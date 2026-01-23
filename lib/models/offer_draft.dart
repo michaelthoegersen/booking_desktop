@@ -48,6 +48,46 @@ class OfferDraft {
   int get totalDays => rounds.fold<int>(0, (sum, r) => sum + r.billableDays);
 
   double get totalKm => rounds.fold<double>(0, (sum, r) => sum + r.totalKm);
+
+  // ------------------------------------------------------------
+  // ✅ JSON SUPPORT
+  // ------------------------------------------------------------
+  Map<String, dynamic> toJson() {
+    return {
+      'company': company,
+      'contact': contact,
+      'production': production,
+      'busCount': busCount,
+      'busType': busType.name,
+      'rounds': rounds.map((r) => r.toJson()).toList(),
+    };
+  }
+
+  static OfferDraft fromJson(Map<String, dynamic> json) {
+    final draft = OfferDraft(
+      company: (json['company'] ?? '') as String,
+      contact: (json['contact'] ?? '') as String,
+      production: (json['production'] ?? '') as String,
+      busCount: (json['busCount'] ?? 1) as int,
+      busType: _busTypeFromName((json['busType'] ?? 'sleeper12') as String),
+    );
+
+    final rawRounds = (json['rounds'] as List?) ?? [];
+    final max = rawRounds.length < draft.rounds.length ? rawRounds.length : draft.rounds.length;
+
+    for (int i = 0; i < max; i++) {
+      draft.rounds[i] = OfferRound.fromJson(Map<String, dynamic>.from(rawRounds[i]));
+    }
+
+    return draft;
+  }
+
+  static BusType _busTypeFromName(String name) {
+    for (final t in BusType.values) {
+      if (t.name == name) return t;
+    }
+    return BusType.sleeper12;
+  }
 }
 
 class OfferRound {
@@ -73,6 +113,34 @@ class OfferRound {
     if (pickupEveningFirstDay) return (base - 1).clamp(0, 999999);
     return base;
   }
+
+  // ------------------------------------------------------------
+  // ✅ JSON SUPPORT
+  // ------------------------------------------------------------
+  Map<String, dynamic> toJson() {
+    return {
+      'startLocation': startLocation,
+      'trailer': trailer,
+      'pickupEveningFirstDay': pickupEveningFirstDay,
+      'totalKm': totalKm,
+      'entries': entries.map((e) => e.toJson()).toList(),
+    };
+  }
+
+  static OfferRound fromJson(Map<String, dynamic> json) {
+    final r = OfferRound();
+    r.startLocation = (json['startLocation'] ?? '') as String;
+    r.trailer = (json['trailer'] ?? false) as bool;
+    r.pickupEveningFirstDay = (json['pickupEveningFirstDay'] ?? false) as bool;
+    r.totalKm = ((json['totalKm'] ?? 0) as num).toDouble();
+
+    final rawEntries = (json['entries'] as List?) ?? [];
+    for (final raw in rawEntries) {
+      r.entries.add(RoundEntry.fromJson(Map<String, dynamic>.from(raw)));
+    }
+
+    return r;
+  }
 }
 
 class RoundEntry {
@@ -97,6 +165,25 @@ class RoundEntry {
       date: date ?? this.date,
       location: location ?? this.location,
       extra: extra ?? this.extra,
+    );
+  }
+
+  // ------------------------------------------------------------
+  // ✅ JSON SUPPORT
+  // ------------------------------------------------------------
+  Map<String, dynamic> toJson() {
+    return {
+      'date': date.toIso8601String(),
+      'location': location,
+      'extra': extra,
+    };
+  }
+
+  static RoundEntry fromJson(Map<String, dynamic> json) {
+    return RoundEntry(
+      date: DateTime.parse(json['date'] as String),
+      location: (json['location'] ?? '') as String,
+      extra: (json['extra'] ?? '') as String,
     );
   }
 }

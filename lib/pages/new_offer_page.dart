@@ -1,19 +1,23 @@
 import 'dart:typed_data';
 import 'dart:io';
+
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:intl/intl.dart';
-import 'package:path/path.dart' as p;
 
 import '../models/offer_draft.dart';
 import '../services/trip_calculator.dart';
 import '../services/offer_pdf_service.dart';
 import '../state/settings_store.dart';
 import '../widgets/offer_preview.dart';
+import '../services/offer_storage_service.dart';
 
 class NewOfferPage extends StatefulWidget {
-  const NewOfferPage({super.key});
+  /// ✅ Hvis du sender inn offerId -> åpner den eksisterende draft
+  final String? offerId;
+
+  const NewOfferPage({super.key, this.offerId});
 
   @override
   State<NewOfferPage> createState() => _NewOfferPageState();
@@ -22,6 +26,7 @@ class NewOfferPage extends StatefulWidget {
 class _NewOfferPageState extends State<NewOfferPage> {
   int roundIndex = 0;
 
+  // ✅ default values, men dette overskrives av loadDraft()
   final OfferDraft offer = OfferDraft(
     company: 'Norsk Turnétransport AS',
     contact: 'Michael',
@@ -36,6 +41,11 @@ class _NewOfferPageState extends State<NewOfferPage> {
   final TextEditingController locationCtrl = TextEditingController();
 
   DateTime? selectedDate;
+
+  // ✅ Offer/draft id in Supabase
+  String? _draftId;
+
+  bool _loadingDraft = false;
 
   final List<String> knownLocations = const [
     "Oslo",
@@ -64,7 +74,7 @@ class _NewOfferPageState extends State<NewOfferPage> {
   final Map<String, double?> _distanceCache = {};
   final Map<String, double> _ferryCache = {};
   final Map<String, double> _tollCache = {};
-  final Map<String, String> _extraCache = {}; // ✅ NEW
+  final Map<String, String> _extraCache = {};
 
   bool _loadingKm = false;
   String? _kmError;
@@ -73,7 +83,7 @@ class _NewOfferPageState extends State<NewOfferPage> {
   Map<int, double?> _kmByIndex = {};
   Map<int, double> _ferryByIndex = {};
   Map<int, double> _tollByIndex = {};
-  Map<int, String> _extraByIndex = {}; // ✅ NEW
+  Map<int, String> _extraByIndex = {};
 
   // ------------------------------------------------------------
   // Lifecycle
@@ -82,12 +92,42 @@ class _NewOfferPageState extends State<NewOfferPage> {
   void initState() {
     super.initState();
 
+    // init controllers from initial offer
     companyCtrl.text = offer.company;
     contactCtrl.text = offer.contact;
     productionCtrl.text = offer.production;
 
     _syncRoundControllers();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _recalcKm());
+
+    // ✅ Hvis vi kom med offerId -> load draft først
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      final id = widget.offerId?.trim();
+      if (id != null && id.isNotEmpty) {
+        await _loadDraft(id);
+      } else {
+        await _recalcKm();
+      }
+    });
+  }
+
+  /// ✅ KRITISK: Når vi klikker nytt draft i dashboard mens vi allerede er på /new
+  /// initState kjøres ikke igjen. Derfor må vi reagere på ny widget.offerId her.
+  @override
+  void didUpdateWidget(covariant NewOfferPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+
+    final newId = widget.offerId?.trim();
+    final oldId = oldWidget.offerId?.trim();
+
+    // Hvis vi får ny ID -> last nytt draft
+    if (newId != null && newId.isNotEmpty && newId != oldId) {
+      _loadDraft(newId);
+    }
+
+    // Hvis vi går fra draft -> blank new offer
+    if ((newId == null || newId.isEmpty) && (oldId != null && oldId.isNotEmpty)) {
+      _resetToBlankOffer();
+    }
   }
 
   void _syncRoundControllers() {
@@ -102,6 +142,35 @@ class _NewOfferPageState extends State<NewOfferPage> {
     _extraByIndex = {};
   }
 
+  void _resetToBlankOffer() {
+    setState(() {
+      _draftId = null;
+      roundIndex = 0;
+
+      // reset offer til defaults
+      offer.company = 'Norsk Turnétransport AS';
+      offer.contact = 'Michael';
+      offer.production = 'Karpe';
+      offer.busCount = 1;
+      offer.busType = BusType.sleeper12;
+
+      for (final r in offer.rounds) {
+        r.startLocation = '';
+        r.trailer = false;
+        r.pickupEveningFirstDay = false;
+        r.entries.clear();
+      }
+
+      companyCtrl.text = offer.company;
+      contactCtrl.text = offer.contact;
+      productionCtrl.text = offer.production;
+
+      _syncRoundControllers();
+    });
+
+    _recalcKm();
+  }
+
   @override
   void dispose() {
     companyCtrl.dispose();
@@ -112,6 +181,60 @@ class _NewOfferPageState extends State<NewOfferPage> {
     super.dispose();
   }
 
+  // ------------------------------------------------------------
+  // ✅ Load existing draft
+  // ------------------------------------------------------------
+  Future<void> _loadDraft(String id) async {
+    setState(() => _loadingDraft = true);
+
+    try {
+      final loaded = await OfferStorageService.loadDraft(id);
+
+      // copy loaded fields into current offer
+      offer.company = loaded.company;
+      offer.contact = loaded.contact;
+      offer.production = loaded.production;
+      offer.busCount = loaded.busCount;
+      offer.busType = loaded.busType;
+
+      // rounds:
+      for (int i = 0; i < offer.rounds.length; i++) {
+        offer.rounds[i].startLocation = loaded.rounds[i].startLocation;
+        offer.rounds[i].trailer = loaded.rounds[i].trailer;
+        offer.rounds[i].pickupEveningFirstDay = loaded.rounds[i].pickupEveningFirstDay;
+
+        offer.rounds[i].entries.clear();
+        offer.rounds[i].entries.addAll(loaded.rounds[i].entries);
+      }
+
+      // update controllers
+      companyCtrl.text = offer.company;
+      contactCtrl.text = offer.contact;
+      productionCtrl.text = offer.production;
+
+      // set draftId
+      _draftId = id;
+
+      // reset UI state
+      roundIndex = 0;
+      _syncRoundControllers();
+
+      if (!mounted) return;
+      setState(() {});
+      await _recalcKm();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("Load draft failed: $e")),
+      );
+    } finally {
+      if (mounted) setState(() => _loadingDraft = false);
+    }
+  }
+
+  // ------------------------------------------------------------
+  // Small helpers
+  // ------------------------------------------------------------
   String _fmtDate(DateTime d) =>
       "${d.day.toString().padLeft(2, '0')}.${d.month.toString().padLeft(2, '0')}.${d.year}";
 
@@ -129,6 +252,35 @@ class _NewOfferPageState extends State<NewOfferPage> {
   String _norm(String s) => s.trim().replaceAll(RegExp(r"\s+"), " ");
   String _cacheKey(String from, String to) =>
       "${_norm(from).toLowerCase()}__${_norm(to).toLowerCase()}";
+
+  // ------------------------------------------------------------
+  // ✅ Save draft to Supabase (insert/update)
+  // ------------------------------------------------------------
+  Future<void> _saveDraft() async {
+    try {
+      // keep start location of current round
+      offer.rounds[roundIndex].startLocation = _norm(startLocCtrl.text);
+
+      final id = await OfferStorageService.saveDraft(
+        id: _draftId,
+        offer: offer,
+      );
+
+      _draftId = id;
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("Draft saved ✅ (${_draftId!})")),
+      );
+
+      setState(() {});
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("Draft save failed: $e")),
+      );
+    }
+  }
 
   // ------------------------------------------------------------
   // ✅ KM + ferry + toll + extra lookup from Supabase
@@ -264,7 +416,9 @@ class _NewOfferPageState extends State<NewOfferPage> {
       _tollByIndex = tollByIndex;
       _extraByIndex = extraByIndex;
       _loadingKm = false;
-      if (missing) _kmError = "Missing routes in routes_all. Check place names / direction.";
+      if (missing) {
+        _kmError = "Missing routes in routes_all. Check place names / direction.";
+      }
     });
   }
 
@@ -275,15 +429,21 @@ class _NewOfferPageState extends State<NewOfferPage> {
     final loc = _norm(locationCtrl.text);
 
     if (selectedDate == null) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Pick a date first.")));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Pick a date first.")),
+      );
       return;
     }
     if (loc.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Enter a location.")));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Enter a location.")),
+      );
       return;
     }
     if (_norm(startLocCtrl.text).isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Start location must be set first.")));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Start location must be set first.")),
+      );
       return;
     }
 
@@ -300,7 +460,9 @@ class _NewOfferPageState extends State<NewOfferPage> {
 
   Future<void> _pasteManyLines(List<String> lines) async {
     if (selectedDate == null) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Pick a date first, then paste.")));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Pick a date first, then paste.")),
+      );
       return;
     }
 
@@ -361,7 +523,10 @@ class _NewOfferPageState extends State<NewOfferPage> {
               ),
             ),
             actions: [
-              TextButton(onPressed: () => Navigator.pop(context), child: const Text("Cancel")),
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text("Cancel"),
+              ),
               FilledButton(
                 onPressed: () {
                   Navigator.pop(
@@ -369,7 +534,7 @@ class _NewOfferPageState extends State<NewOfferPage> {
                     RoundEntry(
                       date: tempDate,
                       location: _norm(tempLocCtrl.text),
-                      extra: entry.extra, // behold ekstra
+                      extra: entry.extra,
                     ),
                   );
                 },
@@ -417,7 +582,6 @@ class _NewOfferPageState extends State<NewOfferPage> {
     final Map<int, double?> kmByIndex = {};
     final Map<int, double> ferryByIndex = {};
     final Map<int, double> tollByIndex = {};
-    final Map<int, String> extraByIndex = {};
 
     for (int i = 0; i < entries.length; i++) {
       final from = i == 0 ? start : _norm(entries[i - 1].location);
@@ -428,7 +592,6 @@ class _NewOfferPageState extends State<NewOfferPage> {
 
       ferryByIndex[i] = _ferryByIndex[i] ?? 0.0;
       tollByIndex[i] = _tollByIndex[i] ?? 0.0;
-      extraByIndex[i] = _extraByIndex[i] ?? '';
     }
 
     final totalKm = kmByIndex.values.whereType<double>().fold<double>(0, (a, b) => a + b);
@@ -472,7 +635,7 @@ class _NewOfferPageState extends State<NewOfferPage> {
   }
 
   // ------------------------------------------------------------
-  // ✅ Export PDF -> Dropbox
+  // ✅ Export PDF
   // ------------------------------------------------------------
   Future<void> _exportPdf() async {
     showDialog(
@@ -494,7 +657,7 @@ class _NewOfferPageState extends State<NewOfferPage> {
 
     try {
       final bytes = await _buildPdfBytes().timeout(const Duration(seconds: 30));
-      final filePath = await _savePdfToDropbox(bytes);
+      final filePath = await _savePdfToFile(bytes);
 
       if (!mounted) return;
       Navigator.pop(context);
@@ -513,51 +676,36 @@ class _NewOfferPageState extends State<NewOfferPage> {
   }
 
   // ------------------------------------------------------------
-  // ✅ Dropbox saving uses SettingsStore
+  // ✅ Save PDF (FilePicker)
   // ------------------------------------------------------------
-  Future<String> _savePdfToDropbox(Uint8List bytes) async {
-  final production = offer.production.trim().isEmpty ? "UnknownProduction" : offer.production.trim();
-  final safeProduction = _safeFolderName(production);
+  Future<String> _savePdfToFile(Uint8List bytes) async {
+    final production = offer.production.trim().isEmpty ? "UnknownProduction" : offer.production.trim();
+    final safeProduction = _safeFolderName(production);
 
-  final todayStamp = DateFormat("yyyyMMdd").format(DateTime.now());
-  final offerYear = _getOfferYear() ?? DateTime.now().year;
+    final todayStamp = DateFormat("yyyyMMdd").format(DateTime.now());
+    final defaultFileName = "Offer Nightliner $safeProduction $todayStamp.pdf";
 
-  final defaultFileName = "Offer Nightliner $safeProduction $todayStamp.pdf";
+    final filePath = await FilePicker.platform.saveFile(
+      dialogTitle: "Save PDF offer",
+      fileName: defaultFileName,
+      type: FileType.custom,
+      allowedExtensions: ["pdf"],
+      lockParentWindow: true,
+    );
 
-  // ✅ Bruk FilePicker "Save As"
-  final filePath = await FilePicker.platform.saveFile(
-    dialogTitle: "Save PDF offer",
-    fileName: defaultFileName,
-    type: FileType.custom,
-    allowedExtensions: ["pdf"],
-    lockParentWindow: true,
-  );
-
-  if (filePath == null) {
-    throw Exception("Save cancelled.");
-  }
-
-  // ✅ Sørg for at filnavn slutter på .pdf
-  var finalPath = filePath;
-  if (!finalPath.toLowerCase().endsWith(".pdf")) {
-    finalPath += ".pdf";
-  }
-
-  // ✅ Skriv filen
-  final file = File(finalPath);
-  await file.writeAsBytes(bytes, flush: true);
-
-  return finalPath;
-}
-
-  int? _getOfferYear() {
-    DateTime? earliest;
-    for (final r in offer.rounds) {
-      for (final e in r.entries) {
-        if (earliest == null || e.date.isBefore(earliest)) earliest = e.date;
-      }
+    if (filePath == null) {
+      throw Exception("Save cancelled.");
     }
-    return earliest?.year;
+
+    var finalPath = filePath;
+    if (!finalPath.toLowerCase().endsWith(".pdf")) {
+      finalPath += ".pdf";
+    }
+
+    final file = File(finalPath);
+    await file.writeAsBytes(bytes, flush: true);
+
+    return finalPath;
   }
 
   String _safeFolderName(String name) {
@@ -576,11 +724,9 @@ class _NewOfferPageState extends State<NewOfferPage> {
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     final round = offer.rounds[roundIndex];
-
     final entryCount = round.entries.length;
 
     final totalKm = _kmByIndex.values.whereType<double>().fold<double>(0, (a, b) => a + b);
-    final legKm = List.generate(entryCount, (i) => (_kmByIndex[i] ?? 0.0).toDouble());
 
     final ferryTotal = _ferryByIndex.values.fold<double>(0.0, (a, b) => a + b);
     final tollTotal = _tollByIndex.values.fold<double>(0.0, (a, b) => a + b);
@@ -591,10 +737,14 @@ class _NewOfferPageState extends State<NewOfferPage> {
       pickupEveningFirstDay: round.pickupEveningFirstDay,
       trailer: round.trailer,
       totalKm: totalKm,
-      legKm: legKm,
+      legKm: List.generate(entryCount, (i) => (_kmByIndex[i] ?? 0.0).toDouble()),
       ferryCost: ferryTotal,
       tollCost: tollTotal,
     );
+
+    if (_loadingDraft) {
+      return const Center(child: CircularProgressIndicator());
+    }
 
     return Padding(
       padding: const EdgeInsets.all(18),
@@ -617,6 +767,8 @@ class _NewOfferPageState extends State<NewOfferPage> {
                 });
               },
               onExport: _exportPdf,
+              onSave: _saveDraft,
+              draftId: _draftId,
             ),
           ),
 
@@ -635,7 +787,6 @@ class _NewOfferPageState extends State<NewOfferPage> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Header row
                   Row(
                     children: [
                       Text(
@@ -648,7 +799,10 @@ class _NewOfferPageState extends State<NewOfferPage> {
                         child: DropdownButtonFormField<int>(
                           value: roundIndex,
                           decoration: const InputDecoration(labelText: "Round", prefixIcon: Icon(Icons.repeat)),
-                          items: List.generate(12, (i) => DropdownMenuItem(value: i, child: Text("Round ${i + 1}"))),
+                          items: List.generate(
+                            12,
+                            (i) => DropdownMenuItem(value: i, child: Text("Round ${i + 1}")),
+                          ),
                           onChanged: (v) async {
                             if (v == null) return;
                             setState(() {
@@ -826,12 +980,6 @@ class _NewOfferPageState extends State<NewOfferPage> {
                                   style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 12)),
                               Text("Total: ${totalKm.toStringAsFixed(0)} km",
                                   style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 12)),
-                              if (calc.dDriveDays > 0)
-                                Text("D.Drive days: ${calc.dDriveDays}",
-                                    style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 12)),
-                              if (calc.flightTickets > 0)
-                                Text("Flights: ${calc.flightTickets}",
-                                    style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 12)),
                             ],
                           ),
 
@@ -857,12 +1005,6 @@ class _NewOfferPageState extends State<NewOfferPage> {
                                         style: const TextStyle(fontWeight: FontWeight.w900)),
                                     if (round.trailer)
                                       Text("Trailer: ${_nok(calc.trailerDayCost + calc.trailerKmCost)}",
-                                          style: const TextStyle(fontWeight: FontWeight.w900)),
-                                    if (calc.dDriveDays > 0)
-                                      Text("D.Drive: ${_nok(calc.dDriveCost)}",
-                                          style: const TextStyle(fontWeight: FontWeight.w900)),
-                                    if (calc.flightTickets > 0)
-                                      Text("Flights: ${_nok(calc.flightCost)}",
                                           style: const TextStyle(fontWeight: FontWeight.w900)),
                                     if (ferryTotal > 0)
                                       Text("Ferry: ${_nok(calc.ferryCost)}", style: const TextStyle(fontWeight: FontWeight.w900)),
@@ -919,6 +1061,9 @@ class _LeftOfferCard extends StatelessWidget {
 
   final OfferDraft offer;
   final Future<void> Function() onExport;
+  final Future<void> Function() onSave;
+
+  final String? draftId;
 
   const _LeftOfferCard({
     required this.companyCtrl,
@@ -927,6 +1072,8 @@ class _LeftOfferCard extends StatelessWidget {
     required this.onChanged,
     required this.offer,
     required this.onExport,
+    required this.onSave,
+    required this.draftId,
   });
 
   @override
@@ -943,8 +1090,16 @@ class _LeftOfferCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text("New Offer", style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w900)),
-          const SizedBox(height: 16),
+          Text(
+            draftId == null ? "New Offer" : "Edit Offer",
+            style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w900),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            draftId == null ? "Not saved yet" : "ID: $draftId",
+            style: TextStyle(color: cs.onSurfaceVariant, fontWeight: FontWeight.w700, fontSize: 12),
+          ),
+          const SizedBox(height: 14),
 
           Text("Customer", style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w900)),
           const SizedBox(height: 10),
@@ -994,7 +1149,7 @@ class _LeftOfferCard extends StatelessWidget {
                   prefixIcon: Icon(Icons.directions_bus),
                 ),
                 items: List.generate(8, (i) => i + 1)
-                    .map((n) => DropdownMenuItem(value: n, child: Text("$n", overflow: TextOverflow.ellipsis)))
+                    .map((n) => DropdownMenuItem(value: n, child: Text("$n")))
                     .toList(),
                 onChanged: (v) {
                   if (v == null) return;
@@ -1011,10 +1166,7 @@ class _LeftOfferCard extends StatelessWidget {
                   prefixIcon: Icon(Icons.airline_seat_recline_normal),
                 ),
                 items: BusType.values
-                    .map((t) => DropdownMenuItem(
-                          value: t,
-                          child: Text(t.label, overflow: TextOverflow.ellipsis, maxLines: 1, softWrap: false),
-                        ))
+                    .map((t) => DropdownMenuItem(value: t, child: Text(t.label)))
                     .toList(),
                 onChanged: (v) {
                   if (v == null) return;
@@ -1031,7 +1183,7 @@ class _LeftOfferCard extends StatelessWidget {
             children: [
               Expanded(
                 child: OutlinedButton.icon(
-                  onPressed: () {},
+                  onPressed: onSave,
                   icon: const Icon(Icons.save),
                   label: const Text("Save draft"),
                 ),

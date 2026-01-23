@@ -3,6 +3,7 @@ import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../widgets/action_tile.dart';
+import '../services/offer_storage_service.dart';
 
 class DashboardPage extends StatefulWidget {
   const DashboardPage({super.key});
@@ -16,10 +17,28 @@ class _DashboardPageState extends State<DashboardPage> {
   bool loadingRoutes = false;
   String? routesError;
 
+  bool loadingRecent = false;
+  String? recentError;
+  List<Map<String, dynamic>> recentOffers = [];
+
   @override
   void initState() {
     super.initState();
     _loadRoutesCount();
+    _loadRecentOffers();
+
+    // ✅ Auto-refresh recent offers når draft lagres
+    OfferStorageService.recentOffersRefresh.addListener(_onRecentRefresh);
+  }
+
+  @override
+  void dispose() {
+    OfferStorageService.recentOffersRefresh.removeListener(_onRecentRefresh);
+    super.dispose();
+  }
+
+  void _onRecentRefresh() {
+    _loadRecentOffers();
   }
 
   Future<void> _loadRoutesCount() async {
@@ -30,8 +49,6 @@ class _DashboardPageState extends State<DashboardPage> {
 
     try {
       final client = Supabase.instance.client;
-
-      // ✅ TABELLNAVN: routes_all (ikke routes_all / routes / noe annet tull)
       final data = await client.from('routes_all').select('id');
 
       setState(() {
@@ -43,9 +60,51 @@ class _DashboardPageState extends State<DashboardPage> {
         routesCount = null;
       });
     } finally {
+      if (mounted) {
+        setState(() {
+          loadingRoutes = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _loadRecentOffers() async {
+    setState(() {
+      loadingRecent = true;
+      recentError = null;
+    });
+
+    try {
+      final items = await OfferStorageService.loadRecentOffers(limit: 30);
+      if (!mounted) return;
+
       setState(() {
-        loadingRoutes = false;
+        recentOffers = items;
       });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        recentError = e.toString();
+        recentOffers = [];
+      });
+    } finally {
+      if (!mounted) return;
+      setState(() {
+        loadingRecent = false;
+      });
+    }
+  }
+
+  String _fmtDateTime(dynamic value) {
+    try {
+      if (value == null) return "";
+      if (value is DateTime) {
+        return "${value.day.toString().padLeft(2, '0')}.${value.month.toString().padLeft(2, '0')}.${value.year}";
+      }
+      final d = DateTime.parse(value.toString());
+      return "${d.day.toString().padLeft(2, '0')}.${d.month.toString().padLeft(2, '0')}.${d.year}";
+    } catch (_) {
+      return "";
     }
   }
 
@@ -66,10 +125,15 @@ class _DashboardPageState extends State<DashboardPage> {
                 ?.copyWith(fontWeight: FontWeight.w900),
           ),
           const SizedBox(height: 6),
-          Text("Choose what you want to do.",
-              style: TextStyle(color: cs.onSurfaceVariant)),
+          Text(
+            "Choose what you want to do.",
+            style: TextStyle(color: cs.onSurfaceVariant),
+          ),
           const SizedBox(height: 16),
 
+          // ------------------------------------------------------------
+          // ACTION TILES
+          // ------------------------------------------------------------
           Wrap(
             spacing: 14,
             runSpacing: 14,
@@ -104,7 +168,9 @@ class _DashboardPageState extends State<DashboardPage> {
 
           const SizedBox(height: 18),
 
-          // ✅ SUPABASE STATUS CARD
+          // ------------------------------------------------------------
+          // ROUTES COUNT (SUPABASE STATUS)
+          // ------------------------------------------------------------
           Container(
             width: double.infinity,
             padding: const EdgeInsets.all(14),
@@ -121,29 +187,33 @@ class _DashboardPageState extends State<DashboardPage> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text("Routes in database",
-                          style: Theme.of(context)
-                              .textTheme
-                              .titleMedium
-                              ?.copyWith(fontWeight: FontWeight.w900)),
+                      Text(
+                        "Routes in database",
+                        style: Theme.of(context)
+                            .textTheme
+                            .titleMedium
+                            ?.copyWith(fontWeight: FontWeight.w900),
+                      ),
                       const SizedBox(height: 4),
                       if (loadingRoutes)
-                        Text("Loading…",
-                            style: TextStyle(color: cs.onSurfaceVariant))
+                        Text("Loading…", style: TextStyle(color: cs.onSurfaceVariant))
                       else if (routesError != null)
-                        Text("Error: $routesError",
-                            style: TextStyle(
-                              color: cs.error,
-                              fontWeight: FontWeight.w700,
-                            ))
+                        Text(
+                          "Error: $routesError",
+                          style: TextStyle(
+                            color: cs.error,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        )
                       else
                         Text(
                           routesCount == null
                               ? "—"
                               : "$routesCount route(s) found in routes_all",
                           style: TextStyle(
-                              color: cs.onSurfaceVariant,
-                              fontWeight: FontWeight.w700),
+                            color: cs.onSurfaceVariant,
+                            fontWeight: FontWeight.w700,
+                          ),
                         ),
                     ],
                   ),
@@ -160,7 +230,9 @@ class _DashboardPageState extends State<DashboardPage> {
 
           const SizedBox(height: 18),
 
-          // ✅ ORIGINAL: Recent offers-listen din
+          // ------------------------------------------------------------
+          // RECENT OFFERS (LIVE SUPABASE)
+          // ------------------------------------------------------------
           Expanded(
             child: Container(
               width: double.infinity,
@@ -173,44 +245,107 @@ class _DashboardPageState extends State<DashboardPage> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text("Recent offers",
-                      style: Theme.of(context)
-                          .textTheme
-                          .titleMedium
-                          ?.copyWith(fontWeight: FontWeight.w900)),
-                  const SizedBox(height: 12),
-                  Expanded(
-                    child: ListView.separated(
-                      itemCount: 8,
-                      separatorBuilder: (_, __) =>
-                          Divider(color: cs.outlineVariant),
-                      itemBuilder: (_, i) {
-                        final status = i % 3 == 0 ? "Draft" : "Final";
-                        return ListTile(
-                          contentPadding: EdgeInsets.zero,
-                          leading: CircleAvatar(
-                              backgroundColor: cs.primaryContainer,
-                              child: Text("${i + 1}")),
-                          title: Text("Km Example Artist 202601${i + 10}"),
-                          subtitle: const Text("Company name • Nightliner"),
-                          trailing: Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 10, vertical: 6),
-                            decoration: BoxDecoration(
-                              color: status == "Draft"
-                                  ? cs.tertiaryContainer
-                                  : cs.secondaryContainer,
-                              borderRadius: BorderRadius.circular(999),
-                            ),
-                            child: Text(status,
-                                style: const TextStyle(
-                                    fontWeight: FontWeight.w900)),
-                          ),
-                          onTap: () => context.go("/edit"),
-                        );
-                      },
-                    ),
+                  Row(
+                    children: [
+                      Text(
+                        "Recent offers",
+                        style: Theme.of(context)
+                            .textTheme
+                            .titleMedium
+                            ?.copyWith(fontWeight: FontWeight.w900),
+                      ),
+                      const Spacer(),
+                      OutlinedButton.icon(
+                        onPressed: loadingRecent ? null : _loadRecentOffers,
+                        icon: const Icon(Icons.refresh),
+                        label: const Text("Refresh"),
+                      ),
+                    ],
                   ),
+                  const SizedBox(height: 12),
+
+                  if (loadingRecent)
+                    Expanded(
+                      child: Center(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: const [
+                            CircularProgressIndicator(),
+                            SizedBox(height: 12),
+                            Text("Loading offers…"),
+                          ],
+                        ),
+                      ),
+                    )
+                  else if (recentError != null)
+                    Expanded(
+                      child: Center(
+                        child: Text(
+                          "Error loading offers:\n$recentError",
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            color: cs.error,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                      ),
+                    )
+                  else if (recentOffers.isEmpty)
+                    const Expanded(
+                      child: Center(child: Text("No offers yet.")),
+                    )
+                  else
+                    Expanded(
+                      child: ListView.separated(
+                        itemCount: recentOffers.length,
+                        separatorBuilder: (_, __) => Divider(color: cs.outlineVariant),
+                        itemBuilder: (_, i) {
+                          final row = recentOffers[i];
+
+                          final id = row['id']?.toString() ?? '';
+                          final production = (row['production'] ?? '—').toString();
+                          final company = (row['company'] ?? '—').toString();
+                          final contact = (row['contact'] ?? '').toString();
+                          final status = (row['status'] ?? 'Draft').toString();
+                          final updated = _fmtDateTime(row['updated_at'] ?? row['created_at']);
+
+                          final isDraft = status.toLowerCase() == "draft";
+                          final badgeBg = isDraft ? cs.tertiaryContainer : cs.secondaryContainer;
+                          final badgeText = isDraft ? "Draft" : "Final";
+
+                          return ListTile(
+                            contentPadding: EdgeInsets.zero,
+                            leading: CircleAvatar(
+                              backgroundColor: cs.primaryContainer,
+                              child: Text("${i + 1}"),
+                            ),
+                            title: Text(
+                              production,
+                              style: const TextStyle(fontWeight: FontWeight.w900),
+                            ),
+                            subtitle: Text(
+                              contact.trim().isEmpty
+                                  ? "$company • $updated"
+                                  : "$company • $contact • $updated",
+                            ),
+                            trailing: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                              decoration: BoxDecoration(
+                                color: badgeBg,
+                                borderRadius: BorderRadius.circular(999),
+                              ),
+                              child: Text(
+                                badgeText,
+                                style: const TextStyle(fontWeight: FontWeight.w900),
+                              ),
+                            ),
+
+                            /// ✅ KRITISK: bruk alltid /new/:id (path param)
+                            onTap: id.isEmpty ? null : () => context.go("/new/$id"),
+                          );
+                        },
+                      ),
+                    ),
                 ],
               ),
             ),
