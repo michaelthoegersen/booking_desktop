@@ -27,7 +27,7 @@ class _DashboardPageState extends State<DashboardPage> {
     _loadRoutesCount();
     _loadRecentOffers();
 
-    // ✅ Auto-refresh recent offers når draft lagres
+    // ✅ Auto-refresh recent offers når draft lagres / slettes
     OfferStorageService.recentOffersRefresh.addListener(_onRecentRefresh);
   }
 
@@ -41,6 +41,9 @@ class _DashboardPageState extends State<DashboardPage> {
     _loadRecentOffers();
   }
 
+  // ------------------------------------------------------------
+  // ROUTES COUNT
+  // ------------------------------------------------------------
   Future<void> _loadRoutesCount() async {
     setState(() {
       loadingRoutes = true;
@@ -61,13 +64,14 @@ class _DashboardPageState extends State<DashboardPage> {
       });
     } finally {
       if (mounted) {
-        setState(() {
-          loadingRoutes = false;
-        });
+        setState(() => loadingRoutes = false);
       }
     }
   }
 
+  // ------------------------------------------------------------
+  // RECENT OFFERS
+  // ------------------------------------------------------------
   Future<void> _loadRecentOffers() async {
     setState(() {
       loadingRecent = true;
@@ -89,12 +93,54 @@ class _DashboardPageState extends State<DashboardPage> {
       });
     } finally {
       if (!mounted) return;
-      setState(() {
-        loadingRecent = false;
-      });
+      setState(() => loadingRecent = false);
     }
   }
 
+  // ------------------------------------------------------------
+  // DELETE DRAFT (CONFIRM)
+  // ------------------------------------------------------------
+  Future<void> _confirmDeleteDraft(String id, String title) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text("Delete draft"),
+        content: Text(
+          "Are you sure you want to permanently delete:\n\n$title",
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(
+              context,
+              rootNavigator: true,
+            ).pop(false),
+            child: const Text("Cancel"),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(
+              context,
+              rootNavigator: true,
+            ).pop(true),
+            child: const Text("Delete"),
+          ),
+        ],
+      ),
+    );
+
+    if (ok != true) return;
+
+    await OfferStorageService.deleteDraft(id);
+
+    if (!mounted) return;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text("Draft deleted")),
+    );
+  }
+
+  // ------------------------------------------------------------
+  // FORMAT DATE
+  // ------------------------------------------------------------
   String _fmtDateTime(dynamic value) {
     try {
       if (value == null) return "";
@@ -108,6 +154,9 @@ class _DashboardPageState extends State<DashboardPage> {
     }
   }
 
+  // ------------------------------------------------------------
+  // UI
+  // ------------------------------------------------------------
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
@@ -169,69 +218,7 @@ class _DashboardPageState extends State<DashboardPage> {
           const SizedBox(height: 18),
 
           // ------------------------------------------------------------
-          // ROUTES COUNT (SUPABASE STATUS)
-          // ------------------------------------------------------------
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(
-              color: cs.surfaceContainerLowest,
-              borderRadius: BorderRadius.circular(18),
-              border: Border.all(color: cs.outlineVariant),
-            ),
-            child: Row(
-              children: [
-                Icon(Icons.alt_route_rounded, color: cs.primary),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        "Routes in database",
-                        style: Theme.of(context)
-                            .textTheme
-                            .titleMedium
-                            ?.copyWith(fontWeight: FontWeight.w900),
-                      ),
-                      const SizedBox(height: 4),
-                      if (loadingRoutes)
-                        Text("Loading…", style: TextStyle(color: cs.onSurfaceVariant))
-                      else if (routesError != null)
-                        Text(
-                          "Error: $routesError",
-                          style: TextStyle(
-                            color: cs.error,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        )
-                      else
-                        Text(
-                          routesCount == null
-                              ? "—"
-                              : "$routesCount route(s) found in routes_all",
-                          style: TextStyle(
-                            color: cs.onSurfaceVariant,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                    ],
-                  ),
-                ),
-                const SizedBox(width: 12),
-                OutlinedButton.icon(
-                  onPressed: loadingRoutes ? null : _loadRoutesCount,
-                  icon: const Icon(Icons.refresh),
-                  label: const Text("Refresh"),
-                ),
-              ],
-            ),
-          ),
-
-          const SizedBox(height: 18),
-
-          // ------------------------------------------------------------
-          // RECENT OFFERS (LIVE SUPABASE)
+          // RECENT OFFERS
           // ------------------------------------------------------------
           Expanded(
             child: Container(
@@ -256,7 +243,8 @@ class _DashboardPageState extends State<DashboardPage> {
                       ),
                       const Spacer(),
                       OutlinedButton.icon(
-                        onPressed: loadingRecent ? null : _loadRecentOffers,
+                        onPressed:
+                            loadingRecent ? null : _loadRecentOffers,
                         icon: const Icon(Icons.refresh),
                         label: const Text("Refresh"),
                       ),
@@ -265,30 +253,8 @@ class _DashboardPageState extends State<DashboardPage> {
                   const SizedBox(height: 12),
 
                   if (loadingRecent)
-                    Expanded(
-                      child: Center(
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: const [
-                            CircularProgressIndicator(),
-                            SizedBox(height: 12),
-                            Text("Loading offers…"),
-                          ],
-                        ),
-                      ),
-                    )
-                  else if (recentError != null)
-                    Expanded(
-                      child: Center(
-                        child: Text(
-                          "Error loading offers:\n$recentError",
-                          textAlign: TextAlign.center,
-                          style: TextStyle(
-                            color: cs.error,
-                            fontWeight: FontWeight.w800,
-                          ),
-                        ),
-                      ),
+                    const Expanded(
+                      child: Center(child: CircularProgressIndicator()),
                     )
                   else if (recentOffers.isEmpty)
                     const Expanded(
@@ -298,50 +264,41 @@ class _DashboardPageState extends State<DashboardPage> {
                     Expanded(
                       child: ListView.separated(
                         itemCount: recentOffers.length,
-                        separatorBuilder: (_, __) => Divider(color: cs.outlineVariant),
+                        separatorBuilder: (_, __) =>
+                            Divider(color: cs.outlineVariant),
                         itemBuilder: (_, i) {
                           final row = recentOffers[i];
 
                           final id = row['id']?.toString() ?? '';
-                          final production = (row['production'] ?? '—').toString();
-                          final company = (row['company'] ?? '—').toString();
-                          final contact = (row['contact'] ?? '').toString();
-                          final status = (row['status'] ?? 'Draft').toString();
-                          final updated = _fmtDateTime(row['updated_at'] ?? row['created_at']);
-
-                          final isDraft = status.toLowerCase() == "draft";
-                          final badgeBg = isDraft ? cs.tertiaryContainer : cs.secondaryContainer;
-                          final badgeText = isDraft ? "Draft" : "Final";
+                          final production =
+                              (row['production'] ?? '—').toString();
+                          final company =
+                              (row['company'] ?? '—').toString();
+                          final updated = _fmtDateTime(
+                            row['updated_at'] ?? row['created_at'],
+                          );
 
                           return ListTile(
                             contentPadding: EdgeInsets.zero,
-                            leading: CircleAvatar(
-                              backgroundColor: cs.primaryContainer,
-                              child: Text("${i + 1}"),
-                            ),
                             title: Text(
                               production,
-                              style: const TextStyle(fontWeight: FontWeight.w900),
+                              style: const TextStyle(
+                                  fontWeight: FontWeight.w900),
                             ),
-                            subtitle: Text(
-                              contact.trim().isEmpty
-                                  ? "$company • $updated"
-                                  : "$company • $contact • $updated",
-                            ),
-                            trailing: Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                              decoration: BoxDecoration(
-                                color: badgeBg,
-                                borderRadius: BorderRadius.circular(999),
+                            subtitle: Text("$company • $updated"),
+                            trailing: IconButton(
+                              icon: Icon(
+                                Icons.delete_outline,
+                                color: cs.error,
                               ),
-                              child: Text(
-                                badgeText,
-                                style: const TextStyle(fontWeight: FontWeight.w900),
-                              ),
+                              onPressed: id.isEmpty
+                                  ? null
+                                  : () =>
+                                      _confirmDeleteDraft(id, production),
                             ),
-
-                            /// ✅ KRITISK: bruk alltid /new/:id (path param)
-                            onTap: id.isEmpty ? null : () => context.go("/new/$id"),
+                            onTap: id.isEmpty
+                                ? null
+                                : () => context.go("/new/$id"),
                           );
                         },
                       ),

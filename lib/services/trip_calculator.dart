@@ -24,7 +24,7 @@ class RoundCalcResult {
 
   final double totalCost;
 
-  // ✅ NEW: Store leg km for PDF rows
+  // ✅ Stored per-leg km for PDF rows
   final List<double> legKm;
 
   const RoundCalcResult({
@@ -50,7 +50,7 @@ class RoundCalcResult {
 class TripCalculator {
   static RoundCalcResult calculateRound({
     required AppSettings settings,
-    required int entryCount,
+    required int entryCount, // ⚠️ entryCount = ANTALL UNIKE DATOER
     required bool pickupEveningFirstDay,
     required bool trailer,
     required double totalKm,
@@ -62,38 +62,47 @@ class TripCalculator {
     // Billable days
     // ------------------------------------------------------------
     int billableDays = entryCount;
+
     if (pickupEveningFirstDay && billableDays > 0) {
       billableDays -= 1;
     }
-    if (billableDays < 0) billableDays = 0;
+
+    if (billableDays < 0) {
+      billableDays = 0;
+    }
 
     // ------------------------------------------------------------
-    // Included km
+    // Included / extra km
     // ------------------------------------------------------------
     final includedKm = billableDays * settings.includedKmPerDay;
-    final extraKm = (totalKm - includedKm).clamp(0, 999999999).toDouble();
+    final extraKm =
+        (totalKm - includedKm).clamp(0, double.infinity).toDouble();
 
     // ------------------------------------------------------------
     // D.Drive days (per leg)
     // ------------------------------------------------------------
     int dDriveDays = 0;
     for (final km in legKm) {
-      if (km >= settings.dDriveKmThreshold) dDriveDays++;
+      if (km >= settings.dDriveKmThreshold) {
+        dDriveDays++;
+      }
     }
 
     // ------------------------------------------------------------
-    // Flights (placeholder logic – you can expand later)
+    // Flights (placeholder – ready for future logic)
     // ------------------------------------------------------------
-    final int flightTickets = 0;
+    const int flightTickets = 0;
 
     // ------------------------------------------------------------
-    // Prices
+    // Costs
     // ------------------------------------------------------------
     final dayCost = billableDays * settings.dayPrice;
     final extraKmCost = extraKm * settings.extraKmPrice;
 
-    final trailerDayCost = trailer ? (billableDays * settings.trailerDayPrice) : 0.0;
-    final trailerKmCost = trailer ? (totalKm * settings.trailerKmPrice) : 0.0;
+    final trailerDayCost =
+        trailer ? billableDays * settings.trailerDayPrice : 0.0;
+    final trailerKmCost =
+        trailer ? totalKm * settings.trailerKmPrice : 0.0;
 
     final dDriveCost = dDriveDays * settings.dDriveDayPrice;
     final flightCost = flightTickets * settings.flightTicketPrice;
@@ -123,7 +132,7 @@ class TripCalculator {
       ferryCost: ferryCost,
       tollCost: tollCost,
       totalCost: totalCost,
-      legKm: legKm, // ✅ stored here
+      legKm: legKm,
     );
   }
 }

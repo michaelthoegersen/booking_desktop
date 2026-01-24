@@ -7,77 +7,102 @@ import '../models/offer_draft.dart';
 class OfferStorageService {
   static SupabaseClient get sb => Supabase.instance.client;
 
-  /// ✅ Notifier som Dashboard kan lytte på (refresh recent offers)
-  static final ValueNotifier<int> recentOffersRefresh = ValueNotifier<int>(0);
+  /// 🔔 Dashboard / Edit page kan lytte på denne
+  static final ValueNotifier<int> recentOffersRefresh =
+      ValueNotifier<int>(0);
 
-  // ------------------------------------------------------------
-  // ✅ SAVE (insert/update)
-  // ------------------------------------------------------------
+  // ============================================================
+  // SAVE (INSERT / UPDATE)
+  // ============================================================
   static Future<String> saveDraft({
-    required OfferDraft offer,
     String? id,
+    required OfferDraft offer,
   }) async {
     final payload = _offerToDbPayload(offer);
 
-    // INSERT
-    if (id == null || id.trim().isEmpty) {
-      final res = await sb.from('offers').insert(payload).select('id').single();
+    // -----------------------------
+    // UPDATE eksisterende draft
+    // -----------------------------
+    if (id != null && id.isNotEmpty) {
+      await sb
+          .from('offers')
+          .update({
+            ...payload,
+            'updated_at': DateTime.now().toIso8601String(),
+          })
+          .eq('id', id);
 
-      final newId = res['id'] as String;
-
-      // ✅ refresh dashboard
       recentOffersRefresh.value++;
-
-      return newId;
+      return id;
     }
 
-    // UPDATE
-    await sb.from('offers').update(payload).eq('id', id);
+    // -----------------------------
+    // INSERT ny draft
+    // -----------------------------
+    final res = await sb
+        .from('offers')
+        .insert({
+          ...payload,
+          'created_at': DateTime.now().toIso8601String(),
+          'updated_at': DateTime.now().toIso8601String(),
+        })
+        .select('id')
+        .single();
 
-    // ✅ refresh dashboard
     recentOffersRefresh.value++;
-
-    return id;
+    return res['id'] as String;
   }
 
-  // ------------------------------------------------------------
-  // ✅ LOAD (draft by id)
-  // ------------------------------------------------------------
+  // ============================================================
+  // DELETE draft
+  // ============================================================
+  static Future<void> deleteDraft(String id) async {
+    await sb.from('offers').delete().eq('id', id);
+    recentOffersRefresh.value++;
+  }
+
+  // ============================================================
+  // LOAD single draft
+  // ============================================================
   static Future<OfferDraft> loadDraft(String id) async {
-    final res =
-        await sb.from('offers').select().eq('id', id).limit(1).single();
+    final res = await sb
+        .from('offers')
+        .select()
+        .eq('id', id)
+        .limit(1)
+        .single();
 
     return _offerFromDb(res);
   }
 
-  // ------------------------------------------------------------
-  // ✅ LIST recent offers (Dashboard / Edit page)
-  // ------------------------------------------------------------
-  static Future<List<Map<String, dynamic>>> loadRecentOffers(
-      {int limit = 20}) async {
+  // ============================================================
+  // LIST recent offers (Dashboard / Edit page)
+  // ============================================================
+  static Future<List<Map<String, dynamic>>> loadRecentOffers({
+    int limit = 20,
+  }) async {
     final res = await sb
         .from('offers')
-        .select('id, title, production, status, company, contact, created_at, updated_at')
+        .select(
+            'id, title, production, status, company, contact, created_at, updated_at')
         .order('updated_at', ascending: false)
         .limit(limit);
 
     return (res as List).cast<Map<String, dynamic>>();
   }
 
-  // ------------------------------------------------------------
-  // 🔁 Convert -> DB payload
+  // ============================================================
+  // DB PAYLOAD BUILDER
   //
-  // ✅ IMPORTANT:
-  // Supabase tabellen din krever:
+  // ⚠️ Supabase-krav:
   // - title NOT NULL
-  // - payload NOT NULL   ✅✅✅
-  // ------------------------------------------------------------
+  // - payload NOT NULL
+  // ============================================================
   static Map<String, dynamic> _offerToDbPayload(OfferDraft offer) {
     final jsonMap = _offerToJson(offer);
     final jsonString = jsonEncode(jsonMap);
 
     return {
-      // ✅ disse må alltid være med
       'title': _buildTitle(offer),
       'company': offer.company.trim(),
       'contact': offer.contact.trim(),
@@ -87,29 +112,27 @@ class OfferStorageService {
       'bus_count': offer.busCount,
       'bus_type': offer.busType.name,
 
-      // ✅ DB krever payload NOT NULL
-      // JSONB kan sendes som Map (best) eller String.
-      // Vi sender Map for JSONB.
+      // ✅ primær JSONB-kolonne
       'payload': jsonMap,
 
-      // ✅ hvis du fortsatt vil beholde offer_json også:
-      // (kan fjernes senere når alt fungerer)
+      // 🔁 legacy (kan fjernes senere)
       'offer_json': jsonString,
     };
   }
 
-  // ------------------------------------------------------------
-  // ✅ Generate safe title
-  // ------------------------------------------------------------
+  // ============================================================
+  // TITLE GENERATOR
+  // ============================================================
   static String _buildTitle(OfferDraft offer) {
     final prod =
         offer.production.trim().isEmpty ? "Offer" : offer.production.trim();
 
-    // Finn tidligste dato i hele offeret
     DateTime? earliest;
     for (final r in offer.rounds) {
       for (final e in r.entries) {
-        if (earliest == null || e.date.isBefore(earliest)) earliest = e.date;
+        if (earliest == null || e.date.isBefore(earliest)) {
+          earliest = e.date;
+        }
       }
     }
 
@@ -118,14 +141,16 @@ class OfferStorageService {
             .toIso8601String()
             .substring(0, 10)
             .replaceAll("-", "")
-        : "${earliest.year}${earliest.month.toString().padLeft(2, '0')}${earliest.day.toString().padLeft(2, '0')}";
+        : "${earliest.year}"
+            "${earliest.month.toString().padLeft(2, '0')}"
+            "${earliest.day.toString().padLeft(2, '0')}";
 
     return "$prod $stamp";
   }
 
-  // ------------------------------------------------------------
-  // 🔁 Convert OfferDraft -> JSON
-  // ------------------------------------------------------------
+  // ============================================================
+  // OfferDraft → JSON
+  // ============================================================
   static Map<String, dynamic> _offerToJson(OfferDraft offer) {
     return {
       'company': offer.company,
@@ -150,19 +175,13 @@ class OfferStorageService {
     };
   }
 
-  // ------------------------------------------------------------
-  // 🔁 Convert DB -> OfferDraft
-  //
-  // ✅ Les først fra payload (riktig kolonne)
-  // fallback til offer_json hvis payload ikke finnes
-  // ------------------------------------------------------------
+  // ============================================================
+  // DB → OfferDraft
+  // ============================================================
   static OfferDraft _offerFromDb(Map<String, dynamic> row) {
     dynamic raw = row['payload'];
-
-    // fallback
     raw ??= row['offer_json'];
 
-    // payload kan komme som Map eller String
     final Map<String, dynamic> data =
         raw is String ? jsonDecode(raw) : (raw as Map<String, dynamic>);
 
@@ -171,7 +190,9 @@ class OfferStorageService {
       contact: (data['contact'] ?? '') as String,
       production: (data['production'] ?? '') as String,
       busCount: (data['busCount'] ?? 1) as int,
-      busType: _busTypeFromName((data['busType'] ?? 'sleeper12') as String),
+      busType: _busTypeFromName(
+        (data['busType'] ?? 'sleeper12') as String,
+      ),
     );
 
     final rounds = (data['rounds'] as List?) ?? [];
@@ -180,8 +201,10 @@ class OfferStorageService {
       if (i >= rounds.length) break;
 
       final r = rounds[i] as Map<String, dynamic>;
-      draft.rounds[i].startLocation = (r['startLocation'] ?? '') as String;
-      draft.rounds[i].trailer = (r['trailer'] ?? false) as bool;
+      draft.rounds[i].startLocation =
+          (r['startLocation'] ?? '') as String;
+      draft.rounds[i].trailer =
+          (r['trailer'] ?? false) as bool;
       draft.rounds[i].pickupEveningFirstDay =
           (r['pickupEveningFirstDay'] ?? false) as bool;
 
@@ -199,7 +222,8 @@ class OfferStorageService {
         );
       }
 
-      draft.rounds[i].entries.sort((a, b) => a.date.compareTo(b.date));
+      draft.rounds[i].entries
+          .sort((a, b) => a.date.compareTo(b.date));
     }
 
     return draft;
