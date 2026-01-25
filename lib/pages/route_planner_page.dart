@@ -1,16 +1,16 @@
 import 'package:flutter/material.dart';
+
 import '../services/distance_service.dart';
 import '../models/route_result.dart';
-import 'route_map_view.dart';
 
 class RoutePlannerPage extends StatefulWidget {
-  final String initialFrom;
-  final String initialTo;
+  final String? initialFrom;
+  final String? initialTo;
 
   const RoutePlannerPage({
     super.key,
-    required this.initialFrom,
-    required this.initialTo,
+    this.initialFrom,
+    this.initialTo,
   });
 
   @override
@@ -18,106 +18,156 @@ class RoutePlannerPage extends StatefulWidget {
 }
 
 class _RoutePlannerPageState extends State<RoutePlannerPage> {
-  late TextEditingController fromCtrl;
-  late TextEditingController toCtrl;
+  final _fromCtrl = TextEditingController();
+  final _toCtrl = TextEditingController();
 
-  List<RouteResult> routes = [];
-  RouteResult? selected;
-  bool loading = false;
+  List<RouteResult> _routes = [];
+  RouteResult? _selected;
+
+  bool _loading = false;
 
   @override
   void initState() {
     super.initState();
-    fromCtrl = TextEditingController(text: widget.initialFrom);
-    toCtrl = TextEditingController(text: widget.initialTo);
-    _load();
+
+    _fromCtrl.text = widget.initialFrom ?? '';
+    _toCtrl.text = widget.initialTo ?? '';
   }
 
-  Future<void> _load() async {
-    setState(() => loading = true);
-    routes = await DistanceService.getRouteAlternatives(
-      from: fromCtrl.text,
-      to: toCtrl.text,
+  // ------------------------------------------------------------
+  // LOAD ROUTES
+  // ------------------------------------------------------------
+  Future<void> _loadRoutes() async {
+    final from = _fromCtrl.text.trim();
+    final to = _toCtrl.text.trim();
+
+    if (from.isEmpty || to.isEmpty) return;
+
+    setState(() => _loading = true);
+
+    final routes = await DistanceService.getRouteAlternatives(
+      from: from,
+      to: to,
     );
-    selected = routes.first;
-    setState(() => loading = false);
+
+    setState(() {
+      _routes = routes;
+      _selected = routes.isNotEmpty ? routes.first : null;
+      _loading = false;
+    });
   }
 
+  // ------------------------------------------------------------
+  // UI
+  // ------------------------------------------------------------
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
         title: const Text("Route planner"),
         actions: [
-          if (selected != null)
+          if (_selected != null)
             FilledButton(
-              onPressed: () => Navigator.pop(context, selected),
+              onPressed: () => Navigator.pop(context, _selected),
               child: const Text("Use route"),
-            )
+            ),
         ],
       ),
+
       body: Row(
-  children: [
-    // LEFT PANEL
-    SizedBox(
-      width: 380,
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Column(
-          children: [
-            TextField(
-              controller: _fromCtrl,
-              decoration: const InputDecoration(labelText: "From"),
-              onSubmitted: (_) => _loadRoutes(),
-            ),
+        children: [
+          // --------------------------------------------------
+          // LEFT PANEL
+          // --------------------------------------------------
+          SizedBox(
+            width: 360,
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Column(
+                children: [
+                  TextField(
+                    controller: _fromCtrl,
+                    decoration: const InputDecoration(labelText: "From"),
+                    onSubmitted: (_) => _loadRoutes(),
+                  ),
 
-            TextField(
-              controller: _toCtrl,
-              decoration: const InputDecoration(labelText: "To"),
-              onSubmitted: (_) => _loadRoutes(),
-            ),
+                  TextField(
+                    controller: _toCtrl,
+                    decoration: const InputDecoration(labelText: "To"),
+                    onSubmitted: (_) => _loadRoutes(),
+                  ),
 
-            const SizedBox(height: 12),
+                  const SizedBox(height: 12),
 
-            FilledButton(
-              onPressed: _loadRoutes,
-              child: const Text("Finn ruter"),
-            ),
+                  FilledButton.icon(
+                    icon: const Icon(Icons.alt_route),
+                    label: const Text("Find routes"),
+                    onPressed: _loading ? null : _loadRoutes,
+                  ),
 
-            const SizedBox(height: 12),
+                  const SizedBox(height: 12),
 
-            Expanded(
-              child: ListView.builder(
-                itemCount: _routes.length,
-                itemBuilder: (_, i) {
-                  final r = _routes[i];
+                  Expanded(
+                    child: _loading
+                        ? const Center(child: CircularProgressIndicator())
+                        : ListView.builder(
+                            itemCount: _routes.length,
+                            itemBuilder: (_, i) {
+                              final r = _routes[i];
+                              final selected = r == _selected;
 
-                  return ListTile(
-                    title: Text(r.summary),
-                    subtitle: Text(
-                      "${r.km.toStringAsFixed(1)} km · ${r.durationMin} min",
-                    ),
-                    selected: r == _selected,
-                    onTap: () {
-                      setState(() => _selected = r);
-                    },
-                  );
-                },
+                              return Card(
+                                color: selected
+                                    ? Theme.of(context)
+                                        .colorScheme
+                                        .primaryContainer
+                                    : null,
+                                child: ListTile(
+                                  title: Text(r.summary),
+                                  subtitle: Text(
+                                    '${r.km.toStringAsFixed(1)} km · ${r.durationMin} min',
+                                  ),
+                                  trailing: selected
+                                      ? const Icon(Icons.check)
+                                      : null,
+                                  onTap: () {
+                                    setState(() => _selected = r);
+                                  },
+                                ),
+                              );
+                            },
+                          ),
+                  ),
+                ],
               ),
             ),
-          ],
-        ),
-      ),
-    ),
+          ),
 
-    // RIGHT PANEL – MAP
-    Expanded(
-      child: _selected == null
-          ? const Center(child: Text("Velg en rute"))
-          : RouteMapView(
-              from: _selected!.from,
-              to: _selected!.to,
+          // --------------------------------------------------
+          // RIGHT PANEL (PLACEHOLDER FOR MAP)
+          // --------------------------------------------------
+          Expanded(
+            child: Center(
+              child: _selected == null
+                  ? const Text("No route selected")
+                  : Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        const Icon(Icons.map, size: 80),
+                        const SizedBox(height: 12),
+                        Text(
+                          _selected!.summary,
+                          style: const TextStyle(fontSize: 18),
+                        ),
+                        Text(
+                          '${_selected!.km.toStringAsFixed(1)} km',
+                        ),
+                      ],
+                    ),
             ),
-    ),
-  ],
-),
+          ),
+        ],
+      ),
+    );
+  }
+}

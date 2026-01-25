@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 
 import '../models/route_result.dart';
 import '../services/routes_service.dart';
@@ -12,7 +13,7 @@ class RoutesAdminPage extends StatefulWidget {
 }
 
 class _RoutesAdminPageState extends State<RoutesAdminPage> {
-  final _service = RoutesService();
+  final RoutesService _service = RoutesService();
 
   List<RouteResult> _routes = [];
   bool _loading = false;
@@ -23,26 +24,61 @@ class _RoutesAdminPageState extends State<RoutesAdminPage> {
     _load();
   }
 
+  // ------------------------------------------------------------
+  // LOAD (SAFE)
+  // ------------------------------------------------------------
   Future<void> _load() async {
+    if (!mounted) return;
+
     setState(() => _loading = true);
 
     try {
       final res = await _service.getAllRoutes();
 
-      _routes = res
-          .map((e) => RouteResult.fromMap(e))
-          .toList();
-    } catch (e) {
-      debugPrint(e.toString());
-    }
+      final list = <RouteResult>[];
 
-    setState(() => _loading = false);
+      for (final e in res) {
+        try {
+          list.add(RouteResult.fromMap(e));
+        } catch (err) {
+          debugPrint('PARSE ERROR: $err');
+        }
+      }
+
+      if (!mounted) return;
+
+      setState(() {
+        _routes = list;
+      });
+    } catch (e, st) {
+      debugPrint('LOAD ERROR: $e');
+      debugPrint(st.toString());
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Load failed: $e')),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _loading = false);
+      }
+    }
   }
 
+  // ------------------------------------------------------------
+  // OPEN EDITOR
+  // ------------------------------------------------------------
   Future<void> _openEditor([RouteResult? route]) async {
     final changed = await showDialog<bool>(
       context: context,
-      builder: (_) => RouteEditDialog(route: route),
+      barrierDismissible: false,
+      builder: (_) {
+        return RouteEditDialog(
+          route: route,
+          service: _service,
+        );
+      },
     );
 
     if (changed == true) {
@@ -50,6 +86,9 @@ class _RoutesAdminPageState extends State<RoutesAdminPage> {
     }
   }
 
+  // ------------------------------------------------------------
+  // DELETE
+  // ------------------------------------------------------------
   Future<void> _delete(RouteResult route) async {
     final ok = await showDialog<bool>(
       context: context,
@@ -58,23 +97,40 @@ class _RoutesAdminPageState extends State<RoutesAdminPage> {
         content: const Text('Are you sure?'),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context, false),
+            onPressed: () => context.pop(false),
             child: const Text('Cancel'),
           ),
           FilledButton(
-            onPressed: () => Navigator.pop(context, true),
+            onPressed: () => context.pop(true),
             child: const Text('Delete'),
           ),
         ],
       ),
     );
 
-    if (ok == true) {
+    if (ok != true) return;
+
+    try {
       await _service.deleteRoute(route.id);
+
+      if (!mounted) return;
+
       await _load();
+    } catch (e, st) {
+      debugPrint('DELETE ERROR: $e');
+      debugPrint(st.toString());
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Delete failed: $e')),
+        );
+      }
     }
   }
 
+  // ------------------------------------------------------------
+  // UI
+  // ------------------------------------------------------------
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -93,35 +149,57 @@ class _RoutesAdminPageState extends State<RoutesAdminPage> {
         child: const Icon(Icons.add),
       ),
 
-      body: _loading
-          ? const Center(child: CircularProgressIndicator())
-          : _routes.isEmpty
-              ? const Center(child: Text('No routes found'))
-              : ListView.separated(
-                  itemCount: _routes.length,
-                  separatorBuilder: (_, __) => const Divider(),
-                  itemBuilder: (_, i) {
-                    final r = _routes[i];
+      body: _buildBody(),
+    );
+  }
 
-                    return ListTile(
-                      title: Text('${r.from} → ${r.to}'),
-                      subtitle: Text('${r.km} km'),
-                      trailing: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          IconButton(
-                            icon: const Icon(Icons.edit),
-                            onPressed: () => _openEditor(r),
-                          ),
-                          IconButton(
-                            icon: const Icon(Icons.delete),
-                            onPressed: () => _delete(r),
-                          ),
-                        ],
-                      ),
-                    );
-                  },
+  Widget _buildBody() {
+    if (_loading) {
+      return const Center(
+        child: CircularProgressIndicator(),
+      );
+    }
+
+    if (_routes.isEmpty) {
+      return const Center(
+        child: Text('No routes found'),
+      );
+    }
+
+    return SafeArea(
+      child: ListView.separated(
+        padding: const EdgeInsets.all(16),
+        itemCount: _routes.length,
+        separatorBuilder: (_, __) => const Divider(),
+        itemBuilder: (_, i) {
+          final r = _routes[i];
+
+          return ListTile(
+            leading: const Icon(Icons.route),
+
+            title: Text('${r.from} → ${r.to}'),
+
+            subtitle: Text(
+              '${r.km.toStringAsFixed(1)} km',
+            ),
+
+            trailing: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                IconButton(
+                  icon: const Icon(Icons.edit),
+                  onPressed: () => _openEditor(r),
                 ),
+
+                IconButton(
+                  icon: const Icon(Icons.delete_outline),
+                  onPressed: () => _delete(r),
+                ),
+              ],
+            ),
+          );
+        },
+      ),
     );
   }
 }

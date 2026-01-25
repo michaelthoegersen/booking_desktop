@@ -1,104 +1,143 @@
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 
 import '../models/route_result.dart';
 import '../services/routes_service.dart';
 
 class RouteEditDialog extends StatefulWidget {
   final RouteResult? route;
+  final RoutesService service;
 
-  const RouteEditDialog({super.key, this.route});
+  const RouteEditDialog({
+    super.key,
+    required this.service,
+    this.route,
+  });
 
   @override
   State<RouteEditDialog> createState() => _RouteEditDialogState();
 }
 
 class _RouteEditDialogState extends State<RouteEditDialog> {
-  final _service = RoutesService();
+  late TextEditingController _fromCtrl;
+  late TextEditingController _toCtrl;
+  late TextEditingController _kmCtrl;
 
-  late final TextEditingController _fromCtrl;
-  late final TextEditingController _toCtrl;
-  late final TextEditingController _kmCtrl;
-  late final TextEditingController _ferryCtrl;
-  late final TextEditingController _tollCtrl;
-  late final TextEditingController _extraCtrl;
+  bool _saving = false;
 
   @override
   void initState() {
     super.initState();
 
-    final r = widget.route;
-
-    _fromCtrl = TextEditingController(text: r?.from ?? '');
-    _toCtrl = TextEditingController(text: r?.to ?? '');
-    _kmCtrl = TextEditingController(text: r?.km.toString() ?? '');
-    _ferryCtrl = TextEditingController(text: r?.ferry.toString() ?? '0');
-    _tollCtrl = TextEditingController(text: r?.toll.toString() ?? '0');
-    _extraCtrl = TextEditingController(text: r?.extra ?? '');
+    _fromCtrl = TextEditingController(text: widget.route?.from ?? '');
+    _toCtrl = TextEditingController(text: widget.route?.to ?? '');
+    _kmCtrl = TextEditingController(
+      text: widget.route?.km.toString() ?? '',
+    );
   }
 
+  @override
+  void dispose() {
+    _fromCtrl.dispose();
+    _toCtrl.dispose();
+    _kmCtrl.dispose();
+    super.dispose();
+  }
+
+  // ------------------------------------------------------------
+  // SAVE
+  // ------------------------------------------------------------
   Future<void> _save() async {
     final from = _fromCtrl.text.trim();
     final to = _toCtrl.text.trim();
+    final km = double.tryParse(_kmCtrl.text);
 
-    if (from.isEmpty || to.isEmpty) return;
-
-    final km = double.tryParse(_kmCtrl.text) ?? 0;
-    final ferry = double.tryParse(_ferryCtrl.text) ?? 0;
-    final toll = double.tryParse(_tollCtrl.text) ?? 0;
-    final extra = _extraCtrl.text.trim();
-
-    if (widget.route == null) {
-      // CREATE
-      await _service.createRoute(
-        from: from,
-        to: to,
-        km: km,
-        ferry: ferry,
-        toll: toll,
-        extra: extra,
+    if (from.isEmpty || to.isEmpty || km == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Invalid input')),
       );
-    } else {
-      // UPDATE
-      await _service.updateRoute(
-        id: widget.route!.id,
-        from: from,
-        to: to,
-        km: km,
-        ferry: ferry,
-        toll: toll,
-        extra: extra,
-      );
+      return;
     }
 
-    if (mounted) Navigator.pop(context, true);
+    setState(() => _saving = true);
+
+    try {
+      if (widget.route == null) {
+        // CREATE
+        await widget.service.createRoute(
+          from: from,
+          to: to,
+          km: km,
+        );
+      } else {
+        // UPDATE
+        await widget.service.updateRoute(
+          id: widget.route!.id,
+          from: from,
+          to: to,
+          km: km,
+        );
+      }
+
+      if (!mounted) return;
+
+      context.pop(true);
+    } catch (e, st) {
+      debugPrint('SAVE ERROR: $e');
+      debugPrint(st.toString());
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Save failed: $e')),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _saving = false);
+      }
+    }
   }
 
+  // ------------------------------------------------------------
+  // UI
+  // ------------------------------------------------------------
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
       title: Text(widget.route == null ? 'New route' : 'Edit route'),
+
       content: SizedBox(
-        width: 420,
-        child: SingleChildScrollView(
-          child: Column(
-            children: [
-              TextField(controller: _fromCtrl, decoration: const InputDecoration(labelText: 'From')),
-              TextField(controller: _toCtrl, decoration: const InputDecoration(labelText: 'To')),
-              TextField(controller: _kmCtrl, decoration: const InputDecoration(labelText: 'KM')),
-              TextField(controller: _ferryCtrl, decoration: const InputDecoration(labelText: 'Ferry')),
-              TextField(controller: _tollCtrl, decoration: const InputDecoration(labelText: 'Toll')),
-              TextField(controller: _extraCtrl, decoration: const InputDecoration(labelText: 'Extra')),
-            ],
-          ),
+        width: 400,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: _fromCtrl,
+              decoration: const InputDecoration(labelText: 'From'),
+            ),
+
+            TextField(
+              controller: _toCtrl,
+              decoration: const InputDecoration(labelText: 'To'),
+            ),
+
+            TextField(
+              controller: _kmCtrl,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(labelText: 'Distance (km)'),
+            ),
+          ],
         ),
       ),
+
       actions: [
         TextButton(
-          onPressed: () => Navigator.pop(context),
+          onPressed: _saving ? null : () => context.pop(false),
           child: const Text('Cancel'),
         ),
+
         FilledButton(
-          onPressed: _save,
+          onPressed: _saving ? null : _save,
           child: const Text('Save'),
         ),
       ],
