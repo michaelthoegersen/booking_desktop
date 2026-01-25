@@ -12,6 +12,7 @@ import '../services/offer_pdf_service.dart';
 import '../state/settings_store.dart';
 import '../widgets/offer_preview.dart';
 import '../services/offer_storage_service.dart';
+import 'package:go_router/go_router.dart';
 
 // ✅ NY: bruker routes db for autocomplete + route lookup
 import '../services/routes_service.dart';
@@ -257,6 +258,41 @@ class _NewOfferPageState extends State<NewOfferPage> {
   // ------------------------------------------------------------
   // Small helpers
   // ------------------------------------------------------------
+  Future<void> _onAddMissingRoutePressed() async {
+  // CASE 1: Draft er ikke lagret ennå
+  if (_draftId == null) {
+    final shouldSave = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text("Save draft first?"),
+        content: const Text(
+          "You need to save this offer before adding routes.\n\nDo you want to save now?",
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text("No"),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text("Yes, save"),
+          ),
+        ],
+      ),
+    );
+
+    if (shouldSave == true) {
+      await _saveDraft();
+    } else {
+      return;
+    }
+  }
+
+  // CASE 2: Draft finnes → gå til Routes Admin
+  if (!mounted) return;
+  GoRouter.of(context).go("/routes");
+}
+
   String _fmtDate(DateTime d) =>
       "${d.day.toString().padLeft(2, '0')}.${d.month.toString().padLeft(2, '0')}.${d.year}";
 
@@ -891,6 +927,13 @@ class _NewOfferPageState extends State<NewOfferPage> {
                       ),
                     ],
                   ),
+                  const SizedBox(height: 8),
+
+                  OutlinedButton.icon(
+                    icon: const Icon(Icons.add_road),
+                    label: const Text("Add missing route"),
+                    onPressed: _onAddMissingRoutePressed,
+          ),
 
                   const SizedBox(height: 12),
 

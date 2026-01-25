@@ -2,17 +2,18 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
-import 'package:flutter/services.dart';
 
 import 'widgets/app_shell.dart';
+
 import 'pages/dashboard_page.dart';
 import 'pages/new_offer_page.dart';
 import 'pages/edit_offer_page.dart';
 import 'pages/customers_page.dart';
 import 'pages/settings_page.dart';
+import 'pages/routes_admin_page.dart';
 
 import 'state/settings_store.dart';
-import 'ui/css_theme.dart'; // ✅ NY
+import 'ui/css_theme.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -47,19 +48,43 @@ class BookingApp extends StatelessWidget {
   Widget build(BuildContext context) {
     final router = GoRouter(
       initialLocation: "/",
+
+      errorBuilder: (context, state) {
+        return Scaffold(
+          body: Center(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text(
+                  "Page not found",
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 12),
+                Text(state.error?.toString() ?? ""),
+                const SizedBox(height: 24),
+                FilledButton(
+                  onPressed: () => context.go("/"),
+                  child: const Text("Go to dashboard"),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+
       routes: [
         ShellRoute(
           builder: (context, state, child) {
             return AppShell(child: child);
           },
           routes: [
+            // ---------------- DASHBOARD ----------------
             GoRoute(
               path: "/",
               builder: (context, state) => const DashboardPage(),
             ),
 
-            /// ✅ /new -> blank offer
-            /// ✅ /new?id=UUID -> draft (query param)
+            // ---------------- NEW OFFER ----------------
             GoRoute(
               path: "/new",
               builder: (context, state) {
@@ -68,7 +93,6 @@ class BookingApp extends StatelessWidget {
               },
             ),
 
-            /// ✅ /new/<uuid>  --> FIXER "no routes for location"
             GoRoute(
               path: "/new/:id",
               builder: (context, state) {
@@ -77,17 +101,28 @@ class BookingApp extends StatelessWidget {
               },
             ),
 
+            // ---------------- EDIT OFFER ----------------
             GoRoute(
               path: "/edit",
               builder: (context, state) => const EditOfferPage(),
             ),
+
+            // ---------------- CUSTOMERS ----------------
             GoRoute(
               path: "/customers",
               builder: (context, state) => const CustomersPage(),
             ),
+
+            // ---------------- SETTINGS ----------------
             GoRoute(
               path: "/settings",
               builder: (context, state) => const SettingsPage(),
+            ),
+
+            // ---------------- ROUTES ADMIN ----------------
+            GoRoute(
+              path: "/routes",
+              builder: (context, state) => const RoutesAdminPage(),
             ),
           ],
         ),
@@ -97,7 +132,7 @@ class BookingApp extends StatelessWidget {
     return MaterialApp.router(
       debugShowCheckedModeBanner: false,
       title: "Booking System",
-      theme: CssTheme.theme(), // ✅ mobil-look theme
+      theme: CssTheme.theme(),
       routerConfig: router,
     );
   }

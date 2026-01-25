@@ -10,6 +10,7 @@ class RoutesService {
 
   // ------------------------------------------------------------
   // ✅ Finn route (IKKE maybeSingle!)
+  // Brukes av kalkulator / new offer
   // ------------------------------------------------------------
   Future<Map<String, dynamic>?> findRoute({
     required String from,
@@ -50,13 +51,14 @@ class RoutesService {
 
       return null;
     } catch (e) {
-      // ⚠️ viktig: ikke la exceptions drepe hele kalkylen
+      // ⚠️ viktig: ikke la exceptions drepe kalkyle
       return null;
     }
   }
 
   // ------------------------------------------------------------
   // ✅ Autocomplete: hent steder fra routes_all
+  // Brukes i NewOfferPage
   // ------------------------------------------------------------
   Future<List<String>> searchPlaces(
     String query, {
@@ -66,7 +68,6 @@ class RoutesService {
     if (q.length < 2) return [];
 
     try {
-      // hent litt flere enn limit – Set filtrerer senere
       final fromRes = await _client
           .from('routes_all')
           .select('from_place')
@@ -98,10 +99,95 @@ class RoutesService {
       }
 
       final list = places.toList()..sort();
-
       return list.length > limit ? list.take(limit).toList() : list;
     } catch (_) {
       return [];
     }
+  }
+
+  // ============================================================
+  // 🔧 ADMIN / CRUD
+  // Brukes KUN av RoutesAdminPage
+  // ============================================================
+
+  // ------------------------------------------------------------
+  // READ ALL
+  // ------------------------------------------------------------
+  Future<List<Map<String, dynamic>>> getAllRoutes() async {
+    final res = await _client
+        .from('routes_all')
+        .select()
+        .order('from_place');
+
+    return (res as List).cast<Map<String, dynamic>>();
+  }
+
+  // ------------------------------------------------------------
+  // READ ONE
+  // ------------------------------------------------------------
+  Future<Map<String, dynamic>?> getRouteById(String id) async {
+    final res = await _client
+        .from('routes_all')
+        .select()
+        .eq('id', id)
+        .maybeSingle();
+
+    if (res == null) return null;
+    return Map<String, dynamic>.from(res);
+  }
+
+  // ------------------------------------------------------------
+  // CREATE
+  // ------------------------------------------------------------
+  Future<void> createRoute({
+    required String from,
+    required String to,
+    required double km,
+    double ferry = 0,
+    double toll = 0,
+    String extra = '',
+  }) async {
+    await _client.from('routes_all').insert({
+      'from_place': from.trim(),
+      'to_place': to.trim(),
+      'distance_total_km': km,
+      'ferry_price': ferry,
+      'toll_nightliner': toll,
+      'extra': extra,
+      'updated_at': DateTime.now().toIso8601String(),
+    });
+  }
+
+  // ------------------------------------------------------------
+  // UPDATE
+  // ------------------------------------------------------------
+  Future<void> updateRoute({
+    required String id,
+    required String from,
+    required String to,
+    required double km,
+    double ferry = 0,
+    double toll = 0,
+    String extra = '',
+  }) async {
+    await _client
+        .from('routes_all')
+        .update({
+          'from_place': from.trim(),
+          'to_place': to.trim(),
+          'distance_total_km': km,
+          'ferry_price': ferry,
+          'toll_nightliner': toll,
+          'extra': extra,
+          'updated_at': DateTime.now().toIso8601String(),
+        })
+        .eq('id', id);
+  }
+
+  // ------------------------------------------------------------
+  // DELETE
+  // ------------------------------------------------------------
+  Future<void> deleteRoute(String id) async {
+    await _client.from('routes_all').delete().eq('id', id);
   }
 }
