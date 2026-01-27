@@ -13,6 +13,7 @@ import 'pages/edit_offer_page.dart';
 import 'pages/customers_page.dart';
 import 'pages/settings_page.dart';
 import 'pages/routes_admin_page.dart';
+import 'pages/calendar_page.dart'; // ✅ CALENDAR
 
 import 'state/settings_store.dart';
 import 'ui/css_theme.dart';
@@ -54,7 +55,7 @@ final supabase = Supabase.instance.client;
 bool get isLoggedIn => supabase.auth.currentSession != null;
 
 // ------------------------------------------------------------
-// SUPABASE AUTH REFRESHER (erstatter GoRouterRefreshStream)
+// SUPABASE AUTH REFRESHER
 // ------------------------------------------------------------
 class SupabaseAuthRefresher extends ChangeNotifier {
   SupabaseAuthRefresher() {
@@ -73,7 +74,6 @@ class BookingApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final router = GoRouter(
-      // 👇 Lytter på login/logout
       refreshListenable: SupabaseAuthRefresher(),
 
       initialLocation: "/",
@@ -83,15 +83,14 @@ class BookingApp extends StatelessWidget {
       // --------------------------------------------------
       redirect: (context, state) {
         final loggedIn = isLoggedIn;
-
         final goingToLogin = state.matchedLocation == "/login";
 
-        // Ikke logget inn → send til login
+        // Ikke logget inn → login
         if (!loggedIn && !goingToLogin) {
           return "/login";
         }
 
-        // Logget inn → ikke til login
+        // Logget inn → ikke login
         if (loggedIn && goingToLogin) {
           return "/";
         }
@@ -110,11 +109,18 @@ class BookingApp extends StatelessWidget {
               children: [
                 const Text(
                   "Page not found",
-                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
+
                 const SizedBox(height: 12),
+
                 Text(state.error?.toString() ?? ""),
+
                 const SizedBox(height: 24),
+
                 FilledButton(
                   onPressed: () => context.go("/"),
                   child: const Text("Go to dashboard"),
@@ -137,6 +143,7 @@ class BookingApp extends StatelessWidget {
           builder: (context, state, child) {
             return AppShell(child: child);
           },
+
           routes: [
             // ---------------- DASHBOARD ----------------
             GoRoute(
@@ -165,6 +172,12 @@ class BookingApp extends StatelessWidget {
             GoRoute(
               path: "/edit",
               builder: (context, state) => const EditOfferPage(),
+            ),
+
+            // ---------------- CALENDAR ---------------- ✅
+            GoRoute(
+              path: "/calendar",
+              builder: (context, state) => const CalendarPage(),
             ),
 
             // ---------------- CUSTOMERS ----------------

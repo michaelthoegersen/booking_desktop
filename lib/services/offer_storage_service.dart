@@ -290,4 +290,55 @@ class OfferStorageService {
     }
     return BusType.sleeper12;
   }
+  // ============================================================
+// SAVE TO SAMLETDATA (Calendar)
+// ============================================================
+static Future<void> saveToSamletData({
+  required OfferDraft offer,
+  required String kilde,
+  required Map<DateTime, double> kmByDate,
+  required Map<DateTime, double> timeByDate,
+}) async {
+  final sb = Supabase.instance.client;
+
+  final produksjon = offer.production.trim();
+  final kjoretoy = _buildKjoretoy(offer);
+
+  for (final date in kmByDate.keys) {
+    final dato = DateTime(date.year, date.month, date.day);
+
+    await sb.from('samletdata').upsert({
+      'dato': dato.toIso8601String().substring(0, 10),
+      'sted': '',
+      'venue': '',
+      'adresse': '',
+      'km': kmByDate[date]?.toString() ?? '',
+      'tid': timeByDate[date]?.toString() ?? '',
+      'produksjon': produksjon,
+      'kjoretoy': kjoretoy,
+      'pris': '',
+      'getin': '',
+      'kommentarer': '',
+      'ferry': '',
+      'vedlegg': '',
+      'contact': offer.contact,
+      'status': 'Forespørsel',
+      'kilde': kilde,
+    },
+    onConflict: 'dato,kilde');
+  }
+}
+static String _buildKjoretoy(OfferDraft offer) {
+  var type = offer.busType.label;
+
+  if (offer.rounds.any((r) => r.trailer)) {
+    type += " + trailer";
+  }
+
+  if (offer.busCount > 1) {
+    type = "${offer.busCount}x $type";
+  }
+
+  return type;
+}
 }

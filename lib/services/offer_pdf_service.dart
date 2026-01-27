@@ -161,66 +161,97 @@ This offer is valid for 7 days from today’s date and assumes that a vehicle is
   }
 
   // ============================================================
-  // BLACK BAR
-  // ============================================================
+// BLACK BAR (FIXED ALIGNMENT)
+// ============================================================
 
-  static pw.Widget _buildTopBar(
-    pw.ImageProvider logo,
-    pw.Font font,
-  ) {
-    return pw.Stack(
+static pw.Widget _buildTopBar(
+  pw.ImageProvider logo,
+  pw.Font font,
+) {
+  return pw.Container(
+    width: double.infinity,
+    height: 110, // Litt mer luft
+    color: PdfColors.black,
+
+    child: pw.Stack(
       children: [
-        pw.Container(
-          width: double.infinity,
-          height: 95,
-          color: PdfColors.black,
+
+        // LOGO (FULL KONTROLL)
+        pw.Positioned(
+          left: 0,  // → høyre
+          top: -25,   // ↓ ned
+
+          child: pw.Image(
+            logo,
+            height: 180, // 👈 STØRRELSE (endre denne)
+            fit: pw.BoxFit.contain,
+          ),
         ),
 
-        pw.Padding(
-          padding: const pw.EdgeInsets.fromLTRB(40, 5, 40, 5),
-          child: pw.Row(
-            children: [
-              pw.Padding(
-                padding: const pw.EdgeInsets.only(left: -55, top: -20),
-                child: pw.Image(logo, width: 220),
-              ),
+        // TEKST (låst høyre)
+        pw.Positioned(
+          right: -140,
+          top: 40,
 
-              pw.Spacer(),
+          child: pw.Container(
+            width: 420,
 
-              pw.Column(
-                crossAxisAlignment: pw.CrossAxisAlignment.end,
-                children: [
-                  _whiteText(
-                    "Coach Service Scandinavia / STARCOACH - Ring Lillgård 1585 62 Linköping, SE",
-                    font,
+            child: pw.Column(
+              crossAxisAlignment: pw.CrossAxisAlignment.start,
+              children: [
+
+                pw.Text(
+                  "Coach Service Scandinavia / STARCOACH - Ring Lillgård 1585 62 Linköping, SE",
+                  style: pw.TextStyle(
+                    font: font,
+                    fontSize: 8,
+                    color: PdfColors.white,
                   ),
-                  _whiteText(
-                    "Michael: +47 948 93 820  sales@coachservicescandinavia.com",
-                    font,
+                ),
+
+                pw.SizedBox(height: 4),
+
+                pw.Text(
+                  "Michael: +47 948 93 820  sales@coachservicescandinavia.com",
+                  style: pw.TextStyle(
+                    font: font,
+                    fontSize: 8,
+                    color: PdfColors.white,
                   ),
-                  _whiteText(
-                    "Benny: +46 73-428 19 48  benny.nyberg@starcoach.nu",
-                    font,
+                ),
+
+                pw.SizedBox(height: 4),
+
+                pw.Text(
+                  "Benny: +46 73-428 19 48  benny.nyberg@starcoach.nu",
+                  style: pw.TextStyle(
+                    font: font,
+                    fontSize: 8,
+                    color: PdfColors.white,
                   ),
-                ],
-              ),
-            ],
+                ),
+              ],
+            ),
           ),
         ),
       ],
-    );
-  }
+    ),
+  );
+}
+// ============================================================
+// WHITE TEXT (TOP BAR HELPER)
+// ============================================================
 
-  static pw.Widget _whiteText(String text, pw.Font font) {
-    return pw.Text(
-      text,
-      style: pw.TextStyle(
-        font: font,
-        fontSize: 8,
-        color: PdfColors.white,
-      ),
-    );
-  }
+static pw.Widget _whiteText(String text, pw.Font font) {
+  return pw.Text(
+    text,
+    style: pw.TextStyle(
+      font: font,
+      fontSize: 10,
+      color: PdfColors.white,
+    ),
+  );
+}
 
   // ============================================================
   // TOP CONTENT
@@ -233,15 +264,15 @@ This offer is valid for 7 days from today’s date and assumes that a vehicle is
   pw.Font font,
 ) {
   return pw.Container(
-    height: 260, // Nok plass → ingen clipping
-    padding: const pw.EdgeInsets.only(top: 10),
+    height: 95, // Nok plass → ingen clipping
+    padding: const pw.EdgeInsets.only(top: -25),
     child: pw.Stack(
       children: [
 
         // Buss
         pw.Positioned(
           left: 0,
-          top: 0, // ALDRI negativ
+          top: -10, // ALDRI negativ
           child: pw.Image(
             busLayout,
             width: 200,
@@ -251,7 +282,7 @@ This offer is valid for 7 days from today’s date and assumes that a vehicle is
         // Høyre info
         pw.Positioned(
           right: 0,
-          top: 0, // ALDRI negativ
+          top: 15, // ALDRI negativ
           child: pw.Container(
             width: 160,
             child: pw.Column(

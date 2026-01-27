@@ -139,7 +139,6 @@ class _SideNav extends StatelessWidget {
                 "assets/pdf/logos/TourFlowLogo.png",
                 fit: BoxFit.contain,
 
-                // Fallback hvis fil mangler
                 errorBuilder: (context, error, stack) {
                   return const Center(
                     child: Text(
@@ -163,6 +162,12 @@ class _SideNav extends StatelessWidget {
               icon: Icons.dashboard_rounded,
               label: "Dashboard",
               route: "/",
+            ),
+
+            const _NavItem(
+              icon: Icons.calendar_month,
+              label: "Calendar",
+              route: "/calendar",
             ),
 
             const _NavItem(
@@ -213,10 +218,8 @@ class _NavItem extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Nåværende path
     final currentPath = GoRouterState.of(context).uri.path;
 
-    // Matcher både /new og /new/123 osv
     final selected =
         currentPath == route || currentPath.startsWith("$route/");
 
