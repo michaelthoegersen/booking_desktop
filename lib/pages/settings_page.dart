@@ -18,8 +18,6 @@ class _SettingsPageState extends State<SettingsPage> {
   late TextEditingController trailerKmCtrl;
   late TextEditingController dDriveDayCtrl;
   late TextEditingController flightTicketCtrl;
-
-  // ✅ NEW
   late TextEditingController dropboxCtrl;
 
   @override
@@ -27,12 +25,18 @@ class _SettingsPageState extends State<SettingsPage> {
     super.initState();
     final s = SettingsStore.current;
 
-    dayPriceCtrl = TextEditingController(text: s.dayPrice.toStringAsFixed(0));
-    extraKmCtrl = TextEditingController(text: s.extraKmPrice.toStringAsFixed(0));
-    trailerDayCtrl = TextEditingController(text: s.trailerDayPrice.toStringAsFixed(0));
-    trailerKmCtrl = TextEditingController(text: s.trailerKmPrice.toStringAsFixed(0));
-    dDriveDayCtrl = TextEditingController(text: s.dDriveDayPrice.toStringAsFixed(0));
-    flightTicketCtrl = TextEditingController(text: s.flightTicketPrice.toStringAsFixed(0));
+    dayPriceCtrl =
+        TextEditingController(text: s.dayPrice.toStringAsFixed(0));
+    extraKmCtrl =
+        TextEditingController(text: s.extraKmPrice.toStringAsFixed(0));
+    trailerDayCtrl =
+        TextEditingController(text: s.trailerDayPrice.toStringAsFixed(0));
+    trailerKmCtrl =
+        TextEditingController(text: s.trailerKmPrice.toStringAsFixed(0));
+    dDriveDayCtrl =
+        TextEditingController(text: s.dDriveDayPrice.toStringAsFixed(0));
+    flightTicketCtrl =
+        TextEditingController(text: s.flightTicketPrice.toStringAsFixed(0));
 
     dropboxCtrl = TextEditingController(text: s.dropboxRootPath);
   }
@@ -62,7 +66,6 @@ class _SettingsPageState extends State<SettingsPage> {
 
     if (result == null) return;
 
-    // optional: ensure path exists
     if (!await Directory(result).exists()) return;
 
     setState(() {
@@ -76,23 +79,33 @@ class _SettingsPageState extends State<SettingsPage> {
     SettingsStore.current = current.copyWith(
       dayPrice: _parseDouble(dayPriceCtrl.text, current.dayPrice),
       extraKmPrice: _parseDouble(extraKmCtrl.text, current.extraKmPrice),
-      trailerDayPrice: _parseDouble(trailerDayCtrl.text, current.trailerDayPrice),
-      trailerKmPrice: _parseDouble(trailerKmCtrl.text, current.trailerKmPrice),
-      dDriveDayPrice: _parseDouble(dDriveDayCtrl.text, current.dDriveDayPrice),
-      flightTicketPrice: _parseDouble(flightTicketCtrl.text, current.flightTicketPrice),
-
-      // ✅ NEW:
+      trailerDayPrice:
+          _parseDouble(trailerDayCtrl.text, current.trailerDayPrice),
+      trailerKmPrice:
+          _parseDouble(trailerKmCtrl.text, current.trailerKmPrice),
+      dDriveDayPrice:
+          _parseDouble(dDriveDayCtrl.text, current.dDriveDayPrice),
+      flightTicketPrice:
+          _parseDouble(flightTicketCtrl.text, current.flightTicketPrice),
       dropboxRootPath: dropboxCtrl.text.trim(),
     );
 
-    await SettingsStore.save(); // ✅ persist
+    await SettingsStore.save();
 
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Settings saved")));
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text("Settings saved")),
+    );
+
     setState(() {});
   }
 
-  Widget _field(String label, TextEditingController ctrl, String suffix) {
+  Widget _field(
+    String label,
+    TextEditingController ctrl,
+    String suffix,
+  ) {
     return TextField(
       controller: ctrl,
       keyboardType: TextInputType.number,
@@ -119,17 +132,30 @@ class _SettingsPageState extends State<SettingsPage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            // -------------------------
+            // TITLE
+            // -------------------------
             Text(
               "Settings",
-              style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w900),
+              style: Theme.of(context)
+                  .textTheme
+                  .titleLarge
+                  ?.copyWith(fontWeight: FontWeight.w900),
             ),
+
             const SizedBox(height: 14),
 
-            // ✅ Dropbox section
+            // -------------------------
+            // DROPBOX
+            // -------------------------
             Text(
               "Dropbox",
-              style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w900),
+              style: Theme.of(context)
+                  .textTheme
+                  .titleMedium
+                  ?.copyWith(fontWeight: FontWeight.w900),
             ),
+
             const SizedBox(height: 10),
 
             Row(
@@ -157,22 +183,70 @@ class _SettingsPageState extends State<SettingsPage> {
             Divider(color: cs.outlineVariant),
             const SizedBox(height: 18),
 
-            // prices
+            // -------------------------
+            // PRICES
+            // -------------------------
             Wrap(
               spacing: 12,
               runSpacing: 12,
               children: [
-                SizedBox(width: 240, child: _field("Day price", dayPriceCtrl, "NOK")),
-                SizedBox(width: 240, child: _field("Extra km price", extraKmCtrl, "NOK/km")),
-                SizedBox(width: 240, child: _field("Trailer day price", trailerDayCtrl, "NOK/day")),
-                SizedBox(width: 240, child: _field("Trailer km price", trailerKmCtrl, "NOK/km")),
-                SizedBox(width: 240, child: _field("D.Drive day price", dDriveDayCtrl, "NOK/day")),
-                SizedBox(width: 240, child: _field("Flight ticket price", flightTicketCtrl, "NOK")),
+                SizedBox(
+                    width: 240,
+                    child: _field("Day price", dayPriceCtrl, "NOK")),
+                SizedBox(
+                    width: 240,
+                    child:
+                        _field("Extra km price", extraKmCtrl, "NOK/km")),
+                SizedBox(
+                    width: 240,
+                    child: _field(
+                        "Trailer day price", trailerDayCtrl, "NOK/day")),
+                SizedBox(
+                    width: 240,
+                    child: _field(
+                        "Trailer km price", trailerKmCtrl, "NOK/km")),
+                SizedBox(
+                    width: 240,
+                    child: _field(
+                        "D.Drive day price", dDriveDayCtrl, "NOK/day")),
+                SizedBox(
+                    width: 240,
+                    child: _field(
+                        "Flight ticket price", flightTicketCtrl, "NOK")),
               ],
+            ),
+
+            const SizedBox(height: 24),
+            Divider(color: cs.outlineVariant),
+            const SizedBox(height: 12),
+
+            // -------------------------
+            // ABOUT
+            // -------------------------
+            ListTile(
+              leading: const Icon(Icons.info_outline),
+              title: const Text("About TourFlow"),
+              onTap: () {
+                showAboutDialog(
+                  context: context,
+                  applicationName: "TourFlow",
+                  applicationVersion: "1.0.0",
+                  applicationLegalese:
+                      "© Coach Service Scandinavia",
+                  children: const [
+                    SizedBox(height: 12),
+                    Text(
+                        "TourFlow – Tour & booking management system"),
+                  ],
+                );
+              },
             ),
 
             const Spacer(),
 
+            // -------------------------
+            // SAVE
+            // -------------------------
             Align(
               alignment: Alignment.centerRight,
               child: FilledButton.icon(

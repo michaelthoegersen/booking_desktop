@@ -43,6 +43,12 @@
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
 
+	<key>CFBundleName</key>
+	<string>TourFlow</string>
+
+	<key>CFBundleDisplayName</key>
+	<string>TourFlow</string>
+	
 	<!-- ✅ RIKTIG App Transport Security -->
 	<key>NSAppTransportSecurity</key>
 	<dict>

@@ -3,6 +3,8 @@ import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 
+import 'pages/login_page.dart';
+import 'pages/customers_admin_page.dart';
 import 'widgets/app_shell.dart';
 
 import 'pages/dashboard_page.dart';
@@ -15,6 +17,9 @@ import 'pages/routes_admin_page.dart';
 import 'state/settings_store.dart';
 import 'ui/css_theme.dart';
 
+// ------------------------------------------------------------
+// MAIN
+// ------------------------------------------------------------
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
@@ -41,14 +46,62 @@ Future<void> main() async {
   runApp(const BookingApp());
 }
 
+// ------------------------------------------------------------
+// AUTH HELPERS
+// ------------------------------------------------------------
+final supabase = Supabase.instance.client;
+
+bool get isLoggedIn => supabase.auth.currentSession != null;
+
+// ------------------------------------------------------------
+// SUPABASE AUTH REFRESHER (erstatter GoRouterRefreshStream)
+// ------------------------------------------------------------
+class SupabaseAuthRefresher extends ChangeNotifier {
+  SupabaseAuthRefresher() {
+    Supabase.instance.client.auth.onAuthStateChange.listen((_) {
+      notifyListeners();
+    });
+  }
+}
+
+// ------------------------------------------------------------
+// APP
+// ------------------------------------------------------------
 class BookingApp extends StatelessWidget {
   const BookingApp({super.key});
 
   @override
   Widget build(BuildContext context) {
     final router = GoRouter(
+      // 👇 Lytter på login/logout
+      refreshListenable: SupabaseAuthRefresher(),
+
       initialLocation: "/",
 
+      // --------------------------------------------------
+      // AUTH REDIRECT
+      // --------------------------------------------------
+      redirect: (context, state) {
+        final loggedIn = isLoggedIn;
+
+        final goingToLogin = state.matchedLocation == "/login";
+
+        // Ikke logget inn → send til login
+        if (!loggedIn && !goingToLogin) {
+          return "/login";
+        }
+
+        // Logget inn → ikke til login
+        if (loggedIn && goingToLogin) {
+          return "/";
+        }
+
+        return null;
+      },
+
+      // --------------------------------------------------
+      // ERROR PAGE
+      // --------------------------------------------------
       errorBuilder: (context, state) {
         return Scaffold(
           body: Center(
@@ -73,6 +126,13 @@ class BookingApp extends StatelessWidget {
       },
 
       routes: [
+        // ---------------- LOGIN ----------------
+        GoRoute(
+          path: "/login",
+          builder: (context, state) => const LoginPage(),
+        ),
+
+        // ---------------- APP SHELL ----------------
         ShellRoute(
           builder: (context, state, child) {
             return AppShell(child: child);
@@ -110,7 +170,8 @@ class BookingApp extends StatelessWidget {
             // ---------------- CUSTOMERS ----------------
             GoRoute(
               path: "/customers",
-              builder: (context, state) => const CustomersPage(),
+              builder: (context, state) =>
+                  const CustomersAdminPage(),
             ),
 
             // ---------------- SETTINGS ----------------
@@ -122,7 +183,8 @@ class BookingApp extends StatelessWidget {
             // ---------------- ROUTES ADMIN ----------------
             GoRoute(
               path: "/routes",
-              builder: (context, state) => const RoutesAdminPage(),
+              builder: (context, state) =>
+                  const RoutesAdminPage(),
             ),
           ],
         ),
@@ -131,7 +193,7 @@ class BookingApp extends StatelessWidget {
 
     return MaterialApp.router(
       debugShowCheckedModeBanner: false,
-      title: "Booking System",
+      title: "TourFlow",
       theme: CssTheme.theme(),
       routerConfig: router,
     );

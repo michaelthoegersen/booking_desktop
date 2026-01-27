@@ -68,7 +68,10 @@ class _RoutePlannerPageState extends State<RoutePlannerPage> {
         actions: [
           if (_selected != null)
             FilledButton(
-              onPressed: () => Navigator.pop(context, _selected),
+              onPressed: () {
+                // ✅ PASSERER MED EXTRA (summary)
+                Navigator.pop(context, _selected);
+              },
               child: const Text("Use route"),
             ),
         ],
@@ -123,7 +126,11 @@ class _RoutePlannerPageState extends State<RoutePlannerPage> {
                                         .primaryContainer
                                     : null,
                                 child: ListTile(
-                                  title: Text(r.summary),
+                                  title: Text(
+                                    r.summary.isNotEmpty
+                                        ? r.summary
+                                        : "Standard route",
+                                  ),
                                   subtitle: Text(
                                     '${r.km.toStringAsFixed(1)} km · ${r.durationMin} min',
                                   ),
@@ -144,7 +151,7 @@ class _RoutePlannerPageState extends State<RoutePlannerPage> {
           ),
 
           // --------------------------------------------------
-          // RIGHT PANEL (PLACEHOLDER FOR MAP)
+          // RIGHT PANEL (PREVIEW)
           // --------------------------------------------------
           Expanded(
             child: Center(
@@ -155,10 +162,18 @@ class _RoutePlannerPageState extends State<RoutePlannerPage> {
                       children: [
                         const Icon(Icons.map, size: 80),
                         const SizedBox(height: 12),
+
+                        // ✅ VISER EXTRA
                         Text(
                           _selected!.summary,
-                          style: const TextStyle(fontSize: 18),
+                          style: const TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                          ),
                         ),
+
+                        const SizedBox(height: 4),
+
                         Text(
                           '${_selected!.km.toStringAsFixed(1)} km',
                         ),

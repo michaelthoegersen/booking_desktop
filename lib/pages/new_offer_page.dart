@@ -1,13 +1,13 @@
 import 'dart:typed_data';
 import 'dart:io';
-
+import 'dart:async';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:intl/intl.dart';
 
 import '../models/offer_draft.dart';
-import '../services/trip_calculator.dart';
+import 'package:booking_desktop/services/trip_calculator.dart';
 import '../services/offer_pdf_service.dart';
 import '../state/settings_store.dart';
 import '../widgets/offer_preview.dart';
@@ -16,6 +16,7 @@ import 'package:go_router/go_router.dart';
 
 // ✅ NY: bruker routes db for autocomplete + route lookup
 import '../services/routes_service.dart';
+import '../services/customers_service.dart';
 
 class NewOfferPage extends StatefulWidget {
   /// ✅ Hvis du sender inn offerId -> åpner den eksisterende draft
@@ -32,10 +33,10 @@ class _NewOfferPageState extends State<NewOfferPage> {
 
   // ✅ default values, men dette overskrives av loadDraft()
   final OfferDraft offer = OfferDraft(
-    company: 'Norsk Turnétransport AS',
-    contact: 'Michael',
-    production: 'Karpe',
-  );
+    company: '',
+    contact: '',
+    production: '',
+);
 
   final TextEditingController companyCtrl = TextEditingController();
   final TextEditingController contactCtrl = TextEditingController();
@@ -406,18 +407,18 @@ class _NewOfferPageState extends State<NewOfferPage> {
   // Recalculate legs for CURRENT round
   // ------------------------------------------------------------
   Future<void> _recalcKm() async {
-    final round = offer.rounds[roundIndex];
-    final start = _norm(round.startLocation);
+  final round = offer.rounds[roundIndex];
+  final start = _norm(round.startLocation);
 
-    if (start.isEmpty) {
-      setState(() {
-        _kmByIndex = {};
-        _ferryByIndex = {};
-        _tollByIndex = {};
-        _extraByIndex = {};
-      });
-      return;
-    }
+  if (start.isEmpty) {
+    setState(() {
+      _kmByIndex = {};
+      _ferryByIndex = {};
+      _tollByIndex = {};
+      _extraByIndex = {};
+    });
+    return;
+  }
 
     final entries = [...round.entries]..sort((a, b) => a.date.compareTo(b.date));
 
@@ -448,82 +449,116 @@ class _NewOfferPageState extends State<NewOfferPage> {
     }
 
     setState(() {
-      _kmByIndex = kmByIndex;
-      _ferryByIndex = ferryByIndex;
-      _tollByIndex = tollByIndex;
-      _extraByIndex = extraByIndex;
-      _loadingKm = false;
-      if (missing) {
-        _kmError = "Missing routes in routes_all. Check place names / direction.";
-      }
-    });
+  _kmByIndex = kmByIndex;
+  _ferryByIndex = ferryByIndex;
+  _tollByIndex = tollByIndex;
+  _extraByIndex = extraByIndex;
+
+  // ✅ LAGRE EXTRA I ENTRY (VIKTIG FOR PDF)
+  for (int i = 0; i < round.entries.length; i++) {
+    round.entries[i] = round.entries[i].copyWith(
+      extra: extraByIndex[i] ?? '',
+    );
+  }
+
+  _loadingKm = false;
+
+  if (missing) {
+    _kmError = "Missing routes in routes_all. Check place names / direction.";
+  }
+});
   }
 
   // ------------------------------------------------------------
   // Add entry
   // ------------------------------------------------------------
   Future<void> _addEntry() async {
-    final loc = _norm(locationCtrl.text);
+  final loc = _norm(locationCtrl.text);
 
-    if (selectedDate == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Pick a date first.")),
-      );
-      return;
-    }
-    if (loc.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Enter a location.")),
-      );
-      return;
-    }
-    if (_norm(startLocCtrl.text).isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Start location must be set first.")),
-      );
-      return;
-    }
-
-    setState(() {
-      offer.rounds[roundIndex].entries.add(
-        RoundEntry(date: selectedDate!, location: loc, extra: ''),
-  );
-      offer.rounds[roundIndex].entries.sort((a, b) => a.date.compareTo(b.date));
-
-  // ✅ AUTO: neste dato = dagen etter
-      selectedDate = selectedDate!.add(const Duration(days: 1));
-
-      locationCtrl.clear();
-      _locationSuggestions = [];
-});
-
-    await _recalcKm();
+  if (selectedDate == null) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text("Pick a date first.")),
+    );
+    return;
   }
+
+  if (loc.isEmpty) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text("Enter a location.")),
+    );
+    return;
+  }
+
+  if (_norm(startLocCtrl.text).isEmpty) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text("Start location must be set first.")),
+    );
+    return;
+  }
+
+  final nextIndex = offer.rounds[roundIndex].entries.length;
+
+  final extra = _extraByIndex[nextIndex] ?? '';
+
+  setState(() {
+    offer.rounds[roundIndex].entries.add(
+      RoundEntry(
+        date: selectedDate!,
+        location: loc,
+        extra: extra, // ✅ HER
+      ),
+    );
+
+    offer.rounds[roundIndex].entries
+        .sort((a, b) => a.date.compareTo(b.date));
+
+    // Auto next day
+    selectedDate = selectedDate!.add(const Duration(days: 1));
+
+    locationCtrl.clear();
+    _locationSuggestions = [];
+  });
+
+  await _recalcKm();
+}
 
   Future<void> _pasteManyLines(List<String> lines) async {
-    if (selectedDate == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Pick a date first, then paste.")),
+  if (selectedDate == null) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text("Pick a date first, then paste.")),
+    );
+    return;
+  }
+
+  final clean = lines.map(_norm).where((e) => e.isNotEmpty).toList();
+  if (clean.isEmpty) return;
+
+  setState(() {
+    for (final loc in clean) {
+      final idx = offer.rounds[roundIndex].entries.length;
+
+      final extra = _extraByIndex[idx] ?? '';
+
+      offer.rounds[roundIndex].entries.add(
+        RoundEntry(
+          date: selectedDate!,
+          location: loc,
+          extra: extra, // ✅ HER
+        ),
       );
-      return;
+
+      selectedDate = selectedDate!.add(const Duration(days: 1));
     }
 
-    final clean = lines.map(_norm).where((e) => e.isNotEmpty).toList();
-    if (clean.isEmpty) return;
+    offer.rounds[roundIndex].entries
+        .sort((a, b) => a.date.compareTo(b.date));
 
-    setState(() {
-      for (final loc in clean) {
-        offer.rounds[roundIndex].entries.add(
-          RoundEntry(date: selectedDate!, location: loc, extra: ''),
-        );
-      }
-      offer.rounds[roundIndex].entries.sort((a, b) => a.date.compareTo(b.date));
-      locationCtrl.clear();
-      _locationSuggestions = [];
-    });
+    locationCtrl.clear();
+    _locationSuggestions = [];
+  });
 
-    await _recalcKm();
-  }
+  await _recalcKm();
+}
 
   Future<void> _editEntry(int index) async {
     final entry = offer.rounds[roundIndex].entries[index];
@@ -788,16 +823,18 @@ class _NewOfferPageState extends State<NewOfferPage> {
         _tollByIndex.values.fold<double>(0.0, (a, b) => a + b);
 
     final calc = TripCalculator.calculateRound(
-      settings: SettingsStore.current,
-      entryCount: entryCount,
-      pickupEveningFirstDay: round.pickupEveningFirstDay,
-      trailer: round.trailer,
-      totalKm: totalKm,
-      legKm: List.generate(
-          entryCount, (i) => (_kmByIndex[i] ?? 0.0).toDouble()),
-      ferryCost: ferryTotal,
-      tollCost: tollTotal,
-    );
+  settings: SettingsStore.current,
+  entryCount: entryCount,
+  pickupEveningFirstDay: round.pickupEveningFirstDay,
+  trailer: round.trailer,
+  totalKm: totalKm,
+  legKm: _kmByIndex.values
+      .whereType<double>()
+      .map((e) => e.toDouble())
+      .toList(),
+  ferryCost: ferryTotal,
+  tollCost: tollTotal,
+);
 
     if (_loadingDraft) {
       return const Center(child: CircularProgressIndicator());
@@ -812,21 +849,11 @@ class _NewOfferPageState extends State<NewOfferPage> {
           SizedBox(
             width: 300,
             child: _LeftOfferCard(
-              companyCtrl: companyCtrl,
-              contactCtrl: contactCtrl,
-              productionCtrl: productionCtrl,
-              offer: offer,
-              onChanged: () {
-                setState(() {
-                  offer.company = companyCtrl.text.trim();
-                  offer.contact = contactCtrl.text.trim();
-                  offer.production = productionCtrl.text.trim();
-                });
-              },
-              onExport: _exportPdf,
-              onSave: _saveDraft,
-              draftId: _draftId,
-            ),
+  offer: offer,
+  onExport: _exportPdf,
+  onSave: _saveDraft,
+  draftId: _draftId,
+),
           ),
 
           const SizedBox(width: 14),
@@ -881,60 +908,61 @@ class _NewOfferPageState extends State<NewOfferPage> {
                     ],
                   ),
 
-                  const SizedBox(height: 12),
+                  const SizedBox(height: 10),
 
                   TextField(
                     controller: startLocCtrl,
                     onChanged: (_) async {
                       setState(() => offer.rounds[roundIndex].startLocation =
-                          _norm(startLocCtrl.text));
+                        _norm(startLocCtrl.text));
                       await _recalcKm();
-                    },
+  },
                     decoration: const InputDecoration(
                       labelText: "Start location (for this round)",
                       prefixIcon: Icon(Icons.flag),
-                    ),
-                  ),
+  ),
+),
 
                   const SizedBox(height: 10),
 
                   Wrap(
-                    spacing: 18,
-                    runSpacing: 6,
-                    children: [
-                      Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Checkbox(
-                            value: round.pickupEveningFirstDay,
-                            onChanged: (v) => setState(() => round
-                                .pickupEveningFirstDay = v ?? false),
-                          ),
-                          const Text(
-                              "Pickup evening (first day not billable)"),
-                        ],
-                      ),
-                      Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Checkbox(
-                            value: round.trailer,
-                            onChanged: (v) =>
-                                setState(() => round.trailer = v ?? false),
-                          ),
-                          const Text("Trailer"),
-                        ],
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
+  spacing: 18,
+  runSpacing: 6,
+  children: [
+    Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Checkbox(
+          value: round.pickupEveningFirstDay,
+          onChanged: (v) async {
+            setState(() {
+              round.pickupEveningFirstDay = v ?? false;
+            });
 
-                  OutlinedButton.icon(
-                    icon: const Icon(Icons.add_road),
-                    label: const Text("Add missing route"),
-                    onPressed: _onAddMissingRoutePressed,
-          ),
-
+            await _recalcKm(); // ✅ Recalc → D.Drive tilbake
+          },
+        ),
+        const Text("Pickup evening (first day not billable)"),
+      ],
+    ),
+    Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Checkbox(
+          value: round.trailer,
+          onChanged: (v) {
+            setState(() {
+              round.trailer = v ?? false;
+            });
+          },
+        ),
+        const Text("Trailer"),
+      ],
+    ),
+  ],
+),
+                
+                
                   const SizedBox(height: 12),
 
                   Container(
@@ -959,24 +987,7 @@ class _NewOfferPageState extends State<NewOfferPage> {
                                       : _fmtDate(selectedDate!)),
                                 ),
                               ),
-                            ),
-                            const SizedBox(width: 10),
-                            SizedBox(
-                              width: 140,
-                              height: 48,
-                              child: FilledButton.icon(
-                                onPressed: _loadingKm ? null : _addEntry,
-                                icon: _loadingKm
-                                    ? const SizedBox(
-                                        width: 18,
-                                        height: 18,
-                                        child: CircularProgressIndicator(
-                                            strokeWidth: 2),
-                                      )
-                                    : const Icon(Icons.add),
-                                label: const Text("Add"),
-                              ),
-                            ),
+                            ),                            
                           ],
                         ),
                         const SizedBox(height: 10),
@@ -988,6 +999,13 @@ class _NewOfferPageState extends State<NewOfferPage> {
                           onPasteMulti: _pasteManyLines,
                           onQueryChanged: _loadPlaceSuggestions,
       ),
+                        const SizedBox(height: 8),
+
+                        OutlinedButton.icon(
+                          icon: const Icon(Icons.add_road),
+                          label: const Text("Add missing route"),
+                          onPressed: _onAddMissingRoutePressed,
+),
 
                         if (_loadingSuggestions)
                           const Padding(
@@ -1108,30 +1126,37 @@ class _NewOfferPageState extends State<NewOfferPage> {
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Wrap(
-                                  spacing: 16,
-                                  runSpacing: 6,
-                                  children: [
-                                    Text("Days: ${_nok(calc.dayCost)}",
-                                        style: const TextStyle(
-                                            fontWeight: FontWeight.w900)),
-                                    Text("Extra km: ${_nok(calc.extraKmCost)}",
-                                        style: const TextStyle(
-                                            fontWeight: FontWeight.w900)),
-                                    if (round.trailer)
-                                      Text(
-                                          "Trailer: ${_nok(calc.trailerDayCost + calc.trailerKmCost)}",
-                                          style: const TextStyle(
-                                              fontWeight: FontWeight.w900)),
-                                    if (ferryTotal > 0)
-                                      Text("Ferry: ${_nok(calc.ferryCost)}",
-                                          style: const TextStyle(
-                                              fontWeight: FontWeight.w900)),
-                                    if (tollTotal > 0)
-                                      Text("Toll: ${_nok(calc.tollCost)}",
-                                          style: const TextStyle(
-                                              fontWeight: FontWeight.w900)),
-                                  ],
-                                ),
+  spacing: 16,
+  runSpacing: 6,
+  children: [
+    Text("Days: ${_nok(calc.dayCost)}",
+        style: const TextStyle(fontWeight: FontWeight.w900)),
+
+    Text("Extra km: ${_nok(calc.extraKmCost)}",
+        style: const TextStyle(fontWeight: FontWeight.w900)),
+
+    // ✅ D.DRIVE
+    if (calc.dDriveDays > 0)
+      Text(
+        "D.Drive (${calc.dDriveDays}): ${_nok(calc.dDriveCost)}",
+        style: const TextStyle(fontWeight: FontWeight.w900),
+      ),
+
+    if (round.trailer)
+      Text(
+        "Trailer: ${_nok(calc.trailerDayCost + calc.trailerKmCost)}",
+        style: const TextStyle(fontWeight: FontWeight.w900),
+      ),
+
+    if (ferryTotal > 0)
+      Text("Ferry: ${_nok(calc.ferryCost)}",
+          style: const TextStyle(fontWeight: FontWeight.w900)),
+
+    if (tollTotal > 0)
+      Text("Toll: ${_nok(calc.tollCost)}",
+          style: const TextStyle(fontWeight: FontWeight.w900)),
+  ],
+),
                                 const SizedBox(height: 8),
                                 Align(
                                   alignment: Alignment.centerRight,
@@ -1172,32 +1197,173 @@ class _NewOfferPageState extends State<NewOfferPage> {
   }
 }
 
-// ------------------------------------------------------------
-// LEFT CARD
-// ------------------------------------------------------------
-class _LeftOfferCard extends StatelessWidget {
-  final TextEditingController companyCtrl;
-  final TextEditingController contactCtrl;
-  final TextEditingController productionCtrl;
-  final VoidCallback onChanged;
-
+class _LeftOfferCard extends StatefulWidget {
   final OfferDraft offer;
   final Future<void> Function() onExport;
   final Future<void> Function() onSave;
-
   final String? draftId;
 
   const _LeftOfferCard({
-    required this.companyCtrl,
-    required this.contactCtrl,
-    required this.productionCtrl,
-    required this.onChanged,
+    super.key,
     required this.offer,
     required this.onExport,
     required this.onSave,
     required this.draftId,
   });
 
+  @override
+  State<_LeftOfferCard> createState() => _LeftOfferCardState();
+}
+
+class _LeftOfferCardState extends State<_LeftOfferCard> {
+  final SupabaseClient _client = Supabase.instance.client;
+
+  final TextEditingController _companyCtrl = TextEditingController();
+
+  bool _loading = false;
+
+  List<Map<String, dynamic>> _companySuggestions = [];
+  List<Map<String, dynamic>> _contacts = [];
+  List<Map<String, dynamic>> _productions = [];
+
+  String? _contactId;
+  String? _productionId;
+
+  // --------------------------------------------------
+  // INIT
+  // --------------------------------------------------
+  @override
+  void initState() {
+    super.initState();
+
+    if (widget.offer.company.isNotEmpty) {
+      _companyCtrl.text = widget.offer.company;
+      _restore(widget.offer.company);
+    }
+  }
+
+  // --------------------------------------------------
+  // RESTORE
+  // --------------------------------------------------
+  Future<void> _restore(String name) async {
+    final r = await _client
+        .from('companies')
+        .select()
+        .eq('name', name)
+        .maybeSingle();
+
+    if (r == null) return;
+
+    await _loadDetails(r['id'].toString());
+
+    if (mounted) {
+      setState(() {
+        final c = _contacts.firstWhere(
+          (e) => e['name'] == widget.offer.contact,
+          orElse: () => {},
+        );
+
+        final p = _productions.firstWhere(
+          (e) => e['name'] == widget.offer.production,
+          orElse: () => {},
+        );
+
+        _contactId = c['id']?.toString();
+        _productionId = p['id']?.toString();
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _companyCtrl.dispose();
+    super.dispose();
+  }
+
+  // --------------------------------------------------
+  // SEARCH
+  // --------------------------------------------------
+  Future<void> _search(String q) async {
+    if (q.length < 2) {
+      setState(() => _companySuggestions = []);
+      return;
+    }
+
+    setState(() => _loading = true);
+
+    try {
+      final res = await _client
+          .from('companies')
+          .select()
+          .ilike('name', '%$q%')
+          .order('name')
+          .limit(10);
+
+      if (!mounted) return;
+
+      setState(() {
+        _companySuggestions = List<Map<String, dynamic>>.from(res);
+      });
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  // --------------------------------------------------
+  // SELECT COMPANY
+  // --------------------------------------------------
+  Future<void> _select(Map<String, dynamic> row) async {
+    final name = row['name'] ?? '';
+    final id = row['id']?.toString();
+
+    if (id == null) return;
+
+    setState(() {
+      _companyCtrl.text = name;
+
+      widget.offer.company = name;
+      widget.offer.contact = '';
+      widget.offer.production = '';
+
+      _contacts.clear();
+      _productions.clear();
+
+      _contactId = null;
+      _productionId = null;
+
+      _companySuggestions.clear();
+    });
+
+    await _loadDetails(id);
+  }
+
+  // --------------------------------------------------
+  // LOAD CONTACTS / PRODUCTIONS
+  // --------------------------------------------------
+  Future<void> _loadDetails(String id) async {
+    final c = await _client
+        .from('contacts')
+        .select()
+        .eq('company_id', id)
+        .order('name');
+
+    final p = await _client
+        .from('productions')
+        .select()
+        .eq('company_id', id)
+        .order('name');
+
+    if (!mounted) return;
+
+    setState(() {
+      _contacts = List<Map<String, dynamic>>.from(c);
+      _productions = List<Map<String, dynamic>>.from(p);
+    });
+  }
+
+  // --------------------------------------------------
+  // UI
+  // --------------------------------------------------
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
@@ -1209,140 +1375,179 @@ class _LeftOfferCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(18),
         border: Border.all(color: cs.outlineVariant),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            draftId == null ? "New Offer" : "Edit Offer",
-            style: Theme.of(context)
-                .textTheme
-                .titleLarge
-                ?.copyWith(fontWeight: FontWeight.w900),
-          ),
-          const SizedBox(height: 6),
-          Text(
-            draftId == null ? "Not saved yet" : "ID: $draftId",
-            style: TextStyle(
-                color: cs.onSurfaceVariant,
-                fontWeight: FontWeight.w700,
-                fontSize: 12),
-          ),
-          const SizedBox(height: 14),
-
-          Text("Customer",
+      child: SingleChildScrollView(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              widget.draftId == null ? "New Offer" : "Edit Offer",
               style: Theme.of(context)
                   .textTheme
-                  .titleSmall
-                  ?.copyWith(fontWeight: FontWeight.w900)),
-          const SizedBox(height: 10),
+                  .titleLarge
+                  ?.copyWith(fontWeight: FontWeight.w900),
+            ),
 
-          TextField(
-            controller: companyCtrl,
-            onChanged: (_) => onChanged(),
-            decoration: const InputDecoration(
-                labelText: "Company", prefixIcon: Icon(Icons.apartment_rounded)),
-          ),
+            const SizedBox(height: 16),
 
-          const SizedBox(height: 10),
+            const Text("Company", style: TextStyle(fontWeight: FontWeight.w900)),
+            const SizedBox(height: 6),
 
-          TextField(
-            controller: contactCtrl,
-            onChanged: (_) => onChanged(),
-            decoration: const InputDecoration(
-                labelText: "Contact person", prefixIcon: Icon(Icons.person)),
-          ),
-
-          const SizedBox(height: 14),
-          Divider(color: cs.outlineVariant),
-          const SizedBox(height: 14),
-
-          Text("Production",
-              style: Theme.of(context)
-                  .textTheme
-                  .titleSmall
-                  ?.copyWith(fontWeight: FontWeight.w900)),
-          const SizedBox(height: 10),
-
-          TextField(
-            controller: productionCtrl,
-            onChanged: (_) => onChanged(),
-            decoration: const InputDecoration(
-                labelText: "Production / Band", prefixIcon: Icon(Icons.music_note)),
-          ),
-
-          const SizedBox(height: 14),
-          Divider(color: cs.outlineVariant),
-          const SizedBox(height: 14),
-
-          Text("Vehicle",
-              style: Theme.of(context)
-                  .textTheme
-                  .titleSmall
-                  ?.copyWith(fontWeight: FontWeight.w900)),
-          const SizedBox(height: 10),
-
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              DropdownButtonFormField<int>(
-                value: offer.busCount,
-                isExpanded: true,
-                decoration: const InputDecoration(
-                  labelText: "Buses",
-                  prefixIcon: Icon(Icons.directions_bus),
-                ),
-                items: List.generate(8, (i) => i + 1)
-                    .map((n) =>
-                        DropdownMenuItem(value: n, child: Text("$n")))
-                    .toList(),
-                onChanged: (v) {
-                  if (v == null) return;
-                  offer.busCount = v;
-                  onChanged();
-                },
+            TextField(
+              controller: _companyCtrl,
+              onChanged: _search,
+              decoration: InputDecoration(
+                labelText: "Search company",
+                prefixIcon: const Icon(Icons.apartment),
+                suffixIcon: _loading
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : null,
               ),
-              const SizedBox(height: 10),
-              DropdownButtonFormField<BusType>(
-                value: offer.busType,
-                isExpanded: true,
-                decoration: const InputDecoration(
-                  labelText: "Bus type",
-                  prefixIcon: Icon(Icons.airline_seat_recline_normal),
+            ),
+
+            if (_companySuggestions.isNotEmpty)
+              Container(
+                margin: const EdgeInsets.only(top: 4),
+                constraints: const BoxConstraints(maxHeight: 220),
+                decoration: BoxDecoration(
+                  color: cs.surface,
+                  border: Border.all(color: cs.outlineVariant),
+                  borderRadius: BorderRadius.circular(12),
                 ),
-                items: BusType.values
-                    .map((t) => DropdownMenuItem(value: t, child: Text(t.label)))
-                    .toList(),
-                onChanged: (v) {
-                  if (v == null) return;
-                  offer.busType = v;
-                  onChanged();
-                },
-              ),
-            ],
-          ),
-
-          const Spacer(),
-
-          Row(
-            children: [
-              Expanded(
-                child: OutlinedButton.icon(
-                  onPressed: onSave,
-                  icon: const Icon(Icons.save),
-                  label: const Text("Save draft"),
+                child: ListView.builder(
+                  itemCount: _companySuggestions.length,
+                  itemBuilder: (_, i) {
+                    final c = _companySuggestions[i];
+                    return ListTile(
+                      dense: true,
+                      title: Text(c['name'] ?? ''),
+                      onTap: () => _select(c),
+                    );
+                  },
                 ),
               ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: FilledButton.icon(
-                  onPressed: onExport,
-                  icon: const Icon(Icons.picture_as_pdf),
-                  label: const Text("Export PDF"),
-                ),
+
+            const SizedBox(height: 16),
+
+            // ---------------- CONTACT ----------------
+            const Text("Contact", style: TextStyle(fontWeight: FontWeight.w900)),
+
+            DropdownButtonFormField<String>(
+              value: _contactId,
+
+              style: TextStyle(
+                fontWeight: FontWeight.normal,
+                color: cs.onSurface,
               ),
-            ],
-          ),
-        ],
+
+              items: _contacts
+                  .map(
+                    (c) => DropdownMenuItem(
+                      value: c['id'].toString(),
+                      child: Text(
+                        c['name'] ?? '',
+                        style: TextStyle(
+                          fontWeight: FontWeight.normal,
+                          color: cs.onSurface,
+                        ),
+                      ),
+                    ),
+                  )
+                  .toList(),
+
+              onChanged: (v) {
+                if (v == null) return;
+
+                final ct =
+                    _contacts.firstWhere((e) => e['id'].toString() == v);
+
+                setState(() {
+                  _contactId = v;
+                  widget.offer.contact = ct['name'] ?? '';
+                });
+              },
+            ),
+
+            const SizedBox(height: 16),
+
+            // ---------------- PRODUCTION ----------------
+            const Text("Production",
+                style: TextStyle(fontWeight: FontWeight.w900)),
+
+            DropdownButtonFormField<String>(
+              value: _productionId,
+
+              style: TextStyle(
+                fontWeight: FontWeight.normal,
+                color: cs.onSurface,
+              ),
+
+              items: _productions
+                  .map(
+                    (p) => DropdownMenuItem(
+                      value: p['id'].toString(),
+                      child: Text(
+                        p['name'] ?? '',
+                        style: TextStyle(
+                          fontWeight: FontWeight.normal,
+                          color: cs.onSurface,
+                        ),
+                      ),
+                    ),
+                  )
+                  .toList(),
+
+              onChanged: (v) {
+                if (v == null) return;
+
+                final pr =
+                    _productions.firstWhere((e) => e['id'].toString() == v);
+
+                setState(() {
+                  _productionId = v;
+                  widget.offer.production = pr['name'] ?? '';
+                });
+              },
+            ),
+
+            const SizedBox(height: 18),
+
+            // ---------------- BUS SETTINGS ----------------
+            _BusSettingsCard(
+              offer: widget.offer,
+              onChanged: () => setState(() {}),
+            ),
+
+            const SizedBox(height: 18),
+
+            Divider(color: cs.outlineVariant),
+
+            const SizedBox(height: 16),
+
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: widget.onSave,
+                    icon: const Icon(Icons.save),
+                    label: const Text("Save draft"),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: FilledButton.icon(
+                    onPressed: widget.onExport,
+                    icon: const Icon(Icons.picture_as_pdf),
+                    label: const Text("Export PDF"),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -1515,6 +1720,113 @@ class _LocationAutoComplete extends StatelessWidget {
             ),
           ),
       ],
+    );
+  }
+}
+// ------------------------------------------------------------
+// BUS SETTINGS WIDGET
+// ------------------------------------------------------------
+class _BusSettingsCard extends StatelessWidget {
+  final OfferDraft offer;
+  final VoidCallback onChanged;
+
+  const _BusSettingsCard({
+    required this.offer,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: cs.surface,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: cs.outlineVariant),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            "Bus settings",
+            style: TextStyle(
+              fontWeight: FontWeight.w900,
+              fontSize: 13,
+            ),
+          ),
+
+          const SizedBox(height: 10),
+
+          // ---------------- BUS COUNT ----------------
+          DropdownButtonFormField<int>(
+            value: offer.busCount,
+            style: TextStyle(
+              fontWeight: FontWeight.normal,
+              color: cs.onSurface,
+            ),
+            decoration: const InputDecoration(
+              labelText: "Buses",
+              prefixIcon: Icon(Icons.directions_bus),
+            ),
+            items: [1, 2, 3, 4]
+                .map(
+                  (n) => DropdownMenuItem(
+                    value: n,
+                    child: Text(
+                      "$n bus${n > 1 ? "es" : ""}",
+                      style: TextStyle(
+                        fontWeight: FontWeight.normal,
+                        color: cs.onSurface,
+                      ),
+                    ),
+                  ),
+                )
+                .toList(),
+            onChanged: (v) {
+              if (v == null) return;
+              offer.busCount = v;
+              onChanged();
+            },
+          ),
+
+          const SizedBox(height: 12),
+
+          // ---------------- BUS TYPE ----------------
+          DropdownButtonFormField<BusType>(
+            value: offer.busType,
+            style: TextStyle(
+              fontWeight: FontWeight.normal,
+              color: cs.onSurface,
+            ),
+            decoration: const InputDecoration(
+              labelText: "Bus type",
+              prefixIcon: Icon(Icons.airline_seat_recline_extra),
+            ),
+            items: BusType.values
+                .map(
+                  (b) => DropdownMenuItem(
+                    value: b,
+                    child: Text(
+                      b.label,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontWeight: FontWeight.normal,
+                        color: cs.onSurface,
+                      ),
+                    ),
+                  ),
+                )
+                .toList(),
+            onChanged: (v) {
+              if (v == null) return;
+              offer.busType = v;
+              onChanged();
+            },
+          ),
+        ],
+      ),
     );
   }
 }

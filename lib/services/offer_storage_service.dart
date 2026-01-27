@@ -20,83 +20,135 @@ class OfferStorageService {
   }) async {
     final payload = _offerToDbPayload(offer);
 
+    // ✅ Hent innlogget bruker
+    final user = sb.auth.currentUser;
+
+    if (user == null) {
+      throw Exception("User not logged in");
+    }
+
+    final userId = user.id;
+
     // -----------------------------
-    // UPDATE eksisterende draft
+    // UPDATE
     // -----------------------------
     if (id != null && id.isNotEmpty) {
-      await sb
-          .from('offers')
-          .update({
-            ...payload,
-            'updated_at': DateTime.now().toIso8601String(),
-          })
-          .eq('id', id);
+      await sb.from('offers').update({
+        ...payload,
+        'updated_at': DateTime.now().toIso8601String(),
+        'updated_by': userId,
+      }).eq('id', id);
 
       recentOffersRefresh.value++;
       return id;
     }
 
     // -----------------------------
-    // INSERT ny draft
+    // INSERT
     // -----------------------------
-    final res = await sb
-        .from('offers')
-        .insert({
-          ...payload,
-          'created_at': DateTime.now().toIso8601String(),
-          'updated_at': DateTime.now().toIso8601String(),
-        })
-        .select('id')
-        .single();
+    final res = await sb.from('offers').insert({
+      ...payload,
+
+      // Audit
+      'created_by': userId,
+      'updated_by': userId,
+
+      'created_at': DateTime.now().toIso8601String(),
+      'updated_at': DateTime.now().toIso8601String(),
+    }).select('id').single();
 
     recentOffersRefresh.value++;
+
     return res['id'] as String;
   }
 
   // ============================================================
-  // DELETE draft
+  // DELETE
   // ============================================================
   static Future<void> deleteDraft(String id) async {
     await sb.from('offers').delete().eq('id', id);
+
     recentOffersRefresh.value++;
   }
 
   // ============================================================
-  // LOAD single draft
+  // LOAD SINGLE
   // ============================================================
   static Future<OfferDraft> loadDraft(String id) async {
     final res = await sb
         .from('offers')
         .select()
         .eq('id', id)
-        .limit(1)
         .single();
 
     return _offerFromDb(res);
   }
 
   // ============================================================
-  // LIST recent offers (Dashboard / Edit page)
+  // LOAD RECENT (WITH PROFILES)
   // ============================================================
   static Future<List<Map<String, dynamic>>> loadRecentOffers({
-    int limit = 20,
-  }) async {
-    final res = await sb
-        .from('offers')
-        .select(
-            'id, title, production, status, company, contact, created_at, updated_at')
-        .order('updated_at', ascending: false)
-        .limit(limit);
+  int limit = 20,
+}) async {
+  final user = sb.auth.currentUser;
+  if (user == null) return [];
 
-    return (res as List).cast<Map<String, dynamic>>();
+  // 1. Hent offers
+  final offersRes = await sb
+      .from('offers')
+      .select(
+        'id, production, company, created_at, updated_at, created_by, updated_by',
+      )
+      .order('updated_at', ascending: false)
+      .limit(limit);
+
+  final offers = (offersRes as List).cast<Map<String, dynamic>>();
+
+  if (offers.isEmpty) return [];
+
+  // 2. Samle alle userIds
+  final Set<String> userIds = {};
+
+  for (final o in offers) {
+    if (o['created_by'] != null) {
+      userIds.add(o['created_by']);
+    }
+    if (o['updated_by'] != null) {
+      userIds.add(o['updated_by']);
+    }
   }
 
+  if (userIds.isEmpty) return offers;
+
+  // 3. Hent profiles
+  final profilesRes = await sb
+      .from('profiles')
+      .select('id, name')
+      .filter('id', 'in', '(${userIds.join(',')})');
+
+  final profiles = (profilesRes as List).cast<Map<String, dynamic>>();
+
+  // 4. Lag lookup-map
+  final Map<String, String> profileMap = {};
+
+  for (final p in profiles) {
+    profileMap[p['id']] = p['name'] ?? 'Unknown';
+  }
+
+  // 5. Koble navn på offers
+  for (final o in offers) {
+    o['created_name'] =
+        profileMap[o['created_by']] ?? 'Unknown';
+
+    o['updated_name'] =
+        profileMap[o['updated_by']] ?? 'Unknown';
+  }
+
+  return offers;
+}
+
   // ============================================================
-  // DB PAYLOAD BUILDER
-  //
-  // ⚠️ Supabase-krav:
-  // - title NOT NULL
-  // - payload NOT NULL
+  // PAYLOAD
   // ============================================================
   static Map<String, dynamic> _offerToDbPayload(OfferDraft offer) {
     final jsonMap = _offerToJson(offer);
@@ -112,22 +164,20 @@ class OfferStorageService {
       'bus_count': offer.busCount,
       'bus_type': offer.busType.name,
 
-      // ✅ primær JSONB-kolonne
       'payload': jsonMap,
-
-      // 🔁 legacy (kan fjernes senere)
       'offer_json': jsonString,
     };
   }
 
   // ============================================================
-  // TITLE GENERATOR
+  // TITLE
   // ============================================================
   static String _buildTitle(OfferDraft offer) {
     final prod =
         offer.production.trim().isEmpty ? "Offer" : offer.production.trim();
 
     DateTime? earliest;
+
     for (final r in offer.rounds) {
       for (final e in r.entries) {
         if (earliest == null || e.date.isBefore(earliest)) {
@@ -149,7 +199,7 @@ class OfferStorageService {
   }
 
   // ============================================================
-  // OfferDraft → JSON
+  // TO JSON
   // ============================================================
   static Map<String, dynamic> _offerToJson(OfferDraft offer) {
     return {
@@ -176,7 +226,7 @@ class OfferStorageService {
   }
 
   // ============================================================
-  // DB → OfferDraft
+  // FROM DB
   // ============================================================
   static OfferDraft _offerFromDb(Map<String, dynamic> row) {
     dynamic raw = row['payload'];
@@ -201,18 +251,23 @@ class OfferStorageService {
       if (i >= rounds.length) break;
 
       final r = rounds[i] as Map<String, dynamic>;
+
       draft.rounds[i].startLocation =
           (r['startLocation'] ?? '') as String;
+
       draft.rounds[i].trailer =
           (r['trailer'] ?? false) as bool;
+
       draft.rounds[i].pickupEveningFirstDay =
           (r['pickupEveningFirstDay'] ?? false) as bool;
 
       draft.rounds[i].entries.clear();
 
       final entries = (r['entries'] as List?) ?? [];
+
       for (final e in entries) {
         final em = e as Map<String, dynamic>;
+
         draft.rounds[i].entries.add(
           RoundEntry(
             date: DateTime.parse(em['date'] as String),

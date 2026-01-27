@@ -5,7 +5,11 @@ import '../ui/css_theme.dart';
 
 class AppShell extends StatelessWidget {
   final Widget child;
-  const AppShell({super.key, required this.child});
+
+  const AppShell({
+    super.key,
+    required this.child,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -14,6 +18,7 @@ class AppShell extends StatelessWidget {
       body: Row(
         children: [
           const _SideNav(),
+
           Expanded(
             child: Column(
               children: [
@@ -54,6 +59,7 @@ class _TopBar extends StatelessWidget {
                   color: Colors.white,
                 ),
           ),
+
           const SizedBox(width: 12),
 
           Container(
@@ -65,7 +71,10 @@ class _TopBar extends StatelessWidget {
             ),
             child: const Text(
               "Desktop",
-              style: TextStyle(fontWeight: FontWeight.w900, color: Colors.white),
+              style: TextStyle(
+                fontWeight: FontWeight.w900,
+                color: Colors.white,
+              ),
             ),
           ),
 
@@ -106,42 +115,81 @@ class _SideNav extends StatelessWidget {
       width: 260,
       decoration: const BoxDecoration(
         color: CssTheme.surface,
-        border: Border(right: BorderSide(color: CssTheme.outline)),
+        border: Border(
+          right: BorderSide(color: CssTheme.outline),
+        ),
       ),
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
           children: [
-            // LOGO BOX
+            // --------------------------------------------------
+            // LOGO
+            // --------------------------------------------------
             Container(
-              height: 70,
+              height: 90,
               width: double.infinity,
+              padding: const EdgeInsets.all(10),
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(16),
-                color: Colors.black,
-                border: Border.all(color: Colors.black),
+                color: Colors.white,
+                border: Border.all(color: CssTheme.outline),
               ),
-              alignment: Alignment.center,
-              child: const Text(
-                "YOUR LOGO",
-                style: TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.w900,
-                  letterSpacing: 1.2,
-                ),
+              child: Image.asset(
+                "assets/pdf/logos/TourFlowLogo.png",
+                fit: BoxFit.contain,
+
+                // Fallback hvis fil mangler
+                errorBuilder: (context, error, stack) {
+                  return const Center(
+                    child: Text(
+                      "LOGO",
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        color: Colors.black54,
+                      ),
+                    ),
+                  );
+                },
               ),
             ),
 
             const SizedBox(height: 14),
 
-            _NavItem(icon: Icons.dashboard_rounded, label: "Dashboard", route: "/"),
-            _NavItem(icon: Icons.add_circle_outline, label: "New offer", route: "/new"),
-            _NavItem(icon: Icons.edit_note, label: "Edit offers", route: "/edit"),
-            _NavItem(icon: Icons.apartment_rounded, label: "Customers", route: "/customers"),
+            // --------------------------------------------------
+            // NAV ITEMS
+            // --------------------------------------------------
+            const _NavItem(
+              icon: Icons.dashboard_rounded,
+              label: "Dashboard",
+              route: "/",
+            ),
+
+            const _NavItem(
+              icon: Icons.add_circle_outline,
+              label: "New offer",
+              route: "/new",
+            ),
+
+            const _NavItem(
+              icon: Icons.edit_note,
+              label: "Edit offers",
+              route: "/edit",
+            ),
+
+            const _NavItem(
+              icon: Icons.apartment_rounded,
+              label: "Customers",
+              route: "/customers",
+            ),
 
             const Spacer(),
 
-            _NavItem(icon: Icons.settings, label: "Settings", route: "/settings"),
+            const _NavItem(
+              icon: Icons.settings,
+              label: "Settings",
+              route: "/settings",
+            ),
           ],
         ),
       ),
@@ -165,28 +213,42 @@ class _NavItem extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // ✅ Bruk path så querystring ikke ødelegger
+    // Nåværende path
     final currentPath = GoRouterState.of(context).uri.path;
 
-    // ✅ Dette gjør at /new, /new/:id, /new/anything blir selected
-    final selected = currentPath == route || currentPath.startsWith("$route/");
+    // Matcher både /new og /new/123 osv
+    final selected =
+        currentPath == route || currentPath.startsWith("$route/");
 
     return InkWell(
       borderRadius: BorderRadius.circular(14),
       onTap: () => context.go(route),
+
       child: Container(
         width: double.infinity,
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+        padding: const EdgeInsets.symmetric(
+          horizontal: 12,
+          vertical: 12,
+        ),
         margin: const EdgeInsets.symmetric(vertical: 4),
+
         decoration: BoxDecoration(
           color: selected ? Colors.black : Colors.transparent,
           borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: selected ? Colors.black : CssTheme.outline),
+          border: Border.all(
+            color: selected ? Colors.black : CssTheme.outline,
+          ),
         ),
+
         child: Row(
           children: [
-            Icon(icon, color: selected ? Colors.white : Colors.black87),
+            Icon(
+              icon,
+              color: selected ? Colors.white : Colors.black87,
+            ),
+
             const SizedBox(width: 10),
+
             Text(
               label,
               style: TextStyle(

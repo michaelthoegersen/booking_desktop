@@ -24,10 +24,11 @@ class _DashboardPageState extends State<DashboardPage> {
   @override
   void initState() {
     super.initState();
+
     _loadRoutesCount();
     _loadRecentOffers();
 
-    // ✅ Auto-refresh recent offers når draft lagres / slettes
+    // Auto refresh når draft lagres / slettes
     OfferStorageService.recentOffersRefresh.addListener(_onRecentRefresh);
   }
 
@@ -79,7 +80,9 @@ class _DashboardPageState extends State<DashboardPage> {
     });
 
     try {
-      final items = await OfferStorageService.loadRecentOffers(limit: 30);
+      final items =
+          await OfferStorageService.loadRecentOffers(limit: 30);
+
       if (!mounted) return;
 
       setState(() {
@@ -87,18 +90,20 @@ class _DashboardPageState extends State<DashboardPage> {
       });
     } catch (e) {
       if (!mounted) return;
+
       setState(() {
         recentError = e.toString();
         recentOffers = [];
       });
     } finally {
       if (!mounted) return;
+
       setState(() => loadingRecent = false);
     }
   }
 
   // ------------------------------------------------------------
-  // DELETE DRAFT (CONFIRM)
+  // DELETE DRAFT
   // ------------------------------------------------------------
   Future<void> _confirmDeleteDraft(String id, String title) async {
     final ok = await showDialog<bool>(
@@ -144,11 +149,16 @@ class _DashboardPageState extends State<DashboardPage> {
   String _fmtDateTime(dynamic value) {
     try {
       if (value == null) return "";
-      if (value is DateTime) {
-        return "${value.day.toString().padLeft(2, '0')}.${value.month.toString().padLeft(2, '0')}.${value.year}";
-      }
-      final d = DateTime.parse(value.toString());
-      return "${d.day.toString().padLeft(2, '0')}.${d.month.toString().padLeft(2, '0')}.${d.year}";
+
+      final d = value is DateTime
+          ? value
+          : DateTime.parse(value.toString());
+
+      return "${d.day.toString().padLeft(2, '0')}"
+          ".${d.month.toString().padLeft(2, '0')}"
+          ".${d.year} "
+          "${d.hour.toString().padLeft(2, '0')}"
+          ":${d.minute.toString().padLeft(2, '0')}";
     } catch (_) {
       return "";
     }
@@ -166,6 +176,9 @@ class _DashboardPageState extends State<DashboardPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          // --------------------------------------------------
+          // HEADER
+          // --------------------------------------------------
           Text(
             "Welcome",
             style: Theme.of(context)
@@ -173,16 +186,19 @@ class _DashboardPageState extends State<DashboardPage> {
                 .headlineMedium
                 ?.copyWith(fontWeight: FontWeight.w900),
           ),
+
           const SizedBox(height: 6),
+
           Text(
             "Choose what you want to do.",
             style: TextStyle(color: cs.onSurfaceVariant),
           ),
+
           const SizedBox(height: 16),
 
-          // ------------------------------------------------------------
+          // --------------------------------------------------
           // ACTION TILES
-          // ------------------------------------------------------------
+          // --------------------------------------------------
           Wrap(
             spacing: 14,
             runSpacing: 14,
@@ -217,9 +233,9 @@ class _DashboardPageState extends State<DashboardPage> {
 
           const SizedBox(height: 18),
 
-          // ------------------------------------------------------------
+          // --------------------------------------------------
           // RECENT OFFERS
-          // ------------------------------------------------------------
+          // --------------------------------------------------
           Expanded(
             child: Container(
               width: double.infinity,
@@ -232,6 +248,7 @@ class _DashboardPageState extends State<DashboardPage> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  // Header
                   Row(
                     children: [
                       Text(
@@ -250,16 +267,26 @@ class _DashboardPageState extends State<DashboardPage> {
                       ),
                     ],
                   ),
+
                   const SizedBox(height: 12),
 
+                  // ---------------- LOADING
                   if (loadingRecent)
                     const Expanded(
-                      child: Center(child: CircularProgressIndicator()),
+                      child: Center(
+                        child: CircularProgressIndicator(),
+                      ),
                     )
+
+                  // ---------------- EMPTY
                   else if (recentOffers.isEmpty)
                     const Expanded(
-                      child: Center(child: Text("No offers yet.")),
+                      child: Center(
+                        child: Text("No offers yet."),
+                      ),
                     )
+
+                  // ---------------- LIST
                   else
                     Expanded(
                       child: ListView.separated(
@@ -269,23 +296,43 @@ class _DashboardPageState extends State<DashboardPage> {
                         itemBuilder: (_, i) {
                           final row = recentOffers[i];
 
-                          final id = row['id']?.toString() ?? '';
+                          final id =
+                              row['id']?.toString() ?? '';
+
                           final production =
                               (row['production'] ?? '—').toString();
+
                           final company =
                               (row['company'] ?? '—').toString();
-                          final updated = _fmtDateTime(
-                            row['updated_at'] ?? row['created_at'],
+
+                          final createdBy =
+                              row['created_name']?.toString() ??
+                                  'Unknown';
+
+                          final updatedBy =
+                              row['updated_name']?.toString() ??
+                                  'Unknown';
+
+                          final updatedDate = _fmtDateTime(
+                            row['updated_at'] ??
+                                row['created_at'],
                           );
 
                           return ListTile(
                             contentPadding: EdgeInsets.zero,
+
                             title: Text(
                               production,
                               style: const TextStyle(
-                                  fontWeight: FontWeight.w900),
+                                fontWeight: FontWeight.w900,
+                              ),
                             ),
-                            subtitle: Text("$company • $updated"),
+
+                            subtitle: Text(
+                              "$company • $updatedDate\n"
+                              "Created: $createdBy • Updated: $updatedBy",
+                            ),
+
                             trailing: IconButton(
                               icon: Icon(
                                 Icons.delete_outline,
@@ -293,9 +340,12 @@ class _DashboardPageState extends State<DashboardPage> {
                               ),
                               onPressed: id.isEmpty
                                   ? null
-                                  : () =>
-                                      _confirmDeleteDraft(id, production),
+                                  : () => _confirmDeleteDraft(
+                                        id,
+                                        production,
+                                      ),
                             ),
+
                             onTap: id.isEmpty
                                 ? null
                                 : () => context.go("/new/$id"),

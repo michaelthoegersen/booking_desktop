@@ -1,102 +1,159 @@
-// lib/services/offer_pdf_service.dart
 import 'dart:typed_data';
-import 'package:flutter/services.dart' show rootBundle;
+
+import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
-
 import '../models/offer_draft.dart';
 import '../models/app_settings.dart';
-import '../services/trip_calculator.dart';
+import 'package:booking_desktop/services/trip_calculator.dart';
 
 class OfferPdfService {
+  // ============================================================
+  // TERMS
+  // ============================================================
+
+  static const String _termsText = """
+Terms and Conditions:
+
+1. General Pricing and Additional Costs
+Any extra days beyond the agreed travel plan will be invoiced at 13,500 SEK per day, plus 22 SEK per km beyond the offered distance.
+In addition to the agreed price, any costs for parking, per diem/diet, and hotel for the driver will be invoiced if overnight stays in the bus are not possible.
+The price includes: driver, double drivers (if applicable), travel expenses, fuel, road taxes, tolls, and ferries.
+Pricing is based on a diesel price of 18 SEK excl. VAT / 22 SEK incl. VAT per liter. If costs for fuel, tolls, ferries, or other transport-related fees increase significantly, the difference will be invoiced after the tour.
+A VAT rate of 6% will be added to transport services, and 25% to other costs.
+
+2. Electricity Requirements
+The bus requires 1 x 400V 32A three-phase power connection upon arrival.
+
+3. Responsibility and Liability
+The customer is responsible for ensuring that all equipment is properly packaged and fully insured throughout the assignment.
+Coach Service Scandinavia is not financially responsible for delays or cancellations caused by unforeseen events, except for costs related to alternative bus transport if the fault can be attributed to us.
+All drivers comply with applicable international driving and rest-time regulations.
+The customer is responsible for ensuring that the schedule complies with working time regulations.
+The customer must ensure that power supply is available to the bus while it is stationary at concerts, shows, festivals, and similar events.
+
+4. Booking, Availability, and Replacement of Vehicles or Personnel
+This offer does not constitute a reservation of vehicles or personnel. Resources are reserved only once we receive an official order.
+We reserve the right to decline the assignment if it cannot be coordinated with our other commitments.
+We reserve the right, in consultation with the client’s representative, to replace vehicles and/or personnel, even during an ongoing assignment, if necessary. Any replacement will be of equal or superior quality to the originally specified resources.
+
+5. Safety, Behavior, and Onboard Facilities
+Smoking is strictly prohibited on board our buses. Any cleaning required due to smoking will be invoiced to the customer.
+One initial bed-making is included at the start of the journey. If additional bed-making is required during the tour, a fee of 250 SEK per bed will be charged.
+According to maritime law, passengers are not permitted to stay inside vehicles during ferry crossings within the European Union. It is the customer's responsibility to inform all passengers accordingly.
+
+6. Payment Terms
+An advance payment of 30% of the total net amount will be invoiced upon ordering and must be paid for the booking to be confirmed.
+The remaining balance will be invoiced 14 days before the tour starts and must be fully paid before the tour begins.
+
+7. Cancellation Policy
+If the customer cancels the assignment:
+- Less than 60 days before the first day of the event: 50% of the agreed total amount will be invoiced.
+- Less than 30 days before the first day of the event: 100% of the agreed total amount will be invoiced.
+
+8. Validity of the Offer
+This offer is valid for 7 days from today’s date and assumes that a vehicle is still available at the time of ordering.
+
+9. Acceptance
+""";
+
+  // ============================================================
+  // BUS TYPE IMAGE
+  // ============================================================
+
+  static String _busImageForType(BusType type) {
+    switch (type) {
+      case BusType.sleeper12:
+        return 'assets/pdf/buses/12_sleeper.png';
+      case BusType.sleeper14:
+        return 'assets/pdf/buses/14_sleeper.png';
+      case BusType.sleeper16:
+        return 'assets/pdf/buses/16_sleeper.png';
+      case BusType.sleeper18:
+        return 'assets/pdf/buses/18_sleeper.png';
+      case BusType.sleeper12StarRoom:
+        return 'assets/pdf/buses/12_sleeper.png';
+    }
+  }
+
+  // ============================================================
+  // MAIN
+  // ============================================================
+
   static Future<Uint8List> buildPdf({
     required OfferDraft offer,
     required AppSettings settings,
     required Map<int, RoundCalcResult> roundCalcByIndex,
   }) async {
-    // ✅ Background template ONLY
-    final template = pw.MemoryImage(
-      (await rootBundle.load('assets/pdf/template_page0.png')).buffer.asUint8List(),
-    );
-
     final doc = pw.Document();
 
-    // Used rounds (only those that contain entries or start location)
-    final usedRounds = <int>[];
-    for (int i = 0; i < offer.rounds.length; i++) {
-      final r = offer.rounds[i];
-      if (r.entries.isNotEmpty || r.startLocation.trim().isNotEmpty) {
-        usedRounds.add(i);
-      }
-    }
+    final regular = pw.Font.ttf(
+      await rootBundle.load('assets/fonts/calibri.ttf'),
+    );
+
+    final bold = pw.Font.ttf(
+      await rootBundle.load('assets/fonts/calibrib.ttf'),
+    );
+
+    final appLogo = pw.MemoryImage(
+      (await rootBundle.load('assets/pdf/logos/LOGOapp.png'))
+          .buffer
+          .asUint8List(),
+    );
+
+    final busLayout = pw.MemoryImage(
+      (await rootBundle.load('assets/pdf/buses/DDBus.png'))
+          .buffer
+          .asUint8List(),
+    );
+
+    final busTypeImage = pw.MemoryImage(
+      (await rootBundle.load(
+        _busImageForType(offer.busType),
+      ))
+          .buffer
+          .asUint8List(),
+    );
 
     doc.addPage(
-      pw.Page(
+      pw.MultiPage(
         pageFormat: PdfPageFormat.a4,
-        margin: pw.EdgeInsets.zero,
-        build: (ctx) {
-          return pw.Stack(
-            children: [
-              // ✅ template full page
-              pw.Positioned.fill(
-                child: pw.Image(template, fit: pw.BoxFit.cover),
-              ),
+        margin: const pw.EdgeInsets.fromLTRB(0, 0, 0, 40),
+        build: (context) => [
+          _buildTopBar(appLogo, regular),
 
-              // ✅ Fill-in LEFT INFO (Company/Contact/Production)
-              _posText(
-                left: 170,
-                top: 186,
-                width: 250,
-                text: offer.company,
-                fontSize: 13,
-                bold: true,
-              ),
-              _posText(
-                left: 170,
-                top: 214,
-                width: 250,
-                text: offer.contact,
-                fontSize: 13,
-                bold: true,
-              ),
-              _posText(
-                left: 170,
-                top: 242,
-                width: 250,
-                text: offer.production,
-                fontSize: 13,
-                bold: true,
-              ),
+          pw.SizedBox(height: 20),
 
-              // ✅ Fill-in RIGHT INFO block (same values, but aligned to that panel)
-              _posText(left: 595, top: 206, width: 180, text: offer.company, fontSize: 9),
-              _posText(left: 595, top: 248, width: 180, text: offer.production, fontSize: 9),
-              _posText(left: 595, top: 270, width: 180, text: "${offer.busCount} x ${offer.busType.label}", fontSize: 9),
-              _posText(
-                left: 595,
-                top: 292,
-                width: 180,
-                text: _offerDateSpan(offer),
-                fontSize: 9,
-              ),
-              _posText(
-                left: 595,
-                top: 314,
-                width: 180,
-                text: _validUntil(),
-                fontSize: 9,
-              ),
+          _buildTopContent(
+            offer,
+            busLayout,
+            busTypeImage,
+            regular,
+          ),
 
-              // ✅ ROUNDS
-              ..._buildRounds(
-                offer: offer,
-                usedRounds: usedRounds,
-                roundCalcByIndex: roundCalcByIndex,
-              ),
-            ],
-          );
-        },
+          pw.SizedBox(height: 30),
+
+          _buildOfferTitle(bold),
+
+          pw.SizedBox(height: 15),
+
+          _buildTable(
+            offer,
+            settings,
+            roundCalcByIndex,
+            regular,
+            bold,
+          ),
+
+          pw.SizedBox(height: 30),
+
+          _buildTerms(regular, bold),
+
+          pw.SizedBox(height: 30),
+
+          _buildSignature(regular),
+        ],
       ),
     );
 
@@ -104,197 +161,249 @@ class OfferPdfService {
   }
 
   // ============================================================
-  // ROUNDS SECTION (Dynamic)
+  // BLACK BAR
   // ============================================================
 
-  static List<pw.Widget> _buildRounds({
-    required OfferDraft offer,
-    required List<int> usedRounds,
-    required Map<int, RoundCalcResult> roundCalcByIndex,
-  }) {
-    if (usedRounds.isEmpty) return [];
-
-    // ----- Coordinates for the “Round 1 block” in your template -----
-    // 👇 these are the ONLY numbers you will tweak later
-    const double blockLeft = 90;
-    const double blockTop = 470; // start of first round
-    const double blockWidth = 710;
-
-    // Each round block height (roughly the same as template)
-    // We do dynamic Y spacing based on actual number of rounds.
-    const double blockHeight = 250;
-
-    final widgets = <pw.Widget>[];
-
-    double y = blockTop;
-
-    for (final ri in usedRounds) {
-      final round = offer.rounds[ri];
-      final calc = roundCalcByIndex[ri];
-
-      // sorted entries
-      final entries = List<RoundEntry>.from(round.entries);
-      entries.sort((a, b) => a.date.compareTo(b.date));
-
-      // block header: "Round X" and "Start: ..."
-      widgets.add(
-        _posText(
-          left: blockLeft,
-          top: y,
-          width: 140,
-          text: "Round ${ri + 1}",
-          fontSize: 14,
-          bold: true,
+  static pw.Widget _buildTopBar(
+    pw.ImageProvider logo,
+    pw.Font font,
+  ) {
+    return pw.Stack(
+      children: [
+        pw.Container(
+          width: double.infinity,
+          height: 95,
+          color: PdfColors.black,
         ),
-      );
 
-      widgets.add(
-        _posText(
-          left: blockLeft + 110,
-          top: y + 1,
-          width: 220,
-          text: "Start: ${round.startLocation}",
-          fontSize: 10,
-          bold: false,
-        ),
-      );
+        pw.Padding(
+          padding: const pw.EdgeInsets.fromLTRB(40, 5, 40, 5),
+          child: pw.Row(
+            children: [
+              pw.Padding(
+                padding: const pw.EdgeInsets.only(left: -55, top: -20),
+                child: pw.Image(logo, width: 220),
+              ),
 
-      // trailer flag
-      if (round.trailer) {
-        widgets.add(
-          _posText(
-            left: blockLeft + blockWidth - 80,
-            top: y,
-            width: 80,
-            text: "Trailer",
-            fontSize: 10,
-            bold: true,
-            alignRight: true,
+              pw.Spacer(),
+
+              pw.Column(
+                crossAxisAlignment: pw.CrossAxisAlignment.end,
+                children: [
+                  _whiteText(
+                    "Coach Service Scandinavia / STARCOACH - Ring Lillgård 1585 62 Linköping, SE",
+                    font,
+                  ),
+                  _whiteText(
+                    "Michael: +47 948 93 820  sales@coachservicescandinavia.com",
+                    font,
+                  ),
+                  _whiteText(
+                    "Benny: +46 73-428 19 48  benny.nyberg@starcoach.nu",
+                    font,
+                  ),
+                ],
+              ),
+            ],
           ),
-        );
-      }
-
-      // Table rows positions
-      final rowStartY = y + 60; // first table row
-      const rowHeight = 22;
-
-      for (int i = 0; i < entries.length; i++) {
-        final e = entries[i];
-
-        final from = (i == 0) ? round.startLocation : entries[i - 1].location;
-        final to = e.location;
-
-        // KM: we do not depend on calc.legKm (because your model doesn't have it)
-        // We can’t compute leg km here unless you pass it in.
-        // So we display "-" if missing.
-        // (You can later pass legKmByRound if needed)
-        final kmText = "-";
-
-        // Time calc based on km if possible
-        final timeText = "--";
-
-        // Extra logic: D.Drive + Ferry/Bridge
-        final extraText = _buildExtraText(
-          hasDDrive: (calc?.dDriveDays ?? 0) > 0,
-          extraField: (e.extra ?? ''),
-        );
-
-        widgets.add(
-          _roundRow(
-            left: blockLeft,
-            top: rowStartY + (i * rowHeight),
-            date: DateFormat("dd.MM.yyyy").format(e.date),
-            route: "$from → $to",
-            km: kmText,
-            time: timeText,
-            extra: extraText,
-          ),
-        );
-
-        // stop if too many rows (avoid going outside the template round box)
-        if (i >= 5) break;
-      }
-
-      // Totals box (bottom of round)
-      final totalsTop = y + blockHeight - 55;
-
-      widgets.add(
-        _roundTotalsLine(
-          left: blockLeft + 20,
-          top: totalsTop,
-          calc: calc,
         ),
-      );
-
-      y += blockHeight;
-    }
-
-    return widgets;
+      ],
+    );
   }
 
-  static pw.Widget _roundRow({
-    required double left,
-    required double top,
-    required String date,
-    required String route,
-    required String km,
-    required String time,
-    required String extra,
-  }) {
-    // Column widths based on template
-    const dateW = 95.0;
-    const routeW = 360.0;
-    const kmW = 60.0;
-    const timeW = 90.0;
-    const extraW = 110.0;
-
-    return pw.Positioned(
-      left: left,
-      top: top,
-      child: pw.Row(
-        children: [
-          _cell(date, dateW, bold: true),
-          _cell(route, routeW, bold: true),
-          _cell(km, kmW, right: true),
-          _cell(time, timeW, right: true),
-          _cell(extra, extraW),
-        ],
+  static pw.Widget _whiteText(String text, pw.Font font) {
+    return pw.Text(
+      text,
+      style: pw.TextStyle(
+        font: font,
+        fontSize: 8,
+        color: PdfColors.white,
       ),
     );
   }
 
-  static pw.Widget _roundTotalsLine({
-    required double left,
-    required double top,
-    required RoundCalcResult? calc,
-  }) {
-    String nok(num v) => "${v.toStringAsFixed(0)},-";
+  // ============================================================
+  // TOP CONTENT
+  // ============================================================
 
-    final day = nok(calc?.dayCost ?? 0);
-    final extraKm = nok(calc?.extraKmCost ?? 0);
-    final trailer = nok((calc?.trailerDayCost ?? 0) + (calc?.trailerKmCost ?? 0));
-    final toll = nok(calc?.tollCost ?? 0);
-    final total = nok(calc?.totalCost ?? 0);
+  static pw.Widget _buildTopContent(
+  OfferDraft offer,
+  pw.ImageProvider busLayout,
+  pw.ImageProvider busTypeImage,
+  pw.Font font,
+) {
+  return pw.Container(
+    height: 260, // Nok plass → ingen clipping
+    padding: const pw.EdgeInsets.only(top: 10),
+    child: pw.Stack(
+      children: [
 
-    final trailerText =
-        ((calc?.trailerDayCost ?? 0) + (calc?.trailerKmCost ?? 0)) > 0 ? "Trailer: $trailer," : "";
+        // Buss
+        pw.Positioned(
+          left: 0,
+          top: 0, // ALDRI negativ
+          child: pw.Image(
+            busLayout,
+            width: 200,
+          ),
+        ),
 
-    return pw.Positioned(
-      left: left,
-      top: top,
-      child: pw.Row(
+        // Høyre info
+        pw.Positioned(
+          right: 0,
+          top: 0, // ALDRI negativ
+          child: pw.Container(
+            width: 160,
+            child: pw.Column(
+              crossAxisAlignment: pw.CrossAxisAlignment.start,
+              children: [
+                _rightInfo("Company", offer.company, font),
+                _rightInfo("Name", offer.contact, font),
+                _rightInfo("Phone", "", font),
+                _rightInfo("Email", "", font),
+                _rightInfo("Production", offer.production, font),
+                _rightInfo(
+                  "Vehicle",
+                  "${offer.busCount} x ${offer.busType.label}",
+                  font,
+                ),
+                _rightInfo("Date", _offerDateSpan(offer), font),
+                _rightInfo("Valid until", _validUntil(), font),
+
+                pw.SizedBox(height: 12),
+
+                pw.Image(
+                  busTypeImage,
+                  width: 140,
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
+  // ============================================================
+  // OFFER TITLE
+  // ============================================================
+
+  static pw.Widget _buildOfferTitle(pw.Font bold) {
+    return pw.Center(
+      child: pw.Text(
+        "Offer",
+        style: pw.TextStyle(font: bold, fontSize: 24),
+      ),
+    );
+  }
+
+  // ============================================================
+  // TABLE
+  // ============================================================
+
+  static pw.Widget _buildTable(
+    OfferDraft offer,
+    AppSettings settings,
+    Map<int, RoundCalcResult> calc,
+    pw.Font regular,
+    pw.Font bold,
+  ) {
+    final headers = [
+      "Round",
+      "Date",
+      "Location",
+      "Km",
+      "Time",
+      "Extra",
+      "Price",
+    ];
+
+    final rows = <List<String>>[];
+
+    int roundNo = 1;
+
+    for (int i = 0; i < offer.rounds.length; i++) {
+      final round = offer.rounds[i];
+      final result = calc[i];
+
+      for (int r = 0; r < round.entries.length; r++) {
+        final e = round.entries[r];
+
+        final double km =
+            (result != null && r < result.legKm.length)
+                ? result.legKm[r].toDouble()
+                : 0.0;
+
+        final hasDDrive = km >= settings.dDriveKmThreshold;
+
+        rows.add([
+          roundNo.toString(),
+          DateFormat("dd.MM.yyyy").format(e.date),
+          e.location,
+          km > 0 ? "${km.round()}" : "",
+          _calcTimeText(km: km, hasDDrive: hasDDrive),
+          _buildExtraText(hasDDrive: hasDDrive, extraField: e.extra),
+          r == 0 ? _formatNok(result?.totalCost) : "",
+        ]);
+      }
+
+      roundNo++;
+    }
+
+    return pw.Padding(
+      padding: const pw.EdgeInsets.symmetric(horizontal: 40),
+      child: pw.Table.fromTextArray(
+        headers: headers,
+        data: rows,
+        headerStyle: pw.TextStyle(font: bold, fontSize: 9),
+        cellStyle: pw.TextStyle(font: regular, fontSize: 8),
+        border: pw.TableBorder.all(color: PdfColors.grey600),
+      ),
+    );
+  }
+
+  // ============================================================
+  // TERMS
+  // ============================================================
+
+  static pw.Widget _buildTerms(pw.Font regular, pw.Font bold) {
+    return pw.Padding(
+      padding: const pw.EdgeInsets.symmetric(horizontal: 40),
+      child: pw.Paragraph(
+        text: _termsText,
+        style: pw.TextStyle(
+          font: regular,
+          fontSize: 9,
+          height: 1.4,
+        ),
+      ),
+    );
+  }
+
+  // ============================================================
+  // SIGNATURE
+  // ============================================================
+
+  static pw.Widget _buildSignature(pw.Font font) {
+    return pw.Padding(
+      padding: const pw.EdgeInsets.symmetric(horizontal: 40),
+      child: pw.Column(
+        crossAxisAlignment: pw.CrossAxisAlignment.start,
         children: [
-          _mini("Days: $day,"),
-          pw.SizedBox(width: 18),
-          _mini("Extra km: $extraKm,"),
-          pw.SizedBox(width: 18),
-          if (trailerText.isNotEmpty) _mini(trailerText),
-          if (trailerText.isNotEmpty) pw.SizedBox(width: 18),
-          _mini("Toll: $toll,"),
-          pw.SizedBox(width: 140),
           pw.Text(
-            "TOTAL: $total",
-            style: pw.TextStyle(fontSize: 14, fontWeight: pw.FontWeight.bold),
+            "Location and date: ____________________________",
+            style: pw.TextStyle(font: font, fontSize: 9),
+          ),
+          pw.SizedBox(height: 8),
+          pw.Text(
+            "Customer name: _______________________________",
+            style: pw.TextStyle(font: font, fontSize: 9),
+          ),
+          pw.SizedBox(height: 8),
+          pw.Text(
+            "Signature: ___________________________________",
+            style: pw.TextStyle(font: font, fontSize: 9),
           ),
         ],
       ),
@@ -305,78 +414,49 @@ class OfferPdfService {
   // HELPERS
   // ============================================================
 
-  static pw.Widget _posText({
-    required double left,
-    required double top,
-    required double width,
-    required String text,
-    required double fontSize,
-    bool bold = false,
-    bool alignRight = false,
+  static String _calcTimeText({
+    required double km,
+    required bool hasDDrive,
   }) {
-    return pw.Positioned(
-      left: left,
-      top: top,
-      child: pw.SizedBox(
-        width: width,
-        child: pw.Text(
-          text,
-          maxLines: 1,
-          overflow: pw.TextOverflow.clip,
-          textAlign: alignRight ? pw.TextAlign.right : pw.TextAlign.left,
-          style: pw.TextStyle(
-            fontSize: fontSize,
-            fontWeight: bold ? pw.FontWeight.bold : pw.FontWeight.normal,
-          ),
-        ),
-      ),
-    );
+    if (km <= 0) return "";
+
+    double hours = km / 60;
+
+    if (!hasDDrive) {
+      if (hours > 9) hours += 1.5;
+      if (hours > 4.5) hours += 0.75;
+    }
+
+    final m = (hours * 60).round();
+
+    return "${m ~/ 60}h ${m % 60}m";
   }
 
-  static pw.Widget _cell(String text, double width, {bool bold = false, bool right = false}) {
-    return pw.SizedBox(
-      width: width,
-      child: pw.Text(
-        text,
-        maxLines: 1,
-        overflow: pw.TextOverflow.clip,
-        textAlign: right ? pw.TextAlign.right : pw.TextAlign.left,
-        style: pw.TextStyle(
-          fontSize: 10,
-          fontWeight: bold ? pw.FontWeight.bold : pw.FontWeight.normal,
-        ),
-      ),
-    );
-  }
-
-  static pw.Widget _mini(String text) {
-    return pw.Text(
-      text,
-      style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold),
-    );
-  }
-
-  static String _validUntil() {
-    // Example: 14 days validity
-    final d = DateTime.now().add(const Duration(days: 14));
-    return DateFormat("dd.MM.yyyy").format(d);
+  static String _formatNok(num? v) {
+    if (v == null || v == 0) return "";
+    return "kr ${NumberFormat('#,###').format(v)}";
   }
 
   static String _offerDateSpan(OfferDraft offer) {
-    DateTime? earliest;
-    DateTime? latest;
+    DateTime? first;
+    DateTime? last;
 
     for (final r in offer.rounds) {
       for (final e in r.entries) {
-        earliest = (earliest == null || e.date.isBefore(earliest)) ? e.date : earliest;
-        latest = (latest == null || e.date.isAfter(latest)) ? e.date : latest;
+        first ??= e.date;
+        last = e.date;
       }
     }
 
-    if (earliest == null) return "-";
-    if (latest == null) return DateFormat("dd.MM.yyyy").format(earliest);
+    if (first == null) return "-";
 
-    return "${DateFormat("dd.MM.yyyy").format(earliest)} - ${DateFormat("dd.MM.yyyy").format(latest)}";
+    return "${DateFormat('dd.MM.yyyy').format(first)} - "
+        "${DateFormat('dd.MM.yyyy').format(last!)}";
+  }
+
+  static String _validUntil() {
+    final d = DateTime.now().add(const Duration(days: 7));
+    return DateFormat("dd.MM.yyyy").format(d);
   }
 
   static String _buildExtraText({
@@ -387,25 +467,49 @@ class OfferPdfService {
 
     if (hasDDrive) extras.add("D.Drive");
 
-    final e = extraField.trim();
-    if (e.isNotEmpty) {
-      final parts = e
-          .split(RegExp(r'[/,]'))
-          .map((s) => s.trim())
-          .where((s) => s.isNotEmpty)
-          .toList();
+    final parts = extraField
+        .split(RegExp(r'[,/]'))
+        .map((e) => e.trim())
+        .where((e) => e.isNotEmpty);
 
-      for (final p in parts) {
-        final low = p.toLowerCase();
-        if (low.contains("ferry")) {
-          if (!extras.contains("Ferry")) extras.add("Ferry");
-        } else if (low.contains("bridge")) {
-          if (!extras.contains("Bridge")) extras.add("Bridge");
-        }
-      }
+    for (final p in parts) {
+      if (p.toLowerCase().contains("ferry")) extras.add("Ferry");
+      if (p.toLowerCase().contains("bridge")) extras.add("Bridge");
     }
 
-    if (extras.isEmpty) return "-";
     return extras.join("/");
+  }
+    static pw.Widget _rightInfo(
+    String label,
+    String value,
+    pw.Font font,
+  ) {
+    return pw.Padding(
+      padding: const pw.EdgeInsets.only(bottom: 4),
+      child: pw.Row(
+        crossAxisAlignment: pw.CrossAxisAlignment.start,
+        children: [
+          pw.SizedBox(
+            width: 60,
+            child: pw.Text(
+              "$label:",
+              style: pw.TextStyle(
+                font: font,
+                fontSize: 8,
+              ),
+            ),
+          ),
+          pw.Expanded(
+            child: pw.Text(
+              value,
+              style: pw.TextStyle(
+                font: font,
+                fontSize: 8,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }

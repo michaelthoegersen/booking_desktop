@@ -24,17 +24,19 @@ extension BusTypeLabel on BusType {
 }
 
 class OfferDraft {
+  String? userId;
+
   String company;
   String contact;
   String production;
 
-  // ✅ NEW (for PDF etc.)
   int busCount;
   BusType busType;
 
   final List<OfferRound> rounds;
 
   OfferDraft({
+    this.userId,
     this.company = '',
     this.contact = '',
     this.production = '',
@@ -42,18 +44,30 @@ class OfferDraft {
     this.busType = BusType.sleeper12,
   }) : rounds = List.generate(12, (_) => OfferRound());
 
+  // ------------------------------------------------------------
+  // COMPUTED
+  // ------------------------------------------------------------
+
   int get usedRounds =>
-      rounds.where((r) => r.entries.isNotEmpty || r.startLocation.trim().isNotEmpty).length;
+      rounds.where(
+        (r) =>
+            r.entries.isNotEmpty ||
+            r.startLocation.trim().isNotEmpty,
+      ).length;
 
-  int get totalDays => rounds.fold<int>(0, (sum, r) => sum + r.billableDays);
+  int get totalDays =>
+      rounds.fold<int>(0, (sum, r) => sum + r.billableDays);
 
-  double get totalKm => rounds.fold<double>(0, (sum, r) => sum + r.totalKm);
+  double get totalKm =>
+      rounds.fold<double>(0, (sum, r) => sum + r.totalKm);
 
   // ------------------------------------------------------------
-  // ✅ JSON SUPPORT
+  // JSON
   // ------------------------------------------------------------
+
   Map<String, dynamic> toJson() {
     return {
+      'userId': userId,
       'company': company,
       'contact': contact,
       'production': production,
@@ -65,18 +79,26 @@ class OfferDraft {
 
   static OfferDraft fromJson(Map<String, dynamic> json) {
     final draft = OfferDraft(
+      userId: json['userId'] as String?,
       company: (json['company'] ?? '') as String,
       contact: (json['contact'] ?? '') as String,
       production: (json['production'] ?? '') as String,
       busCount: (json['busCount'] ?? 1) as int,
-      busType: _busTypeFromName((json['busType'] ?? 'sleeper12') as String),
+      busType: _busTypeFromName(
+        (json['busType'] ?? 'sleeper12') as String,
+      ),
     );
 
     final rawRounds = (json['rounds'] as List?) ?? [];
-    final max = rawRounds.length < draft.rounds.length ? rawRounds.length : draft.rounds.length;
+
+    final max = rawRounds.length < draft.rounds.length
+        ? rawRounds.length
+        : draft.rounds.length;
 
     for (int i = 0; i < max; i++) {
-      draft.rounds[i] = OfferRound.fromJson(Map<String, dynamic>.from(rawRounds[i]));
+      draft.rounds[i] = OfferRound.fromJson(
+        Map<String, dynamic>.from(rawRounds[i]),
+      );
     }
 
     return draft;
@@ -90,33 +112,37 @@ class OfferDraft {
   }
 }
 
+// ============================================================
+// ROUND
+// ============================================================
+
 class OfferRound {
   String startLocation = '';
 
-  /// checkbox per round
   bool trailer = false;
 
-  /// pickup evening applies only for first entry
   bool pickupEveningFirstDay = false;
 
   final List<RoundEntry> entries = [];
 
-  /// computed by ui/calculator
   double totalKm = 0;
 
-  /// Billable days:
-  /// - entries count
-  /// - minus 1 if pickup evening + at least 1 entry
   int get billableDays {
     if (entries.isEmpty) return 0;
+
     final base = entries.length;
-    if (pickupEveningFirstDay) return (base - 1).clamp(0, 999999);
+
+    if (pickupEveningFirstDay) {
+      return (base - 1).clamp(0, 999999);
+    }
+
     return base;
   }
 
   // ------------------------------------------------------------
-  // ✅ JSON SUPPORT
+  // JSON
   // ------------------------------------------------------------
+
   Map<String, dynamic> toJson() {
     return {
       'startLocation': startLocation,
@@ -129,25 +155,35 @@ class OfferRound {
 
   static OfferRound fromJson(Map<String, dynamic> json) {
     final r = OfferRound();
+
     r.startLocation = (json['startLocation'] ?? '') as String;
     r.trailer = (json['trailer'] ?? false) as bool;
-    r.pickupEveningFirstDay = (json['pickupEveningFirstDay'] ?? false) as bool;
+    r.pickupEveningFirstDay =
+        (json['pickupEveningFirstDay'] ?? false) as bool;
     r.totalKm = ((json['totalKm'] ?? 0) as num).toDouble();
 
     final rawEntries = (json['entries'] as List?) ?? [];
+
     for (final raw in rawEntries) {
-      r.entries.add(RoundEntry.fromJson(Map<String, dynamic>.from(raw)));
+      r.entries.add(
+        RoundEntry.fromJson(
+          Map<String, dynamic>.from(raw),
+        ),
+      );
     }
 
     return r;
   }
 }
 
+// ============================================================
+// ENTRY
+// ============================================================
+
 class RoundEntry {
   final DateTime date;
   final String location;
 
-  // ✅ NEW: ferry/bridge info from Supabase column "extra"
   final String extra;
 
   RoundEntry({
@@ -169,8 +205,9 @@ class RoundEntry {
   }
 
   // ------------------------------------------------------------
-  // ✅ JSON SUPPORT
+  // JSON
   // ------------------------------------------------------------
+
   Map<String, dynamic> toJson() {
     return {
       'date': date.toIso8601String(),

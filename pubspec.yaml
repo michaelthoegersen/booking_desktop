@@ -24,10 +24,25 @@ dependencies:
   flutter_polyline_points: ^2.0.0
   http: ^1.2.0
   webview_flutter: ^4.7.0
+
+
+flutter_icons:
+  android: true
+  ios: true
+
+  macos:
+    generate: true
+
+  windows:
+    generate: true
+
+  image_path: "assets/icon/TourFlowIcon.png"
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^6.0.0
+  flutter_launcher_icons: ^0.13.1
 
 flutter:
   uses-material-design: true
@@ -35,8 +50,13 @@ flutter:
     - .env
     - assets/pdf/logos/CSSLogo.png
     - assets/pdf/logos/Starcoachlogo.png
+    - assets/pdf/logos/LOGOapp.png
     - assets/pdf/buses/12_sleeper.png
     - assets/pdf/buses/14_sleeper.png
     - assets/pdf/buses/16_sleeper.png
     - assets/pdf/buses/18_sleeper.png
+    - assets/pdf/buses/DDBus.png
     - assets/pdf/template_page0.png
+    - assets/pdf/logos/TourFlowLogo.png
+    - assets/fonts/Calibri.ttf
+    - assets/fonts/Calibrib.ttf
