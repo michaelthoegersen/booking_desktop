@@ -180,47 +180,62 @@ class OfferRound {
 // ENTRY
 // ============================================================
 
-class RoundEntry {
+  class RoundEntry {
   final DateTime date;
   final String location;
-
   final String extra;
+
+  // ✅ NY
+  final Map<String, double> countryKm;
 
   RoundEntry({
     required this.date,
     required this.location,
-    this.extra = '',
-  });
+    required this.extra,
+
+    // ✅ NY
+    Map<String, double>? countryKm,
+  }) : countryKm = countryKm ?? const {};
 
   RoundEntry copyWith({
     DateTime? date,
     String? location,
     String? extra,
+    Map<String, double>? countryKm,
   }) {
     return RoundEntry(
       date: date ?? this.date,
       location: location ?? this.location,
       extra: extra ?? this.extra,
+      countryKm: countryKm ?? this.countryKm,
     );
   }
-
-  // ------------------------------------------------------------
-  // JSON
-  // ------------------------------------------------------------
 
   Map<String, dynamic> toJson() {
     return {
       'date': date.toIso8601String(),
       'location': location,
       'extra': extra,
+
+      // ✅ NY
+      'countryKm': countryKm,
     };
   }
 
-  static RoundEntry fromJson(Map<String, dynamic> json) {
+  factory RoundEntry.fromJson(Map<String, dynamic> json) {
     return RoundEntry(
-      date: DateTime.parse(json['date'] as String),
-      location: (json['location'] ?? '') as String,
-      extra: (json['extra'] ?? '') as String,
+      date: DateTime.parse(json['date']),
+      location: json['location'],
+      extra: json['extra'] ?? '',
+
+      // ✅ NY
+      countryKm: json['countryKm'] != null
+          ? Map<String, double>.from(
+              (json['countryKm'] as Map).map(
+                (k, v) => MapEntry(k.toString(), (v as num).toDouble()),
+              ),
+            )
+          : {},
     );
   }
 }

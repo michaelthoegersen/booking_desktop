@@ -13,6 +13,7 @@ class DashboardPage extends StatefulWidget {
 }
 
 class _DashboardPageState extends State<DashboardPage> {
+  SupabaseClient get sb => Supabase.instance.client;
   int? routesCount;
   bool loadingRoutes = false;
   String? routesError;
@@ -134,7 +135,21 @@ class _DashboardPageState extends State<DashboardPage> {
 
     if (ok != true) return;
 
-    await OfferStorageService.deleteDraft(id);
+    // 1️⃣ Slett kalender-rader først
+await sb
+    .from('samletdata')
+    .delete()
+    .eq('draft_id', id);
+
+// 2️⃣ Slett selve draftet
+await OfferStorageService.deleteDraft(id);
+
+if (!mounted) return;
+
+// 3️⃣ Feedback til bruker
+ScaffoldMessenger.of(context).showSnackBar(
+  const SnackBar(content: Text("Draft deleted")),
+);
 
     if (!mounted) return;
 

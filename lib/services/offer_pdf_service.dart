@@ -317,82 +317,194 @@ static pw.Widget _whiteText(String text, pw.Font font) {
 }
 
   // ============================================================
-  // OFFER TITLE
-  // ============================================================
+// OFFER TITLE
+// ============================================================
 
-  static pw.Widget _buildOfferTitle(pw.Font bold) {
-    return pw.Center(
-      child: pw.Text(
-        "Offer",
-        style: pw.TextStyle(font: bold, fontSize: 24),
+static pw.Widget _buildOfferTitle(pw.Font bold) {
+  return pw.Center(
+    child: pw.Text(
+      "Offer",
+      style: pw.TextStyle(
+        font: bold,
+        fontSize: 24,
+      ),
+    ),
+  );
+}
+  static pw.Widget _buildTable(
+  OfferDraft offer,
+  AppSettings settings,
+  Map<int, RoundCalcResult> calc,
+  pw.Font regular,
+  pw.Font bold,
+) {
+  final widgets = <pw.Widget>[];
+
+  const double boxWidth = 220;
+
+  for (int i = 0; i < offer.rounds.length; i++) {
+    final round = offer.rounds[i];
+    final result = calc[i];
+
+    if (round.entries.isEmpty) continue;
+
+    // ---------------- Round title
+    widgets.add(
+      pw.Text(
+        "Round ${i + 1}",
+        style: pw.TextStyle(
+          font: bold,
+          fontSize: 12,
+        ),
       ),
     );
-  }
 
-  // ============================================================
-  // TABLE
-  // ============================================================
+    widgets.add(pw.SizedBox(height: 8));
 
-  static pw.Widget _buildTable(
-    OfferDraft offer,
-    AppSettings settings,
-    Map<int, RoundCalcResult> calc,
-    pw.Font regular,
-    pw.Font bold,
-  ) {
+    // ---------------- Headers
     final headers = [
-      "Round",
       "Date",
       "Location",
       "Km",
       "Time",
       "Extra",
-      "Price",
     ];
 
     final rows = <List<String>>[];
 
-    int roundNo = 1;
+    // ---------------- Rows
+    for (int r = 0; r < round.entries.length; r++) {
+      final e = round.entries[r];
 
-    for (int i = 0; i < offer.rounds.length; i++) {
-      final round = offer.rounds[i];
-      final result = calc[i];
+      final double km =
+          (result != null && r < result.legKm.length)
+              ? result.legKm[r].toDouble()
+              : 0.0;
 
-      for (int r = 0; r < round.entries.length; r++) {
-        final e = round.entries[r];
+      final hasDDrive = km >= settings.dDriveKmThreshold;
 
-        final double km =
-            (result != null && r < result.legKm.length)
-                ? result.legKm[r].toDouble()
-                : 0.0;
-
-        final hasDDrive = km >= settings.dDriveKmThreshold;
-
-        rows.add([
-          roundNo.toString(),
-          DateFormat("dd.MM.yyyy").format(e.date),
-          e.location,
-          km > 0 ? "${km.round()}" : "",
-          _calcTimeText(km: km, hasDDrive: hasDDrive),
-          _buildExtraText(hasDDrive: hasDDrive, extraField: e.extra),
-          r == 0 ? _formatNok(result?.totalCost) : "",
-        ]);
-      }
-
-      roundNo++;
+      rows.add([
+        DateFormat("dd.MM.yyyy").format(e.date),
+        e.location,
+        km > 0 ? "${km.round()}" : "",
+        _calcTimeText(km: km, hasDDrive: hasDDrive),
+        _buildExtraText(
+          hasDDrive: hasDDrive,
+          extraField: e.extra,
+        ),
+      ]);
     }
 
-    return pw.Padding(
-      padding: const pw.EdgeInsets.symmetric(horizontal: 40),
-      child: pw.Table.fromTextArray(
+    // ---------------- Table
+    widgets.add(
+      pw.Table.fromTextArray(
         headers: headers,
         data: rows,
+
+        columnWidths: const {
+          0: pw.FlexColumnWidth(1),
+          1: pw.FlexColumnWidth(1),
+          2: pw.FlexColumnWidth(1),
+          3: pw.FlexColumnWidth(1),
+          4: pw.FlexColumnWidth(1),
+        },
+
+        headerAlignment: pw.Alignment.centerLeft,
+
+        cellAlignments: {
+          for (int i = 0; i < headers.length; i++)
+            i: pw.Alignment.centerLeft,
+        },
+
         headerStyle: pw.TextStyle(font: bold, fontSize: 9),
         cellStyle: pw.TextStyle(font: regular, fontSize: 8),
-        border: pw.TableBorder.all(color: PdfColors.grey600),
+
+        border: pw.TableBorder(
+          horizontalInside:
+              pw.BorderSide(color: PdfColors.grey400),
+          verticalInside:
+              pw.BorderSide(color: PdfColors.grey400),
+          top: pw.BorderSide(color: PdfColors.grey600),
+          bottom: pw.BorderSide(color: PdfColors.grey600),
+        ),
       ),
     );
+
+    // ---------------- Subtotal + VAT
+    if (result != null && result.totalCost != null) {
+      widgets.add(pw.SizedBox(height: 6));
+
+      // Subtotal
+      widgets.add(
+  pw.Align(
+    alignment: pw.Alignment.centerRight,
+    child: pw.Text(
+      "Subtotal: ${_formatNok(result.totalCost)}",
+      textAlign: pw.TextAlign.right,
+      style: pw.TextStyle(
+        font: bold,
+        fontSize: 9,
+      ),
+    ),
+  ),
+);
+
+      widgets.add(pw.SizedBox(height: 6));
+
+      // -------- VAT KM (FROM ROUTES, SAME AS NEW OFFER PAGE)
+
+final Map<String, double> countryKm = {};
+
+for (final entry in round.entries) {
+  entry.countryKm.forEach((country, km) {
+    if (km <= 0) return;
+
+    countryKm[country] = (countryKm[country] ?? 0) + km;
+  });
+}
+
+// Base price (SAME AS UI)
+final double basePrice = result.totalCost;
+
+      final vatMap = _calculateForeignVat(
+        basePrice: basePrice,
+        countryKm: countryKm,
+      );
+
+      final double totalExVat = result.totalCost ?? 0;
+
+      final double totalIncVat =
+          totalExVat +
+          vatMap.values.fold(0.0, (a, b) => a + b);
+
+      // VAT Box
+      widgets.add(
+        pw.Align(
+          alignment: pw.Alignment.centerRight,
+          child: _buildVatBox(
+  vatMap,
+  totalExVat,
+  totalIncVat,
+  regular,
+  bold,
+),
+        ),
+      );
+    }
+
+    widgets.add(pw.SizedBox(height: 25));
   }
+
+  // ---------------- Wrapper
+  return pw.Padding(
+    padding: const pw.EdgeInsets.symmetric(horizontal: 40),
+    child: pw.Column(
+      crossAxisAlignment: pw.CrossAxisAlignment.start,
+      children: widgets,
+    ),
+  );
+}
+
 
   // ============================================================
   // TERMS
@@ -510,6 +622,158 @@ static pw.Widget _whiteText(String text, pw.Font font) {
 
     return extras.join("/");
   }
+
+  // ============================================================
+// VAT ENGINE (PDF - SOURCE OF TRUTH)
+// ============================================================
+
+// VAT rates (same as NewOfferPage)
+static const Map<String, double> _vatRates = {
+  'DK': 0.25,
+  'DE': 0.19,
+  'AT': 0.10,
+  'PL': 0.08,
+  'BE': 0.06,
+  'SI': 0.095,
+  'HR': 0.25,
+  'Other': 0.0,
+};
+
+// --------------------------------------------
+// Calculate foreign VAT
+// --------------------------------------------
+static Map<String, double> _calculateForeignVat({
+  required double basePrice,
+  required Map<String, double> countryKm,
+}) {
+  if (basePrice <= 0 || countryKm.isEmpty) return {};
+
+  final totalKm =
+      countryKm.values.fold<double>(0, (a, b) => a + b);
+
+  if (totalKm <= 0) return {};
+
+  final Map<String, double> result = {};
+
+  countryKm.forEach((country, km) {
+    if (km <= 0) return;
+
+    final rate = _vatRates[country] ?? 0;
+    if (rate <= 0) return;
+
+    final share = km / totalKm;
+    final vat = basePrice * share * rate;
+
+    if (vat > 0) {
+      result[country] = vat;
+    }
+  });
+
+  return result;
+}
+// --------------------------------------------
+// VAT BOX (PDF - ultra tight layout)
+// --------------------------------------------
+static pw.Widget _buildVatBox(
+  Map<String, double> vatMap,
+  double excl,
+  double incl,
+  pw.Font regular,
+  pw.Font bold,
+) {
+  const double valueWidth = 95;
+
+  pw.Widget row(
+    String label,
+    String value, {
+    bool boldText = false,
+    bool italic = false,
+  }) {
+    final style = pw.TextStyle(
+      font: boldText ? bold : regular,
+      fontSize: 9,
+      fontStyle:
+          italic ? pw.FontStyle.italic : pw.FontStyle.normal,
+    );
+
+    return pw.Row(
+      mainAxisSize: pw.MainAxisSize.min,
+      crossAxisAlignment: pw.CrossAxisAlignment.center,
+      children: [
+        // LABEL → auto width
+        pw.Text(
+          label,
+          style: style,
+          textAlign: pw.TextAlign.right,
+        ),
+
+        // MINIMALT mellomrom
+        pw.SizedBox(width: -400),
+
+        // VALUE → fast høyrejustert
+        pw.SizedBox(
+          width: valueWidth,
+          child: pw.Text(
+            value,
+            textAlign: pw.TextAlign.right,
+            style: style,
+          ),
+        ),
+      ],
+    );
+  }
+
+  final rows = <pw.Widget>[];
+
+  // ---- TOTAL EXCL
+  rows.add(
+    row(
+      "Total excl VAT",
+      _formatNok(excl),
+      boldText: true,
+    ),
+  );
+
+  // ---- VAT lines
+  vatMap.forEach((country, value) {
+    final rate =
+        ((_vatRates[country] ?? 0) * 100).round();
+
+    rows.add(
+      row(
+        "VAT $country $rate%",
+        _formatNok(value),
+        italic: true,
+      ),
+    );
+  });
+
+  rows.add(pw.SizedBox(height: 4));
+
+  // ---- TOTAL INCL
+  rows.add(
+    row(
+      "Total incl VAT",
+      _formatNok(incl),
+      boldText: true,
+    ),
+  );
+
+  return pw.Align(
+    alignment: pw.Alignment.centerRight,
+    child: pw.Column(
+      crossAxisAlignment: pw.CrossAxisAlignment.end,
+      children: rows,
+    ),
+  );
+}
+
+
+
+  // ============================================================
+  // RIGHT INFO
+  // ============================================================
+
     static pw.Widget _rightInfo(
     String label,
     String value,
@@ -524,23 +788,18 @@ static pw.Widget _whiteText(String text, pw.Font font) {
             width: 60,
             child: pw.Text(
               "$label:",
-              style: pw.TextStyle(
-                font: font,
-                fontSize: 8,
-              ),
+              style: pw.TextStyle(font: font, fontSize: 8),
             ),
           ),
           pw.Expanded(
             child: pw.Text(
               value,
-              style: pw.TextStyle(
-                font: font,
-                fontSize: 8,
-              ),
+              style: pw.TextStyle(font: font, fontSize: 8),
             ),
           ),
         ],
       ),
     );
   }
-}
+
+} // 👈 DENNE MÅ MED

@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:google_maps_flutter/google_maps_flutter.dart';
 
 import '../services/directions_service.dart';
 import '../models/route_result.dart';

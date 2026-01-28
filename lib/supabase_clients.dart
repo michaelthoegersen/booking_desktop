@@ -5,8 +5,3 @@ final supabaseDesktop = SupabaseClient(
   dotenv.env['SUPABASE_URL']!,
   dotenv.env['SUPABASE_ANON_KEY']!,
 );
-
-final supabaseDrivers = SupabaseClient(
-  dotenv.env['SUPABASE_URL_DRIVERS']!,
-  dotenv.env['SUPABASE_KEY_DRIVERS']!,
-);

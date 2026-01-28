@@ -5,6 +5,8 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:intl/intl.dart';
+import '../services/calendar_sync_service.dart';
+import '../supabase_clients.dart';
 
 import '../models/offer_draft.dart';
 import 'package:booking_desktop/services/trip_calculator.dart';
@@ -31,12 +33,50 @@ class NewOfferPage extends StatefulWidget {
 class _NewOfferPageState extends State<NewOfferPage> {
   int roundIndex = 0;
 
-  // ✅ default values, men dette overskrives av loadDraft()
+  // ------------------------------------------------------------
+  // BUS PICKER (Calendar sync)
+  // ------------------------------------------------------------
+  Future<String?> _pickBus() async {
+    return showDialog<String>(
+      context: context,
+      builder: (ctx) {
+        return AlertDialog(
+          title: const Text("Select bus"),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _busTile(ctx, "CSS_1034"),
+              _busTile(ctx, "CSS_1023"),
+              _busTile(ctx, "CSS_1008"),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: const Text("Cancel"),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _busTile(BuildContext ctx, String bus) {
+    return ListTile(
+      leading: const Icon(Icons.directions_bus),
+      title: Text(bus),
+      onTap: () => Navigator.of(ctx).pop(bus),
+    );
+  }
+
+  // ------------------------------------------------------------
+  // DEFAULT OFFER
+  // ------------------------------------------------------------
   final OfferDraft offer = OfferDraft(
     company: '',
     contact: '',
     production: '',
-);
+  );
 
   final TextEditingController companyCtrl = TextEditingController();
   final TextEditingController contactCtrl = TextEditingController();
@@ -47,13 +87,14 @@ class _NewOfferPageState extends State<NewOfferPage> {
 
   DateTime? selectedDate;
 
-  // ✅ Offer/draft id in Supabase
+  // ------------------------------------------------------------
+  // Draft
+  // ------------------------------------------------------------
   String? _draftId;
-
   bool _loadingDraft = false;
 
   // ------------------------------------------------------------
-  // ✅ Routes service (autocomplete + km lookup)
+  // Routes service
   // ------------------------------------------------------------
   final RoutesService _routesService = RoutesService();
 
@@ -63,21 +104,29 @@ class _NewOfferPageState extends State<NewOfferPage> {
   SupabaseClient get sb => Supabase.instance.client;
 
   // ------------------------------------------------------------
-  // caches per leg (from,to)
+  // CACHES (GLOBAL PER ROUTE)
   // ------------------------------------------------------------
   final Map<String, double?> _distanceCache = {};
   final Map<String, double> _ferryCache = {};
   final Map<String, double> _tollCache = {};
   final Map<String, String> _extraCache = {};
 
+  // ✅ NY: Land-km cache
+  final Map<String, Map<String, double>> _countryKmCache = {};
+
+  // ------------------------------------------------------------
+  // PER ENTRY (CURRENT ROUND)
+  // ------------------------------------------------------------
   bool _loadingKm = false;
   String? _kmError;
 
-  // per entry index (current round)
   Map<int, double?> _kmByIndex = {};
   Map<int, double> _ferryByIndex = {};
   Map<int, double> _tollByIndex = {};
   Map<int, String> _extraByIndex = {};
+
+  // ✅ NY: Land-km per entry
+  Map<int, Map<String, double>> _countryKmByIndex = {};
 
   // ------------------------------------------------------------
   // Lifecycle
@@ -86,16 +135,15 @@ class _NewOfferPageState extends State<NewOfferPage> {
   void initState() {
     super.initState();
 
-    // init controllers from initial offer
     companyCtrl.text = offer.company;
     contactCtrl.text = offer.contact;
     productionCtrl.text = offer.production;
 
     _syncRoundControllers();
 
-    // ✅ Hvis vi kom med offerId -> load draft først
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       final id = widget.offerId?.trim();
+
       if (id != null && id.isNotEmpty) {
         await _loadDraft(id);
       } else {
@@ -259,6 +307,136 @@ class _NewOfferPageState extends State<NewOfferPage> {
   // ------------------------------------------------------------
   // Small helpers
   // ------------------------------------------------------------
+
+  // ============================================================
+// VAT ENGINE (Foreign VAT calculation)
+// ============================================================
+
+static const Map<String, double> _vatRates = {
+  'DK': 0.25,
+  'DE': 0.19,
+  'AT': 0.10,
+  'PL': 0.08,
+  'BE': 0.06,
+  'SI': 0.095,
+  'HR': 0.25,
+  'Other': 0.0,
+};
+
+// --------------------------------------------
+// Collect km from all rounds
+// --------------------------------------------
+Map<String, double> _collectAllCountryKm() {
+  final Map<String, double> result = {};
+
+  for (final map in _countryKmByIndex.values) {
+    map.forEach((country, km) {
+      if (km <= 0) return;
+
+      result[country] = (result[country] ?? 0) + km;
+    });
+  }
+
+  return result;
+}
+
+// --------------------------------------------
+// Calculate foreign VAT
+// --------------------------------------------
+Map<String, double> _calculateForeignVat({
+  required double basePrice,
+  required Map<String, double> countryKm,
+}) {
+  final totalKm =
+      countryKm.values.fold<double>(0, (a, b) => a + b);
+
+  if (totalKm == 0) return {};
+
+  final Map<String, double> result = {};
+
+  countryKm.forEach((country, km) {
+    final rate = _vatRates[country] ?? 0;
+
+    if (rate <= 0 || km <= 0) return;
+
+    final share = km / totalKm;
+    final vat = basePrice * share * rate;
+
+    if (vat > 0) {
+      result[country] = vat;
+    }
+  });
+
+  return result;
+}
+
+// --------------------------------------------
+// VAT UI box
+// --------------------------------------------
+Widget _buildVatBox(
+  Map<String, double> vatMap,
+  double excl,
+  double incl,
+) {
+  if (vatMap.isEmpty) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.end,
+      children: [
+        Text(
+          "Total excl VAT: ${_nok(excl)}",
+          style: const TextStyle(fontWeight: FontWeight.w900),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          "Total incl VAT: ${_nok(incl)}",
+          style: const TextStyle(fontWeight: FontWeight.w900),
+        ),
+      ],
+    );
+  }
+
+  return Column(
+    crossAxisAlignment: CrossAxisAlignment.end,
+    children: [
+      const Text(
+        "Foreign VAT",
+        style: TextStyle(fontWeight: FontWeight.w900),
+      ),
+
+      const SizedBox(height: 6),
+
+      ...vatMap.entries.map((e) {
+        final rate = (_vatRates[e.key] ?? 0) * 100;
+
+        return Text(
+          "${e.key} (${rate.toStringAsFixed(1)}%): ${_nok(e.value)}",
+          style: const TextStyle(fontWeight: FontWeight.w700),
+        );
+      }),
+
+      const SizedBox(height: 6),
+
+      Text(
+        "Total VAT: ${_nok(vatMap.values.fold(0, (a, b) => a + b))}",
+        style: const TextStyle(fontWeight: FontWeight.w900),
+      ),
+
+      const Divider(),
+
+      Text(
+        "Total excl VAT: ${_nok(excl)}",
+        style: const TextStyle(fontWeight: FontWeight.w900),
+      ),
+
+      const SizedBox(height: 4),
+
+      Text(
+        "Total incl VAT: ${_nok(incl)}",
+        style: const TextStyle(fontWeight: FontWeight.w900),
+      ),
+    ],
+  );
+}
   Future<void> _onAddMissingRoutePressed() async {
   // CASE 1: Draft er ikke lagret ennå
   if (_draftId == null) {
@@ -317,91 +495,179 @@ class _NewOfferPageState extends State<NewOfferPage> {
   // ------------------------------------------------------------
   Future<void> _saveDraft() async {
   try {
-    offer.rounds[roundIndex].startLocation = _norm(startLocCtrl.text);
+    // Sørg for at startlocation er synket
+    offer.rounds[roundIndex].startLocation =
+        _norm(startLocCtrl.text);
 
+    // --------------------------------------------------
+    // 0️⃣ Velg buss først
+    // --------------------------------------------------
+    final selectedBus = await _pickBus();
+
+    if (selectedBus == null) {
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Ingen buss valgt")),
+      );
+      return;
+    }
+
+    // --------------------------------------------------
+    // 1️⃣ Lagre draft (Desktop DB)
+    // --------------------------------------------------
     final id = await OfferStorageService.saveDraft(
-      id: _draftId, // 👈 NØKKELEN
-      offer: offer,
-    );
+  id: _draftId,
+  offer: offer,
+);
 
-    // ✅ LÅS DRAFT-ID ETTER FØRSTE SAVE
-    _draftId ??= id;
+if (id == null || id.isEmpty) {
+  throw Exception("Failed to save draft (no ID returned)");
+}
+
+    // --------------------------------------------------
+    // 2️⃣ HENT FERSK DATA FRA DB (KRITISK)
+    // --------------------------------------------------
+    final freshOffer = await OfferStorageService.loadDraft(id);
+
+if (freshOffer == null) {
+  throw Exception("Draft was saved, but could not be reloaded from DB.");
+}
+
+await CalendarSyncService.syncFromOffer(
+  freshOffer,
+  selectedBus: selectedBus,
+  draftId: id, // ✅
+);
+
+    // --------------------------------------------------
 
     if (!mounted) return;
+
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text("Draft saved ✅")),
+      SnackBar(content: Text("Lagret på $selectedBus ✅")),
     );
 
     setState(() {});
-  } catch (e) {
+  } catch (e, st) {
+    debugPrint("SAVE ERROR:");
+    debugPrint(e.toString());
+    debugPrint(st.toString());
+
     if (!mounted) return;
+
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text("Draft save failed: $e")),
+      SnackBar(content: Text("Save failed: $e")),
     );
   }
 }
-
   // ------------------------------------------------------------
   // ✅ KM + ferry + toll + extra lookup from Supabase
   // ------------------------------------------------------------
   Future<double?> _fetchLegData({
-    required String from,
-    required String to,
-    required int index,
-  }) async {
-    final fromN = _norm(from);
-    final toN = _norm(to);
-    final key = _cacheKey(fromN, toN);
+  required String from,
+  required String to,
+  required int index,
+}) async {
+  final fromN = _norm(from);
+  final toN = _norm(to);
+  final key = _cacheKey(fromN, toN);
 
-    // cache hit
-    if (_distanceCache.containsKey(key)) {
-      _ferryByIndex[index] = _ferryCache[key] ?? 0.0;
-      _tollByIndex[index] = _tollCache[key] ?? 0.0;
-      _extraByIndex[index] = _extraCache[key] ?? '';
-      return _distanceCache[key];
-    }
+  // ---------------- CACHE HIT ----------------
+  if (_distanceCache.containsKey(key)) {
+    _ferryByIndex[index] = _ferryCache[key] ?? 0.0;
+    _tollByIndex[index] = _tollCache[key] ?? 0.0;
+    _extraByIndex[index] = _extraCache[key] ?? '';
 
-    try {
-      // ✅ Bruk din RoutesService (eksakt match + reverse)
-      final res = await _routesService.findRoute(from: fromN, to: toN);
+    // ✅ VIKTIG: land-cache også
+    _countryKmByIndex[index] = _countryKmCache[key] ?? {};
 
-      if (res == null) {
-        _distanceCache[key] = null;
-        _ferryCache[key] = 0.0;
-        _tollCache[key] = 0.0;
-        _extraCache[key] = '';
-        _ferryByIndex[index] = 0.0;
-        _tollByIndex[index] = 0.0;
-        _extraByIndex[index] = '';
-        return null;
-      }
+    return _distanceCache[key];
+  }
 
-      final km = (res['distance_total_km'] as num?)?.toDouble();
-      final ferry = (res['ferry_price'] as num?)?.toDouble() ?? 0.0;
-      final toll = (res['toll_nightliner'] as num?)?.toDouble() ?? 0.0;
-      final extra = (res['extra'] as String?)?.trim() ?? '';
+  try {
+    final res = await _routesService.findRoute(
+      from: fromN,
+      to: toN,
+    );
 
-      _distanceCache[key] = km;
-      _ferryCache[key] = ferry;
-      _tollCache[key] = toll;
-      _extraCache[key] = extra;
-
-      _ferryByIndex[index] = ferry;
-      _tollByIndex[index] = toll;
-      _extraByIndex[index] = extra;
-
-      return km;
-    } catch (_) {
+    if (res == null) {
       _distanceCache[key] = null;
       _ferryCache[key] = 0.0;
       _tollCache[key] = 0.0;
       _extraCache[key] = '';
+      _countryKmCache[key] = {};
+
       _ferryByIndex[index] = 0.0;
       _tollByIndex[index] = 0.0;
       _extraByIndex[index] = '';
+      _countryKmByIndex[index] = {};
+
       return null;
     }
+
+    // ---------------- HOVEDDATA ----------------
+    final km = (res['distance_total_km'] as num?)?.toDouble();
+    final ferry = (res['ferry_price'] as num?)?.toDouble() ?? 0.0;
+    final toll = (res['toll_nightliner'] as num?)?.toDouble() ?? 0.0;
+    final extra = (res['extra'] as String?)?.trim() ?? '';
+
+    // ---------------- LAND-FORDELING ----------------
+    final Map<String, double> countryKm = {
+      if ((res['km_dk'] as num?) != null && (res['km_dk'] as num) > 0)
+        'DK': (res['km_dk'] as num).toDouble(),
+
+      if ((res['km_de'] as num?) != null && (res['km_de'] as num) > 0)
+        'DE': (res['km_de'] as num).toDouble(),
+
+      if ((res['km_be'] as num?) != null && (res['km_be'] as num) > 0)
+        'BE': (res['km_be'] as num).toDouble(),
+
+      if ((res['km_pl'] as num?) != null && (res['km_pl'] as num) > 0)
+        'PL': (res['km_pl'] as num).toDouble(),
+
+      if ((res['km_au'] as num?) != null && (res['km_au'] as num) > 0)
+        'AT': (res['km_au'] as num).toDouble(),
+
+      if ((res['km_hr'] as num?) != null && (res['km_hr'] as num) > 0)
+        'HR': (res['km_hr'] as num).toDouble(),
+
+      if ((res['km_si'] as num?) != null && (res['km_si'] as num) > 0)
+        'SI': (res['km_si'] as num).toDouble(),
+
+      if ((res['km_other'] as num?) != null && (res['km_other'] as num) > 0)
+        'Other': (res['km_other'] as num).toDouble(),
+    };
+
+    // ---------------- CACHE ----------------
+    _distanceCache[key] = km;
+    _ferryCache[key] = ferry;
+    _tollCache[key] = toll;
+    _extraCache[key] = extra;
+    _countryKmCache[key] = countryKm;
+
+    // ---------------- PER ENTRY ----------------
+    _ferryByIndex[index] = ferry;
+    _tollByIndex[index] = toll;
+    _extraByIndex[index] = extra;
+    _countryKmByIndex[index] = countryKm;
+
+    return km;
+  } catch (e) {
+    _distanceCache[key] = null;
+    _ferryCache[key] = 0.0;
+    _tollCache[key] = 0.0;
+    _extraCache[key] = '';
+    _countryKmCache[key] = {};
+
+    _ferryByIndex[index] = 0.0;
+    _tollByIndex[index] = 0.0;
+    _extraByIndex[index] = '';
+    _countryKmByIndex[index] = {};
+
+    return null;
   }
+}
 
   // ------------------------------------------------------------
   // Recalculate legs for CURRENT round
@@ -454,12 +720,13 @@ class _NewOfferPageState extends State<NewOfferPage> {
   _tollByIndex = tollByIndex;
   _extraByIndex = extraByIndex;
 
-  // ✅ LAGRE EXTRA I ENTRY (VIKTIG FOR PDF)
-  for (int i = 0; i < round.entries.length; i++) {
-    round.entries[i] = round.entries[i].copyWith(
-      extra: extraByIndex[i] ?? '',
-    );
-  }
+  // ✅ LAGRE EXTRA + COUNTRY KM I ENTRY (VIKTIG FOR PDF + VAT)
+for (int i = 0; i < round.entries.length; i++) {
+  round.entries[i] = round.entries[i].copyWith(
+    extra: extraByIndex[i] ?? '',
+    countryKm: _countryKmByIndex[i] ?? {},
+  );
+}
 
   _loadingKm = false;
 
@@ -802,39 +1069,56 @@ class _NewOfferPageState extends State<NewOfferPage> {
 
   String _nok(double v) => "${v.toStringAsFixed(0)},-";
 
-  // ------------------------------------------------------------
+    // ------------------------------------------------------------
   // UI
   // ------------------------------------------------------------
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     final round = offer.rounds[roundIndex];
+
     final entryCount = round.entries
-      .map((e) => DateTime(e.date.year, e.date.month, e.date.day))
-      .toSet()
-      .length;
+        .map((e) => DateTime(e.date.year, e.date.month, e.date.day))
+        .toSet()
+        .length;
 
     final totalKm =
         _kmByIndex.values.whereType<double>().fold<double>(0, (a, b) => a + b);
 
     final ferryTotal =
         _ferryByIndex.values.fold<double>(0.0, (a, b) => a + b);
+
     final tollTotal =
         _tollByIndex.values.fold<double>(0.0, (a, b) => a + b);
 
     final calc = TripCalculator.calculateRound(
-  settings: SettingsStore.current,
-  entryCount: entryCount,
-  pickupEveningFirstDay: round.pickupEveningFirstDay,
-  trailer: round.trailer,
-  totalKm: totalKm,
-  legKm: _kmByIndex.values
-      .whereType<double>()
-      .map((e) => e.toDouble())
-      .toList(),
-  ferryCost: ferryTotal,
-  tollCost: tollTotal,
-);
+      settings: SettingsStore.current,
+      entryCount: entryCount,
+      pickupEveningFirstDay: round.pickupEveningFirstDay,
+      trailer: round.trailer,
+      totalKm: totalKm,
+      legKm: _kmByIndex.values
+          .whereType<double>()
+          .map((e) => e.toDouble())
+          .toList(),
+      ferryCost: ferryTotal,
+      tollCost: tollTotal,
+    );
+
+    final basePrice =
+        calc.totalCost - calc.ferryCost - calc.tollCost;
+
+    final countryKm = _collectAllCountryKm();
+
+    final foreignVatMap = _calculateForeignVat(
+      basePrice: basePrice,
+      countryKm: countryKm,
+    );
+
+    final totalExVat = calc.totalCost;
+
+    final totalIncVat = totalExVat +
+        foreignVatMap.values.fold(0.0, (a, b) => a + b);
 
     if (_loadingDraft) {
       return const Center(child: CircularProgressIndicator());
@@ -845,20 +1129,21 @@ class _NewOfferPageState extends State<NewOfferPage> {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // LEFT
+
+          // ================= LEFT =================
           SizedBox(
             width: 300,
             child: _LeftOfferCard(
-  offer: offer,
-  onExport: _exportPdf,
-  onSave: _saveDraft,
-  draftId: _draftId,
-),
+              offer: offer,
+              onExport: _exportPdf,
+              onSave: _saveDraft,
+              draftId: _draftId,
+            ),
           ),
 
           const SizedBox(width: 14),
 
-          // CENTER
+          // ================= CENTER =================
           Expanded(
             flex: 14,
             child: Container(
@@ -871,6 +1156,8 @@ class _NewOfferPageState extends State<NewOfferPage> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+
+                  // ---------- HEADER ----------
                   Row(
                     children: [
                       Text(
@@ -886,21 +1173,27 @@ class _NewOfferPageState extends State<NewOfferPage> {
                         child: DropdownButtonFormField<int>(
                           value: roundIndex,
                           decoration: const InputDecoration(
-                              labelText: "Round",
-                              prefixIcon: Icon(Icons.repeat)),
+                            labelText: "Round",
+                            prefixIcon: Icon(Icons.repeat),
+                          ),
                           items: List.generate(
                             12,
                             (i) => DropdownMenuItem(
-                                value: i, child: Text("Round ${i + 1}")),
+                              value: i,
+                              child: Text("Round ${i + 1}"),
+                            ),
                           ),
                           onChanged: (v) async {
                             if (v == null) return;
+
                             setState(() {
                               offer.rounds[roundIndex].startLocation =
                                   _norm(startLocCtrl.text);
+
                               roundIndex = v;
                               _syncRoundControllers();
                             });
+
                             await _recalcKm();
                           },
                         ),
@@ -910,61 +1203,67 @@ class _NewOfferPageState extends State<NewOfferPage> {
 
                   const SizedBox(height: 10),
 
+                  // ---------- START LOCATION ----------
                   TextField(
                     controller: startLocCtrl,
                     onChanged: (_) async {
-                      setState(() => offer.rounds[roundIndex].startLocation =
-                        _norm(startLocCtrl.text));
+                      setState(() {
+                        offer.rounds[roundIndex].startLocation =
+                            _norm(startLocCtrl.text);
+                      });
+
                       await _recalcKm();
-  },
+                    },
                     decoration: const InputDecoration(
                       labelText: "Start location (for this round)",
                       prefixIcon: Icon(Icons.flag),
-  ),
-),
+                    ),
+                  ),
 
                   const SizedBox(height: 10),
 
+                  // ---------- OPTIONS ----------
                   Wrap(
-  spacing: 18,
-  runSpacing: 6,
-  children: [
-    Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Checkbox(
-          value: round.pickupEveningFirstDay,
-          onChanged: (v) async {
-            setState(() {
-              round.pickupEveningFirstDay = v ?? false;
-            });
+                    spacing: 18,
+                    runSpacing: 6,
+                    children: [
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Checkbox(
+                            value: round.pickupEveningFirstDay,
+                            onChanged: (v) async {
+                              setState(() {
+                                round.pickupEveningFirstDay = v ?? false;
+                              });
 
-            await _recalcKm(); // ✅ Recalc → D.Drive tilbake
-          },
-        ),
-        const Text("Pickup evening (first day not billable)"),
-      ],
-    ),
-    Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Checkbox(
-          value: round.trailer,
-          onChanged: (v) {
-            setState(() {
-              round.trailer = v ?? false;
-            });
-          },
-        ),
-        const Text("Trailer"),
-      ],
-    ),
-  ],
-),
-                
-                
+                              await _recalcKm();
+                            },
+                          ),
+                          const Text(
+                              "Pickup evening (first day not billable)"),
+                        ],
+                      ),
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Checkbox(
+                            value: round.trailer,
+                            onChanged: (v) {
+                              setState(() {
+                                round.trailer = v ?? false;
+                              });
+                            },
+                          ),
+                          const Text("Trailer"),
+                        ],
+                      ),
+                    ],
+                  ),
+
                   const SizedBox(height: 12),
 
+                  // ---------- ENTRY INPUT ----------
                   Container(
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
@@ -974,6 +1273,7 @@ class _NewOfferPageState extends State<NewOfferPage> {
                     ),
                     child: Column(
                       children: [
+
                         Row(
                           children: [
                             Expanded(
@@ -982,14 +1282,17 @@ class _NewOfferPageState extends State<NewOfferPage> {
                                 onPressed: _pickDate,
                                 label: Align(
                                   alignment: Alignment.centerLeft,
-                                  child: Text(selectedDate == null
-                                      ? "Pick date"
-                                      : _fmtDate(selectedDate!)),
+                                  child: Text(
+                                    selectedDate == null
+                                        ? "Pick date"
+                                        : _fmtDate(selectedDate!),
+                                  ),
                                 ),
                               ),
-                            ),                            
+                            ),
                           ],
                         ),
+
                         const SizedBox(height: 10),
 
                         _LocationAutoComplete(
@@ -998,14 +1301,15 @@ class _NewOfferPageState extends State<NewOfferPage> {
                           onSubmit: _addEntry,
                           onPasteMulti: _pasteManyLines,
                           onQueryChanged: _loadPlaceSuggestions,
-      ),
+                        ),
+
                         const SizedBox(height: 8),
 
                         OutlinedButton.icon(
                           icon: const Icon(Icons.add_road),
                           label: const Text("Add missing route"),
                           onPressed: _onAddMissingRoutePressed,
-),
+                        ),
 
                         if (_loadingSuggestions)
                           const Padding(
@@ -1028,9 +1332,10 @@ class _NewOfferPageState extends State<NewOfferPage> {
                             alignment: Alignment.centerLeft,
                             child: Text(
                               _kmError!,
-                              style: TextStyle(
-                                  color: cs.error,
-                                  fontWeight: FontWeight.w900),
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w900,
+                                color: Colors.red,
+                              ),
                             ),
                           ),
                         ],
@@ -1040,34 +1345,52 @@ class _NewOfferPageState extends State<NewOfferPage> {
 
                   const SizedBox(height: 12),
 
+                  // ---------- ROUTES ----------
                   Expanded(
                     child: Container(
                       width: double.infinity,
-                      padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+                      padding:
+                          const EdgeInsets.fromLTRB(12, 8, 12, 8),
                       decoration: BoxDecoration(
                         borderRadius: BorderRadius.circular(14),
-                        border: Border.all(color: cs.outlineVariant),
+                        border:
+                            Border.all(color: cs.outlineVariant),
                         color: cs.surface,
                       ),
                       child: Column(
                         children: [
+
                           const _RoutesTableHeader(),
-                          Divider(height: 14, color: cs.outlineVariant),
+
+                          Divider(
+                            height: 14,
+                            color: cs.outlineVariant,
+                          ),
+
                           if (round.entries.isEmpty)
                             const Expanded(
-                                child: Center(child: Text("No entries yet.")))
+                              child: Center(
+                                child: Text("No entries yet."),
+                              ),
+                            )
                           else
                             Expanded(
                               child: ListView.separated(
                                 itemCount: round.entries.length,
                                 separatorBuilder: (_, __) =>
-                                    Divider(height: 1, color: cs.outlineVariant),
+                                    Divider(
+                                  height: 1,
+                                  color: cs.outlineVariant,
+                                ),
                                 itemBuilder: (_, i) {
                                   final e = round.entries[i];
                                   final km = _kmByIndex[i];
+
                                   final from = i == 0
                                       ? round.startLocation
-                                      : round.entries[i - 1].location;
+                                      : round.entries[i - 1]
+                                          .location;
+
                                   final routeText =
                                       "${_norm(from)} → ${_norm(e.location)}";
 
@@ -1075,95 +1398,143 @@ class _NewOfferPageState extends State<NewOfferPage> {
                                     date: _fmtDate(e.date),
                                     route: routeText,
                                     km: km,
+                                    countryKm:
+                                        _countryKmByIndex[i] ?? {},
                                     onEdit: () => _editEntry(i),
                                     onDelete: () async {
-                                      setState(() => offer
-                                          .rounds[roundIndex].entries
-                                          .removeAt(i));
+                                      setState(() {
+                                        offer.rounds[roundIndex]
+                                            .entries
+                                            .removeAt(i);
+                                      });
+
                                       await _recalcKm();
                                     },
                                   );
                                 },
                               ),
                             ),
-                          Divider(height: 14, color: cs.outlineVariant),
 
+                          Divider(
+                            height: 14,
+                            color: cs.outlineVariant,
+                          ),
+
+                          // ---------- SUMMARY ----------
                           Wrap(
                             spacing: 14,
                             runSpacing: 6,
                             children: [
-                              Text("Billable days: ${calc.billableDays}",
-                                  style: const TextStyle(
-                                      fontWeight: FontWeight.w900,
-                                      fontSize: 12)),
                               Text(
-                                  "Included: ${calc.includedKm.toStringAsFixed(0)} km",
-                                  style: const TextStyle(
-                                      fontWeight: FontWeight.w700,
-                                      fontSize: 12)),
-                              Text("Extra: ${calc.extraKm.toStringAsFixed(0)} km",
-                                  style: const TextStyle(
-                                      fontWeight: FontWeight.w700,
-                                      fontSize: 12)),
-                              Text("Total: ${totalKm.toStringAsFixed(0)} km",
-                                  style: const TextStyle(
-                                      fontWeight: FontWeight.w900,
-                                      fontSize: 12)),
+                                "Billable days: ${calc.billableDays}",
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w900,
+                                  fontSize: 12,
+                                ),
+                              ),
+                              Text(
+                                "Included: ${calc.includedKm.toStringAsFixed(0)} km",
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w700,
+                                  fontSize: 12,
+                                ),
+                              ),
+                              Text(
+                                "Extra: ${calc.extraKm.toStringAsFixed(0)} km",
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w700,
+                                  fontSize: 12,
+                                ),
+                              ),
+                              Text(
+                                "Total: ${totalKm.toStringAsFixed(0)} km",
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w900,
+                                  fontSize: 12,
+                                ),
+                              ),
                             ],
                           ),
 
                           const SizedBox(height: 10),
 
+                          // ---------- COST ----------
                           Container(
                             width: double.infinity,
                             padding: const EdgeInsets.all(12),
                             decoration: BoxDecoration(
-                              borderRadius: BorderRadius.circular(12),
-                              border: Border.all(color: cs.outlineVariant),
-                              color: cs.surfaceContainerLowest,
+                              borderRadius:
+                                  BorderRadius.circular(12),
+                              border: Border.all(
+                                  color: cs.outlineVariant),
+                              color:
+                                  cs.surfaceContainerLowest,
                             ),
                             child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
+                              crossAxisAlignment:
+                                  CrossAxisAlignment.start,
                               children: [
+
                                 Wrap(
-  spacing: 16,
-  runSpacing: 6,
-  children: [
-    Text("Days: ${_nok(calc.dayCost)}",
-        style: const TextStyle(fontWeight: FontWeight.w900)),
-
-    Text("Extra km: ${_nok(calc.extraKmCost)}",
-        style: const TextStyle(fontWeight: FontWeight.w900)),
-
-    // ✅ D.DRIVE
-    if (calc.dDriveDays > 0)
-      Text(
-        "D.Drive (${calc.dDriveDays}): ${_nok(calc.dDriveCost)}",
-        style: const TextStyle(fontWeight: FontWeight.w900),
-      ),
-
-    if (round.trailer)
-      Text(
-        "Trailer: ${_nok(calc.trailerDayCost + calc.trailerKmCost)}",
-        style: const TextStyle(fontWeight: FontWeight.w900),
-      ),
-
-    if (ferryTotal > 0)
-      Text("Ferry: ${_nok(calc.ferryCost)}",
-          style: const TextStyle(fontWeight: FontWeight.w900)),
-
-    if (tollTotal > 0)
-      Text("Toll: ${_nok(calc.tollCost)}",
-          style: const TextStyle(fontWeight: FontWeight.w900)),
-  ],
-),
-                                const SizedBox(height: 8),
-                                Align(
-                                  alignment: Alignment.centerRight,
-                                  child: Text("TOTAL: ${_nok(calc.totalCost)}",
+                                  spacing: 16,
+                                  runSpacing: 6,
+                                  children: [
+                                    Text(
+                                      "Days: ${_nok(calc.dayCost)}",
                                       style: const TextStyle(
-                                          fontWeight: FontWeight.w900,
-                                          fontSize: 14)),
+                                          fontWeight:
+                                              FontWeight.w900),
+                                    ),
+                                    Text(
+                                      "Extra km: ${_nok(calc.extraKmCost)}",
+                                      style: const TextStyle(
+                                          fontWeight:
+                                              FontWeight.w900),
+                                    ),
+                                    if (calc.dDriveDays > 0)
+                                      Text(
+                                        "D.Drive (${calc.dDriveDays}): ${_nok(calc.dDriveCost)}",
+                                        style: const TextStyle(
+                                            fontWeight:
+                                                FontWeight.w900),
+                                      ),
+                                    if (round.trailer)
+                                      Text(
+                                        "Trailer: ${_nok(calc.trailerDayCost + calc.trailerKmCost)}",
+                                        style: const TextStyle(
+                                            fontWeight:
+                                                FontWeight.w900),
+                                      ),
+                                    if (ferryTotal > 0)
+                                      Text(
+                                        "Ferry: ${_nok(calc.ferryCost)}",
+                                        style: const TextStyle(
+                                            fontWeight:
+                                                FontWeight.w900),
+                                      ),
+                                    if (tollTotal > 0)
+                                      Text(
+                                        "Toll: ${_nok(calc.tollCost)}",
+                                        style: const TextStyle(
+                                            fontWeight:
+                                                FontWeight.w900),
+                                      ),
+                                  ],
+                                ),
+
+                                const SizedBox(height: 10),
+
+                                Align(
+                                  alignment:
+                                      Alignment.centerRight,
+                                  child: Text(
+                                    "TOTAL: ${_nok(calc.totalCost)}",
+                                    style: const TextStyle(
+                                      fontWeight:
+                                          FontWeight.w900,
+                                      fontSize: 14,
+                                    ),
+                                  ),
                                 ),
                               ],
                             ),
@@ -1179,6 +1550,7 @@ class _NewOfferPageState extends State<NewOfferPage> {
 
           const SizedBox(width: 14),
 
+          // ================= RIGHT =================
           SizedBox(
             width: 430,
             child: Container(
@@ -1188,7 +1560,55 @@ class _NewOfferPageState extends State<NewOfferPage> {
                 borderRadius: BorderRadius.circular(18),
                 border: Border.all(color: cs.outlineVariant),
               ),
-              child: SingleChildScrollView(child: OfferPreview(offer: offer)),
+              child: SingleChildScrollView(
+                child: Column(
+                  crossAxisAlignment:
+                      CrossAxisAlignment.start,
+                  children: [
+
+                    OfferPreview(offer: offer),
+
+                    const SizedBox(height: 20),
+
+                    // ---------- VAT ----------
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        color: cs.surface,
+                        borderRadius:
+                            BorderRadius.circular(12),
+                        border: Border.all(
+                          color: cs.outlineVariant,
+                        ),
+                      ),
+                      child: Column(
+                        crossAxisAlignment:
+                            CrossAxisAlignment.end,
+                        children: [
+
+                          const Text(
+                            "VAT summary",
+                            style: TextStyle(
+                              fontWeight:
+                                  FontWeight.w900,
+                              fontSize: 14,
+                            ),
+                          ),
+
+                          const SizedBox(height: 10),
+
+                          _buildVatBox(
+                            foreignVatMap,
+                            totalExVat,
+                            totalIncVat,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             ),
           ),
         ],
@@ -1196,6 +1616,10 @@ class _NewOfferPageState extends State<NewOfferPage> {
     );
   }
 }
+
+// =================================================
+// LEFT CARD
+// =================================================
 
 class _LeftOfferCard extends StatefulWidget {
   final OfferDraft offer;
@@ -1558,28 +1982,47 @@ class _RoutesTableHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    const headerStyle = TextStyle(fontWeight: FontWeight.w800, fontSize: 12);
+    const headerStyle = TextStyle(
+      fontWeight: FontWeight.w900,
+      fontSize: 14, // 👈 STØRRE
+    );
 
     return Row(
       children: const [
-        SizedBox(width: 105, child: Text("Date", style: headerStyle)),
-        SizedBox(width: 12),
-        Expanded(child: Text("Route", style: headerStyle)),
-        SizedBox(width: 12),
         SizedBox(
-            width: 70,
-            child: Text("KM", style: headerStyle, textAlign: TextAlign.right)),
+          width: 105,
+          child: Text("Date", style: headerStyle),
+        ),
+        SizedBox(width: 12),
+
+        Expanded(
+          child: Text("Route", style: headerStyle),
+        ),
+
+        SizedBox(width: 12),
+
+        SizedBox(
+          width: 70,
+          child: Text(
+            "KM",
+            style: headerStyle,
+            textAlign: TextAlign.right,
+          ),
+        ),
+
         SizedBox(width: 10),
+
         SizedBox(width: 66),
       ],
     );
   }
 }
-
 class _RoutesTableRow extends StatelessWidget {
   final String date;
   final String route;
   final double? km;
+  final Map<String, double> countryKm;
+
   final VoidCallback onEdit;
   final VoidCallback onDelete;
 
@@ -1587,64 +2030,118 @@ class _RoutesTableRow extends StatelessWidget {
     required this.date,
     required this.route,
     required this.km,
+    required this.countryKm,
     required this.onEdit,
     required this.onDelete,
   });
+
+  String _buildCountryKmText() {
+    if (countryKm.isEmpty) return "";
+
+    final buffer = StringBuffer();
+
+    countryKm.forEach((country, value) {
+      if (value > 0) {
+        buffer.writeln(
+          "$country: ${value.toStringAsFixed(0)} km",
+        );
+      }
+    });
+
+    return buffer.toString().trim();
+  }
 
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
 
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8),
+    final tooltipText = _buildCountryKmText();
+
+    return Container(
+      padding: const EdgeInsets.symmetric(
+        vertical: 14, // 👈 MER HØYDE
+        horizontal: 4,
+      ),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
+          // -------- DATE
           SizedBox(
-              width: 105,
-              child: Text(date,
-                  style: const TextStyle(
-                      fontWeight: FontWeight.w800, fontSize: 12))),
-          const SizedBox(width: 12),
-          Expanded(
+            width: 105,
             child: Text(
-              route,
-              style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 12),
-              overflow: TextOverflow.ellipsis,
-              maxLines: 1,
-              softWrap: false,
-            ),
-          ),
-          const SizedBox(width: 12),
-          SizedBox(
-            width: 70,
-            child: Text(
-              km == null ? "?" : km!.toStringAsFixed(0),
-              textAlign: TextAlign.right,
-              style: TextStyle(
+              date,
+              style: const TextStyle(
                 fontWeight: FontWeight.w900,
-                fontSize: 12,
-                color: km == null ? cs.error : cs.onSurface,
+                fontSize: 15, // 👈 større innhold
               ),
             ),
           ),
-          const SizedBox(width: 10),
+
+          const SizedBox(width: 12),
+
+          // -------- ROUTE
+          Expanded(
+            child: Text(
+              route,
+              style: const TextStyle(
+                fontWeight: FontWeight.w800,
+                fontSize: 15, // 👈 større innhold
+              ),
+              overflow: TextOverflow.ellipsis,
+              maxLines: 2, // 👈 tillat 2 linjer
+            ),
+          ),
+
+          const SizedBox(width: 12),
+
+          // -------- KM
+          SizedBox(
+            width: 70,
+            child: Tooltip(
+              message: tooltipText.isEmpty
+                  ? "No country breakdown"
+                  : tooltipText,
+              preferBelow: false,
+              child: Text(
+                km == null ? "?" : km!.toStringAsFixed(0),
+                textAlign: TextAlign.right,
+                style: TextStyle(
+                  fontWeight: FontWeight.w900,
+                  fontSize: 15, // 👈 større
+                  color: km == null ? cs.error : cs.onSurface,
+                ),
+              ),
+            ),
+          ),
+
+          const SizedBox(width: 12),
+
+          // -------- BUTTONS
           SizedBox(
             width: 66,
             child: Row(
               mainAxisAlignment: MainAxisAlignment.end,
               children: [
                 IconButton(
-                  constraints: const BoxConstraints(),
+                  constraints: const BoxConstraints(
+                    minHeight: 36,
+                    minWidth: 36,
+                  ),
                   padding: EdgeInsets.zero,
                   onPressed: onEdit,
-                  icon: const Icon(Icons.edit, size: 18),
+                  icon: const Icon(Icons.edit, size: 20),
                 ),
+
                 const SizedBox(width: 6),
+
                 IconButton(
-                  constraints: const BoxConstraints(),
+                  constraints: const BoxConstraints(
+                    minHeight: 36,
+                    minWidth: 36,
+                  ),
                   padding: EdgeInsets.zero,
                   onPressed: onDelete,
-                  icon: const Icon(Icons.delete_outline, size: 18),
+                  icon: const Icon(Icons.delete_outline, size: 20),
                 ),
               ],
             ),
@@ -1654,7 +2151,6 @@ class _RoutesTableRow extends StatelessWidget {
     );
   }
 }
-
 class _LocationAutoComplete extends StatelessWidget {
   final TextEditingController controller;
   final List<String> suggestions;

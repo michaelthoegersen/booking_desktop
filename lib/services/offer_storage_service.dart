@@ -322,7 +322,7 @@ static Future<void> saveToSamletData({
       'ferry': '',
       'vedlegg': '',
       'contact': offer.contact,
-      'status': 'Forespørsel',
+      'status': 'Draft',
       'kilde': kilde,
     },
     onConflict: 'dato,kilde');

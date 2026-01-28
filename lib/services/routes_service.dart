@@ -18,15 +18,29 @@ class RoutesService {
   }) async {
     final a = _norm(from);
     final b = _norm(to);
+
     if (a.isEmpty || b.isEmpty) return null;
+
+    const selectFields = '''
+      distance_total_km,
+      ferry_price,
+      toll_nightliner,
+      extra,
+      km_dk,
+      km_de,
+      km_be,
+      km_pl,
+      km_au,
+      km_hr,
+      km_si,
+      km_other
+    ''';
 
     try {
       // 1️⃣ Eksakt match
       final exact = await _client
           .from('routes_all')
-          .select(
-            'distance_total_km, ferry_price, toll_nightliner, extra',
-          )
+          .select(selectFields)
           .eq('from_place', a)
           .eq('to_place', b)
           .limit(1);
@@ -38,9 +52,7 @@ class RoutesService {
       // 2️⃣ Reverse match
       final reverse = await _client
           .from('routes_all')
-          .select(
-            'distance_total_km, ferry_price, toll_nightliner, extra',
-          )
+          .select(selectFields)
           .eq('from_place', b)
           .eq('to_place', a)
           .limit(1);
