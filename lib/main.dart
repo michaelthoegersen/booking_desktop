@@ -13,7 +13,7 @@ import 'pages/edit_offer_page.dart';
 import 'pages/customers_page.dart';
 import 'pages/settings_page.dart';
 import 'pages/routes_admin_page.dart';
-import 'pages/calendar_page.dart'; // ✅ CALENDAR
+import 'pages/calendar_page.dart'; // ✅ NY
 
 import 'state/settings_store.dart';
 import 'ui/css_theme.dart';
@@ -83,14 +83,13 @@ class BookingApp extends StatelessWidget {
       // --------------------------------------------------
       redirect: (context, state) {
         final loggedIn = isLoggedIn;
+
         final goingToLogin = state.matchedLocation == "/login";
 
-        // Ikke logget inn → login
         if (!loggedIn && !goingToLogin) {
           return "/login";
         }
 
-        // Logget inn → ikke login
         if (loggedIn && goingToLogin) {
           return "/";
         }
@@ -109,18 +108,11 @@ class BookingApp extends StatelessWidget {
               children: [
                 const Text(
                   "Page not found",
-                  style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                  ),
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                 ),
-
                 const SizedBox(height: 12),
-
                 Text(state.error?.toString() ?? ""),
-
                 const SizedBox(height: 24),
-
                 FilledButton(
                   onPressed: () => context.go("/"),
                   child: const Text("Go to dashboard"),
@@ -143,7 +135,6 @@ class BookingApp extends StatelessWidget {
           builder: (context, state, child) {
             return AppShell(child: child);
           },
-
           routes: [
             // ---------------- DASHBOARD ----------------
             GoRoute(
@@ -174,7 +165,7 @@ class BookingApp extends StatelessWidget {
               builder: (context, state) => const EditOfferPage(),
             ),
 
-            // ---------------- CALENDAR ---------------- ✅
+            // ---------------- CALENDAR ---------------- ✅ NY
             GoRoute(
               path: "/calendar",
               builder: (context, state) => const CalendarPage(),
@@ -184,7 +175,7 @@ class BookingApp extends StatelessWidget {
             GoRoute(
               path: "/customers",
               builder: (context, state) =>
-                  const CustomersAdminPage(),
+                  const CustomersPage(),
             ),
 
             // ---------------- SETTINGS ----------------

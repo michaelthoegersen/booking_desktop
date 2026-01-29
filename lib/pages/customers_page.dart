@@ -3,6 +3,8 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../widgets/new_company_dialog.dart';
+
 class CustomersPage extends StatefulWidget {
   const CustomersPage({super.key});
 
@@ -17,6 +19,7 @@ class _CustomersPageState extends State<CustomersPage> {
 
   Timer? _debounce;
 
+  // DATA
   List<Map<String, dynamic>> _companies = [];
   List<Map<String, dynamic>> _contacts = [];
   List<Map<String, dynamic>> _productions = [];
@@ -26,9 +29,9 @@ class _CustomersPageState extends State<CustomersPage> {
   bool _loadingCompanies = false;
   bool _loadingDetails = false;
 
-  // --------------------------------------------------
+  // ==================================================
   // INIT
-  // --------------------------------------------------
+  // ==================================================
   @override
   void initState() {
     super.initState();
@@ -42,28 +45,54 @@ class _CustomersPageState extends State<CustomersPage> {
     super.dispose();
   }
 
-  // --------------------------------------------------
-  // LOAD COMPANIES (WITH OPTIONAL SEARCH)
-  // --------------------------------------------------
+  // ==================================================
+  // LOAD COMPANIES (SEARCH + AUTOSELECT)
+  // ==================================================
   Future<void> _loadCompanies({String? search}) async {
     setState(() => _loadingCompanies = true);
 
     try {
-      final query = _client.from('companies').select();
+      var query = _client.from('companies').select();
 
-      if (search != null && search.trim().isNotEmpty) {
-        query.ilike('name', '%${search.trim()}%');
+      final q = search?.trim() ?? '';
+
+      if (q.isNotEmpty) {
+        query = query.ilike('name', '%$q%');
       }
 
       final res = await query.order('name');
 
       if (!mounted) return;
 
+      final list = List<Map<String, dynamic>>.from(res);
+
       setState(() {
-        _companies = List<Map<String, dynamic>>.from(res);
+        _companies = list;
       });
+
+      // Auto-select
+      if (list.isNotEmpty) {
+        final stillExists = _selectedCompany != null &&
+            list.any((c) => c['id'] == _selectedCompany!['id']);
+
+        if (!stillExists) {
+          final first = list.first;
+
+          setState(() {
+            _selectedCompany = first;
+          });
+
+          await _loadDetails(first['id']);
+        }
+      } else {
+        setState(() {
+          _selectedCompany = null;
+          _contacts.clear();
+          _productions.clear();
+        });
+      }
     } catch (e) {
-      debugPrint('LOAD COMPANIES ERROR: $e');
+      debugPrint("LOAD COMPANIES ERROR: $e");
     } finally {
       if (mounted) {
         setState(() => _loadingCompanies = false);
@@ -71,9 +100,9 @@ class _CustomersPageState extends State<CustomersPage> {
     }
   }
 
-  // --------------------------------------------------
+  // ==================================================
   // LOAD DETAILS
-  // --------------------------------------------------
+  // ==================================================
   Future<void> _loadDetails(String companyId) async {
     setState(() => _loadingDetails = true);
 
@@ -96,8 +125,6 @@ class _CustomersPageState extends State<CustomersPage> {
         _contacts = List<Map<String, dynamic>>.from(contacts);
         _productions = List<Map<String, dynamic>>.from(productions);
       });
-    } catch (e) {
-      debugPrint('LOAD DETAILS ERROR: $e');
     } finally {
       if (mounted) {
         setState(() => _loadingDetails = false);
@@ -105,97 +132,322 @@ class _CustomersPageState extends State<CustomersPage> {
     }
   }
 
-  // --------------------------------------------------
-  // SEARCH HANDLER (DEBOUNCE)
-  // --------------------------------------------------
+  // ==================================================
+  // SEARCH
+  // ==================================================
   void _onSearchChanged(String value) {
     _debounce?.cancel();
 
     _debounce = Timer(const Duration(milliseconds: 300), () {
-      _selectedCompany = null;
-      _contacts = [];
-      _productions = [];
-
       _loadCompanies(search: value);
     });
   }
 
-  // --------------------------------------------------
+  // ==================================================
+  // COMPANY CRUD
+  // ==================================================
+  Future<void> _createCompany() async {
+    final created = await showDialog<bool>(
+      context: context,
+      builder: (_) => const NewCompanyDialog(),
+    );
+
+    if (created != true) return;
+
+    await _loadCompanies();
+  }
+
+  Future<void> _editCompany() async {
+    if (_selectedCompany == null) return;
+
+    final ctrl =
+        TextEditingController(text: _selectedCompany!['name']);
+
+    final name = await _showTextDialog(
+      title: "Edit company",
+      label: "Company name",
+      controller: ctrl,
+    );
+
+    if (name == null || name.isEmpty) return;
+
+    await _client
+        .from('companies')
+        .update({'name': name})
+        .eq('id', _selectedCompany!['id']);
+
+    await _loadCompanies();
+  }
+
+  Future<void> _deleteCompany() async {
+    if (_selectedCompany == null) return;
+
+    final name = _selectedCompany!['name'];
+    final id = _selectedCompany!['id'];
+
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) {
+        return AlertDialog(
+          title: const Text("Delete company"),
+          content: Text(
+            'Delete "$name"?\n\nAll contacts and productions will be removed.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text("Cancel"),
+            ),
+            FilledButton(
+              style: FilledButton.styleFrom(
+                backgroundColor: Colors.red,
+              ),
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text("Delete"),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (confirm != true) return;
+
+    await _client.from('contacts').delete().eq('company_id', id);
+    await _client.from('productions').delete().eq('company_id', id);
+    await _client.from('companies').delete().eq('id', id);
+
+    setState(() {
+      _selectedCompany = null;
+      _contacts.clear();
+      _productions.clear();
+    });
+
+    await _loadCompanies();
+  }
+
+  // ==================================================
+  // CONTACT CRUD
+  // ==================================================
+  Future<void> _createContact() async {
+    if (_selectedCompany == null) return;
+
+    final name = TextEditingController();
+    final phone = TextEditingController();
+    final email = TextEditingController();
+
+    final ok = await _showContactDialog(name, phone, email);
+
+    if (!ok) return;
+
+    await _client.from('contacts').insert({
+      'company_id': _selectedCompany!['id'],
+      'name': name.text.trim(),
+      'phone': phone.text.trim(),
+      'email': email.text.trim(),
+    });
+
+    _loadDetails(_selectedCompany!['id']);
+  }
+
+  Future<void> _editContact(Map<String, dynamic> c) async {
+    final name = TextEditingController(text: c['name']);
+    final phone = TextEditingController(text: c['phone']);
+    final email = TextEditingController(text: c['email']);
+
+    final ok = await _showContactDialog(name, phone, email);
+
+    if (!ok) return;
+
+    await _client.from('contacts').update({
+      'name': name.text.trim(),
+      'phone': phone.text.trim(),
+      'email': email.text.trim(),
+    }).eq('id', c['id']);
+
+    _loadDetails(_selectedCompany!['id']);
+  }
+
+  // ==================================================
+  // PRODUCTION CRUD
+  // ==================================================
+  Future<void> _createProduction() async {
+    if (_selectedCompany == null) return;
+
+    final ctrl = TextEditingController();
+
+    final name = await _showTextDialog(
+      title: "New production",
+      label: "Production name",
+      controller: ctrl,
+    );
+
+    if (name == null || name.isEmpty) return;
+
+    await _client.from('productions').insert({
+      'company_id': _selectedCompany!['id'],
+      'name': name,
+    });
+
+    _loadDetails(_selectedCompany!['id']);
+  }
+
+  Future<void> _editProduction(Map<String, dynamic> p) async {
+    final ctrl = TextEditingController(text: p['name']);
+
+    final name = await _showTextDialog(
+      title: "Edit production",
+      label: "Production name",
+      controller: ctrl,
+    );
+
+    if (name == null || name.isEmpty) return;
+
+    await _client
+        .from('productions')
+        .update({'name': name})
+        .eq('id', p['id']);
+
+    _loadDetails(_selectedCompany!['id']);
+  }
+
+  // ==================================================
+  // DIALOGS
+  // ==================================================
+  Future<String?> _showTextDialog({
+    required String title,
+    required String label,
+    required TextEditingController controller,
+  }) {
+    return showDialog<String>(
+      context: context,
+      builder: (ctx) {
+        return AlertDialog(
+          title: Text(title),
+          content: TextField(
+            controller: controller,
+            autofocus: true,
+            decoration: InputDecoration(labelText: label),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text("Cancel"),
+            ),
+            FilledButton(
+              onPressed: () {
+                Navigator.pop(ctx, controller.text.trim());
+              },
+              child: const Text("Save"),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Future<bool> _showContactDialog(
+    TextEditingController name,
+    TextEditingController phone,
+    TextEditingController email,
+  ) {
+    return showDialog<bool>(
+      context: context,
+      builder: (ctx) {
+        return AlertDialog(
+          title: const Text("Contact"),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(controller: name, decoration: const InputDecoration(labelText: "Name")),
+              TextField(controller: phone, decoration: const InputDecoration(labelText: "Phone")),
+              TextField(controller: email, decoration: const InputDecoration(labelText: "Email")),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text("Cancel"),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text("Save"),
+            ),
+          ],
+        );
+      },
+    ).then((v) => v ?? false);
+  }
+
+  // ==================================================
   // UI
-  // --------------------------------------------------
+  // ==================================================
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
 
-    return Row(
-      children: [
-        // ==================================================
-        // LEFT: COMPANIES
-        // ==================================================
-        SizedBox(
-          width: 340,
-          child: Container(
-            decoration: BoxDecoration(
-              border: Border(
-                right: BorderSide(color: cs.outlineVariant),
-              ),
-            ),
-            child: Column(
-              children: [
-                _buildCompaniesHeader(),
-                _buildSearch(),
-                Expanded(child: _buildCompaniesList()),
-              ],
-            ),
-          ),
-        ),
-
-        // ==================================================
-        // RIGHT: DETAILS
-        // ==================================================
-        Expanded(
-          child: _buildDetails(),
-        ),
-      ],
-    );
-  }
-
-  // --------------------------------------------------
-  // HEADER
-  // --------------------------------------------------
-  Widget _buildCompaniesHeader() {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 12, 12, 6),
+    return Container(
+      color: cs.surfaceVariant,
       child: Row(
         children: [
-          const Text(
-            "Companies",
-            style: TextStyle(fontWeight: FontWeight.w900, fontSize: 18),
+          // LEFT
+          SizedBox(
+            width: 340,
+            child: Card(
+              margin: const EdgeInsets.all(12),
+              elevation: 2,
+              child: Column(
+                children: [
+                  _buildHeader(),
+                  _buildSearch(),
+                  Expanded(child: _buildCompanies()),
+                ],
+              ),
+            ),
           ),
-          const Spacer(),
-          IconButton(
-            onPressed: () {
-              _searchCtrl.clear();
-              _loadCompanies();
-            },
-            icon: const Icon(Icons.refresh),
+
+          // RIGHT
+          Expanded(
+            child: Card(
+              margin: const EdgeInsets.fromLTRB(0, 12, 12, 12),
+              elevation: 2,
+              child: _buildDetails(),
+            ),
           ),
         ],
       ),
     );
   }
 
-  // --------------------------------------------------
-  // SEARCH FIELD
-  // --------------------------------------------------
+  // ==================================================
+  // LEFT
+  // ==================================================
+  Widget _buildHeader() {
+    return Padding(
+      padding: const EdgeInsets.all(12),
+      child: Row(
+        children: [
+          const Text(
+            "Companies",
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.w900),
+          ),
+          const Spacer(),
+          IconButton(
+            onPressed: _createCompany,
+            icon: const Icon(Icons.add),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildSearch() {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
+      padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
       child: TextField(
         controller: _searchCtrl,
         onChanged: _onSearchChanged,
         decoration: const InputDecoration(
-          hintText: "Search company...",
+          hintText: "Search...",
           prefixIcon: Icon(Icons.search),
           isDense: true,
         ),
@@ -203,37 +455,25 @@ class _CustomersPageState extends State<CustomersPage> {
     );
   }
 
-  // --------------------------------------------------
-  // COMPANIES LIST
-  // --------------------------------------------------
-  Widget _buildCompaniesList() {
+  Widget _buildCompanies() {
     if (_loadingCompanies) {
       return const Center(child: CircularProgressIndicator());
-    }
-
-    if (_companies.isEmpty) {
-      return const Center(child: Text("No companies found"));
     }
 
     return ListView.builder(
       itemCount: _companies.length,
       itemBuilder: (_, i) {
         final c = _companies[i];
+
         final selected = _selectedCompany?['id'] == c['id'];
 
         return ListTile(
-          title: Text(
-            c['name'] ?? '',
-            style: const TextStyle(fontWeight: FontWeight.w700),
-          ),
           selected: selected,
           selectedTileColor:
               Theme.of(context).colorScheme.primaryContainer,
+          title: Text(c['name'] ?? ''),
           onTap: () {
-            setState(() {
-              _selectedCompany = c;
-            });
-
+            setState(() => _selectedCompany = c);
             _loadDetails(c['id']);
           },
         );
@@ -241,105 +481,147 @@ class _CustomersPageState extends State<CustomersPage> {
     );
   }
 
-  // --------------------------------------------------
-  // DETAILS PANEL
-  // --------------------------------------------------
+  // ==================================================
+  // RIGHT
+  // ==================================================
   Widget _buildDetails() {
     if (_selectedCompany == null) {
-      return const Center(
-        child: Text("Select a company"),
-      );
+      return const Center(child: Text("Select company"));
     }
 
     if (_loadingDetails) {
       return const Center(child: CircularProgressIndicator());
     }
 
-    return Padding(
+    return ListView(
       padding: const EdgeInsets.all(18),
-      child: ListView(
+      children: [
+        _buildCompanyInfo(),
+        const SizedBox(height: 24),
+        _buildContacts(),
+        const SizedBox(height: 24),
+        _buildProductions(),
+      ],
+    );
+  }
+
+  Widget _buildCompanyInfo() {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+  color: Theme.of(context).colorScheme.surface,
+  borderRadius: BorderRadius.circular(12),
+  border: Border.all(
+    color: Theme.of(context).dividerColor,
+  ),
+),
+      child: Row(
         children: [
-          _buildCompanyInfo(),
-          const SizedBox(height: 24),
+          Expanded(
+            child: Text(
+              _selectedCompany!['name'],
+              style: const TextStyle(
+                fontSize: 26,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
 
-          _buildContacts(),
-          const SizedBox(height: 24),
+          IconButton(
+            onPressed: _editCompany,
+            icon: const Icon(Icons.edit),
+          ),
 
-          _buildProductions(),
+          IconButton(
+            onPressed: _deleteCompany,
+            icon: const Icon(Icons.delete),
+            color: Colors.red,
+          ),
         ],
       ),
     );
   }
 
-  // --------------------------------------------------
-  // COMPANY INFO
-  // --------------------------------------------------
-  Widget _buildCompanyInfo() {
-    return Text(
-      _selectedCompany!['name'] ?? '',
-      style: const TextStyle(
-        fontSize: 26,
-        fontWeight: FontWeight.w900,
-      ),
-    );
-  }
-
-  // --------------------------------------------------
-  // CONTACTS
-  // --------------------------------------------------
   Widget _buildContacts() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Text(
-          "Contacts",
-          style: TextStyle(fontSize: 18, fontWeight: FontWeight.w900),
-        ),
-        const SizedBox(height: 8),
-
-        if (_contacts.isEmpty)
-          const Text("No contacts"),
-
-        ..._contacts.map((c) {
-          return Card(
-            child: ListTile(
-              title: Text(c['name'] ?? ''),
-              subtitle: Text(
-                "${c['phone'] ?? ''} · ${c['email'] ?? ''}",
-              ),
-              leading: const Icon(Icons.person),
-            ),
-          );
-        }),
-      ],
+    return _sectionCard(
+      title: "Contacts",
+      onAdd: _createContact,
+      children: _contacts.isEmpty
+          ? [const Text("No contacts")]
+          : _contacts.map((c) {
+              return ListTile(
+                leading: const CircleAvatar(
+                  child: Icon(Icons.person),
+                ),
+                title: Text(c['name'] ?? ''),
+                subtitle:
+                    Text("${c['phone'] ?? ''} · ${c['email'] ?? ''}"),
+                trailing: IconButton(
+                  icon: const Icon(Icons.edit),
+                  onPressed: () => _editContact(c),
+                ),
+              );
+            }).toList(),
     );
   }
 
-  // --------------------------------------------------
-  // PRODUCTIONS
-  // --------------------------------------------------
   Widget _buildProductions() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Text(
-          "Productions",
-          style: TextStyle(fontSize: 18, fontWeight: FontWeight.w900),
-        ),
-        const SizedBox(height: 8),
+    return _sectionCard(
+      title: "Productions",
+      onAdd: _createProduction,
+      children: _productions.isEmpty
+          ? [const Text("No productions")]
+          : _productions.map((p) {
+              return ListTile(
+                leading: const CircleAvatar(
+                  child: Icon(Icons.movie),
+                ),
+                title: Text(p['name'] ?? ''),
+                trailing: IconButton(
+                  icon: const Icon(Icons.edit),
+                  onPressed: () => _editProduction(p),
+                ),
+              );
+            }).toList(),
+    );
+  }
 
-        if (_productions.isEmpty)
-          const Text("No productions"),
-
-        ..._productions.map((p) {
-          return Card(
-            child: ListTile(
-              title: Text(p['name'] ?? ''),
-              leading: const Icon(Icons.movie),
+  Widget _sectionCard({
+    required String title,
+    required VoidCallback onAdd,
+    required List<Widget> children,
+  }) {
+    return Card(
+      margin: const EdgeInsets.only(bottom: 16),
+      elevation: 1,
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Text(
+                  title,
+                  style: const TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const Spacer(),
+                IconButton(
+                  onPressed: onAdd,
+                  icon: const Icon(Icons.add),
+                ),
+              ],
             ),
-          );
-        }),
-      ],
+
+            const Divider(),
+
+            ...children,
+          ],
+        ),
+      ),
     );
   }
 }

@@ -2,28 +2,68 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
-// ------------------------------------------------------------
+
+// ============================================================
+// HELPERS
+// ============================================================
+
+DateTime startOfWeek(DateTime d) {
+  final diff = d.weekday - DateTime.monday;
+  return DateTime(d.year, d.month, d.day - diff);
+}
+
+DateTime normalize(DateTime d) {
+  return DateTime(d.year, d.month, d.day);
+}
+
+String fmt(DateTime d) {
+  return DateFormat("dd.MM.yyyy").format(d);
+}
+
+String fmtDb(DateTime d) {
+  return DateFormat("yyyy-MM-dd").format(d);
+}
+
+
+// ============================================================
+// DRAG DATA
+// ============================================================
+
+class DragBookingData {
+  final String production;
+  final String fromBus;
+  final DateTime from;
+  final DateTime to;
+
+  DragBookingData({
+    required this.production,
+    required this.fromBus,
+    required this.from,
+    required this.to,
+  });
+}
+// ============================================================
 // STATUS COLORS
-// ------------------------------------------------------------
-Color _statusColor(String? status) {
-  switch (status?.toLowerCase()) {
+// ============================================================
+
+Color statusColor(String? status) {
+  switch ((status ?? '').toLowerCase()) {
     case 'draft':
-      return Colors.purple.shade200;
-
+      return Colors.purple.shade300;
     case 'inquiry':
-      return Colors.orange.shade200;
-
+      return Colors.orange.shade300;
     case 'confirmed':
-      return Colors.green.shade200;
-
+      return Colors.green.shade400;
     default:
-      return Colors.blue.shade100;
+      return Colors.grey.shade300;
   }
 }
 
-// ------------------------------------------------------------
+
+// ============================================================
 // CALENDAR PAGE
-// ------------------------------------------------------------
+// ============================================================
+
 class CalendarPage extends StatefulWidget {
   const CalendarPage({super.key});
 
@@ -31,10 +71,18 @@ class CalendarPage extends StatefulWidget {
   State<CalendarPage> createState() => _CalendarPageState();
 }
 
+
 class _CalendarPageState extends State<CalendarPage> {
+
   final supabase = Supabase.instance.client;
 
+  static const double dayWidth = 90;
+  static const double busWidth = 140;
+
   late DateTime weekStart;
+  late DateTime monthStart;
+
+  bool isMonthView = false;
 
   bool loading = false;
   String? error;
@@ -47,50 +95,76 @@ class _CalendarPageState extends State<CalendarPage> {
     "CSS_1008",
   ];
 
+
+  // ============================================================
+  // INIT
+  // ============================================================
+
   @override
   void initState() {
     super.initState();
-    weekStart = _startOfWeek(DateTime.now());
-    _loadWeek();
+
+    weekStart = startOfWeek(DateTime.now());
+    monthStart = DateTime(DateTime.now().year, DateTime.now().month, 1);
+
+    loadWeek();
   }
 
-  // --------------------------------------------------
-  // LOAD (with buffer)
-  // --------------------------------------------------
-  Future<void> _loadWeek() async {
+
+  // ============================================================
+  // LOAD
+  // ============================================================
+
+  Future<void> loadWeek() async {
+
     setState(() {
       loading = true;
       error = null;
     });
 
     final start = weekStart.subtract(const Duration(days: 7));
-    final end = weekStart.add(const Duration(days: 13));
+    final end = weekStart.add(const Duration(days: 14));
+
+    await loadRange(start, end);
+  }
+
+
+  Future<void> loadMonth() async {
+
+    setState(() {
+      loading = true;
+      error = null;
+    });
+
+    final start = DateTime(monthStart.year, monthStart.month, 1);
+    final end = DateTime(monthStart.year, monthStart.month + 1, 0);
+
+    await loadRange(start, end);
+  }
+
+
+  Future<void> loadRange(DateTime start, DateTime end) async {
 
     try {
+
       final res = await supabase
           .from('samletdata')
           .select()
-          .gte('dato', _fmtDb(start))
-          .lte('dato', _fmtDb(end));
+          .gte('dato', fmtDb(start))
+          .lte('dato', fmtDb(end));
 
       final rows = List<Map<String, dynamic>>.from(res);
 
-      final map =
-          <String, Map<DateTime, List<Map<String, dynamic>>>>{};
+      final map = <String, Map<DateTime, List<Map<String, dynamic>>>>{};
 
       for (final r in rows) {
+
         final bus = r['kilde']?.toString();
         final dateStr = r['dato'];
 
         if (bus == null || dateStr == null) continue;
 
-        final parsed = DateTime.parse(dateStr);
-
-        final date = DateTime(
-          parsed.year,
-          parsed.month,
-          parsed.day,
-        );
+        final date = normalize(DateTime.parse(dateStr));
 
         map.putIfAbsent(bus, () => {});
         map[bus]!.putIfAbsent(date, () => []);
@@ -98,151 +172,367 @@ class _CalendarPageState extends State<CalendarPage> {
       }
 
       if (mounted) {
-        setState(() => data = map);
+        setState(() {
+          data = map;
+        });
       }
+
     } catch (e) {
+
       if (mounted) {
-        setState(() => error = e.toString());
+        setState(() {
+          error = e.toString();
+        });
       }
+
     } finally {
+
       if (mounted) {
-        setState(() => loading = false);
+        setState(() {
+          loading = false;
+        });
       }
     }
   }
+    // ============================================================
+  // NAVIGATION
+  // ============================================================
 
-  void _prevWeek() {
-    setState(() {
+  void prev() {
+
+    if (isMonthView) {
+
+      monthStart = DateTime(
+        monthStart.year,
+        monthStart.month - 1,
+        1,
+      );
+
+      loadMonth();
+
+    } else {
+
       weekStart = weekStart.subtract(const Duration(days: 7));
-    });
-    _loadWeek();
+      loadWeek();
+    }
+
+    setState(() {});
   }
 
-  void _nextWeek() {
-    setState(() {
+
+  void next() {
+
+    if (isMonthView) {
+
+      monthStart = DateTime(
+        monthStart.year,
+        monthStart.month + 1,
+        1,
+      );
+
+      loadMonth();
+
+    } else {
+
       weekStart = weekStart.add(const Duration(days: 7));
-    });
-    _loadWeek();
+      loadWeek();
+    }
+
+    setState(() {});
   }
+
+
+  // ============================================================
+  // BUILD
+  // ============================================================
 
   @override
   Widget build(BuildContext context) {
-    final days =
-        List.generate(7, (i) => weekStart.add(Duration(days: i)));
+
+    final days = isMonthView
+        ? List.generate(
+            DateTime(monthStart.year, monthStart.month + 1, 0).day,
+            (i) => DateTime(
+              monthStart.year,
+              monthStart.month,
+              i + 1,
+            ),
+          )
+        : List.generate(
+            7,
+            (i) => weekStart.add(Duration(days: i)),
+          );
 
     return Padding(
-      padding: const EdgeInsets.all(18),
+      padding: const EdgeInsets.all(16),
+
       child: Column(
         children: [
-          _buildHeader(days),
+
+          buildHeader(days),
+
           const SizedBox(height: 12),
-          Expanded(child: _buildContent(days)),
+
+          buildContent(days),
         ],
       ),
     );
   }
+    // ============================================================
+  // HEADER
+  // ============================================================
 
-  Widget _buildHeader(List<DateTime> days) {
+  Widget buildHeader(List<DateTime> days) {
+
+    final title = isMonthView
+        ? DateFormat("MMMM yyyy").format(monthStart)
+        : "${fmt(days.first)} - ${fmt(days.last)}";
+
     return Row(
       children: [
+
         const Text(
           "Calendar",
-          style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+          style: TextStyle(
+            fontSize: 24,
+            fontWeight: FontWeight.bold,
+          ),
         ),
+
         const Spacer(),
+
         IconButton(
-            onPressed: _prevWeek,
-            icon: const Icon(Icons.chevron_left)),
-        Text("${_fmt(days.first)} - ${_fmt(days.last)}"),
+          icon: const Icon(Icons.chevron_left),
+          onPressed: prev,
+        ),
+
+        Text(title),
+
         IconButton(
-            onPressed: _nextWeek,
-            icon: const Icon(Icons.chevron_right)),
+          icon: const Icon(Icons.chevron_right),
+          onPressed: next,
+        ),
+
+        const SizedBox(width: 16),
+
+        SegmentedButton<bool>(
+
+          segments: const [
+
+            ButtonSegment(
+              value: false,
+              label: Text("Week"),
+            ),
+
+            ButtonSegment(
+              value: true,
+              label: Text("Month"),
+            ),
+          ],
+
+          selected: {isMonthView},
+
+          onSelectionChanged: (v) {
+
+            final val = v.first;
+
+            setState(() {
+              isMonthView = val;
+            });
+
+            val ? loadMonth() : loadWeek();
+          },
+        ),
       ],
     );
   }
 
-  Widget _buildContent(List<DateTime> days) {
+
+
+  // ============================================================
+  // CONTENT
+  // ============================================================
+
+  Widget buildContent(List<DateTime> days) {
+
     if (loading) {
-      return const Center(child: CircularProgressIndicator());
+      return const Expanded(
+        child: Center(
+          child: CircularProgressIndicator(),
+        ),
+      );
     }
 
     if (error != null) {
-      return _ErrorBox(error!);
+      return Expanded(
+        child: Center(
+          child: Text(
+            error!,
+            style: const TextStyle(color: Colors.red),
+          ),
+        ),
+      );
     }
 
-    return _buildGrid(days);
+    return buildGrid(days);
   }
+    // ============================================================
+  // GRID
+  // ============================================================
 
-  Widget _buildGrid(List<DateTime> days) {
-    return Column(
-      children: [
-        _buildHeaderRow(days),
-        for (final bus in buses) _buildTimelineRow(bus, days),
-      ],
+  Widget buildGrid(List<DateTime> days) {
+
+    final width = busWidth + dayWidth * days.length;
+
+    return Expanded(
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+
+        child: SizedBox(
+          width: width,
+
+          child: Column(
+            children: [
+
+              buildHeaderRow(days),
+
+              Expanded(
+                child: ListView(
+                  children: [
+                    for (final bus in buses)
+                      buildRow(bus, days),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 
-  Widget _buildHeaderRow(List<DateTime> days) {
+
+
+  // ============================================================
+  // HEADER ROW
+  // ============================================================
+
+  Widget buildHeaderRow(List<DateTime> days) {
+
     return Container(
-      height: 44,
-      color: Colors.grey.shade100,
+      height: 48,
+
+      decoration: BoxDecoration(
+        color: Colors.grey.shade100,
+
+        border: Border(
+          bottom: BorderSide(
+            color: Colors.grey.shade300,
+          ),
+        ),
+      ),
+
       child: Row(
         children: [
-          const SizedBox(width: 140),
+
+          const SizedBox(width: busWidth),
+
           for (final d in days)
-            Expanded(
-              child: Center(
-                child: Text(
-                  DateFormat("EEE\ndd.MM").format(d),
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(fontWeight: FontWeight.bold),
-                ),
+
+            SizedBox(
+              width: dayWidth,
+
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+
+                children: [
+
+                  Text(
+                    DateFormat("EEE").format(d),
+                    style: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+
+                  Text(
+                    DateFormat("dd.MM").format(d),
+                    style: const TextStyle(fontSize: 12),
+                  ),
+                ],
               ),
             ),
         ],
       ),
     );
   }
+  // ============================================================
+// ROW
+// ============================================================
 
-  Widget _buildTimelineRow(String bus, List<DateTime> days) {
-  return DragTarget<_DragBookingData>(
+Widget buildRow(String bus, List<DateTime> days) {
+
+  final segments = buildSegments(bus, days);
+
+  return DragTarget<DragBookingData>(
+
     onWillAccept: (data) {
       return data != null && data.fromBus != bus;
     },
 
     onAccept: (data) async {
+
       await supabase
           .from('samletdata')
           .update({'kilde': bus})
           .eq('produksjon', data.production)
           .eq('kilde', data.fromBus)
-          .gte('dato', _fmtDb(data.from))
-          .lte('dato', _fmtDb(data.to));
+          .gte('dato', fmtDb(data.from))
+          .lte('dato', fmtDb(data.to));
+
+      // Reload correct range
+      await loadRange(
+        isMonthView
+            ? DateTime(monthStart.year, monthStart.month, 1)
+            : weekStart.subtract(const Duration(days: 7)),
+        isMonthView
+            ? DateTime(monthStart.year, monthStart.month + 1, 0)
+            : weekStart.add(const Duration(days: 14)),
+      );
 
       if (mounted) {
-        _loadWeek();
+        setState(() {});
       }
     },
 
     builder: (context, candidate, rejected) {
-      final segments = _buildSegments(bus, days);
+
+      final highlight = candidate.isNotEmpty;
 
       return Container(
         height: 64,
+
         decoration: BoxDecoration(
+          color: highlight
+              ? Colors.blue.withOpacity(0.08)
+              : null,
+
           border: Border(
             bottom: BorderSide(
-              color: candidate.isNotEmpty
-                  ? Colors.blue
-                  : Colors.black12,
-              width: candidate.isNotEmpty ? 2 : 1,
+              color: Colors.grey.shade300,
             ),
           ),
         ),
+
         child: Row(
           children: [
-            _BusCell(bus),
-            Expanded(child: Row(children: segments)),
+
+            BusCell(bus),
+
+            SizedBox(
+              width: dayWidth * days.length,
+              child: Row(children: segments),
+            ),
           ],
         ),
       );
@@ -250,158 +540,159 @@ class _CalendarPageState extends State<CalendarPage> {
   );
 }
 
-  // --------------------------------------------------
-  // SEGMENTS
-  // --------------------------------------------------
-  List<Widget> _buildSegments(String bus, List<DateTime> days) {
-    final result = <Widget>[];
 
-    int i = 0;
 
-    while (i < days.length) {
-      final current = _normalize(days[i]);
+  // ============================================================
+// SEGMENTS (FULL PERIOD FIXED)
+// ============================================================
 
-      final items = data[bus]?[current] ?? [];
+List<Widget> buildSegments(
+  String bus,
+  List<DateTime> days,
+) {
+  final result = <Widget>[];
 
-      if (items.isEmpty) {
-        result.add(const Expanded(child: SizedBox()));
-        i++;
-        continue;
+  int i = 0;
+
+  while (i < days.length) {
+    final day = normalize(days[i]);
+
+    final items = data[bus]?[day] ?? [];
+
+    if (items.isEmpty) {
+      result.add(
+        SizedBox(width: dayWidth),
+      );
+      i++;
+      continue;
+    }
+
+    final prod = items.first['produksjon']?.toString() ?? '';
+
+    if (prod.isEmpty) {
+      result.add(
+        SizedBox(width: dayWidth),
+      );
+      i++;
+      continue;
+    }
+
+    // =====================================
+    // FIND FULL RANGE IN DATA (BACK + FORTH)
+    // =====================================
+
+    DateTime start = day;
+    DateTime end = day;
+
+    // Backwards
+    DateTime prev = start.subtract(const Duration(days: 1));
+
+    while (true) {
+      final prevItems = data[bus]?[prev];
+
+      if (prevItems == null ||
+          prevItems.isEmpty ||
+          prevItems.first['produksjon'] != prod) {
+        break;
       }
 
-      final prod =
-          items.first['produksjon']?.toString().trim() ?? '';
+      start = prev;
+      prev = prev.subtract(const Duration(days: 1));
+    }
 
-      final status =
-          items.first['status']?.toString().trim();
+    // Forwards
+    DateTime next = end.add(const Duration(days: 1));
 
-      if (prod.isEmpty) {
-        result.add(const Expanded(child: SizedBox()));
-        i++;
-        continue;
+    while (true) {
+      final nextItems = data[bus]?[next];
+
+      if (nextItems == null ||
+          nextItems.isEmpty ||
+          nextItems.first['produksjon'] != prod) {
+        break;
       }
 
-      DateTime from = current;
-      DateTime check = current.subtract(const Duration(days: 1));
+      end = next;
+      next = next.add(const Duration(days: 1));
+    }
 
-      while (true) {
-        final prev = data[bus]?[check];
+    // =====================================
+    // CALCULATE ONLY VISIBLE SPAN
+    // =====================================
 
-        if (prev == null || prev.isEmpty) break;
+    int span = 0;
 
-        final p =
-            prev.first['produksjon']?.toString().trim() ?? '';
+    DateTime cursor = start;
 
-        if (p != prod) break;
-
-        from = check;
-        check = check.subtract(const Duration(days: 1));
-      }
-
-      DateTime to = current;
-
-      check = current.add(const Duration(days: 1));
-
-      while (true) {
-        final next = data[bus]?[check];
-
-        if (next == null || next.isEmpty) break;
-
-        final p =
-            next.first['produksjon']?.toString().trim() ?? '';
-
-        if (p != prod) break;
-
-        to = check;
-        check = check.add(const Duration(days: 1));
-      }
-
-      int span = 1;
-
-      for (int j = i + 1; j < days.length; j++) {
-        final d = _normalize(days[j]);
-
-        if (d.isAfter(to)) break;
-
-        final next = data[bus]?[d];
-
-        if (next == null || next.isEmpty) break;
-
-        final p =
-            next.first['produksjon']?.toString().trim() ?? '';
-
-        if (p != prod) break;
-
+    while (!cursor.isAfter(end)) {
+      if (days.any((d) => normalize(d) == cursor)) {
         span++;
       }
 
-      result.add(
-        _BookingSegment(
-          title: prod,
-          span: span,
-          bus: bus,
-          from: from,
-          to: to,
-          status: status,
-        ),
-      );
-
-      i += span;
+      cursor = cursor.add(const Duration(days: 1));
     }
 
-    return result;
+    // =====================================
+    // ADD SEGMENT
+    // =====================================
+
+    result.add(
+      BookingSegment(
+        title: prod,
+        span: span,
+        bus: bus,
+        from: start,
+        to: end,
+        status: items.first['status'],
+        width: dayWidth,
+      ),
+    );
+
+    i += span;
   }
 
-  DateTime _normalize(DateTime d) =>
-      DateTime(d.year, d.month, d.day);
+  return result;
 }
+  } // <-- SLUTT på _CalendarPageState
 
-// --------------------------------------------------
+
+
+// ============================================================
 // BOOKING SEGMENT
-// --------------------------------------------------
-class _BookingSegment extends StatelessWidget {
+// ============================================================
+
+class BookingSegment extends StatelessWidget {
+
   final String title;
   final int span;
   final String bus;
   final DateTime from;
   final DateTime to;
   final String? status;
+  final double width;
 
-  const _BookingSegment({
+  const BookingSegment({
+    super.key,
     required this.title,
     required this.span,
     required this.bus,
     required this.from,
     required this.to,
     this.status,
+    required this.width,
   });
 
-  // --------------------------------------------------
-  // STATUS → COLOR
-  // --------------------------------------------------
-  Color _statusColor() {
-    switch ((status ?? '').toLowerCase()) {
-      case 'draft':
-        return Colors.purple.shade300;
 
-      case 'inquiry':
-        return Colors.orange.shade300;
 
-      case 'confirmed':
-        return Colors.green.shade400;
-
-      default:
-        return Colors.blue.shade100;
-    }
-  }
-
-  // --------------------------------------------------
+  // ============================================================
   // UPDATE STATUS
-  // --------------------------------------------------
+  // ============================================================
+
   Future<void> _updateStatus(
     BuildContext context,
     String newStatus,
   ) async {
+
     final sb = Supabase.instance.client;
 
     await sb
@@ -409,26 +700,33 @@ class _BookingSegment extends StatelessWidget {
         .update({'status': newStatus})
         .eq('produksjon', title)
         .eq('kilde', bus)
-        .gte('dato', _fmtDb(from))
-        .lte('dato', _fmtDb(to));
+        .gte('dato', fmtDb(from))
+        .lte('dato', fmtDb(to));
+
 
     if (context.mounted) {
+
       final parent =
           context.findAncestorStateOfType<_CalendarPageState>();
 
-      parent?._loadWeek();
+      parent?.loadWeek();
     }
   }
 
-  // --------------------------------------------------
-  // CONTEXT MENU (RIGHT CLICK)
-  // --------------------------------------------------
+
+
+  // ============================================================
+  // STATUS MENU
+  // ============================================================
+
   Future<void> _showStatusMenu(
     BuildContext context,
     TapDownDetails details,
   ) async {
+
     final overlay =
         Overlay.of(context).context.findRenderObject() as RenderBox;
+
 
     final position = RelativeRect.fromRect(
       Rect.fromLTWH(
@@ -440,226 +738,199 @@ class _BookingSegment extends StatelessWidget {
       Offset.zero & overlay.size,
     );
 
+
     final selected = await showMenu<String>(
+
       context: context,
       position: position,
+
       items: const [
+
         PopupMenuItem(
           value: 'draft',
-          child: Row(
-            children: [
-              Icon(Icons.circle, color: Colors.purple, size: 12),
-              SizedBox(width: 8),
-              Text("Draft"),
-            ],
-          ),
+          child: Text("Draft"),
         ),
+
         PopupMenuItem(
           value: 'inquiry',
-          child: Row(
-            children: [
-              Icon(Icons.circle, color: Colors.orange, size: 12),
-              SizedBox(width: 8),
-              Text("Inquiry"),
-            ],
-          ),
+          child: Text("Inquiry"),
         ),
+
         PopupMenuItem(
           value: 'confirmed',
-          child: Row(
-            children: [
-              Icon(Icons.circle, color: Colors.green, size: 12),
-              SizedBox(width: 8),
-              Text("Confirmed"),
-            ],
-          ),
+          child: Text("Confirmed"),
         ),
       ],
     );
+
 
     if (selected != null) {
       await _updateStatus(context, selected);
     }
   }
+// ============================================================
+// SEGMENT BODY
+// ============================================================
 
-  // --------------------------------------------------
-  // BUILD
-  // --------------------------------------------------
-  @override
-  Widget build(BuildContext context) {
-    return Expanded(
-      flex: span,
+Widget _buildBody(BuildContext context) {
+  return GestureDetector(
+    behavior: HitTestBehavior.opaque,
 
-      // 🔥 NYTT: Draggable wrapper
-      child: Draggable<_DragBookingData>(
-        data: _DragBookingData(
+    onDoubleTap: () async {
+      final changed = await showDialog<bool>(
+        context: context,
+        builder: (_) => EditCalendarDialog(
           production: title,
-          fromBus: bus,
+          bus: bus,
           from: from,
           to: to,
         ),
+      );
 
-        // Når man drar
-        feedback: Material(
-          color: Colors.transparent,
-          child: Container(
-            width: 160 * span.toDouble(),
-            padding: const EdgeInsets.all(6),
-            decoration: BoxDecoration(
-              color: _statusColor().withOpacity(0.85),
-              borderRadius: BorderRadius.circular(6),
-              boxShadow: const [
-                BoxShadow(
-                  color: Colors.black26,
-                  blurRadius: 6,
-                ),
-              ],
-            ),
-            child: Text(
-              title,
-              style: const TextStyle(
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-          ),
+      if (changed == true && context.mounted) {
+        final parent =
+            context.findAncestorStateOfType<_CalendarPageState>();
+
+        parent?.loadWeek();
+      }
+    },
+
+    onSecondaryTapDown: (d) {
+      _showStatusMenu(context, d);
+    },
+
+    child: Container(
+      margin: const EdgeInsets.all(4),
+      padding: const EdgeInsets.all(6),
+
+      decoration: BoxDecoration(
+        color: statusColor(status),
+        borderRadius: BorderRadius.circular(6),
+      ),
+
+      child: Text(
+        title,
+        overflow: TextOverflow.ellipsis,
+        style: const TextStyle(
+          fontWeight: FontWeight.bold,
         ),
+      ),
+    ),
+  );
+}
 
-        // Når feltet er tomt mens man drar
-        childWhenDragging: Container(
-          margin: const EdgeInsets.all(4),
+// ============================================================
+// BUILD (DRAGGABLE + EXPANDED)
+// ============================================================
+
+@override
+Widget build(BuildContext context) {
+  return Expanded(
+    flex: span,
+
+    child: Draggable<DragBookingData>(
+      data: DragBookingData(
+        production: title,
+        fromBus: bus,
+        from: from,
+        to: to,
+      ),
+
+      affinity: Axis.vertical,
+
+      // =========================
+      // Preview while dragging
+      // =========================
+      feedback: Material(
+        color: Colors.transparent,
+
+        child: Container(
+          width: width * span,
+          padding: const EdgeInsets.all(6),
+
           decoration: BoxDecoration(
-            color: Colors.grey.shade300,
+            color: statusColor(status).withOpacity(0.9),
             borderRadius: BorderRadius.circular(6),
+
+            boxShadow: const [
+              BoxShadow(
+                color: Colors.black26,
+                blurRadius: 6,
+              ),
+            ],
+          ),
+
+          child: Text(
+            title,
+            style: const TextStyle(
+              fontWeight: FontWeight.bold,
+            ),
           ),
         ),
+      ),
 
-        // 👇 Din originale widget (uratørt)
-        child: GestureDetector(
-          behavior: HitTestBehavior.opaque,
+      // =========================
+      // Placeholder
+      // =========================
+      childWhenDragging: Opacity(
+        opacity: 0.3,
+        child: _buildBody(context),
+      ),
 
-          // ---------------- Double click → Edit
-          onDoubleTap: () async {
-            final changed = await showDialog<bool>(
-              context: context,
-              builder: (_) => _EditCalendarDialog(
-                production: title,
-                bus: bus,
-                from: from,
-                to: to,
-              ),
-            );
+      // =========================
+      // Normal
+      // =========================
+      child: _buildBody(context),
+    ),
+  );
+}
+}
+// ============================================================
+// BUS CELL
+// ============================================================
 
-            if (changed == true && context.mounted) {
-              final parent =
-                  context.findAncestorStateOfType<_CalendarPageState>();
+class BusCell extends StatelessWidget {
 
-              parent?._loadWeek();
-            }
-          },
+  final String bus;
 
-          // ---------------- Right click → Status menu
-          onSecondaryTapDown: (details) {
-            _showStatusMenu(context, details);
-          },
+  const BusCell(this.bus, {super.key});
 
-          child: Container(
-            margin: const EdgeInsets.all(4),
-            padding: const EdgeInsets.all(6),
-            decoration: BoxDecoration(
-              color: _statusColor(),
-              borderRadius: BorderRadius.circular(6),
-            ),
-            child: Text(
-              title,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
-                fontWeight: FontWeight.bold,
-                color: Colors.black87,
-              ),
-            ),
-          ),
+
+  @override
+  Widget build(BuildContext context) {
+
+    return Container(
+      width: 140,
+
+      padding: const EdgeInsets.symmetric(horizontal: 12),
+
+      alignment: Alignment.centerLeft,
+
+      child: Text(
+        bus,
+        style: const TextStyle(
+          fontWeight: FontWeight.bold,
         ),
       ),
     );
   }
 }
 
-// --------------------------------------------------
-// UPDATE STATUS
-// --------------------------------------------------
-Future<void> _updateStatus(
-  BuildContext context,
-  String status,
-  String production,
-  String bus,
-  DateTime from,
-  DateTime to,
-) async {
-  final sb = Supabase.instance.client;
 
-  await sb
-      .from('samletdata')
-      .update({'status': status})
-      .eq('produksjon', production)
-      .eq('kilde', bus)
-      .gte('dato', _fmtDb(from))
-      .lte('dato', _fmtDb(to));
 
-  if (context.mounted) {
-    final parent =
-        context.findAncestorStateOfType<_CalendarPageState>();
+// ============================================================
+// EDIT DIALOG
+// ============================================================
 
-    parent?._loadWeek();
-  }
-}
+class EditCalendarDialog extends StatefulWidget {
 
-// --------------------------------------------------
-// BUS CELL
-// --------------------------------------------------
-class _BusCell extends StatelessWidget {
-  final String bus;
-
-  const _BusCell(this.bus);
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: 140,
-      padding: const EdgeInsets.symmetric(horizontal: 12),
-      alignment: Alignment.centerLeft,
-      child: Text(bus,
-          style: const TextStyle(fontWeight: FontWeight.bold)),
-    );
-  }
-}
-
-// --------------------------------------------------
-// ERROR BOX
-// --------------------------------------------------
-class _ErrorBox extends StatelessWidget {
-  final String error;
-
-  const _ErrorBox(this.error);
-
-  @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: Text(error,
-          style: const TextStyle(color: Colors.red)),
-    );
-  }
-}
-
-// --------------------------------------------------
-// EDIT DIALOG (UNCHANGED)
-// --------------------------------------------------
-class _EditCalendarDialog extends StatefulWidget {
   final String production;
   final String bus;
   final DateTime from;
   final DateTime to;
 
-  const _EditCalendarDialog({
+  const EditCalendarDialog({
+    super.key,
     required this.production,
     required this.bus,
     required this.from,
@@ -667,105 +938,328 @@ class _EditCalendarDialog extends StatefulWidget {
   });
 
   @override
-  State<_EditCalendarDialog> createState() =>
+  State<EditCalendarDialog> createState() =>
       _EditCalendarDialogState();
 }
 
-class _EditCalendarDialogState
-    extends State<_EditCalendarDialog> {
+
+
+// ============================================================
+// EDIT DIALOG STATE
+// ============================================================
+
+class _EditCalendarDialogState extends State<EditCalendarDialog> {
 
   final supabase = Supabase.instance.client;
 
-  final sjafor = TextEditingController();
-  final status = TextEditingController();
+
+  final sjaforCtrl = TextEditingController();
+  final statusCtrl = TextEditingController();
+
+
+  final Map<String, TextEditingController> dDriveCtrls = {};
+  final Map<String, TextEditingController> itinCtrls = {};
+  final Map<String, TextEditingController> timeCtrls = {};
+  final Map<String, TextEditingController> venueCtrls = {};
+  final Map<String, TextEditingController> addrCtrls = {};
+  final Map<String, TextEditingController> commentCtrls = {};
+
+
+  final List<Map<String, dynamic>> rows = [];
+
 
   bool loading = true;
   bool saving = false;
 
+  int activeIndex = 0;
+
+
+
+  // ============================================================
+  // INIT
+  // ============================================================
+
   @override
   void initState() {
     super.initState();
-    _load();
+    load();
   }
 
-  Future<void> _load() async {
+
+
+  // ============================================================
+  // LOAD
+  // ============================================================
+
+  Future<void> load() async {
+
     final res = await supabase
         .from('samletdata')
         .select()
         .eq('produksjon', widget.production)
         .eq('kilde', widget.bus)
-        .gte('dato', _fmtDb(widget.from))
-        .lte('dato', _fmtDb(widget.to));
+        .gte('dato', fmtDb(widget.from))
+        .lte('dato', fmtDb(widget.to))
+        .order('dato');
 
-    final rows = List<Map<String, dynamic>>.from(res);
 
-    if (rows.isNotEmpty) {
-      sjafor.text = rows.first['sjafor'] ?? '';
-      status.text = rows.first['status'] ?? '';
+    final list = List<Map<String, dynamic>>.from(res);
+
+
+    if (list.isEmpty) {
+
+      setState(() {
+        loading = false;
+      });
+
+      return;
     }
 
+
+    sjaforCtrl.text = list.first['sjafor'] ?? '';
+    statusCtrl.text = list.first['status'] ?? '';
+
+
+    rows.addAll(list);
+
+
+    for (final r in list) {
+
+      final id = r['id'].toString();
+
+
+      dDriveCtrls[id] =
+          TextEditingController(text: r['d_drive'] ?? '');
+
+      itinCtrls[id] =
+          TextEditingController(text: r['getin'] ?? '');
+
+      timeCtrls[id] =
+          TextEditingController(text: r['tid'] ?? '');
+
+      venueCtrls[id] =
+          TextEditingController(text: r['venue'] ?? '');
+
+      addrCtrls[id] =
+          TextEditingController(text: r['adresse'] ?? '');
+
+      commentCtrls[id] =
+          TextEditingController(text: r['kommentarer'] ?? '');
+    }
+
+
     if (mounted) {
-      setState(() => loading = false);
+      setState(() {
+        loading = false;
+      });
     }
   }
 
-  Future<void> _save() async {
+
+
+  // ============================================================
+  // SAVE
+  // ============================================================
+
+  Future<void> save() async {
+
     if (saving) return;
 
-    setState(() => saving = true);
+
+    setState(() {
+      saving = true;
+    });
+
 
     try {
+
       await supabase
           .from('samletdata')
           .update({
-            'sjafor': sjafor.text.trim(),
-            'status': status.text.trim(),
+            'sjafor': sjaforCtrl.text.trim(),
+            'status': statusCtrl.text.trim(),
           })
           .eq('produksjon', widget.production)
           .eq('kilde', widget.bus)
-          .gte('dato', _fmtDb(widget.from))
-          .lte('dato', _fmtDb(widget.to));
+          .gte('dato', fmtDb(widget.from))
+          .lte('dato', fmtDb(widget.to));
+
+
+      for (final r in rows) {
+
+        final id = r['id'].toString();
+
+
+        await supabase
+            .from('samletdata')
+            .update({
+
+              'd_drive': dDriveCtrls[id]?.text.trim() ?? '',
+              'getin': itinCtrls[id]?.text.trim() ?? '',
+              'tid': timeCtrls[id]?.text.trim() ?? '',
+              'venue': venueCtrls[id]?.text.trim() ?? '',
+              'adresse': addrCtrls[id]?.text.trim() ?? '',
+              'kommentarer': commentCtrls[id]?.text.trim() ?? '',
+            })
+            .eq('id', id);
+      }
+
 
       if (!mounted) return;
 
       Navigator.pop(context, true);
 
     } finally {
+
       if (mounted) {
-        setState(() => saving = false);
+        setState(() {
+          saving = false;
+        });
       }
     }
   }
 
+
+
+  // ============================================================
+  // DISPOSE
+  // ============================================================
+
   @override
   void dispose() {
-    sjafor.dispose();
-    status.dispose();
+
+    sjaforCtrl.dispose();
+    statusCtrl.dispose();
+
+
+    for (final m in [
+
+      dDriveCtrls,
+      itinCtrls,
+      timeCtrls,
+      venueCtrls,
+      addrCtrls,
+      commentCtrls,
+    ]) {
+
+      for (final c in m.values) {
+        c.dispose();
+      }
+    }
+
     super.dispose();
   }
 
+
+
+  // ============================================================
+  // UI
+  // ============================================================
+
   @override
   Widget build(BuildContext context) {
+
     return AlertDialog(
+
       title: Text(
         "Edit ${widget.production}\n"
-        "${_fmt(widget.from)} - ${_fmt(widget.to)}",
+        "${fmt(widget.from)} - ${fmt(widget.to)}",
       ),
 
+
       content: SizedBox(
-        width: 400,
+        width: 520,
+
         child: loading
-            ? const Center(child: CircularProgressIndicator())
-            : Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  _field("Sjåfør", sjafor),
-                  _field("Status", status),
-                ],
+            ? const Center(
+                child: CircularProgressIndicator(),
+              )
+            : SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+
+                  children: [
+
+                    _field("Sjåfør", sjaforCtrl),
+                    _field("Status", statusCtrl),
+
+                    const SizedBox(height: 16),
+                    const Divider(),
+
+
+                    Row(
+                      children: [
+
+                        IconButton(
+                          icon: const Icon(Icons.chevron_left),
+                          onPressed: activeIndex > 0
+                              ? () {
+                                  setState(() {
+                                    activeIndex--;
+                                  });
+                                }
+                              : null,
+                        ),
+
+
+                        Expanded(
+                          child: Column(
+                            children: [
+
+                              Text(
+                                DateFormat("dd.MM.yyyy").format(
+                                  DateTime.parse(
+                                    rows[activeIndex]['dato'],
+                                  ),
+                                ),
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 16,
+                                ),
+                              ),
+
+
+                              Text(
+                                "Day ${activeIndex + 1} of ${rows.length}",
+                                style: const TextStyle(fontSize: 12),
+                              ),
+                            ],
+                          ),
+                        ),
+
+
+                        IconButton(
+                          icon: const Icon(Icons.chevron_right),
+                          onPressed:
+                              activeIndex < rows.length - 1
+                                  ? () {
+                                      setState(() {
+                                        activeIndex++;
+                                      });
+                                    }
+                                  : null,
+                        ),
+                      ],
+                    ),
+
+
+                    const SizedBox(height: 16),
+
+
+                    _dayField("D.Drive", dDriveCtrls),
+                    _multiDayField("Itinerary", itinCtrls),
+                    _dayField("Tid", timeCtrls),
+                    _dayField("Venue", venueCtrls),
+                    _dayField("Adresse", addrCtrls),
+                    _multiDayField("Kommentar", commentCtrls),
+                  ],
+                ),
               ),
       ),
 
+
       actions: [
+
         TextButton(
           onPressed: saving
               ? null
@@ -773,8 +1267,10 @@ class _EditCalendarDialogState
           child: const Text("Cancel"),
         ),
 
+
         FilledButton(
-          onPressed: saving ? null : _save,
+          onPressed: saving ? null : save,
+
           child: saving
               ? const SizedBox(
                   width: 20,
@@ -787,11 +1283,20 @@ class _EditCalendarDialogState
     );
   }
 
+
+
+  // ============================================================
+  // HELPERS
+  // ============================================================
+
   Widget _field(String label, TextEditingController c) {
+
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
+
       child: TextField(
         controller: c,
+
         decoration: InputDecoration(
           border: const OutlineInputBorder(),
           labelText: label,
@@ -799,34 +1304,56 @@ class _EditCalendarDialogState
       ),
     );
   }
+
+
+  Widget _dayField(
+    String label,
+    Map<String, TextEditingController> map,
+  ) {
+
+    final id = rows[activeIndex]['id'].toString();
+
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+
+      child: TextField(
+        controller: map[id],
+
+        decoration: InputDecoration(
+          labelText: label,
+          border: const OutlineInputBorder(),
+        ),
+      ),
+    );
+  }
+
+
+  Widget _multiDayField(
+    String label,
+    Map<String, TextEditingController> map,
+  ) {
+
+    final id = rows[activeIndex]['id'].toString();
+
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+
+      child: TextField(
+        controller: map[id],
+
+        maxLines: null,
+        minLines: 3,
+
+        keyboardType: TextInputType.multiline,
+
+        decoration: InputDecoration(
+          labelText: label,
+          alignLabelWithHint: true,
+          border: const OutlineInputBorder(),
+        ),
+      ),
+    );
+  }
 }
-// --------------------------------------------------
-// DRAG DATA
-// --------------------------------------------------
-class _DragBookingData {
-  final String production;
-  final String fromBus;
-  final DateTime from;
-  final DateTime to;
-
-  _DragBookingData({
-    required this.production,
-    required this.fromBus,
-    required this.from,
-    required this.to,
-  });
-}
-
-// --------------------------------------------------
-// HELPERS
-// --------------------------------------------------
-DateTime _startOfWeek(DateTime d) {
-  final diff = d.weekday - DateTime.monday;
-  return DateTime(d.year, d.month, d.day - diff);
-}
-
-String _fmt(DateTime d) =>
-    DateFormat("dd.MM.yyyy").format(d);
-
-String _fmtDb(DateTime d) =>
-    DateFormat("yyyy-MM-dd").format(d);

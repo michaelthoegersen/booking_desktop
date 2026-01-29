@@ -124,34 +124,39 @@ class _SideNav extends StatelessWidget {
         child: Column(
           children: [
             // --------------------------------------------------
-            // LOGO
-            // --------------------------------------------------
-            Container(
-              height: 90,
-              width: double.infinity,
-              padding: const EdgeInsets.all(10),
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(16),
-                color: Colors.white,
-                border: Border.all(color: CssTheme.outline),
-              ),
-              child: Image.asset(
-                "assets/pdf/logos/TourFlowLogo.png",
-                fit: BoxFit.contain,
+// LOGO
+// --------------------------------------------------
+Padding(
+  padding: const EdgeInsets.only(bottom: 12),
+  child: SizedBox(
+    height: 120, // 👈 juster her hvis du vil større/mindre
+    width: double.infinity,
+    child: DecoratedBox(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: CssTheme.outline),
+      ),
+      child: Center(
+        child: Image.asset(
+          "assets/pdf/logos/TourFlowLogo.png",
+          height: 100, // 👈 selve logo-størrelsen
+          fit: BoxFit.contain,
 
-                errorBuilder: (context, error, stack) {
-                  return const Center(
-                    child: Text(
-                      "LOGO",
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        color: Colors.black54,
-                      ),
-                    ),
-                  );
-                },
+          errorBuilder: (context, error, stack) {
+            return const Text(
+              "LOGO",
+              style: TextStyle(
+                fontWeight: FontWeight.bold,
+                color: Colors.black54,
               ),
-            ),
+            );
+          },
+        ),
+      ),
+    ),
+  ),
+),
 
             const SizedBox(height: 14),
 

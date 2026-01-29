@@ -513,8 +513,8 @@ Widget _buildVatBox(
       return;
     }
 
-    // --------------------------------------------------
-    // 1️⃣ Lagre draft (Desktop DB)
+
+   // 1️⃣ Lagre draft (Desktop DB)
     // --------------------------------------------------
     final id = await OfferStorageService.saveDraft(
   id: _draftId,
@@ -1618,7 +1618,7 @@ for (int i = 0; i < round.entries.length; i++) {
 }
 
 // =================================================
-// LEFT CARD
+// LEFT CARD (WITH CONTACT ADMIN)
 // =================================================
 
 class _LeftOfferCard extends StatefulWidget {
@@ -1653,6 +1653,8 @@ class _LeftOfferCardState extends State<_LeftOfferCard> {
   String? _contactId;
   String? _productionId;
 
+  String? _currentCompanyId;
+
   // --------------------------------------------------
   // INIT
   // --------------------------------------------------
@@ -1664,6 +1666,12 @@ class _LeftOfferCardState extends State<_LeftOfferCard> {
       _companyCtrl.text = widget.offer.company;
       _restore(widget.offer.company);
     }
+  }
+
+  @override
+  void dispose() {
+    _companyCtrl.dispose();
+    super.dispose();
   }
 
   // --------------------------------------------------
@@ -1678,34 +1686,30 @@ class _LeftOfferCardState extends State<_LeftOfferCard> {
 
     if (r == null) return;
 
-    await _loadDetails(r['id'].toString());
+    _currentCompanyId = r['id'].toString();
 
-    if (mounted) {
-      setState(() {
-        final c = _contacts.firstWhere(
-          (e) => e['name'] == widget.offer.contact,
-          orElse: () => {},
-        );
+    await _loadDetails(_currentCompanyId!);
 
-        final p = _productions.firstWhere(
-          (e) => e['name'] == widget.offer.production,
-          orElse: () => {},
-        );
+    if (!mounted) return;
 
-        _contactId = c['id']?.toString();
-        _productionId = p['id']?.toString();
-      });
-    }
-  }
+    setState(() {
+      final c = _contacts.firstWhere(
+        (e) => e['name'] == widget.offer.contact,
+        orElse: () => {},
+      );
 
-  @override
-  void dispose() {
-    _companyCtrl.dispose();
-    super.dispose();
+      final p = _productions.firstWhere(
+        (e) => e['name'] == widget.offer.production,
+        orElse: () => {},
+      );
+
+      _contactId = c['id']?.toString();
+      _productionId = p['id']?.toString();
+    });
   }
 
   // --------------------------------------------------
-  // SEARCH
+  // SEARCH COMPANY
   // --------------------------------------------------
   Future<void> _search(String q) async {
     if (q.length < 2) {
@@ -1741,6 +1745,8 @@ class _LeftOfferCardState extends State<_LeftOfferCard> {
     final id = row['id']?.toString();
 
     if (id == null) return;
+
+    _currentCompanyId = id;
 
     setState(() {
       _companyCtrl.text = name;
@@ -1786,193 +1792,380 @@ class _LeftOfferCardState extends State<_LeftOfferCard> {
   }
 
   // --------------------------------------------------
+  // RELOAD CONTACTS
+  // --------------------------------------------------
+  Future<void> _reloadContacts() async {
+    if (_currentCompanyId == null) return;
+
+    final c = await _client
+        .from('contacts')
+        .select()
+        .eq('company_id', _currentCompanyId!)
+        .order('name');
+
+    if (!mounted) return;
+
+    setState(() {
+      _contacts = List<Map<String, dynamic>>.from(c);
+    });
+  }
+
+  // --------------------------------------------------
+  // CONTACT DIALOG
+  // --------------------------------------------------
+  Future<void> _openContactDialog({Map<String, dynamic>? existing}) async {
+    final nameCtrl =
+        TextEditingController(text: existing?['name'] ?? '');
+    final emailCtrl =
+        TextEditingController(text: existing?['email'] ?? '');
+    final phoneCtrl =
+        TextEditingController(text: existing?['phone'] ?? '');
+
+    final isEdit = existing != null;
+
+    final saved = await showDialog<bool>(
+      context: context,
+      builder: (ctx) {
+        return AlertDialog(
+          title: Text(isEdit ? "Edit contact" : "New contact"),
+
+          content: SizedBox(
+            width: 380,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+
+                TextField(
+                  controller: nameCtrl,
+                  decoration: const InputDecoration(
+                    labelText: "Name",
+                  ),
+                ),
+
+                const SizedBox(height: 10),
+
+                TextField(
+                  controller: emailCtrl,
+                  decoration: const InputDecoration(
+                    labelText: "Email",
+                  ),
+                ),
+
+                const SizedBox(height: 10),
+
+                TextField(
+                  controller: phoneCtrl,
+                  decoration: const InputDecoration(
+                    labelText: "Phone",
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text("Cancel"),
+            ),
+
+            FilledButton(
+              onPressed: () async {
+                final name = nameCtrl.text.trim();
+
+                if (name.isEmpty) return;
+
+                try {
+                  if (isEdit) {
+                    await _client
+                        .from('contacts')
+                        .update({
+                          'name': name,
+                          'email': emailCtrl.text.trim(),
+                          'phone': phoneCtrl.text.trim(),
+                        })
+                        .eq('id', existing!['id']);
+                  } else {
+                    await _client.from('contacts').insert({
+                      'company_id': _currentCompanyId,
+                      'name': name,
+                      'email': emailCtrl.text.trim(),
+                      'phone': phoneCtrl.text.trim(),
+                    });
+                  }
+
+                  if (!mounted) return;
+
+                  Navigator.pop(ctx, true);
+                } catch (e) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text("Save failed: $e")),
+                  );
+                }
+              },
+              child: const Text("Save"),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (saved == true) {
+      await _reloadContacts();
+    }
+  }
+
+  // --------------------------------------------------
   // UI
   // --------------------------------------------------
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
 
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: cs.surfaceContainerLowest,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: cs.outlineVariant),
-      ),
-      child: SingleChildScrollView(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              widget.draftId == null ? "New Offer" : "Edit Offer",
-              style: Theme.of(context)
-                  .textTheme
-                  .titleLarge
-                  ?.copyWith(fontWeight: FontWeight.w900),
-            ),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        return Container(
+          height: constraints.maxHeight,
+          padding: const EdgeInsets.all(16),
 
-            const SizedBox(height: 16),
+          decoration: BoxDecoration(
+            color: cs.surfaceContainerLowest,
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(color: cs.outlineVariant),
+          ),
 
-            const Text("Company", style: TextStyle(fontWeight: FontWeight.w900)),
-            const SizedBox(height: 6),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
 
-            TextField(
-              controller: _companyCtrl,
-              onChanged: _search,
-              decoration: InputDecoration(
-                labelText: "Search company",
-                prefixIcon: const Icon(Icons.apartment),
-                suffixIcon: _loading
-                    ? const SizedBox(
-                        width: 18,
-                        height: 18,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : null,
-              ),
-            ),
-
-            if (_companySuggestions.isNotEmpty)
-              Container(
-                margin: const EdgeInsets.only(top: 4),
-                constraints: const BoxConstraints(maxHeight: 220),
-                decoration: BoxDecoration(
-                  color: cs.surface,
-                  border: Border.all(color: cs.outlineVariant),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: ListView.builder(
-                  itemCount: _companySuggestions.length,
-                  itemBuilder: (_, i) {
-                    final c = _companySuggestions[i];
-                    return ListTile(
-                      dense: true,
-                      title: Text(c['name'] ?? ''),
-                      onTap: () => _select(c),
-                    );
-                  },
-                ),
+              // ---------- HEADER ----------
+              Text(
+                widget.draftId == null ? "New Offer" : "Edit Offer",
+                style: Theme.of(context)
+                    .textTheme
+                    .titleLarge
+                    ?.copyWith(fontWeight: FontWeight.w900),
               ),
 
-            const SizedBox(height: 16),
+              const SizedBox(height: 12),
 
-            // ---------------- CONTACT ----------------
-            const Text("Contact", style: TextStyle(fontWeight: FontWeight.w900)),
+              // ---------- SCROLL ----------
+              Expanded(
+                child: SingleChildScrollView(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
 
-            DropdownButtonFormField<String>(
-              value: _contactId,
+                      // ================= COMPANY =================
+                      const Text(
+                        "Company",
+                        style: TextStyle(fontWeight: FontWeight.w900),
+                      ),
 
-              style: TextStyle(
-                fontWeight: FontWeight.normal,
-                color: cs.onSurface,
-              ),
+                      const SizedBox(height: 6),
 
-              items: _contacts
-                  .map(
-                    (c) => DropdownMenuItem(
-                      value: c['id'].toString(),
-                      child: Text(
-                        c['name'] ?? '',
-                        style: TextStyle(
-                          fontWeight: FontWeight.normal,
-                          color: cs.onSurface,
+                      TextField(
+                        controller: _companyCtrl,
+                        onChanged: _search,
+                        decoration: InputDecoration(
+                          labelText: "Search company",
+                          prefixIcon: const Icon(Icons.apartment),
+                          suffixIcon: _loading
+                              ? const SizedBox(
+                                  width: 18,
+                                  height: 18,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
+                                )
+                              : null,
                         ),
                       ),
-                    ),
-                  )
-                  .toList(),
 
-              onChanged: (v) {
-                if (v == null) return;
+                      if (_companySuggestions.isNotEmpty)
+                        Container(
+                          margin: const EdgeInsets.only(top: 4),
+                          constraints:
+                              const BoxConstraints(maxHeight: 180),
+                          decoration: BoxDecoration(
+                            color: cs.surface,
+                            border: Border.all(color: cs.outlineVariant),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: ListView.builder(
+                            shrinkWrap: true,
+                            itemCount: _companySuggestions.length,
+                            itemBuilder: (_, i) {
+                              final c = _companySuggestions[i];
 
-                final ct =
-                    _contacts.firstWhere((e) => e['id'].toString() == v);
-
-                setState(() {
-                  _contactId = v;
-                  widget.offer.contact = ct['name'] ?? '';
-                });
-              },
-            ),
-
-            const SizedBox(height: 16),
-
-            // ---------------- PRODUCTION ----------------
-            const Text("Production",
-                style: TextStyle(fontWeight: FontWeight.w900)),
-
-            DropdownButtonFormField<String>(
-              value: _productionId,
-
-              style: TextStyle(
-                fontWeight: FontWeight.normal,
-                color: cs.onSurface,
-              ),
-
-              items: _productions
-                  .map(
-                    (p) => DropdownMenuItem(
-                      value: p['id'].toString(),
-                      child: Text(
-                        p['name'] ?? '',
-                        style: TextStyle(
-                          fontWeight: FontWeight.normal,
-                          color: cs.onSurface,
+                              return ListTile(
+                                dense: true,
+                                title: Text(c['name'] ?? ''),
+                                onTap: () => _select(c),
+                              );
+                            },
+                          ),
                         ),
+
+                      const SizedBox(height: 16),
+
+                      // ================= CONTACT =================
+                      const Text(
+                        "Contact",
+                        style: TextStyle(fontWeight: FontWeight.w900),
                       ),
-                    ),
-                  )
-                  .toList(),
 
-              onChanged: (v) {
-                if (v == null) return;
+                      const SizedBox(height: 6),
 
-                final pr =
-                    _productions.firstWhere((e) => e['id'].toString() == v);
+                      Row(
+                        children: [
 
-                setState(() {
-                  _productionId = v;
-                  widget.offer.production = pr['name'] ?? '';
-                });
-              },
-            ),
+                          Expanded(
+                            child: DropdownButtonFormField<String>(
+                              value: _contactId,
+                              isExpanded: true,
 
-            const SizedBox(height: 18),
+                              items: _contacts.map((c) {
+                                return DropdownMenuItem(
+                                  value: c['id'].toString(),
+                                  child: Text(
+                                    c['name'] ?? '',
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                );
+                              }).toList(),
 
-            // ---------------- BUS SETTINGS ----------------
-            _BusSettingsCard(
-              offer: widget.offer,
-              onChanged: () => setState(() {}),
-            ),
+                              onChanged: (v) {
+                                if (v == null) return;
 
-            const SizedBox(height: 18),
+                                final ct = _contacts.firstWhere(
+                                  (e) => e['id'].toString() == v,
+                                );
 
-            Divider(color: cs.outlineVariant),
+                                setState(() {
+                                  _contactId = v;
+                                  widget.offer.contact =
+                                      ct['name'] ?? '';
+                                });
+                              },
+                            ),
+                          ),
 
-            const SizedBox(height: 16),
+                          const SizedBox(width: 4),
 
-            Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: widget.onSave,
-                    icon: const Icon(Icons.save),
-                    label: const Text("Save draft"),
+                          IconButton(
+                            icon: const Icon(Icons.add),
+                            tooltip: "Add contact",
+                            onPressed: _currentCompanyId == null
+                                ? null
+                                : () => _openContactDialog(),
+                          ),
+
+                          IconButton(
+                            icon: const Icon(Icons.edit),
+                            tooltip: "Edit contact",
+                            onPressed: _contactId == null
+                                ? null
+                                : () {
+                                    final c = _contacts.firstWhere(
+                                      (e) =>
+                                          e['id'].toString() ==
+                                          _contactId,
+                                    );
+
+                                    _openContactDialog(existing: c);
+                                  },
+                          ),
+                        ],
+                      ),
+
+                      const SizedBox(height: 16),
+
+                      // ================= PRODUCTION =================
+                      const Text(
+                        "Production",
+                        style: TextStyle(fontWeight: FontWeight.w900),
+                      ),
+
+                      const SizedBox(height: 6),
+
+                      DropdownButtonFormField<String>(
+                        value: _productionId,
+                        isExpanded: true,
+
+                        items: _productions.map((p) {
+                          return DropdownMenuItem(
+                            value: p['id'].toString(),
+                            child: Text(
+                              p['name'] ?? '',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          );
+                        }).toList(),
+
+                        onChanged: (v) {
+                          if (v == null) return;
+
+                          final pr = _productions.firstWhere(
+                            (e) => e['id'].toString() == v,
+                          );
+
+                          setState(() {
+                            _productionId = v;
+                            widget.offer.production =
+                                pr['name'] ?? '';
+                          });
+                        },
+                      ),
+
+                      const SizedBox(height: 18),
+
+                      // ================= BUS =================
+                      _BusSettingsCard(
+                        offer: widget.offer,
+                        onChanged: () => setState(() {}),
+                      ),
+
+                      const SizedBox(height: 20),
+
+                      Divider(color: cs.outlineVariant),
+
+                      const SizedBox(height: 16),
+
+                      // ================= BUTTONS =================
+                      Row(
+                        children: [
+                          Expanded(
+                            child: OutlinedButton.icon(
+                              onPressed: widget.onSave,
+                              icon: const Icon(Icons.save),
+                              label: const Text("Save draft"),
+                            ),
+                          ),
+
+                          const SizedBox(width: 10),
+
+                          Expanded(
+                            child: FilledButton.icon(
+                              onPressed: widget.onExport,
+                              icon: const Icon(Icons.picture_as_pdf),
+                              label: const Text("Export PDF"),
+                            ),
+                          ),
+                        ],
+                      ),
+
+                      const SizedBox(height: 12),
+                    ],
                   ),
                 ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: FilledButton.icon(
-                    onPressed: widget.onExport,
-                    icon: const Icon(Icons.picture_as_pdf),
-                    label: const Text("Export PDF"),
-                  ),
-                ),
-              ],
-            ),
-          ],
-        ),
-      ),
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 }
@@ -2057,91 +2250,98 @@ class _RoutesTableRow extends StatelessWidget {
 
     final tooltipText = _buildCountryKmText();
 
-    return Container(
+    return Padding(
       padding: const EdgeInsets.symmetric(
-        vertical: 14, // 👈 MER HØYDE
-        horizontal: 4,
+        vertical: 8,
+        horizontal: 6,
       ),
       child: Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          // -------- DATE
-          SizedBox(
-            width: 105,
+
+          // ---------- DATE (fast prosent)
+          Flexible(
+            flex: 22,
+            fit: FlexFit.tight,
             child: Text(
               date,
-              style: const TextStyle(
-                fontWeight: FontWeight.w900,
-                fontSize: 15, // 👈 større innhold
-              ),
-            ),
-          ),
-
-          const SizedBox(width: 12),
-
-          // -------- ROUTE
-          Expanded(
-            child: Text(
-              route,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
               style: const TextStyle(
                 fontWeight: FontWeight.w800,
-                fontSize: 15, // 👈 større innhold
+                fontSize: 14,
               ),
-              overflow: TextOverflow.ellipsis,
-              maxLines: 2, // 👈 tillat 2 linjer
             ),
           ),
 
-          const SizedBox(width: 12),
+          // ---------- ROUTE (størst felt)
+          Flexible(
+            flex: 45,
+            fit: FlexFit.tight,
+            child: Text(
+              route,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                fontWeight: FontWeight.w700,
+                fontSize: 14,
+              ),
+            ),
+          ),
 
-          // -------- KM
-          SizedBox(
-            width: 70,
+          // ---------- KM
+          Flexible(
+            flex: 12,
+            fit: FlexFit.tight,
             child: Tooltip(
               message: tooltipText.isEmpty
                   ? "No country breakdown"
                   : tooltipText,
-              preferBelow: false,
-              child: Text(
-                km == null ? "?" : km!.toStringAsFixed(0),
-                textAlign: TextAlign.right,
-                style: TextStyle(
-                  fontWeight: FontWeight.w900,
-                  fontSize: 15, // 👈 større
-                  color: km == null ? cs.error : cs.onSurface,
+              child: Align(
+                alignment: Alignment.centerRight,
+                child: Text(
+                  km == null ? "?" : km!.toStringAsFixed(0),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontWeight: FontWeight.w800,
+                    fontSize: 14,
+                    color: km == null
+                        ? cs.error
+                        : cs.onSurface,
+                  ),
                 ),
               ),
             ),
           ),
 
-          const SizedBox(width: 12),
-
-          // -------- BUTTONS
-          SizedBox(
-            width: 66,
+          // ---------- BUTTONS
+          Flexible(
+            flex: 15,
+            fit: FlexFit.tight,
             child: Row(
               mainAxisAlignment: MainAxisAlignment.end,
               children: [
+
                 IconButton(
-                  constraints: const BoxConstraints(
-                    minHeight: 36,
-                    minWidth: 36,
-                  ),
-                  padding: EdgeInsets.zero,
                   onPressed: onEdit,
-                  icon: const Icon(Icons.edit, size: 20),
+                  icon: const Icon(Icons.edit, size: 18),
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(
+                    minWidth: 28,
+                    minHeight: 28,
+                  ),
                 ),
 
-                const SizedBox(width: 6),
+                const SizedBox(width: 4),
 
                 IconButton(
-                  constraints: const BoxConstraints(
-                    minHeight: 36,
-                    minWidth: 36,
-                  ),
-                  padding: EdgeInsets.zero,
                   onPressed: onDelete,
-                  icon: const Icon(Icons.delete_outline, size: 20),
+                  icon: const Icon(Icons.delete_outline, size: 18),
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(
+                    minWidth: 28,
+                    minHeight: 28,
+                  ),
                 ),
               ],
             ),
