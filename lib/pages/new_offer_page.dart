@@ -34,6 +34,7 @@ class NewOfferPage extends StatefulWidget {
 class _NewOfferPageState extends State<NewOfferPage> {
   int roundIndex = 0;
   bool _busLoaded = false;
+  final FocusNode _locationFocus = FocusNode();
 
   // ✅ MERGE-AWARE travel-flag for D.Drive
   List<bool> _travelBefore = [];
@@ -184,16 +185,19 @@ class _NewOfferPageState extends State<NewOfferPage> {
   }
 
   void _syncRoundControllers() {
-    startLocCtrl.text = offer.rounds[roundIndex].startLocation;
-    selectedDate = null;
-    locationCtrl.text = '';
-    _kmError = null;
+  startLocCtrl.text = offer.rounds[roundIndex].startLocation;
 
-    _kmByIndex = {};
-    _ferryByIndex = {};
-    _tollByIndex = {};
-    _extraByIndex = {};
-  }
+  // ✅ AUTO-SET NEXT DATE
+  selectedDate = _getNextAvailableDate();
+
+  locationCtrl.text = '';
+  _kmError = null;
+
+  _kmByIndex = {};
+  _ferryByIndex = {};
+  _tollByIndex = {};
+  _extraByIndex = {};
+}
 
   void _resetToBlankOffer() {
     setState(() {
@@ -226,14 +230,18 @@ class _NewOfferPageState extends State<NewOfferPage> {
   }
 
   @override
-  void dispose() {
-    companyCtrl.dispose();
-    contactCtrl.dispose();
-    productionCtrl.dispose();
-    startLocCtrl.dispose();
-    locationCtrl.dispose();
-    super.dispose();
-  }
+  @override
+void dispose() {
+  companyCtrl.dispose();
+  contactCtrl.dispose();
+  productionCtrl.dispose();
+  startLocCtrl.dispose();
+  locationCtrl.dispose();
+
+  _locationFocus.dispose(); // ✅ NY
+
+  super.dispose();
+}
 
   // ------------------------------------------------------------
   // ✅ Load existing draft
@@ -398,6 +406,22 @@ Future<void> _loadBusForDraft(String draftId) async {
   // ------------------------------------------------------------
   // Small helpers
   // ------------------------------------------------------------
+
+  DateTime _getNextAvailableDate() {
+  final entries = offer.rounds[roundIndex].entries;
+
+  if (entries.isEmpty) {
+    return DateTime.now();
+  }
+
+  // Finn seneste dato
+  final latest = entries
+      .map((e) => e.date)
+      .reduce((a, b) => a.isAfter(b) ? a : b);
+
+  // Neste dag
+  return latest.add(const Duration(days: 1));
+}
   Future<void> _openMissingRouteDialog({
   String? from,
   String? to,
@@ -1042,6 +1066,9 @@ final id = await OfferStorageService.saveDraft(
 // ------------------------------------------------------------
 // Recalculate legs for CURRENT round (with Travel/Off merge)
 // ------------------------------------------------------------
+// ------------------------------------------------------------
+// Recalculate legs for CURRENT round (with Travel merge only)
+// ------------------------------------------------------------
 Future<void> _recalcKm() async {
 
   final round = offer.rounds[roundIndex];
@@ -1081,7 +1108,7 @@ Future<void> _recalcKm() async {
   bool seenTravel = false;
 
   // ===================================================
-  // MERGE-AWARE LOOP
+  // LOOP
   // ===================================================
   for (int i = 0; i < entries.length; i++) {
 
@@ -1090,9 +1117,27 @@ Future<void> _recalcKm() async {
     final toRaw = _norm(entries[i].location);
     final to = toRaw.toLowerCase();
 
-    final isTravel = to == 'travel' || to == 'off';
+    final bool isTravel = to == 'travel';
+    final bool isOff = to == 'off';
 
-    // ---------------- TRAVEL / OFF ----------------
+    // ---------------- OFF (NO MERGE, NO FLAGS) ----------------
+    if (isOff) {
+
+      kmByIndex[i] = 0;
+      ferryByIndex[i] = 0;
+      tollByIndex[i] = 0;
+      extraByIndex[i] = '';
+      countryKmByIndex[i] = {};
+
+      // Off påvirker ingenting
+      pendingTravelIndex = null;
+      seenTravel = false;
+      travelBefore[i] = false;
+
+      continue;
+    }
+
+    // ---------------- TRAVEL (MERGE SOURCE) ----------------
     if (isTravel) {
 
       kmByIndex[i] = 0;
@@ -1107,7 +1152,7 @@ Future<void> _recalcKm() async {
       continue;
     }
 
-    // ---------------- SAME PLACE = 0 KM ----------------
+    // ---------------- SAME PLACE ----------------
     if (_norm(from).toLowerCase() == to) {
 
       kmByIndex[i] = 0;
@@ -1151,6 +1196,7 @@ Future<void> _recalcKm() async {
       extraByIndex[i] = '';
       countryKmByIndex[i] = {};
 
+      // Kun Travel påvirker D.Drive
       travelBefore[pendingTravelIndex] = true;
       travelBefore[i] = true;
 
@@ -1176,7 +1222,7 @@ Future<void> _recalcKm() async {
   }
 
   // ===================================================
-  // APPLY EXTRA + COUNTRY TO ENTRIES
+  // APPLY
   // ===================================================
   for (int i = 0; i < entries.length; i++) {
     entries[i] = entries[i].copyWith(
@@ -1187,9 +1233,6 @@ Future<void> _recalcKm() async {
 
   if (!mounted) return;
 
-  // ===================================================
-  // UPDATE STATE
-  // ===================================================
   setState(() {
     _kmByIndex = kmByIndex;
     _ferryByIndex = ferryByIndex;
@@ -1213,6 +1256,8 @@ Future<void> _recalcKm() async {
   Future<void> _addEntry() async {
   final loc = _norm(locationCtrl.text);
 
+  // ---------------- VALIDATION ----------------
+
   if (selectedDate == null) {
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text("Pick a date first.")),
@@ -1234,100 +1279,168 @@ Future<void> _recalcKm() async {
     return;
   }
 
-  final nextIndex = offer.rounds[roundIndex].entries.length;
+  // ---------------- PREP ----------------
 
-  final extra = _extraByIndex[nextIndex] ?? '';
+  final nextIndex =
+      offer.rounds[roundIndex].entries.length;
+
+  final extra =
+      _extraByIndex[nextIndex] ?? '';
+
+  // ---------------- ADD ----------------
 
   setState(() {
     offer.rounds[roundIndex].entries.add(
       RoundEntry(
         date: selectedDate!,
         location: loc,
-        extra: extra, // ✅ HER
+        extra: extra,
       ),
     );
 
+    // Sort by date
     offer.rounds[roundIndex].entries
         .sort((a, b) => a.date.compareTo(b.date));
 
     // Auto next day
-    selectedDate = selectedDate!.add(const Duration(days: 1));
+    selectedDate =
+        selectedDate!.add(const Duration(days: 1));
 
+    // Clear input
     locationCtrl.clear();
     _locationSuggestions = [];
   });
+
+  // ---------------- REFOCUS ----------------
+
+  FocusScope.of(context)
+      .requestFocus(_locationFocus);
+
+  // ---------------- RECALC ----------------
 
   await _recalcKm();
 }
 
   Future<void> _pasteManyLines(List<String> lines) async {
+
+  // ---------------- VALIDATION ----------------
+
   if (selectedDate == null) {
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text("Pick a date first, then paste.")),
+      const SnackBar(
+        content: Text("Pick a date first, then paste."),
+      ),
     );
     return;
   }
 
-  final clean = lines.map(_norm).where((e) => e.isNotEmpty).toList();
+  final clean = lines
+      .map(_norm)
+      .where((e) => e.isNotEmpty)
+      .toList();
+
   if (clean.isEmpty) return;
+
+  // ---------------- ADD ----------------
 
   setState(() {
     for (final loc in clean) {
-      final idx = offer.rounds[roundIndex].entries.length;
 
-      final extra = _extraByIndex[idx] ?? '';
+      final idx =
+          offer.rounds[roundIndex].entries.length;
+
+      final extra =
+          _extraByIndex[idx] ?? '';
 
       offer.rounds[roundIndex].entries.add(
         RoundEntry(
           date: selectedDate!,
           location: loc,
-          extra: extra, // ✅ HER
+          extra: extra,
         ),
       );
 
-      selectedDate = selectedDate!.add(const Duration(days: 1));
+      // Next day
+      selectedDate =
+          selectedDate!.add(const Duration(days: 1));
     }
 
+    // Sort
     offer.rounds[roundIndex].entries
         .sort((a, b) => a.date.compareTo(b.date));
 
+    // Clear input
     locationCtrl.clear();
     _locationSuggestions = [];
   });
 
+  // ---------------- REFOCUS ----------------
+
+  FocusScope.of(context)
+      .requestFocus(_locationFocus);
+
+  // ---------------- RECALC ----------------
+
   await _recalcKm();
 }
+// ------------------------------------------------------------
+// Edit entry
+// ------------------------------------------------------------
+Future<void> _editEntry(int index) async {
 
-  Future<void> _editEntry(int index) async {
-    final entry = offer.rounds[roundIndex].entries[index];
-    DateTime tempDate = entry.date;
-    final tempLocCtrl = TextEditingController(text: entry.location);
+  final entry =
+      offer.rounds[roundIndex].entries[index];
 
-    final updated = await showDialog<RoundEntry>(
-      context: context,
-      builder: (dialogCtx) {
-        return StatefulBuilder(builder: (_, setDialogState) {
+  DateTime tempDate = entry.date;
+
+  final tempLocCtrl =
+      TextEditingController(text: entry.location);
+
+  // ---------------- DIALOG ----------------
+
+  final updated = await showDialog<RoundEntry>(
+    context: context,
+    builder: (dialogCtx) {
+
+      return StatefulBuilder(
+        builder: (_, setDialogState) {
+
           return AlertDialog(
             title: const Text("Edit entry"),
+
             content: SizedBox(
               width: 420,
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
+
+                  // -------- DATE --------
                   OutlinedButton.icon(
                     icon: const Icon(Icons.calendar_month),
                     label: Text(_fmtDate(tempDate)),
                     onPressed: () async {
-                      final picked = await showDatePicker(
+
+                      final picked =
+                          await showDatePicker(
                         context: dialogCtx,
-                        firstDate: DateTime(tempDate.year - 1),
-                        lastDate: DateTime(tempDate.year + 5),
+                        firstDate:
+                            DateTime(tempDate.year - 1),
+                        lastDate:
+                            DateTime(tempDate.year + 5),
                         initialDate: tempDate,
                       );
-                      if (picked != null) setDialogState(() => tempDate = picked);
+
+                      if (picked != null) {
+                        setDialogState(() {
+                          tempDate = picked;
+                        });
+                      }
                     },
                   ),
+
                   const SizedBox(height: 10),
+
+                  // -------- LOCATION --------
                   TextField(
                     controller: tempLocCtrl,
                     decoration: const InputDecoration(
@@ -1338,42 +1451,65 @@ Future<void> _recalcKm() async {
                 ],
               ),
             ),
+
             actions: [
+
               TextButton(
                 onPressed: () =>
-                  Navigator.of(context, rootNavigator: true).pop(),
+                    Navigator.of(
+                      context,
+                      rootNavigator: true,
+                    ).pop(),
                 child: const Text("Cancel"),
-),
+              ),
+
               FilledButton(
                 onPressed: () {
-                  Navigator.of(context, rootNavigator: true).pop(
+
+                  Navigator.of(
+                    context,
+                    rootNavigator: true,
+                  ).pop(
                     RoundEntry(
                       date: tempDate,
-                      location: _norm(tempLocCtrl.text),
+                      location:
+                          _norm(tempLocCtrl.text),
                       extra: entry.extra,
-  ),
-);
+                    ),
+                  );
                 },
                 child: const Text("Save"),
               ),
             ],
           );
-        });
-      },
-    );
+        },
+      );
+    },
+  );
 
-    if (updated == null) return;
+  if (updated == null) return;
 
-    setState(() {
-      offer.rounds[roundIndex].entries[index] = updated;
-      offer.rounds[roundIndex].entries.sort((a, b) => a.date.compareTo(b.date));
-    });
+  // ---------------- APPLY ----------------
 
-    await _recalcKm();
-  }
+  setState(() {
+    offer.rounds[roundIndex].entries[index] =
+        updated;
 
+    offer.rounds[roundIndex].entries
+        .sort((a, b) => a.date.compareTo(b.date));
+  });
+
+  // ---------------- REFOCUS ----------------
+
+  FocusScope.of(context)
+      .requestFocus(_locationFocus);
+
+  // ---------------- RECALC ----------------
+
+  await _recalcKm();
+}
 // ------------------------------------------------------------
-// ✅ Per-round calc helper (CORRECT Travel merge + D.Drive)
+// ✅ Per-round calc helper (Travel merge + Off = ignore)
 // ------------------------------------------------------------
 Future<RoundCalcResult> _calcRound(int ri) async {
 
@@ -1387,6 +1523,7 @@ Future<RoundCalcResult> _calcRound(int ri) async {
       .toSet()
       .length;
 
+  // ---------------- EMPTY ----------------
   if (entryCount == 0) {
     return TripCalculator.calculateRound(
       settings: SettingsStore.current,
@@ -1414,7 +1551,7 @@ Future<RoundCalcResult> _calcRound(int ri) async {
   bool seenTravel = false;
 
   // ===================================================
-  // LOOP (MATCHER _recalcKm 100%)
+  // LOOP (MATCHES _recalcKm 100%)
   // ===================================================
   for (int i = 0; i < entries.length; i++) {
 
@@ -1427,9 +1564,24 @@ Future<RoundCalcResult> _calcRound(int ri) async {
     final toRaw = _norm(entries[i].location);
     final to = toRaw.toLowerCase();
 
-    final isTravel = to == 'travel' || to == 'off';
+    final bool isTravel = to == 'travel';
+    final bool isOff = to == 'off';
 
-    // ---------------- TRAVEL / OFF ----------------
+    // ---------------- OFF (IGNORE) ----------------
+    if (isOff) {
+
+      kmByIndex[i] = 0;
+      ferryByIndex[i] = 0;
+      tollByIndex[i] = 0;
+
+      pendingTravelIndex = null;
+      seenTravel = false;
+      travelBefore[i] = false;
+
+      continue;
+    }
+
+    // ---------------- TRAVEL (MERGE SOURCE) ----------------
     if (isTravel) {
 
       kmByIndex[i] = 0;
@@ -1442,7 +1594,7 @@ Future<RoundCalcResult> _calcRound(int ri) async {
       continue;
     }
 
-    // ---------------- SAME PLACE = 0 KM ----------------
+    // ---------------- SAME PLACE ----------------
     if (_norm(from).toLowerCase() == to) {
 
       kmByIndex[i] = 0;
@@ -1468,14 +1620,17 @@ Future<RoundCalcResult> _calcRound(int ri) async {
     // ---------------- MERGE WITH TRAVEL ----------------
     if (pendingTravelIndex != null && km != null) {
 
+      // Flytt km til Travel-raden
       kmByIndex[pendingTravelIndex] = km;
       ferryByIndex[pendingTravelIndex] = ferry;
       tollByIndex[pendingTravelIndex] = toll;
 
+      // Denne dagen = 0
       kmByIndex[i] = 0;
       ferryByIndex[i] = 0;
       tollByIndex[i] = 0;
 
+      // Marker travel før
       travelBefore[pendingTravelIndex] = true;
       travelBefore[i] = true;
 
@@ -1532,7 +1687,6 @@ Future<RoundCalcResult> _calcRound(int ri) async {
     hasTravelBefore: travelBefore,
   );
 }
-
   // ------------------------------------------------------------
   // ✅ Build PDF bytes
   // ------------------------------------------------------------
@@ -1871,11 +2025,12 @@ final calc = TripCalculator.calculateRound(
 
                         _LocationAutoComplete(
                           controller: locationCtrl,
+                          focusNode: _locationFocus, // ✅ NY
                           suggestions: _locationSuggestions,
                           onSubmit: _addEntry,
                           onPasteMulti: _pasteManyLines,
                           onQueryChanged: _loadPlaceSuggestions,
-                        ),
+),
 
                         const SizedBox(height: 8),
 
@@ -1960,13 +2115,21 @@ final calc = TripCalculator.calculateRound(
                                   final e = round.entries[i];
                                   final km = _kmByIndex[i];
 
-                                  final from = i == 0
-                                      ? round.startLocation
-                                      : round.entries[i - 1]
-                                          .location;
+                                  final from = _findPreviousRealLocation(
+  round.entries,
+  i,
+  round.startLocation,
+);
 
-                                  final routeText =
-                                      "${_norm(from)} → ${_norm(e.location)}";
+final to = _norm(e.location);
+final toLower = to.toLowerCase();
+
+final bool isSpecial =
+    toLower == 'off' || toLower == 'travel';
+
+final String routeText = isSpecial
+    ? to                    // Bare "Off" / "Travel"
+    : "${_norm(from)} → $to";
 
                                   return _RoutesTableRow(
                                     date: _fmtDate(e.date),
@@ -3008,6 +3171,8 @@ class _RoutesTableRow extends StatelessWidget {
 }
 class _LocationAutoComplete extends StatelessWidget {
   final TextEditingController controller;
+  final FocusNode focusNode;
+
   final List<String> suggestions;
   final Future<void> Function() onSubmit;
   final ValueChanged<List<String>> onPasteMulti;
@@ -3015,6 +3180,7 @@ class _LocationAutoComplete extends StatelessWidget {
 
   const _LocationAutoComplete({
     required this.controller,
+    required this.focusNode,
     required this.suggestions,
     required this.onSubmit,
     required this.onPasteMulti,
@@ -3027,6 +3193,7 @@ class _LocationAutoComplete extends StatelessWidget {
       children: [
         TextField(
           controller: controller,
+          focusNode: focusNode, // ✅ BEHOLDER FOKUS
           decoration: const InputDecoration(
             labelText: "Location",
             prefixIcon: Icon(Icons.place),
@@ -3059,6 +3226,7 @@ class _LocationAutoComplete extends StatelessWidget {
               itemCount: suggestions.length,
               itemBuilder: (_, i) {
                 final s = suggestions[i];
+
                 return ListTile(
                   dense: true,
                   title: Text(s),
