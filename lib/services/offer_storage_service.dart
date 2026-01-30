@@ -151,23 +151,27 @@ class OfferStorageService {
   // PAYLOAD
   // ============================================================
   static Map<String, dynamic> _offerToDbPayload(OfferDraft offer) {
-    final jsonMap = _offerToJson(offer);
-    final jsonString = jsonEncode(jsonMap);
+  final jsonMap = _offerToJson(offer);
+  final jsonString = jsonEncode(jsonMap);
 
-    return {
-      'title': _buildTitle(offer),
-      'company': offer.company.trim(),
-      'contact': offer.contact.trim(),
-      'production': offer.production.trim(),
-      'status': 'Draft',
+  return {
+    'title': _buildTitle(offer),
+    'company': offer.company.trim(),
+    'contact': offer.contact.trim(),
+    'production': offer.production.trim(),
+    'status': 'Draft',
 
-      'bus_count': offer.busCount,
-      'bus_type': offer.busType.name,
+    'bus_count': offer.busCount,
+    'bus_type': offer.busType.name,
 
-      'payload': jsonMap,
-      'offer_json': jsonString,
-    };
-  }
+    // ❌ IKKE bus
+    // ❌ IKKE kilde
+
+    'payload': jsonMap,
+    'offer_json': jsonString,
+  };
+}
+
 
   // ============================================================
   // TITLE
@@ -202,87 +206,102 @@ class OfferStorageService {
   // TO JSON
   // ============================================================
   static Map<String, dynamic> _offerToJson(OfferDraft offer) {
-    return {
-      'company': offer.company,
-      'contact': offer.contact,
-      'production': offer.production,
-      'busCount': offer.busCount,
-      'busType': offer.busType.name,
-      'rounds': offer.rounds.map((r) {
-        return {
-          'startLocation': r.startLocation,
-          'trailer': r.trailer,
-          'pickupEveningFirstDay': r.pickupEveningFirstDay,
-          'entries': r.entries.map((e) {
-            return {
-              'date': e.date.toIso8601String(),
-              'location': e.location,
-              'extra': e.extra,
-            };
-          }).toList(),
-        };
-      }).toList(),
-    };
-  }
+  return {
+    'company': offer.company,
+    'contact': offer.contact,
+    'production': offer.production,
+
+    'busCount': offer.busCount,
+    'busType': offer.busType.name,
+
+    // ✅ BUSS INNI PAYLOAD
+    'bus': offer.bus,
+
+    'rounds': offer.rounds.map((r) {
+      return {
+        'startLocation': r.startLocation,
+        'trailer': r.trailer,
+        'pickupEveningFirstDay': r.pickupEveningFirstDay,
+        'entries': r.entries.map((e) {
+          return {
+            'date': e.date.toIso8601String(),
+            'location': e.location,
+            'extra': e.extra,
+          };
+        }).toList(),
+      };
+    }).toList(),
+  };
+}
 
   // ============================================================
   // FROM DB
   // ============================================================
   static OfferDraft _offerFromDb(Map<String, dynamic> row) {
-    dynamic raw = row['payload'];
-    raw ??= row['offer_json'];
+  dynamic raw = row['payload'];
+  raw ??= row['offer_json'];
 
-    final Map<String, dynamic> data =
-        raw is String ? jsonDecode(raw) : (raw as Map<String, dynamic>);
+  final Map<String, dynamic> data =
+      raw is String ? jsonDecode(raw) : (raw as Map<String, dynamic>);
 
-    final draft = OfferDraft(
-      company: (data['company'] ?? '') as String,
-      contact: (data['contact'] ?? '') as String,
-      production: (data['production'] ?? '') as String,
-      busCount: (data['busCount'] ?? 1) as int,
-      busType: _busTypeFromName(
-        (data['busType'] ?? 'sleeper12') as String,
-      ),
-    );
+  final draft = OfferDraft(
+  company: (data['company'] ?? '') as String,
+  contact: (data['contact'] ?? '') as String,
+  production: (data['production'] ?? '') as String,
 
-    final rounds = (data['rounds'] as List?) ?? [];
+  busCount: (data['busCount'] ?? 1) as int,
 
-    for (int i = 0; i < draft.rounds.length; i++) {
-      if (i >= rounds.length) break;
+  busType: _busTypeFromName(
+    (data['busType'] ?? 'sleeper12') as String,
+  ),
 
-      final r = rounds[i] as Map<String, dynamic>;
+  // ✅ LAST BUSS
+  bus: data['bus'] as String?,
+);
 
-      draft.rounds[i].startLocation =
-          (r['startLocation'] ?? '') as String;
+  final rounds = (data['rounds'] as List?) ?? [];
 
-      draft.rounds[i].trailer =
-          (r['trailer'] ?? false) as bool;
+  for (int i = 0; i < draft.rounds.length; i++) {
+    if (i >= rounds.length) break;
 
-      draft.rounds[i].pickupEveningFirstDay =
-          (r['pickupEveningFirstDay'] ?? false) as bool;
+    final r = rounds[i] as Map<String, dynamic>;
 
-      draft.rounds[i].entries.clear();
+    draft.rounds[i].startLocation =
+        (r['startLocation'] ?? '') as String;
 
-      final entries = (r['entries'] as List?) ?? [];
+    draft.rounds[i].trailer =
+        (r['trailer'] ?? false) as bool;
 
-      for (final e in entries) {
-        final em = e as Map<String, dynamic>;
+    draft.rounds[i].pickupEveningFirstDay =
+        (r['pickupEveningFirstDay'] ?? false) as bool;
 
-        draft.rounds[i].entries.add(
-          RoundEntry(
-            date: DateTime.parse(em['date'] as String),
-            location: (em['location'] ?? '') as String,
-            extra: (em['extra'] ?? '') as String,
-          ),
-        );
-      }
+    draft.rounds[i].entries.clear();
 
-      draft.rounds[i].entries
-          .sort((a, b) => a.date.compareTo(b.date));
+    final entries = (r['entries'] as List?) ?? [];
+
+    for (final e in entries) {
+      final em = e as Map<String, dynamic>;
+
+      draft.rounds[i].entries.add(
+        RoundEntry(
+          date: DateTime.parse(em['date'] as String),
+          location: (em['location'] ?? '') as String,
+          extra: (em['extra'] ?? '') as String,
+        ),
+      );
     }
 
-    return draft;
+    draft.rounds[i].entries
+        .sort((a, b) => a.date.compareTo(b.date));
   }
+
+  // ✅ BACKUP: hvis bare ligger i JSON
+  if (draft.bus == null && data['bus'] != null) {
+    draft.bus = data['bus'] as String?;
+  }
+
+  return draft;
+}
 
   static BusType _busTypeFromName(String name) {
     for (final t in BusType.values) {

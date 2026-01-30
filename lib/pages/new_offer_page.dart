@@ -823,10 +823,13 @@ Widget _buildVatBox(
   // ------------------------------------------------------------
 // ✅ Save draft to Supabase (insert/update)
 // ------------------------------------------------------------
+// ------------------------------------------------------------
+// ✅ Save draft to Supabase (insert/update) - FIXED
+// ------------------------------------------------------------
 Future<void> _saveDraft() async {
 
   // ----------------------------------------
-  // ⛔ Vent hvis draft/buss ikke er ferdig
+  // ⛔ Vent hvis draft lastes
   // ----------------------------------------
   if (_loadingDraft) {
     ScaffoldMessenger.of(context).showSnackBar(
@@ -850,7 +853,7 @@ Future<void> _saveDraft() async {
     // ----------------------------------------
     String selectedBus;
 
-    // 1️⃣ Bruk lagret i modellen
+    // 1️⃣ Bruk eksisterende
     if (offer.bus != null && offer.bus!.isNotEmpty) {
       selectedBus = offer.bus!;
     }
@@ -874,68 +877,69 @@ Future<void> _saveDraft() async {
     }
 
     // ----------------------------------------
-    // ✅ Lagre buss i MODELL
+    // ✅ Lagre i MODELL (ÉN GANG)
     // ----------------------------------------
     offer.bus = selectedBus;
-
-    // Synk state (valgfritt, men ryddig)
     _selectedBus = selectedBus;
 
-    // ----------------------------------------
-    // Save draft
-    // ----------------------------------------
-    // 🔥 LAGRE BUSS I DRAFT
-offer.bus = selectedBus;
+    debugPrint("Saving bus: $selectedBus");
 
-// Save draft
-final id = await OfferStorageService.saveDraft(
-  id: _draftId,
-  offer: offer,
-);
+    // ----------------------------------------
+    // Save to DB
+    // ----------------------------------------
+    final id = await OfferStorageService.saveDraft(
+      id: _draftId,
+      offer: offer,
+    );
 
     if (id == null || id.isEmpty) {
-      throw Exception("Failed to save draft (no ID returned)");
+      throw Exception("Failed to save draft (no ID)");
     }
 
     _draftId = id;
 
     // ----------------------------------------
-    // Reload fresh draft
+    // Reload from DB (SOURCE OF TRUTH)
     // ----------------------------------------
     final freshOffer =
         await OfferStorageService.loadDraft(id);
 
     if (freshOffer == null) {
-      throw Exception("Draft saved but reload failed");
+      throw Exception("Reload after save failed");
     }
 
+    debugPrint("Reloaded bus: ${freshOffer.bus}");
+
     // ----------------------------------------
-    // Sync to calendar
+    // Sync back to state
+    // ----------------------------------------
+    offer.bus = freshOffer.bus;
+    _selectedBus = freshOffer.bus;
+
+    // ----------------------------------------
+    // Sync calendar
     // ----------------------------------------
     await CalendarSyncService.syncFromOffer(
       freshOffer,
-      selectedBus: selectedBus,
+      selectedBus: freshOffer.bus ?? selectedBus,
       draftId: id,
     );
 
     // ----------------------------------------
-    // Update state
+    // UI refresh
     // ----------------------------------------
     if (mounted) {
-      setState(() {
-        _selectedBus = selectedBus;
-        offer.bus = selectedBus;
-      });
+      setState(() {});
     }
 
     // ----------------------------------------
-    // UI feedback
+    // Feedback
     // ----------------------------------------
     if (!mounted) return;
 
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text("Lagret på $selectedBus ✅"),
+        content: Text("Lagret på ${offer.bus} ✅"),
       ),
     );
 
