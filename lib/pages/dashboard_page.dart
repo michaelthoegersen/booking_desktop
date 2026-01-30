@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-
-import '../widgets/action_tile.dart';
+import 'package:flutter_map/flutter_map.dart';
+import 'package:latlong2/latlong.dart';
 import '../services/offer_storage_service.dart';
+import '../widgets/bus_map_widget.dart';
 
 class DashboardPage extends StatefulWidget {
   const DashboardPage({super.key});
@@ -13,6 +14,9 @@ class DashboardPage extends StatefulWidget {
 }
 
 class _DashboardPageState extends State<DashboardPage> {
+// ------------------------------------------------------------
+// CITY → COORDINATES (FOR MAP)
+// ------------------------------------------------------------
 
   // ------------------------------------------------------------
   // SUPABASE
@@ -41,10 +45,20 @@ class _DashboardPageState extends State<DashboardPage> {
 
 
   // ------------------------------------------------------------
-  // DATE CACHE (from → to per offer)
+  // BUS LOCATIONS (TODAY)
   // ------------------------------------------------------------
 
-  final Map<String, String> _offerDateCache = {};
+  Map<String, String> busLocationsToday = {};
+
+  bool loadingBusLocations = false;
+  String? busLocationError;
+
+
+  // ------------------------------------------------------------
+  // DATE CACHE
+  // ------------------------------------------------------------
+
+  final Map<String, String> offerDateCache = {};
 
 
   // ------------------------------------------------------------
@@ -57,6 +71,7 @@ class _DashboardPageState extends State<DashboardPage> {
 
     _loadRoutesCount();
     _loadRecentOffers();
+    _loadBusLocationsToday();
 
     OfferStorageService.recentOffersRefresh
         .addListener(_onRecentRefresh);
@@ -112,10 +127,12 @@ class _DashboardPageState extends State<DashboardPage> {
     }
   }
 
+
   // ------------------------------------------------------------
-// LOAD RECENT OFFERS (with status)
-// ------------------------------------------------------------
-Future<void> _loadRecentOffers() async {
+  // LOAD RECENT OFFERS
+  // ------------------------------------------------------------
+
+  Future<void> _loadRecentOffers() async {
 
   setState(() {
     loadingRecent = true;
@@ -124,13 +141,13 @@ Future<void> _loadRecentOffers() async {
 
   try {
 
-    // 1️⃣ Load drafts/offers
+    // 1. Hent offers
     final items =
-        await OfferStorageService.loadRecentOffers(limit: 30);
+        await OfferStorageService.loadRecentOffers(limit: 200);
 
     if (!mounted) return;
 
-    // 2️⃣ Collect ids
+    // 2. Samle alle id-er
     final ids = items
         .map((e) => e['id']?.toString())
         .whereType<String>()
@@ -143,34 +160,41 @@ Future<void> _loadRecentOffers() async {
       return;
     }
 
-    // 3️⃣ Load status from samletdata
+    // 3. Hent status fra samletdata
     final statusRows = await sb
         .from('samletdata')
         .select('draft_id, status')
         .inFilter('draft_id', ids);
 
-    final statusMap = <String, String>{};
+    // 4. Lag map: id -> status
+    final Map<String, String> statusMap = {};
 
     for (final r in statusRows) {
+
       final id = r['draft_id']?.toString();
       final status = r['status']?.toString();
 
-      if (id != null && status != null && status.isNotEmpty) {
+      if (id != null &&
+          status != null &&
+          status.isNotEmpty) {
+
         statusMap[id] = status;
       }
     }
 
-    // 4️⃣ Merge status into offers
+    // 5. Slå sammen status + offers
     final merged = items.map((row) {
+
       final id = row['id']?.toString();
 
       return {
         ...row,
         'status': statusMap[id] ?? '',
       };
+
     }).toList();
 
-    // 5️⃣ Update UI
+    // 6. Oppdater UI
     setState(() {
       recentOffers = merged;
     });
@@ -194,125 +218,63 @@ Future<void> _loadRecentOffers() async {
 
 
   // ------------------------------------------------------------
-  // DELETE DRAFT
+  // LOAD BUS LOCATIONS (TODAY)
   // ------------------------------------------------------------
 
-  Future<void> _confirmDeleteDraft(
-    String id,
-    String title,
-  ) async {
+  Future<void> _loadBusLocationsToday() async {
+  setState(() {
+    loadingBusLocations = true;
+    busLocationError = null;
+  });
 
-    final ok = await showDialog<bool>(
-      context: context,
+  try {
+    final today = DateTime.now();
 
-      builder: (_) => AlertDialog(
-        title: const Text("Delete draft"),
+    final todayStr =
+        "${today.year}-"
+        "${today.month.toString().padLeft(2, '0')}-"
+        "${today.day.toString().padLeft(2, '0')}";
 
-        content: Text(
-          "Are you sure you want to permanently delete:\n\n$title",
-        ),
-
-        actions: [
-
-          TextButton(
-            onPressed: () =>
-                Navigator.of(context, rootNavigator: true)
-                    .pop(false),
-
-            child: const Text("Cancel"),
-          ),
-
-          FilledButton(
-            onPressed: () =>
-                Navigator.of(context, rootNavigator: true)
-                    .pop(true),
-
-            child: const Text("Delete"),
-          ),
-        ],
-      ),
-    );
-
-    if (ok != true) return;
-
-
-    // Delete calendar rows
-    await sb
+    final res = await sb
         .from('samletdata')
-        .delete()
-        .eq('draft_id', id);
+        .select('kilde, sted')
+        .eq('dato', todayStr);
 
+    final rows = List<Map<String, dynamic>>.from(res);
 
-    // Delete draft
-    await OfferStorageService.deleteDraft(id);
+    final Map<String, String> map = {};
 
+    for (final r in rows) {
+      final bus = r['kilde']?.toString().trim();
+      final place = r['sted']?.toString().trim();
 
-    if (!mounted) return;
+      if (bus == null || bus.isEmpty) continue;
 
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text("Draft deleted")),
-    );
-  }
-
-
-  // ------------------------------------------------------------
-  // LOAD DATE RANGE PER OFFER
-  // ------------------------------------------------------------
-
-  Future<String> _getOfferDateRange(String offerId) async {
-
-    // Use cache
-    if (_offerDateCache.containsKey(offerId)) {
-      return _offerDateCache[offerId]!;
+      // Kun én per buss (første vinner)
+      if (!map.containsKey(bus)) {
+        map[bus] =
+            (place == null || place.isEmpty)
+                ? 'Linköping'
+                : place;
+      }
     }
 
-    try {
+    debugPrint("BUS MAP: $map"); // 👈 debug
 
-      final res = await sb
-          .from('samletdata')
-          .select('dato')
-          .eq('draft_id', offerId)
-          .order('dato');
+    setState(() {
+      busLocationsToday = map;
+    });
+  } catch (e) {
+    debugPrint("BUS MAP ERROR: $e");
 
-
-      final list = List<Map<String, dynamic>>.from(res);
-
-      if (list.isEmpty) return '';
-
-
-      final from =
-          DateTime.parse(list.first['dato']);
-
-      final to =
-          DateTime.parse(list.last['dato']);
-
-
-      final text =
-          "${_fmtDate(from)} → ${_fmtDate(to)}";
-
-
-      _offerDateCache[offerId] = text;
-
-      return text;
-
-    } catch (_) {
-
-      return '';
-    }
+    setState(() {
+      busLocationError = e.toString();
+      busLocationsToday = {};
+    });
+  } finally {
+    setState(() => loadingBusLocations = false);
   }
-
-
-  // ------------------------------------------------------------
-  // FORMAT DATE (dd.MM.yyyy)
-  // ------------------------------------------------------------
-
-  String _fmtDate(DateTime d) {
-
-    return "${d.day.toString().padLeft(2, '0')}"
-        ".${d.month.toString().padLeft(2, '0')}"
-        ".${d.year}";
-  }
+}
 
 
   // ------------------------------------------------------------
@@ -329,18 +291,137 @@ Future<void> _loadRecentOffers() async {
           ? value
           : DateTime.parse(value.toString());
 
-      return "${d.day.toString().padLeft(2, '0')}"
-          ".${d.month.toString().padLeft(2, '0')}"
-          ".${d.year} "
-          "${d.hour.toString().padLeft(2, '0')}"
-          ":${d.minute.toString().padLeft(2, '0')}";
+      return
+          "${d.day.toString().padLeft(2, '0')}."
+          "${d.month.toString().padLeft(2, '0')}."
+          "${d.year} "
+          "${d.hour.toString().padLeft(2, '0')}:"
+          "${d.minute.toString().padLeft(2, '0')}";
 
     } catch (_) {
-
       return "";
     }
   }
+
+// ------------------------------------------------------------
+// DELETE DRAFT (FROM DASHBOARD)
+// ------------------------------------------------------------
+
+Future<void> _confirmDeleteDraft(
+  String id,
+  String title,
+) async {
+
+  final ok = await showDialog<bool>(
+    context: context,
+
+    builder: (_) => AlertDialog(
+      title: const Text("Delete draft"),
+
+      content: Text(
+        "Are you sure you want to permanently delete:\n\n$title",
+      ),
+
+      actions: [
+
+        TextButton(
+          onPressed: () =>
+              Navigator.of(context, rootNavigator: true)
+                  .pop(false),
+
+          child: const Text("Cancel"),
+        ),
+
+        FilledButton(
+          onPressed: () =>
+              Navigator.of(context, rootNavigator: true)
+                  .pop(true),
+
+          child: const Text("Delete"),
+        ),
+      ],
+    ),
+  );
+
+  if (ok != true) return;
+
+  try {
+
+    // 1️⃣ Delete calendar rows
+    await sb
+        .from('samletdata')
+        .delete()
+        .eq('draft_id', id);
+
+    // 2️⃣ Delete draft
+    await OfferStorageService.deleteDraft(id);
+
+    if (!mounted) return;
+
+    // 3️⃣ Refresh list
+    _loadRecentOffers();
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text("Draft deleted"),
+      ),
+    );
+
+  } catch (e) {
+
+    if (!mounted) return;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text("Delete failed: $e"),
+        backgroundColor: Colors.red,
+      ),
+    );
+  }
+}
   // ------------------------------------------------------------
+  // BUS MAP WIDGET
+  // ------------------------------------------------------------
+
+  // ------------------------------------------------------------
+// BUS MAP SECTION (MapTiler)
+// ------------------------------------------------------------
+
+Widget _buildBusMapSection() {
+
+  return Column(
+    children: [
+
+      // Header
+      ListTile(
+        leading: const Icon(Icons.map),
+
+        title: const Text(
+          "Bus locations today",
+          style: TextStyle(fontWeight: FontWeight.w700),
+        ),
+
+        trailing: IconButton(
+          icon: const Icon(Icons.refresh),
+
+          onPressed: loadingBusLocations
+              ? null
+              : _loadBusLocationsToday,
+        ),
+      ),
+
+      const SizedBox(height: 6),
+
+      // Map
+      BusMapWidget(
+        busLocations: busLocationsToday,
+        onRefresh: _loadBusLocationsToday,
+      ),
+    ],
+  );
+} 
+
+// ------------------------------------------------------------
 // STATUS COLOR
 // ------------------------------------------------------------
 Color _statusColor(String? status) {
@@ -352,10 +433,9 @@ Color _statusColor(String? status) {
     case 'confirmed':
       return Colors.green.shade500;
     default:
-      return Colors.grey;
+      return Colors.grey.shade400;
   }
 }
-
   // ------------------------------------------------------------
   // UI
   // ------------------------------------------------------------
@@ -373,10 +453,6 @@ Color _statusColor(String? status) {
         crossAxisAlignment: CrossAxisAlignment.start,
 
         children: [
-
-          // --------------------------------------------------
-          // HEADER
-          // --------------------------------------------------
 
           Text(
             "Welcome",
@@ -401,55 +477,11 @@ Color _statusColor(String? status) {
           const SizedBox(height: 16),
 
 
-          // --------------------------------------------------
-          // ACTION TILES
-          // --------------------------------------------------
-
-          Wrap(
-            spacing: 14,
-            runSpacing: 14,
-
-            children: [
-
-              ActionTile(
-                title: "New Offer",
-                subtitle: "Create a new booking offer",
-                icon: Icons.add_circle_outline,
-                primary: true,
-                onTap: () => context.go("/new"),
-              ),
-
-              ActionTile(
-                title: "Edit Offer",
-                subtitle: "Open and edit existing offers",
-                icon: Icons.edit_note,
-                onTap: () => context.go("/edit"),
-              ),
-
-              ActionTile(
-                title: "Customers",
-                subtitle:
-                    "Companies, contacts and productions",
-                icon: Icons.apartment_rounded,
-                onTap: () => context.go("/customers"),
-              ),
-
-              ActionTile(
-                title: "Settings",
-                subtitle: "Language, export, templates",
-                icon: Icons.settings,
-                onTap: () => context.go("/settings"),
-              ),
-            ],
-          ),
+          _buildBusMapSection(),
 
 
           const SizedBox(height: 18),
 
-
-          // --------------------------------------------------
-          // RECENT OFFERS
-          // --------------------------------------------------
 
           Expanded(
             child: Container(
@@ -469,7 +501,6 @@ Color _statusColor(String? status) {
 
                 children: [
 
-                  // Header
                   Row(
                     children: [
 
@@ -502,7 +533,6 @@ Color _statusColor(String? status) {
                   const SizedBox(height: 12),
 
 
-                  // ---------------- LOADING
                   if (loadingRecent)
 
                     const Expanded(
@@ -511,8 +541,6 @@ Color _statusColor(String? status) {
                       ),
                     )
 
-
-                  // ---------------- EMPTY
                   else if (recentOffers.isEmpty)
 
                     const Expanded(
@@ -521,8 +549,6 @@ Color _statusColor(String? status) {
                       ),
                     )
 
-
-                  // ---------------- LIST
                   else
 
                     Expanded(
@@ -538,177 +564,128 @@ Color _statusColor(String? status) {
 
                         itemBuilder: (_, i) {
 
-                          final row = recentOffers[i];
+  final row = recentOffers[i];
 
-                          final id =
-                              row['id']?.toString() ?? '';
+  final id = row['id']?.toString() ?? '';
 
-                          final production =
-                              (row['production'] ?? '—')
-                                  .toString();
+  final production =
+      row['production']?.toString() ?? '—';
 
-                          final company =
-                              (row['company'] ?? '—')
-                                  .toString();
+  final company =
+      row['company']?.toString() ?? '';
 
-                          final createdBy =
-                              row['created_name']
-                                      ?.toString() ??
-                                  'Unknown';
+  final createdBy =
+      row['created_name']?.toString() ?? 'Unknown';
 
-                          final updatedBy =
-                              row['updated_name']
-                                      ?.toString() ??
-                                  'Unknown';
+  final updatedBy =
+      row['updated_name']?.toString() ?? 'Unknown';
 
-                          final updatedDate =
-                              _fmtDateTime(
-                            row['updated_at'] ??
-                                row['created_at'],
-                          );
-                          final status = row['status']?.toString() ?? '';
+  final updatedDate = _fmtDateTime(
+    row['updated_at'] ?? row['created_at'],
+  );
 
-                          return FutureBuilder<String>(
+  final status =
+      row['status']?.toString() ?? '';
 
-                            future: id.isEmpty
-                                ? null
-                                : _getOfferDateRange(id),
+  return ListTile(
+    contentPadding: EdgeInsets.zero,
 
-                            builder: (context, snap) {
-
-                              final dateRange =
-                                  snap.data ?? '';
-
-
-                              return ListTile(
-  contentPadding: EdgeInsets.zero,
-
-// =====================================================
-// TITLE: Production + Company + Status (COMPACT)
-// =====================================================
-title: Row(
-  crossAxisAlignment: CrossAxisAlignment.center,
-  mainAxisSize: MainAxisSize.min,
-
-  children: [
-
-    // ============================
-    // Production
-    // ============================
-    Text(
-      production,
-      style: const TextStyle(
-        fontWeight: FontWeight.w900,
-        fontSize: 16,
-      ),
-    ),
-
-    // ============================
-    // Company
-    // ============================
-    if (company.isNotEmpty) ...[
-      const SizedBox(width: 6),
-
-      Text(
-        "• $company",
-
-        overflow: TextOverflow.ellipsis,
-
-        style: const TextStyle(
-          fontSize: 13,
-          color: Colors.grey,
-          fontWeight: FontWeight.w500,
-        ),
-      ),
-    ],
-
-    // ============================
-    // Status (right after company)
-    // ============================
-    if (status.isNotEmpty) ...[
-      const SizedBox(width: 8),
-
-      Container(
-        padding: const EdgeInsets.symmetric(
-          horizontal: 6,
-          vertical: 2,
-        ),
-
-        decoration: BoxDecoration(
-          color: _statusColor(status),
-          borderRadius: BorderRadius.circular(10),
-        ),
-
-        child: Text(
-          status.toUpperCase(),
-          style: const TextStyle(
-            color: Colors.white,
-            fontSize: 10,
-            fontWeight: FontWeight.w700,
-          ),
-        ),
-      ),
-    ],
-  ],
-),
-
-  // =====================================================
-  // SUBTITLE: Date + Meta
-  // =====================================================
-  subtitle: RichText(
-    text: TextSpan(
-      style: Theme.of(context).textTheme.bodySmall,
+    // =========================
+    // TITLE
+    // =========================
+    title: Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
 
       children: [
 
-        // Date range
-        if (dateRange.isNotEmpty)
-          TextSpan(
-            text: "📅 $dateRange\n",
-            style: const TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w500,
-            ),
-          ),
-
-        // Meta info
-        TextSpan(
-          text:
-              "Created: $createdBy • Updated: $updatedBy\n"
-              "Last update: $updatedDate",
+        // Production
+        Text(
+          production,
           style: const TextStyle(
-            fontSize: 11,
-            color: Colors.black54,
+            fontWeight: FontWeight.w900,
+            fontSize: 16,
           ),
         ),
+
+        // Company
+        if (company.isNotEmpty) ...[
+          const SizedBox(width: 6),
+
+          Text(
+            "• $company",
+            style: const TextStyle(
+              fontSize: 13,
+              color: Colors.grey,
+            ),
+          ),
+        ],
+
+        // Status
+        if (status.isNotEmpty) ...[
+          const SizedBox(width: 8),
+
+          Container(
+            padding: const EdgeInsets.symmetric(
+              horizontal: 6,
+              vertical: 2,
+            ),
+
+            decoration: BoxDecoration(
+              color: _statusColor(status),
+              borderRadius: BorderRadius.circular(10),
+            ),
+
+            child: Text(
+              status.toUpperCase(),
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 10,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+        ],
       ],
     ),
-  ),
 
-  // =====================================================
-  // DELETE BUTTON
-  // =====================================================
-  trailing: IconButton(
-    icon: Icon(
-      Icons.delete_outline,
-      color: cs.error,
+    // =========================
+    // SUBTITLE
+    // =========================
+    subtitle: Text(
+      "Created: $createdBy • Updated: $updatedBy\n"
+      "Last update: $updatedDate",
+      style: const TextStyle(
+        fontSize: 11,
+        color: Colors.black54,
+      ),
     ),
 
-    onPressed: id.isEmpty
-        ? null
-        : () => _confirmDeleteDraft(
-              id,
-              production,
-            ),
-  ),
+    // =========================
+    // OPEN
+    // =========================
+        // =========================
+    // DELETE
+    // =========================
+    trailing: IconButton(
+      icon: Icon(
+        Icons.delete_outline,
+        color: cs.error,
+      ),
 
-  onTap: id.isEmpty
-      ? null
-      : () => context.go("/new/$id"),
-);
-                            },
-                          );
-                        },
+      tooltip: 'Delete draft',
+
+      onPressed: id.isEmpty
+          ? null
+          : () => _confirmDeleteDraft(
+                id,
+                production,
+              ),
+    ),
+    onTap: id.isEmpty
+        ? null
+        : () => context.go("/new/$id"),
+  );
+},
                       ),
                     ),
                 ],

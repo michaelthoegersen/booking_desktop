@@ -15,6 +15,7 @@ import '../state/settings_store.dart';
 import '../widgets/offer_preview.dart';
 import '../services/offer_storage_service.dart';
 import 'package:go_router/go_router.dart';
+import '../widgets/new_company_dialog.dart';
 
 // ✅ NY: bruker routes db for autocomplete + route lookup
 import '../services/routes_service.dart';
@@ -32,7 +33,10 @@ class NewOfferPage extends StatefulWidget {
 
 class _NewOfferPageState extends State<NewOfferPage> {
   int roundIndex = 0;
+  bool _busLoaded = false;
 
+  // ✅ MERGE-AWARE travel-flag for D.Drive
+  List<bool> _travelBefore = [];
   // ------------------------------------------------------------
   // BUS PICKER (Calendar sync)
   // ------------------------------------------------------------
@@ -47,7 +51,11 @@ class _NewOfferPageState extends State<NewOfferPage> {
             children: [
               _busTile(ctx, "CSS_1034"),
               _busTile(ctx, "CSS_1023"),
-              _busTile(ctx, "CSS_1008"),
+              _busTile(ctx, "YCR 682"),
+              _busTile(ctx, "ESW 337"),
+              _busTile(ctx, "WYN 802"),
+              _busTile(ctx, "RLC 29G"),
+              
             ],
           ),
           actions: [
@@ -92,6 +100,8 @@ class _NewOfferPageState extends State<NewOfferPage> {
   // ------------------------------------------------------------
   String? _draftId;
   bool _loadingDraft = false;
+  // ✅ Remember selected bus
+  String? _selectedBus;
 
   // ------------------------------------------------------------
   // Routes service
@@ -187,8 +197,9 @@ class _NewOfferPageState extends State<NewOfferPage> {
 
   void _resetToBlankOffer() {
     setState(() {
-      _draftId = null;
-      roundIndex = 0;
+  _draftId = null;
+  _selectedBus = null; // 👈 reset bus
+  roundIndex = 0;
 
       // reset offer til defaults
       offer.company = 'Norsk Turnétransport AS';
@@ -227,55 +238,135 @@ class _NewOfferPageState extends State<NewOfferPage> {
   // ------------------------------------------------------------
   // ✅ Load existing draft
   // ------------------------------------------------------------
-  Future<void> _loadDraft(String id) async {
-    setState(() => _loadingDraft = true);
+  // ------------------------------------------------------------
+// ✅ Load existing draft (with saved bus)
+// ------------------------------------------------------------
+Future<void> _loadDraft(String id) async {
 
-    try {
-      final loaded = await OfferStorageService.loadDraft(id);
+  setState(() {
+    _loadingDraft = true;
+  });
 
-      // copy loaded fields into current offer
-      offer.company = loaded.company;
-      offer.contact = loaded.contact;
-      offer.production = loaded.production;
-      offer.busCount = loaded.busCount;
-      offer.busType = loaded.busType;
+  try {
 
-      // rounds:
-      for (int i = 0; i < offer.rounds.length; i++) {
-        offer.rounds[i].startLocation = loaded.rounds[i].startLocation;
-        offer.rounds[i].trailer = loaded.rounds[i].trailer;
-        offer.rounds[i].pickupEveningFirstDay =
-            loaded.rounds[i].pickupEveningFirstDay;
+    // ---------------- LOAD DRAFT ----------------
+    final loaded = await OfferStorageService.loadDraft(id);
 
-        offer.rounds[i].entries.clear();
-        offer.rounds[i].entries.addAll(loaded.rounds[i].entries);
-      }
+    if (loaded == null) {
+      throw Exception("Draft not found");
+    }
 
-      // update controllers
-      companyCtrl.text = offer.company;
-      contactCtrl.text = offer.contact;
-      productionCtrl.text = offer.production;
+    // ---------------- COPY BASIC DATA ----------------
+    offer.company = loaded.company;
+    offer.contact = loaded.contact;
+    offer.production = loaded.production;
 
-      // set draftId
-      _draftId = id;
+    offer.busCount = loaded.busCount;
+    offer.busType = loaded.busType;
 
-      // reset UI state
-      roundIndex = 0;
-      _syncRoundControllers();
+    // ✅ BUSS: hent fra MODELL
+    offer.bus = loaded.bus;
+    _selectedBus = loaded.bus;
 
-      if (!mounted) return;
-      setState(() {});
-      await _recalcKm();
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("Load draft failed: $e")),
-      );
-    } finally {
-      if (mounted) setState(() => _loadingDraft = false);
+    // ---------------- COPY ROUNDS ----------------
+    for (int i = 0; i < offer.rounds.length; i++) {
+
+      offer.rounds[i].startLocation =
+          loaded.rounds[i].startLocation;
+
+      offer.rounds[i].trailer =
+          loaded.rounds[i].trailer;
+
+      offer.rounds[i].pickupEveningFirstDay =
+          loaded.rounds[i].pickupEveningFirstDay;
+
+      offer.rounds[i].entries
+        ..clear()
+        ..addAll(loaded.rounds[i].entries);
+    }
+
+    // ---------------- UPDATE CONTROLLERS ----------------
+    companyCtrl.text = offer.company;
+    contactCtrl.text = offer.contact;
+    productionCtrl.text = offer.production;
+
+    // ---------------- SET DRAFT ID ----------------
+    _draftId = id;
+
+    // ---------------- RESET UI ----------------
+    roundIndex = 0;
+    _syncRoundControllers();
+
+    if (!mounted) return;
+
+    // ---------------- REFRESH UI ----------------
+    setState(() {});
+
+    // ---------------- RECALC ----------------
+    await _recalcKm();
+
+  } catch (e, st) {
+
+    debugPrint("LOAD ERROR:");
+    debugPrint(e.toString());
+    debugPrint(st.toString());
+
+    if (!mounted) return;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text("Load draft failed: $e"),
+        backgroundColor: Colors.red,
+      ),
+    );
+
+  } finally {
+
+    if (mounted) {
+      setState(() {
+        _loadingDraft = false;
+      });
     }
   }
+}
+// ------------------------------------------------------------
+// ✅ Load bus from samletdata for this draft
+// ------------------------------------------------------------
+// ------------------------------------------------------------
+// ✅ Load bus from samletdata for this draft
+// ------------------------------------------------------------
+Future<void> _loadBusForDraft(String draftId) async {
+  try {
+    final res = await sb
+        .from('samletdata')
+        .select('kilde')
+        .eq('draft_id', draftId)
+        .order('updated_at', ascending: false)
+        .limit(1)
+        .maybeSingle();
 
+    if (!mounted) return;
+
+    final bus = res?['kilde']?.toString().trim();
+
+    setState(() {
+      if (bus != null && bus.isNotEmpty) {
+        _selectedBus = bus; // ✅ SETT AKTIV BUSS
+      }
+
+      _busLoaded = true; // ✅ ferdig uansett
+    });
+
+    debugPrint("Loaded bus: $_selectedBus");
+
+  } catch (e) {
+    debugPrint("Load bus failed: $e");
+
+    if (mounted) {
+      setState(() => _busLoaded = true);
+    }
+  }
+}
   // ------------------------------------------------------------
   // ✅ DB autocomplete for location
   // ------------------------------------------------------------
@@ -307,7 +398,210 @@ class _NewOfferPageState extends State<NewOfferPage> {
   // ------------------------------------------------------------
   // Small helpers
   // ------------------------------------------------------------
+  Future<void> _openMissingRouteDialog({
+  String? from,
+  String? to,
+}) async {
 
+  final fromCtrl = TextEditingController(text: from ?? '');
+  final toCtrl = TextEditingController(text: to ?? '');
+  final kmCtrl = TextEditingController();
+
+  await showDialog(
+    context: context,
+    builder: (ctx) {
+
+      return AlertDialog(
+        title: const Text("Add missing route"),
+
+        content: SizedBox(
+          width: 420,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+
+              TextField(
+                controller: fromCtrl,
+                decoration: const InputDecoration(
+                  labelText: "From",
+                ),
+              ),
+
+              const SizedBox(height: 10),
+
+              TextField(
+                controller: toCtrl,
+                decoration: const InputDecoration(
+                  labelText: "To",
+                ),
+              ),
+
+              const SizedBox(height: 10),
+
+              TextField(
+                controller: kmCtrl,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(
+                  labelText: "KM",
+                ),
+              ),
+            ],
+          ),
+        ),
+
+        actions: [
+
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text("Cancel"),
+          ),
+
+          FilledButton(
+            onPressed: () async {
+
+              final from = _norm(fromCtrl.text);
+              final to = _norm(toCtrl.text);
+              final km =
+                  double.tryParse(kmCtrl.text.replaceAll(',', '.'));
+
+              if (from.isEmpty || to.isEmpty || km == null) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text("Fill all fields"),
+                  ),
+                );
+                return;
+              }
+
+              try {
+
+                // ---------------- SAVE TO DB ----------------
+                await sb.from('routes_all').insert({
+                'from_place': from,
+                'to_place': to,
+                'distance_total_km': km,
+});
+
+                if (!mounted) return;
+
+                Navigator.pop(ctx);
+
+                // ---------------- RECALC ----------------
+                await _recalcKm();
+
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text("Route saved ✅"),
+                  ),
+                );
+
+              } catch (e) {
+
+                if (!mounted) return;
+
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text("Save failed: $e"),
+                    backgroundColor: Colors.red,
+                  ),
+                );
+              }
+            },
+
+            child: const Text("Save"),
+          ),
+        ],
+      );
+    },
+  );
+}
+// ------------------------------------------------------------
+// HELPERS
+// ------------------------------------------------------------
+// ------------------------------------------------------------
+// Check if leg has Travel/Off before
+// ------------------------------------------------------------
+bool _hasTravelBefore(List<RoundEntry> entries, int index) {
+  if (index <= 0) return false;
+
+  int i = index - 1;
+
+  while (i >= 0) {
+    final loc = _norm(entries[i].location).toLowerCase();
+
+    if (loc == 'travel' || loc == 'off') {
+      return true;
+    }
+
+    if (loc.isNotEmpty) {
+      return false;
+    }
+
+    i--;
+  }
+
+  return false;
+}
+// ------------------------------------------------------------
+// FIND PREVIOUS REAL LOCATION (skip Travel / Off)
+// ------------------------------------------------------------
+String _findPreviousRealLocation(
+  List<RoundEntry> entries,
+  int index,
+  String startLocation,
+) {
+  for (int i = index - 1; i >= 0; i--) {
+    final loc = _norm(entries[i].location).toLowerCase();
+
+    if (loc != 'travel' && loc != 'off' && loc.isNotEmpty) {
+      return _norm(entries[i].location);
+    }
+  }
+
+  // Fallback → bruk start
+  return _norm(startLocation);
+}
+bool _isNoDriveLeg(String from, String to) {
+  final f = _norm(from).toLowerCase();
+  final t = _norm(to).toLowerCase();
+
+  if (f == t) return true;
+
+  if (t == 'travel') return true;
+  if (t == 'off') return true;
+
+  return false;
+}
+String _norm(String s) {
+  return s.trim().replaceAll(RegExp(r"\s+"), " ");
+}
+
+String _cacheKey(String from, String to) {
+  return "${_norm(from).toLowerCase()}__${_norm(to).toLowerCase()}";
+}
+
+String _fmtDate(DateTime d) {
+  return "${d.day.toString().padLeft(2, '0')}"
+      ".${d.month.toString().padLeft(2, '0')}"
+      ".${d.year}";
+}
+
+Future<void> _pickDate() async {
+  final now = DateTime.now();
+
+  final picked = await showDatePicker(
+    context: context,
+    firstDate: DateTime(now.year - 1),
+    lastDate: DateTime(now.year + 5),
+    initialDate: selectedDate ?? now,
+  );
+
+  if (picked != null && mounted) {
+    setState(() {
+      selectedDate = picked;
+    });
+  }
+}
   // ============================================================
 // VAT ENGINE (Foreign VAT calculation)
 // ============================================================
@@ -438,118 +732,191 @@ Widget _buildVatBox(
   );
 }
   Future<void> _onAddMissingRoutePressed() async {
-  // CASE 1: Draft er ikke lagret ennå
-  if (_draftId == null) {
-    final shouldSave = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text("Save draft first?"),
-        content: const Text(
-          "You need to save this offer before adding routes.\n\nDo you want to save now?",
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(false),
-            child: const Text("No"),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(ctx).pop(true),
-            child: const Text("Yes, save"),
-          ),
-        ],
-      ),
-    );
 
-    if (shouldSave == true) {
-      await _saveDraft();
-    } else {
-      return;
+  final round = offer.rounds[roundIndex];
+
+  if (round.entries.isEmpty) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text("No routes yet.")),
+    );
+    return;
+  }
+
+  debugPrint("---- ADD MISSING ROUTE ----");
+
+  String? suggestedFrom;
+  String? suggestedTo;
+
+  final count = round.entries.length;
+
+  // ================================
+  // FIND FIRST REAL MISSING LEG
+  // ================================
+  for (int i = 0; i < count; i++) {
+
+    final km = _kmByIndex[i];
+
+    final from = i == 0
+        ? _norm(round.startLocation)
+        : _norm(round.entries[i - 1].location);
+
+    final to = _norm(round.entries[i].location);
+
+    debugPrint("[$i] $from → $to | km=$km");
+
+    // ❗ hopp over hvis samme sted
+    if (from == to) continue;
+
+    // ❗ mangler km = denne vil vi ha
+    if (km == null) {
+      suggestedFrom = from;
+      suggestedTo = to;
+      break;
     }
   }
 
-  // CASE 2: Draft finnes → gå til Routes Admin
-  if (!mounted) return;
-  GoRouter.of(context).go("/routes");
-}
-
-  String _fmtDate(DateTime d) =>
-      "${d.day.toString().padLeft(2, '0')}.${d.month.toString().padLeft(2, '0')}.${d.year}";
-
-  Future<void> _pickDate() async {
-    final now = DateTime.now();
-    final picked = await showDatePicker(
-      context: context,
-      firstDate: DateTime(now.year - 1),
-      lastDate: DateTime(now.year + 5),
-      initialDate: selectedDate ?? now,
-    );
-    if (picked != null) setState(() => selectedDate = picked);
+  // ================================
+  // FALLBACK (hvis noe er rart)
+  // ================================
+  if (suggestedFrom == null || suggestedTo == null) {
+    suggestedFrom = _norm(round.startLocation);
+    suggestedTo = _norm(round.entries.first.location);
   }
 
-  String _norm(String s) => s.trim().replaceAll(RegExp(r"\s+"), " ");
-  String _cacheKey(String from, String to) =>
-      "${_norm(from).toLowerCase()}__${_norm(to).toLowerCase()}";
+  debugPrint("SUGGESTED: $suggestedFrom → $suggestedTo");
 
+  // ================================
+  // OPEN DIALOG
+  // ================================
+  await _openMissingRouteDialog(
+    from: suggestedFrom,
+    to: suggestedTo,
+  );
+}
   // ------------------------------------------------------------
   // ✅ Save draft to Supabase (insert/update)
   // ------------------------------------------------------------
-  Future<void> _saveDraft() async {
+  // ------------------------------------------------------------
+// ✅ Save draft to Supabase (insert/update)
+// ------------------------------------------------------------
+Future<void> _saveDraft() async {
+
+  // ----------------------------------------
+  // ⛔ Vent hvis draft/buss ikke er ferdig
+  // ----------------------------------------
+  if (_loadingDraft) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text("Loading draft… please wait"),
+      ),
+    );
+    return;
+  }
+
   try {
-    // Sørg for at startlocation er synket
+
+    // ----------------------------------------
+    // Sync start location
+    // ----------------------------------------
     offer.rounds[roundIndex].startLocation =
         _norm(startLocCtrl.text);
 
-    // --------------------------------------------------
-    // 0️⃣ Velg buss først
-    // --------------------------------------------------
-    final selectedBus = await _pickBus();
+    // ----------------------------------------
+    // Pick / reuse bus (MODEL FIRST)
+    // ----------------------------------------
+    String selectedBus;
 
-    if (selectedBus == null) {
-      if (!mounted) return;
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Ingen buss valgt")),
-      );
-      return;
+    // 1️⃣ Bruk lagret i modellen
+    if (offer.bus != null && offer.bus!.isNotEmpty) {
+      selectedBus = offer.bus!;
     }
 
+    // 2️⃣ Ellers: spør bruker
+    else {
+      final picked = await _pickBus();
 
-   // 1️⃣ Lagre draft (Desktop DB)
-    // --------------------------------------------------
-    final id = await OfferStorageService.saveDraft(
+      if (picked == null || picked.isEmpty) {
+
+        if (!mounted) return;
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Ingen buss valgt")),
+        );
+
+        return;
+      }
+
+      selectedBus = picked;
+    }
+
+    // ----------------------------------------
+    // ✅ Lagre buss i MODELL
+    // ----------------------------------------
+    offer.bus = selectedBus;
+
+    // Synk state (valgfritt, men ryddig)
+    _selectedBus = selectedBus;
+
+    // ----------------------------------------
+    // Save draft
+    // ----------------------------------------
+    // 🔥 LAGRE BUSS I DRAFT
+offer.bus = selectedBus;
+
+// Save draft
+final id = await OfferStorageService.saveDraft(
   id: _draftId,
   offer: offer,
 );
 
-if (id == null || id.isEmpty) {
-  throw Exception("Failed to save draft (no ID returned)");
-}
+    if (id == null || id.isEmpty) {
+      throw Exception("Failed to save draft (no ID returned)");
+    }
 
-    // --------------------------------------------------
-    // 2️⃣ HENT FERSK DATA FRA DB (KRITISK)
-    // --------------------------------------------------
-    final freshOffer = await OfferStorageService.loadDraft(id);
+    _draftId = id;
 
-if (freshOffer == null) {
-  throw Exception("Draft was saved, but could not be reloaded from DB.");
-}
+    // ----------------------------------------
+    // Reload fresh draft
+    // ----------------------------------------
+    final freshOffer =
+        await OfferStorageService.loadDraft(id);
 
-await CalendarSyncService.syncFromOffer(
-  freshOffer,
-  selectedBus: selectedBus,
-  draftId: id, // ✅
-);
+    if (freshOffer == null) {
+      throw Exception("Draft saved but reload failed");
+    }
 
-    // --------------------------------------------------
+    // ----------------------------------------
+    // Sync to calendar
+    // ----------------------------------------
+    await CalendarSyncService.syncFromOffer(
+      freshOffer,
+      selectedBus: selectedBus,
+      draftId: id,
+    );
 
+    // ----------------------------------------
+    // Update state
+    // ----------------------------------------
+    if (mounted) {
+      setState(() {
+        _selectedBus = selectedBus;
+        offer.bus = selectedBus;
+      });
+    }
+
+    // ----------------------------------------
+    // UI feedback
+    // ----------------------------------------
     if (!mounted) return;
 
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text("Lagret på $selectedBus ✅")),
+      SnackBar(
+        content: Text("Lagret på $selectedBus ✅"),
+      ),
     );
 
-    setState(() {});
   } catch (e, st) {
+
     debugPrint("SAVE ERROR:");
     debugPrint(e.toString());
     debugPrint(st.toString());
@@ -557,7 +924,10 @@ await CalendarSyncService.syncFromOffer(
     if (!mounted) return;
 
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text("Save failed: $e")),
+      SnackBar(
+        content: Text("Save failed: $e"),
+        backgroundColor: Colors.red,
+      ),
     );
   }
 }
@@ -669,10 +1039,11 @@ await CalendarSyncService.syncFromOffer(
   }
 }
 
-  // ------------------------------------------------------------
-  // Recalculate legs for CURRENT round
-  // ------------------------------------------------------------
-  Future<void> _recalcKm() async {
+// ------------------------------------------------------------
+// Recalculate legs for CURRENT round (with Travel/Off merge)
+// ------------------------------------------------------------
+Future<void> _recalcKm() async {
+
   final round = offer.rounds[roundIndex];
   final start = _norm(round.startLocation);
 
@@ -682,59 +1053,159 @@ await CalendarSyncService.syncFromOffer(
       _ferryByIndex = {};
       _tollByIndex = {};
       _extraByIndex = {};
+      _countryKmByIndex = {};
+      _travelBefore = [];
     });
     return;
   }
 
-    final entries = [...round.entries]..sort((a, b) => a.date.compareTo(b.date));
+  final entries = round.entries;
 
-    setState(() {
-      _loadingKm = true;
-      _kmError = null;
-    });
+  setState(() {
+    _loadingKm = true;
+    _kmError = null;
+  });
 
-    final Map<int, double?> kmByIndex = {};
-    final Map<int, double> ferryByIndex = {};
-    final Map<int, double> tollByIndex = {};
-    final Map<int, String> extraByIndex = {};
+  final Map<int, double> kmByIndex = {};
+  final Map<int, double> ferryByIndex = {};
+  final Map<int, double> tollByIndex = {};
+  final Map<int, String> extraByIndex = {};
+  final Map<int, Map<String, double>> countryKmByIndex = {};
 
-    bool missing = false;
+  final List<bool> travelBefore =
+      List<bool>.filled(entries.length, false);
 
-    for (int i = 0; i < entries.length; i++) {
-      final from = i == 0 ? start : _norm(entries[i - 1].location);
-      final to = _norm(entries[i].location);
+  bool missing = false;
 
-      final km = await _fetchLegData(from: from, to: to, index: i);
-      kmByIndex[i] = km;
+  int? pendingTravelIndex;
+  bool seenTravel = false;
 
-      ferryByIndex[i] = _ferryByIndex[i] ?? 0.0;
-      tollByIndex[i] = _tollByIndex[i] ?? 0.0;
-      extraByIndex[i] = _extraByIndex[i] ?? '';
+  // ===================================================
+  // MERGE-AWARE LOOP
+  // ===================================================
+  for (int i = 0; i < entries.length; i++) {
 
-      if (km == null) missing = true;
+    final from = _findPreviousRealLocation(entries, i, start);
+
+    final toRaw = _norm(entries[i].location);
+    final to = toRaw.toLowerCase();
+
+    final isTravel = to == 'travel' || to == 'off';
+
+    // ---------------- TRAVEL / OFF ----------------
+    if (isTravel) {
+
+      kmByIndex[i] = 0;
+      ferryByIndex[i] = 0;
+      tollByIndex[i] = 0;
+      extraByIndex[i] = '';
+      countryKmByIndex[i] = {};
+
+      pendingTravelIndex = i;
+      seenTravel = true;
+
+      continue;
     }
 
-    setState(() {
-  _kmByIndex = kmByIndex;
-  _ferryByIndex = ferryByIndex;
-  _tollByIndex = tollByIndex;
-  _extraByIndex = extraByIndex;
+    // ---------------- SAME PLACE = 0 KM ----------------
+    if (_norm(from).toLowerCase() == to) {
 
-  // ✅ LAGRE EXTRA + COUNTRY KM I ENTRY (VIKTIG FOR PDF + VAT)
-for (int i = 0; i < round.entries.length; i++) {
-  round.entries[i] = round.entries[i].copyWith(
-    extra: extraByIndex[i] ?? '',
-    countryKm: _countryKmByIndex[i] ?? {},
-  );
+      kmByIndex[i] = 0;
+      ferryByIndex[i] = 0;
+      tollByIndex[i] = 0;
+      extraByIndex[i] = '';
+      countryKmByIndex[i] = {};
+
+      pendingTravelIndex = null;
+      seenTravel = false;
+
+      continue;
+    }
+
+    // ---------------- LOOKUP ----------------
+    final km = await _fetchLegData(
+      from: from,
+      to: toRaw,
+      index: i,
+    );
+
+    if (km == null) missing = true;
+
+    final ferry = _ferryByIndex[i] ?? 0;
+    final toll = _tollByIndex[i] ?? 0;
+    final extra = _extraByIndex[i] ?? '';
+    final country = _countryKmByIndex[i] ?? {};
+
+    // ---------------- MERGE WITH TRAVEL ----------------
+    if (pendingTravelIndex != null && km != null) {
+
+      kmByIndex[pendingTravelIndex] = km;
+      ferryByIndex[pendingTravelIndex] = ferry;
+      tollByIndex[pendingTravelIndex] = toll;
+      extraByIndex[pendingTravelIndex] = extra;
+      countryKmByIndex[pendingTravelIndex] = country;
+
+      kmByIndex[i] = 0;
+      ferryByIndex[i] = 0;
+      tollByIndex[i] = 0;
+      extraByIndex[i] = '';
+      countryKmByIndex[i] = {};
+
+      travelBefore[pendingTravelIndex] = true;
+      travelBefore[i] = true;
+
+      pendingTravelIndex = null;
+      seenTravel = false;
+
+      continue;
+    }
+
+    // ---------------- NORMAL ----------------
+    kmByIndex[i] = km ?? 0;
+    ferryByIndex[i] = ferry;
+    tollByIndex[i] = toll;
+    extraByIndex[i] = extra;
+    countryKmByIndex[i] = country;
+
+    if (seenTravel) {
+      travelBefore[i] = true;
+      seenTravel = false;
+    } else {
+      travelBefore[i] = false;
+    }
+  }
+
+  // ===================================================
+  // APPLY EXTRA + COUNTRY TO ENTRIES
+  // ===================================================
+  for (int i = 0; i < entries.length; i++) {
+    entries[i] = entries[i].copyWith(
+      extra: extraByIndex[i] ?? '',
+      countryKm: countryKmByIndex[i] ?? {},
+    );
+  }
+
+  if (!mounted) return;
+
+  // ===================================================
+  // UPDATE STATE
+  // ===================================================
+  setState(() {
+    _kmByIndex = kmByIndex;
+    _ferryByIndex = ferryByIndex;
+    _tollByIndex = tollByIndex;
+    _extraByIndex = extraByIndex;
+    _countryKmByIndex = countryKmByIndex;
+    _travelBefore = travelBefore;
+
+    _loadingKm = false;
+
+    if (missing) {
+      _kmError =
+          "Missing routes in routes_all. Check place names / direction.";
+    }
+  });
 }
-
-  _loadingKm = false;
-
-  if (missing) {
-    _kmError = "Missing routes in routes_all. Check place names / direction.";
-  }
-});
-  }
 
   // ------------------------------------------------------------
   // Add entry
@@ -901,66 +1372,166 @@ for (int i = 0; i < round.entries.length; i++) {
     await _recalcKm();
   }
 
-  // ------------------------------------------------------------
-  // ✅ Per-round calc helper (used for PDF for ALL rounds)
-  // ------------------------------------------------------------
-  Future<RoundCalcResult> _calcRound(int ri) async {
-    final round = offer.rounds[ri];
-    final entryCount = round.entries
+// ------------------------------------------------------------
+// ✅ Per-round calc helper (CORRECT Travel merge + D.Drive)
+// ------------------------------------------------------------
+Future<RoundCalcResult> _calcRound(int ri) async {
+
+  final round = offer.rounds[ri];
+
+  final entries = [...round.entries]
+    ..sort((a, b) => a.date.compareTo(b.date));
+
+  final entryCount = entries
       .map((e) => DateTime(e.date.year, e.date.month, e.date.day))
       .toSet()
       .length;
 
-    if (entryCount == 0) {
-      return TripCalculator.calculateRound(
-        settings: SettingsStore.current,
-        entryCount: 0,
-        pickupEveningFirstDay: false,
-        trailer: round.trailer,
-        totalKm: 0.0,
-        legKm: const [],
-        ferryCost: 0.0,
-        tollCost: 0.0,
-      );
-    }
-
-    final start = _norm(round.startLocation);
-    final entries = [...round.entries]..sort((a, b) => a.date.compareTo(b.date));
-
-    final Map<int, double?> kmByIndex = {};
-    final Map<int, double> ferryByIndex = {};
-    final Map<int, double> tollByIndex = {};
-
-    for (int i = 0; i < entries.length; i++) {
-      final from = i == 0 ? start : _norm(entries[i - 1].location);
-      final to = _norm(entries[i].location);
-
-      final km = await _fetchLegData(from: from, to: to, index: i);
-      kmByIndex[i] = km;
-
-      ferryByIndex[i] = _ferryByIndex[i] ?? 0.0;
-      tollByIndex[i] = _tollByIndex[i] ?? 0.0;
-    }
-
-    final totalKm =
-        kmByIndex.values.whereType<double>().fold<double>(0, (a, b) => a + b);
-    final legKm =
-        List.generate(entryCount, (i) => (kmByIndex[i] ?? 0.0).toDouble());
-
-    final ferryTotal = ferryByIndex.values.fold<double>(0.0, (a, b) => a + b);
-    final tollTotal = tollByIndex.values.fold<double>(0.0, (a, b) => a + b);
-
+  if (entryCount == 0) {
     return TripCalculator.calculateRound(
       settings: SettingsStore.current,
-      entryCount: entryCount,
-      pickupEveningFirstDay: round.pickupEveningFirstDay,
+      entryCount: 0,
+      pickupEveningFirstDay: false,
       trailer: round.trailer,
-      totalKm: totalKm,
-      legKm: legKm,
-      ferryCost: ferryTotal,
-      tollCost: tollTotal,
+      totalKm: 0,
+      legKm: const [],
+      ferryCost: 0,
+      tollCost: 0,
+      hasTravelBefore: const [],
     );
   }
+
+  final start = _norm(round.startLocation);
+
+  final Map<int, double> kmByIndex = {};
+  final Map<int, double> ferryByIndex = {};
+  final Map<int, double> tollByIndex = {};
+
+  final List<bool> travelBefore =
+      List<bool>.filled(entries.length, false);
+
+  int? pendingTravelIndex;
+  bool seenTravel = false;
+
+  // ===================================================
+  // LOOP (MATCHER _recalcKm 100%)
+  // ===================================================
+  for (int i = 0; i < entries.length; i++) {
+
+    final from = _findPreviousRealLocation(
+      entries,
+      i,
+      start,
+    );
+
+    final toRaw = _norm(entries[i].location);
+    final to = toRaw.toLowerCase();
+
+    final isTravel = to == 'travel' || to == 'off';
+
+    // ---------------- TRAVEL / OFF ----------------
+    if (isTravel) {
+
+      kmByIndex[i] = 0;
+      ferryByIndex[i] = 0;
+      tollByIndex[i] = 0;
+
+      pendingTravelIndex = i;
+      seenTravel = true;
+
+      continue;
+    }
+
+    // ---------------- SAME PLACE = 0 KM ----------------
+    if (_norm(from).toLowerCase() == to) {
+
+      kmByIndex[i] = 0;
+      ferryByIndex[i] = 0;
+      tollByIndex[i] = 0;
+
+      pendingTravelIndex = null;
+      seenTravel = false;
+
+      continue;
+    }
+
+    // ---------------- LOOKUP ----------------
+    final km = await _fetchLegData(
+      from: from,
+      to: toRaw,
+      index: i,
+    );
+
+    final ferry = _ferryByIndex[i] ?? 0;
+    final toll = _tollByIndex[i] ?? 0;
+
+    // ---------------- MERGE WITH TRAVEL ----------------
+    if (pendingTravelIndex != null && km != null) {
+
+      kmByIndex[pendingTravelIndex] = km;
+      ferryByIndex[pendingTravelIndex] = ferry;
+      tollByIndex[pendingTravelIndex] = toll;
+
+      kmByIndex[i] = 0;
+      ferryByIndex[i] = 0;
+      tollByIndex[i] = 0;
+
+      travelBefore[pendingTravelIndex] = true;
+      travelBefore[i] = true;
+
+      pendingTravelIndex = null;
+      seenTravel = false;
+
+      continue;
+    }
+
+    // ---------------- NORMAL ----------------
+    kmByIndex[i] = km ?? 0;
+    ferryByIndex[i] = ferry;
+    tollByIndex[i] = toll;
+
+    if (seenTravel) {
+      travelBefore[i] = true;
+      seenTravel = false;
+    } else {
+      travelBefore[i] = false;
+    }
+  }
+
+  // ===================================================
+  // SUM
+  // ===================================================
+
+  final totalKm =
+      kmByIndex.values.fold<double>(0, (a, b) => a + b);
+
+  final legKm = List.generate(
+    entryCount,
+    (i) => kmByIndex[i] ?? 0,
+  );
+
+  final ferryTotal =
+      ferryByIndex.values.fold<double>(0, (a, b) => a + b);
+
+  final tollTotal =
+      tollByIndex.values.fold<double>(0, (a, b) => a + b);
+
+  // ===================================================
+  // RESULT
+  // ===================================================
+
+  return TripCalculator.calculateRound(
+    settings: SettingsStore.current,
+    entryCount: entryCount,
+    pickupEveningFirstDay: round.pickupEveningFirstDay,
+    trailer: round.trailer,
+    totalKm: totalKm,
+    legKm: legKm,
+    ferryCost: ferryTotal,
+    tollCost: tollTotal,
+    hasTravelBefore: travelBefore,
+  );
+}
 
   // ------------------------------------------------------------
   // ✅ Build PDF bytes
@@ -1091,19 +1662,22 @@ for (int i = 0; i < round.entries.length; i++) {
     final tollTotal =
         _tollByIndex.values.fold<double>(0.0, (a, b) => a + b);
 
-    final calc = TripCalculator.calculateRound(
-      settings: SettingsStore.current,
-      entryCount: entryCount,
-      pickupEveningFirstDay: round.pickupEveningFirstDay,
-      trailer: round.trailer,
-      totalKm: totalKm,
-      legKm: _kmByIndex.values
-          .whereType<double>()
-          .map((e) => e.toDouble())
-          .toList(),
-      ferryCost: ferryTotal,
-      tollCost: tollTotal,
-    );
+    final travelFlags = _travelBefore;
+
+final calc = TripCalculator.calculateRound(
+  settings: SettingsStore.current,
+  entryCount: entryCount,
+  pickupEveningFirstDay: round.pickupEveningFirstDay,
+  trailer: round.trailer,
+  totalKm: totalKm,
+  legKm: _kmByIndex.values
+      .whereType<double>()
+      .map((e) => e.toDouble())
+      .toList(),
+  ferryCost: ferryTotal,
+  tollCost: tollTotal,
+  hasTravelBefore: travelFlags,
+);
 
     final basePrice =
         calc.totalCost - calc.ferryCost - calc.tollCost;
@@ -1736,7 +2310,54 @@ class _LeftOfferCardState extends State<_LeftOfferCard> {
       if (mounted) setState(() => _loading = false);
     }
   }
+// --------------------------------------------------
+// CREATE COMPANY INLINE (FROM NEW OFFER)
+// --------------------------------------------------
+Future<void> _createCompanyInline() async {
 
+  final created = await showDialog<bool>(
+    context: context,
+    builder: (_) => const NewCompanyDialog(),
+  );
+
+  // Bruker avbrøt
+  if (created != true) return;
+
+  setState(() => _loading = true);
+
+  try {
+
+    // Hent siste opprettede company
+    final res = await _client
+        .from('companies')
+        .select()
+        .order('created_at', ascending: false)
+        .limit(1)
+        .single();
+
+    if (!mounted) return;
+
+    // Velg automatisk
+    await _select(res);
+
+  } catch (e) {
+
+    if (!mounted) return;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text("Failed to create company: $e"),
+        backgroundColor: Colors.red,
+      ),
+    );
+
+  } finally {
+
+    if (mounted) {
+      setState(() => _loading = false);
+    }
+  }
+}
   // --------------------------------------------------
   // SELECT COMPANY
   // --------------------------------------------------
@@ -1814,106 +2435,125 @@ class _LeftOfferCardState extends State<_LeftOfferCard> {
   // CONTACT DIALOG
   // --------------------------------------------------
   Future<void> _openContactDialog({Map<String, dynamic>? existing}) async {
-    final nameCtrl =
-        TextEditingController(text: existing?['name'] ?? '');
-    final emailCtrl =
-        TextEditingController(text: existing?['email'] ?? '');
-    final phoneCtrl =
-        TextEditingController(text: existing?['phone'] ?? '');
+  final nameCtrl =
+      TextEditingController(text: existing?['name'] ?? '');
+  final emailCtrl =
+      TextEditingController(text: existing?['email'] ?? '');
+  final phoneCtrl =
+      TextEditingController(text: existing?['phone'] ?? '');
 
-    final isEdit = existing != null;
+  final isEdit = existing != null;
 
-    final saved = await showDialog<bool>(
-      context: context,
-      builder: (ctx) {
-        return AlertDialog(
-          title: Text(isEdit ? "Edit contact" : "New contact"),
+  final result = await showDialog<Map<String, dynamic>>(
+    context: context,
+    builder: (ctx) {
+      return AlertDialog(
+        title: Text(isEdit ? "Edit contact" : "New contact"),
 
-          content: SizedBox(
-            width: 380,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
+        content: SizedBox(
+          width: 380,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
 
-                TextField(
-                  controller: nameCtrl,
-                  decoration: const InputDecoration(
-                    labelText: "Name",
-                  ),
+              TextField(
+                controller: nameCtrl,
+                decoration: const InputDecoration(
+                  labelText: "Name",
                 ),
+              ),
 
-                const SizedBox(height: 10),
+              const SizedBox(height: 10),
 
-                TextField(
-                  controller: emailCtrl,
-                  decoration: const InputDecoration(
-                    labelText: "Email",
-                  ),
+              TextField(
+                controller: emailCtrl,
+                decoration: const InputDecoration(
+                  labelText: "Email",
                 ),
+              ),
 
-                const SizedBox(height: 10),
+              const SizedBox(height: 10),
 
-                TextField(
-                  controller: phoneCtrl,
-                  decoration: const InputDecoration(
-                    labelText: "Phone",
-                  ),
+              TextField(
+                controller: phoneCtrl,
+                decoration: const InputDecoration(
+                  labelText: "Phone",
                 ),
-              ],
-            ),
+              ),
+            ],
+          ),
+        ),
+
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text("Cancel"),
           ),
 
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text("Cancel"),
-            ),
+          FilledButton(
+            onPressed: () async {
+              final name = nameCtrl.text.trim();
 
-            FilledButton(
-              onPressed: () async {
-                final name = nameCtrl.text.trim();
+              if (name.isEmpty) return;
 
-                if (name.isEmpty) return;
+              try {
+                Map<String, dynamic> saved;
 
-                try {
-                  if (isEdit) {
-                    await _client
-                        .from('contacts')
-                        .update({
-                          'name': name,
-                          'email': emailCtrl.text.trim(),
-                          'phone': phoneCtrl.text.trim(),
-                        })
-                        .eq('id', existing!['id']);
-                  } else {
-                    await _client.from('contacts').insert({
-                      'company_id': _currentCompanyId,
-                      'name': name,
-                      'email': emailCtrl.text.trim(),
-                      'phone': phoneCtrl.text.trim(),
-                    });
-                  }
+                if (isEdit) {
+                  final res = await _client
+                      .from('contacts')
+                      .update({
+                        'name': name,
+                        'email': emailCtrl.text.trim(),
+                        'phone': phoneCtrl.text.trim(),
+                      })
+                      .eq('id', existing!['id'])
+                      .select()
+                      .single();
 
-                  if (!mounted) return;
+                  saved = res;
 
-                  Navigator.pop(ctx, true);
-                } catch (e) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text("Save failed: $e")),
-                  );
+                } else {
+                  final res = await _client
+                      .from('contacts')
+                      .insert({
+                        'company_id': _currentCompanyId,
+                        'name': name,
+                        'email': emailCtrl.text.trim(),
+                        'phone': phoneCtrl.text.trim(),
+                      })
+                      .select()
+                      .single();
+
+                  saved = res;
                 }
-              },
-              child: const Text("Save"),
-            ),
-          ],
-        );
-      },
-    );
 
-    if (saved == true) {
-      await _reloadContacts();
-    }
+                if (!mounted) return;
+
+                Navigator.pop(ctx, saved);
+
+              } catch (e) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text("Save failed: $e")),
+                );
+              }
+            },
+            child: const Text("Save"),
+          ),
+        ],
+      );
+    },
+  );
+
+  if (result != null) {
+    await _reloadContacts();
+
+    setState(() {
+      _contactId = result['id'].toString();
+      widget.offer.contact = result['name'] ?? '';
+    });
   }
+}
 
   // --------------------------------------------------
   // UI
@@ -1964,23 +2604,38 @@ class _LeftOfferCardState extends State<_LeftOfferCard> {
 
                       const SizedBox(height: 6),
 
-                      TextField(
-                        controller: _companyCtrl,
-                        onChanged: _search,
-                        decoration: InputDecoration(
-                          labelText: "Search company",
-                          prefixIcon: const Icon(Icons.apartment),
-                          suffixIcon: _loading
-                              ? const SizedBox(
-                                  width: 18,
-                                  height: 18,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2,
-                                  ),
-                                )
-                              : null,
-                        ),
-                      ),
+                      Row(
+  children: [
+
+    // ================= COMPANY SEARCH =================
+    Expanded(
+      child: TextField(
+        controller: _companyCtrl,
+        onChanged: _search,
+        decoration: InputDecoration(
+          labelText: "Search company",
+          prefixIcon: const Icon(Icons.apartment),
+          suffixIcon: _loading
+              ? const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : null,
+        ),
+      ),
+    ),
+
+    const SizedBox(width: 6),
+
+    // ================= ADD COMPANY =================
+    IconButton(
+      tooltip: "Add new company",
+      icon: const Icon(Icons.add_business),
+      onPressed: _createCompanyInline,
+    ),
+  ],
+),
 
                       if (_companySuggestions.isNotEmpty)
                         Container(

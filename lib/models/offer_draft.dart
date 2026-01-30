@@ -33,6 +33,9 @@ class OfferDraft {
   int busCount;
   BusType busType;
 
+  // ✅ NY: Lagret buss
+  String? bus;
+
   final List<OfferRound> rounds;
 
   OfferDraft({
@@ -42,6 +45,9 @@ class OfferDraft {
     this.production = '',
     this.busCount = 1,
     this.busType = BusType.sleeper12,
+
+    // ✅ NY
+    this.bus,
   }) : rounds = List.generate(12, (_) => OfferRound());
 
   // ------------------------------------------------------------
@@ -73,6 +79,10 @@ class OfferDraft {
       'production': production,
       'busCount': busCount,
       'busType': busType.name,
+
+      // ✅ NY
+      'bus': bus,
+
       'rounds': rounds.map((r) => r.toJson()).toList(),
     };
   }
@@ -87,6 +97,9 @@ class OfferDraft {
       busType: _busTypeFromName(
         (json['busType'] ?? 'sleeper12') as String,
       ),
+
+      // ✅ NY
+      bus: json['bus'] as String?,
     );
 
     final rawRounds = (json['rounds'] as List?) ?? [];

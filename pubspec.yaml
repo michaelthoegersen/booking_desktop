@@ -10,13 +10,14 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-
+  flutter_map: ^6.1.0
+  latlong2: ^0.9.0
   go_router: ^14.6.2
   supabase_flutter: ^2.8.0
   flutter_dotenv: ^5.1.0
   file_picker: ^8.1.2
   shared_preferences: ^2.3.2
-
+  flutter_map_marker_cluster: ^1.3.5
   cupertino_icons: ^1.0.8
   pdf: ^3.11.0
   printing: ^5.13.0
@@ -56,6 +57,7 @@ flutter:
     - assets/pdf/buses/16_sleeper.png
     - assets/pdf/buses/18_sleeper.png
     - assets/pdf/buses/DDBus.png
+    - assets/pdf/buses/DDBuskart.png
     - assets/pdf/template_page0.png
     - assets/pdf/logos/TourFlowLogo.png
     - assets/fonts/Calibri.ttf

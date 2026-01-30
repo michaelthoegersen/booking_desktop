@@ -8,6 +8,34 @@ import '../supabase_clients.dart';
 class CalendarSyncService {
   static SupabaseClient get sb => Supabase.instance.client;
 
+  // --------------------------------------------------
+  // Helper: Sjekk om det finnes Travel/Off før index
+  // --------------------------------------------------
+  static bool _hasTravelBefore(
+    List<RoundEntry> entries,
+    int index,
+  ) {
+    if (index <= 0) return false;
+
+    int i = index - 1;
+
+    while (i >= 0) {
+      final loc = entries[i].location.trim().toLowerCase();
+
+      if (loc == 'travel' || loc == 'off') {
+        return true;
+      }
+
+      if (loc.isNotEmpty) {
+        return false;
+      }
+
+      i--;
+    }
+
+    return false;
+  }
+
   /// Sync offer → samletdata (kalender)
   static Future<void> syncFromOffer(
     OfferDraft offer, {
@@ -69,23 +97,46 @@ class CalendarSyncService {
 
         if (round.entries.isEmpty) continue;
 
+        final entries = [...round.entries]
+          ..sort((a, b) => a.date.compareTo(b.date));
+
+        // --------------------------------------------------
+        // BUILD TRAVEL FLAGS (ekte)
+        // --------------------------------------------------
+        final List<bool> travelFlags = [];
+
+        for (int i = 0; i < entries.length; i++) {
+          final hasTravel = _hasTravelBefore(entries, i);
+          travelFlags.add(hasTravel);
+        }
+
+        // --------------------------------------------------
         // Kalkuler pris per runde
+        // --------------------------------------------------
         final calc = TripCalculator.calculateRound(
           settings: SettingsStore.current,
-          entryCount: round.entries.length,
+          entryCount: entries.length,
           pickupEveningFirstDay: round.pickupEveningFirstDay,
           trailer: round.trailer,
           totalKm: 0,
           legKm: const [],
           ferryCost: 0,
           tollCost: 0,
+
+          // 👇 RIKTIG travel info
+          hasTravelBefore: travelFlags,
         );
 
+        // --------------------------------------------------
         // Kjøretøytekst
+        // --------------------------------------------------
         final vehicle =
             "${offer.busType.label}${round.trailer ? ' + trailer' : ''}";
 
-        for (final e in round.entries) {
+        // --------------------------------------------------
+        // Bygg rader
+        // --------------------------------------------------
+        for (final e in entries) {
           final dateStr =
               e.date.toIso8601String().substring(0, 10);
 
@@ -134,17 +185,6 @@ class CalendarSyncService {
       }
 
       print("📅 SYNC DONE");
-
-      // --------------------------------------------------
-      // DEBUG PRINT
-      // --------------------------------------------------
-      print("=== CALENDAR SYNC ===");
-
-      for (final r in offer.rounds) {
-        for (final e in r.entries) {
-          print("DATE: ${e.date}  LOC: ${e.location}");
-        }
-      }
 
     } catch (e, st) {
       print("❌ CALENDAR SYNC ERROR");

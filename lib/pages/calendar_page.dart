@@ -6,7 +6,9 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 // ============================================================
 // HELPERS
 // ============================================================
-
+String formatBusName(String raw) {
+  return raw.replaceAll("_", " ");
+}
 DateTime startOfWeek(DateTime d) {
   final diff = d.weekday - DateTime.monday;
   return DateTime(d.year, d.month, d.day - diff);
@@ -24,7 +26,15 @@ String fmtDb(DateTime d) {
   return DateFormat("yyyy-MM-dd").format(d);
 }
 
-
+final Map<String, String> busTypes = {
+  "CSS_1034": "12–18 bunks\n12 + Star room",
+  "CSS_1023": "12–14 sleeper",
+  "CSS_1008": "12 sleeper",
+  "YCR 682": "16-sleeper",
+  "ESW 337": "14-sleeper",
+  "WYN 802": "14-sleeper",
+  "RLC 29G": "16-sleeper",
+};
 // ============================================================
 // DRAG DATA
 // ============================================================
@@ -93,6 +103,10 @@ class _CalendarPageState extends State<CalendarPage> {
     "CSS_1034",
     "CSS_1023",
     "CSS_1008",
+    "YCR 682",
+    "ESW 337",
+    "WYN 802",
+    "RLC 29G",
   ];
 
 
@@ -527,7 +541,10 @@ Widget buildRow(String bus, List<DateTime> days) {
         child: Row(
           children: [
 
-            BusCell(bus),
+            BusCell(
+            bus,
+            busTypes: busTypes,
+),
 
             SizedBox(
               width: dayWidth * days.length,
@@ -890,27 +907,53 @@ Widget build(BuildContext context) {
 // ============================================================
 
 class BusCell extends StatelessWidget {
-
   final String bus;
+  final Map<String, String> busTypes;
 
-  const BusCell(this.bus, {super.key});
-
+  const BusCell(
+    this.bus, {
+    super.key,
+    required this.busTypes,
+  });
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+
+    final prettyBus = formatBusName(bus);
+    final type = busTypes[bus] ?? '';
 
     return Container(
       width: 140,
-
       padding: const EdgeInsets.symmetric(horizontal: 12),
-
       alignment: Alignment.centerLeft,
 
-      child: Text(
-        bus,
-        style: const TextStyle(
-          fontWeight: FontWeight.bold,
-        ),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        crossAxisAlignment: CrossAxisAlignment.start,
+
+        children: [
+
+          // BUS NAME
+          Text(
+            prettyBus,
+            style: const TextStyle(
+              fontWeight: FontWeight.bold,
+              fontSize: 14,
+            ),
+          ),
+
+          // BUS TYPE (small text)
+          if (type.isNotEmpty)
+            Text(
+              type,
+              style: TextStyle(
+                fontSize: 11,
+                color: cs.onSurfaceVariant,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+        ],
       ),
     );
   }
