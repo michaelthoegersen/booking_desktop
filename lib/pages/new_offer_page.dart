@@ -296,7 +296,7 @@ Future<void> _loadDraft(String id) async {
     // ✅ BUSS: hent fra MODELL
     offer.bus = loaded.bus;
     _selectedBus = loaded.bus;
-
+    offer.status = loaded.status; // ✅ NY
     // ---------------- COPY ROUNDS ----------------
     for (int i = 0; i < offer.rounds.length; i++) {
 
@@ -665,6 +665,19 @@ Future<void> _pickDate() async {
     });
   }
 }
+String _validStatus(String? status) {
+  const allowed = [
+    "Draft",
+    "Sent",
+    "Confirmed",
+    "Cancelled",
+  ];
+
+  if (status == null) return "Draft";
+  if (allowed.contains(status)) return status;
+
+  return "Draft";
+}
   // ============================================================
 // VAT ENGINE (Foreign VAT calculation)
 // ============================================================
@@ -866,6 +879,8 @@ Widget _buildVatBox(
 // ✅ Save draft to Supabase (insert/update) - FIXED
 // ------------------------------------------------------------
 Future<void> _saveDraft() async {
+  // Auto-set Draft hvis tom
+offer.status = _validStatus(offer.status);
 
   // ----------------------------------------
   // ⛔ Vent hvis draft lastes
@@ -950,10 +965,10 @@ Future<void> _saveDraft() async {
     debugPrint("Reloaded bus: ${freshOffer.bus}");
 
     // ----------------------------------------
-    // Sync back to state
-    // ----------------------------------------
-    offer.bus = freshOffer.bus;
-    _selectedBus = freshOffer.bus;
+    // Sync back to state (FULL SYNC)
+offer.bus = freshOffer.bus;
+_selectedBus = freshOffer.bus;
+offer.status = freshOffer.status; // ✅ VIKTIG
 
     // ----------------------------------------
     // Sync calendar
@@ -2484,7 +2499,105 @@ final String routeText = isSpecial
                     OfferPreview(offer: offer),
 
                     const SizedBox(height: 20),
+                    // ================= STATUS =================
+// ================= STATUS =================
+Container(
+  width: double.infinity,
+  padding: const EdgeInsets.all(14),
+  decoration: BoxDecoration(
+    color: cs.surface,
+    borderRadius: BorderRadius.circular(12),
+    border: Border.all(color: cs.outlineVariant),
+  ),
+  child: Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
 
+      const Text(
+        "Status",
+        style: TextStyle(
+          fontWeight: FontWeight.w900,
+          fontSize: 14,
+        ),
+      ),
+
+      const SizedBox(height: 8),
+
+      DropdownButtonFormField<String>(
+        value: _validStatus(offer.status),
+        isExpanded: true,
+
+        decoration: const InputDecoration(
+          prefixIcon: Icon(Icons.flag),
+          border: OutlineInputBorder(),
+        ),
+
+        items: const [
+          DropdownMenuItem(
+            value: "Draft",
+            child: Text("📝 Draft"),
+          ),
+          DropdownMenuItem(
+            value: "Sent",
+            child: Text("📤 Sent"),
+          ),
+          DropdownMenuItem(
+            value: "Confirmed",
+            child: Text("✅ Confirmed"),
+          ),
+          DropdownMenuItem(
+            value: "Cancelled",
+            child: Text("❌ Cancelled"),
+          ),
+        ],
+
+        onChanged: (v) {
+          if (v == null) return;
+
+          setState(() {
+            offer.status = v;
+          });
+        },
+      ),
+
+      const SizedBox(height: 12),
+
+      // ---------- VAT ----------
+      Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: cs.surface,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: cs.outlineVariant,
+          ),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: [
+
+            const Text(
+              "VAT summary",
+              style: TextStyle(
+                fontWeight: FontWeight.w900,
+                fontSize: 14,
+              ),
+            ),
+
+            const SizedBox(height: 10),
+
+            _buildVatBox(
+              foreignVatMap,
+              totalExVat,
+              totalIncVat,
+            ),
+          ],
+        ),
+      ),
+    ],
+  ),
+),
                     // ---------- VAT ----------
                     Container(
                       width: double.infinity,

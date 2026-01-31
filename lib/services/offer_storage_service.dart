@@ -156,16 +156,16 @@ class OfferStorageService {
 
   return {
     'title': _buildTitle(offer),
+
     'company': offer.company.trim(),
     'contact': offer.contact.trim(),
     'production': offer.production.trim(),
-    'status': 'Draft',
+
+    // ✅ RIKTIG STATUS
+    'status': offer.status,
 
     'bus_count': offer.busCount,
     'bus_type': offer.busType.name,
-
-    // ❌ IKKE bus
-    // ❌ IKKE kilde
 
     'payload': jsonMap,
     'offer_json': jsonString,
@@ -249,13 +249,15 @@ class OfferStorageService {
   contact: (data['contact'] ?? '') as String,
   production: (data['production'] ?? '') as String,
 
+  // ✅ LAST STATUS FRA DB
+  status: (row['status'] ?? 'Draft') as String,
+
   busCount: (data['busCount'] ?? 1) as int,
 
   busType: _busTypeFromName(
     (data['busType'] ?? 'sleeper12') as String,
   ),
 
-  // ✅ LAST BUSS
   bus: data['bus'] as String?,
 );
 

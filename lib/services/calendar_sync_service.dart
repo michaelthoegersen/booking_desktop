@@ -37,13 +37,15 @@ class CalendarSyncService {
   }
 
   /// Sync offer → samletdata (kalender)
-  static Future<void> syncFromOffer(
+  /// Sync offer → samletdata (kalender)
+static Future<void> syncFromOffer(
   OfferDraft offer, {
   required String selectedBus,
   required String draftId,
 }) async {
   try {
     print("📅 SYNC START: ${offer.production}");
+    print("📌 STATUS: ${offer.status}");
 
     // --------------------------------------------------
     // 1️⃣ Hent eksisterende rader
@@ -53,7 +55,6 @@ class CalendarSyncService {
         .select('dato, kilde')
         .eq('draft_id', draftId);
 
-    // Map: dato -> bus
     final Map<String, String> existingBusByDate = {};
 
     for (final r in existing) {
@@ -64,8 +65,6 @@ class CalendarSyncService {
         existingBusByDate[d] = b;
       }
     }
-
-    print("📦 Existing overrides: $existingBusByDate");
 
     // --------------------------------------------------
     // 2️⃣ Finn alle datoer i offer
@@ -87,46 +86,39 @@ class CalendarSyncService {
     }
 
     // --------------------------------------------------
-    // 3️⃣ Slett KUN rader som ikke finnes lenger
+    // 3️⃣ Slett gamle rader
     // --------------------------------------------------
-    // --------------------------------------------------
-// 3️⃣ Slett KUN rader som ikke finnes lenger
-// --------------------------------------------------
-final dbDates = existingBusByDate.keys.toSet();
+    final dbDates = existingBusByDate.keys.toSet();
 
-final toDelete = dbDates.difference(offerDates);
+    final toDelete = dbDates.difference(offerDates);
 
-if (toDelete.isNotEmpty) {
-  await sb
-      .from('samletdata')
-      .delete()
-      .eq('draft_id', draftId)
-      .inFilter('dato', toDelete.toList());
+    if (toDelete.isNotEmpty) {
+      await sb
+          .from('samletdata')
+          .delete()
+          .eq('draft_id', draftId)
+          .inFilter('dato', toDelete.toList());
 
-  print("🗑️ Deleted removed dates: $toDelete");
-}
+      print("🗑️ Deleted: $toDelete");
+    }
 
     // --------------------------------------------------
     // 4️⃣ Bygg nye rader
     // --------------------------------------------------
     final rows = <Map<String, dynamic>>[];
 
-    for (int ri = 0; ri < offer.rounds.length; ri++) {
-      final round = offer.rounds[ri];
-
+    for (final round in offer.rounds) {
       if (round.entries.isEmpty) continue;
 
       final entries = [...round.entries]
         ..sort((a, b) => a.date.compareTo(b.date));
 
-      // Travel flags
       final List<bool> travelFlags = [];
 
       for (int i = 0; i < entries.length; i++) {
         travelFlags.add(_hasTravelBefore(entries, i));
       }
 
-      // Calc
       final calc = TripCalculator.calculateRound(
         settings: SettingsStore.current,
         dates: entries.map((e) => e.date).toList(),
@@ -142,14 +134,10 @@ if (toDelete.isNotEmpty) {
       final vehicle =
           "${offer.busType.label}${round.trailer ? ' + trailer' : ''}";
 
-      // --------------------------------------------------
-      // 5️⃣ Per dag
-      // --------------------------------------------------
       for (final e in entries) {
         final dateStr =
             e.date.toIso8601String().substring(0, 10);
 
-        // 👇 VELG BUS SMART
         final bus =
             existingBusByDate[dateStr] ?? selectedBus;
 
@@ -167,18 +155,17 @@ if (toDelete.isNotEmpty) {
           'pris': calc.totalCost.toString(),
 
           'contact': offer.contact,
-          'status': 'Draft',
 
-          // 🔥 BEHOLD OVERRIDE
+          // ✅ BRUK MODELLENS STATUS
+          'status': offer.status,
+
           'kilde': bus,
         });
       }
     }
 
-    print("📅 Rows to upsert: ${rows.length}");
-
     // --------------------------------------------------
-    // 6️⃣ UPSERT (ikke insert)
+    // 5️⃣ UPSERT
     // --------------------------------------------------
     if (rows.isNotEmpty) {
       await sb
@@ -188,7 +175,7 @@ if (toDelete.isNotEmpty) {
             onConflict: 'draft_id,dato',
           );
 
-      print("✅ Upsert complete");
+      print("✅ Upsert: ${rows.length}");
     }
 
     print("📅 SYNC DONE");
@@ -201,4 +188,3 @@ if (toDelete.isNotEmpty) {
   }
 }
 }
-

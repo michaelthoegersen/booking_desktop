@@ -1,3 +1,7 @@
+// ============================================================
+// BUS TYPE
+// ============================================================
+
 enum BusType {
   sleeper12,
   sleeper14,
@@ -23,6 +27,10 @@ extension BusTypeLabel on BusType {
   }
 }
 
+// ============================================================
+// OFFER DRAFT
+// ============================================================
+
 class OfferDraft {
   String? userId;
 
@@ -30,10 +38,13 @@ class OfferDraft {
   String contact;
   String production;
 
+  /// ✅ GLOBAL STATUS
+  String status;
+
   int busCount;
   BusType busType;
 
-  // ✅ NY: Lagret buss
+  /// ✅ Saved bus
   String? bus;
 
   final List<OfferRound> rounds;
@@ -43,19 +54,34 @@ class OfferDraft {
     this.company = '',
     this.contact = '',
     this.production = '',
+    this.status = 'Draft',
     this.busCount = 1,
     this.busType = BusType.sleeper12,
-
-    // ✅ NY
     this.bus,
   }) : rounds = List.generate(12, (_) => OfferRound());
+
+  // ------------------------------------------------------------
+  // STATUS SAFETY
+  // ------------------------------------------------------------
+
+  static const List<String> _allowedStatus = [
+    'Draft',
+    'Sent',
+    'Confirmed',
+    'Cancelled',
+  ];
+
+  static String _safeStatus(String? value) {
+    if (value == null) return 'Draft';
+    if (_allowedStatus.contains(value)) return value;
+    return 'Draft';
+  }
 
   // ------------------------------------------------------------
   // COMPUTED
   // ------------------------------------------------------------
 
-  int get usedRounds =>
-      rounds.where(
+  int get usedRounds => rounds.where(
         (r) =>
             r.entries.isNotEmpty ||
             r.startLocation.trim().isNotEmpty,
@@ -77,10 +103,12 @@ class OfferDraft {
       'company': company,
       'contact': contact,
       'production': production,
+
+      // ✅ SAFE STATUS
+      'status': _safeStatus(status),
+
       'busCount': busCount,
       'busType': busType.name,
-
-      // ✅ NY
       'bus': bus,
 
       'rounds': rounds.map((r) => r.toJson()).toList(),
@@ -90,15 +118,20 @@ class OfferDraft {
   static OfferDraft fromJson(Map<String, dynamic> json) {
     final draft = OfferDraft(
       userId: json['userId'] as String?,
+
       company: (json['company'] ?? '') as String,
       contact: (json['contact'] ?? '') as String,
       production: (json['production'] ?? '') as String,
+
+      // ✅ SAFE LOAD
+      status: _safeStatus(json['status'] as String?),
+
       busCount: (json['busCount'] ?? 1) as int,
+
       busType: _busTypeFromName(
         (json['busType'] ?? 'sleeper12') as String,
       ),
 
-      // ✅ NY
       bus: json['bus'] as String?,
     );
 
@@ -170,9 +203,12 @@ class OfferRound {
     final r = OfferRound();
 
     r.startLocation = (json['startLocation'] ?? '') as String;
+
     r.trailer = (json['trailer'] ?? false) as bool;
+
     r.pickupEveningFirstDay =
         (json['pickupEveningFirstDay'] ?? false) as bool;
+
     r.totalKm = ((json['totalKm'] ?? 0) as num).toDouble();
 
     final rawEntries = (json['entries'] as List?) ?? [];
@@ -193,20 +229,18 @@ class OfferRound {
 // ENTRY
 // ============================================================
 
-  class RoundEntry {
+class RoundEntry {
   final DateTime date;
   final String location;
   final String extra;
 
-  // ✅ NY
+  /// ✅ Country km breakdown (VAT etc)
   final Map<String, double> countryKm;
 
   RoundEntry({
     required this.date,
     required this.location,
     required this.extra,
-
-    // ✅ NY
     Map<String, double>? countryKm,
   }) : countryKm = countryKm ?? const {};
 
@@ -230,7 +264,7 @@ class OfferRound {
       'location': location,
       'extra': extra,
 
-      // ✅ NY
+      // ✅ COUNTRY KM
       'countryKm': countryKm,
     };
   }
@@ -238,14 +272,18 @@ class OfferRound {
   factory RoundEntry.fromJson(Map<String, dynamic> json) {
     return RoundEntry(
       date: DateTime.parse(json['date']),
-      location: json['location'],
-      extra: json['extra'] ?? '',
 
-      // ✅ NY
+      location: (json['location'] ?? '') as String,
+
+      extra: (json['extra'] ?? '') as String,
+
       countryKm: json['countryKm'] != null
           ? Map<String, double>.from(
               (json['countryKm'] as Map).map(
-                (k, v) => MapEntry(k.toString(), (v as num).toDouble()),
+                (k, v) => MapEntry(
+                  k.toString(),
+                  (v as num).toDouble(),
+                ),
               ),
             )
           : {},
