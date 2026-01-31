@@ -56,7 +56,7 @@ class TripCalculator {
 
   static RoundCalcResult calculateRound({
     required AppSettings settings,
-    required int entryCount,
+    required List<DateTime> dates,
     required bool pickupEveningFirstDay,
     required bool trailer,
     required double totalKm,
@@ -67,24 +67,36 @@ class TripCalculator {
   }) {
 
     // ----------------------------------------
-    // SAFETY (NO CRASH)
+    // ENTRY COUNT = ANTALL LEGS
+    // ----------------------------------------
+
+    final int entryCount = legKm.length;
+
+    // ----------------------------------------
+    // SAFETY
     // ----------------------------------------
 
     if (entryCount == 0) {
       return _emptyResult();
     }
 
-    if (legKm.length != entryCount ||
-        hasTravelBefore.length != entryCount) {
+    if (hasTravelBefore.length != entryCount) {
       return _emptyResult();
     }
 
 
     // ----------------------------------------
-    // BILLABLE DAYS
+    // BILLABLE DAYS (UNIQUE DATES)
     // ----------------------------------------
 
-    int billableDays = entryCount;
+    final Set<String> uniqueDays = {};
+
+    for (final d in dates) {
+      final key = '${d.year}-${d.month}-${d.day}';
+      uniqueDays.add(key);
+    }
+
+    int billableDays = uniqueDays.length;
 
     if (pickupEveningFirstDay && billableDays > 0) {
       billableDays -= 1;
@@ -124,42 +136,43 @@ class TripCalculator {
 
 
     // ----------------------------------------
-// D.DRIVE (FINAL LOGIC)
-// ----------------------------------------
+    // D.DRIVE
+    // ----------------------------------------
 
-int dDriveDays = 0;
+    int dDriveDays = 0;
 
-final double threshold = settings.dDriveKmThreshold;
-final double hardLimit = threshold * 2;
+    final double threshold = settings.dDriveKmThreshold;
+    final double hardLimit = threshold * 2;
 
-for (int i = 0; i < entryCount; i++) {
+    for (int i = 0; i < entryCount; i++) {
 
-  final double km = legKm[i];
-  final bool hadTravel = hasTravelBefore[i];
+      final double km = legKm[i];
+      final bool hadTravel = hasTravelBefore[i];
 
-  // ---------- NO DRIVE ----------
-  if (km <= 0) continue;
+      // ---------- NO DRIVE ----------
+      if (km <= 0) continue;
 
-  // ---------- UNDER 600 ----------
-  if (km < threshold) continue;
+      // ---------- UNDER THRESHOLD ----------
+      if (km < threshold) continue;
 
-  // ---------- TRAVEL BEFORE ----------
-  if (hadTravel) {
+      // ---------- TRAVEL BEFORE ----------
+      if (hadTravel) {
 
-    // Under 1200 → ignore
-    if (km < hardLimit) continue;
+        if (km < hardLimit) continue;
 
-    // Over 1200 → allow
-    dDriveDays++;
-    continue;
-  }
+        dDriveDays++;
+        continue;
+      }
 
-  // ---------- NORMAL ----------
-  dDriveDays++;
-}
+      // ---------- NORMAL ----------
+      dDriveDays++;
+    }
 
-final double dDriveCost =
-    dDriveDays * settings.dDriveDayPrice;
+
+    final double dDriveCost =
+        dDriveDays * settings.dDriveDayPrice;
+
+
     // ----------------------------------------
     // TRAILER
     // ----------------------------------------

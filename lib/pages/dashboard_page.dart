@@ -388,12 +388,13 @@ Future<void> _confirmDeleteDraft(
 // ------------------------------------------------------------
 
 Widget _buildBusMapSection() {
-
   return Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
     children: [
 
       // Header
       ListTile(
+        contentPadding: EdgeInsets.zero,
         leading: const Icon(Icons.map),
 
         title: const Text(
@@ -403,23 +404,27 @@ Widget _buildBusMapSection() {
 
         trailing: IconButton(
           icon: const Icon(Icons.refresh),
-
-          onPressed: loadingBusLocations
-              ? null
-              : _loadBusLocationsToday,
+          onPressed:
+              loadingBusLocations ? null : _loadBusLocationsToday,
         ),
       ),
 
       const SizedBox(height: 6),
 
-      // Map
-      BusMapWidget(
-        busLocations: busLocationsToday,
-        onRefresh: _loadBusLocationsToday,
+      // 👇 MAP FYLLER RESTEN
+      Expanded(
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(16),
+
+          child: BusMapWidget(
+            busLocations: busLocationsToday,
+            onRefresh: _loadBusLocationsToday,
+          ),
+        ),
       ),
     ],
   );
-} 
+}
 
 // ------------------------------------------------------------
 // STATUS COLOR
@@ -441,259 +446,235 @@ Color _statusColor(String? status) {
   // ------------------------------------------------------------
 
   @override
-  Widget build(BuildContext context) {
+Widget build(BuildContext context) {
+  final cs = Theme.of(context).colorScheme;
 
-    final cs = Theme.of(context).colorScheme;
+  return Padding(
+    padding: const EdgeInsets.all(18),
 
-
-    return Padding(
-      padding: const EdgeInsets.all(18),
-
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-
-        children: [
-
-          Text(
-            "Welcome",
-
-            style: Theme.of(context)
-                .textTheme
-                .headlineMedium
-                ?.copyWith(fontWeight: FontWeight.w900),
-          ),
-
-
-          const SizedBox(height: 6),
-
-
-          Text(
-            "Choose what you want to do.",
-
-            style: TextStyle(color: cs.onSurfaceVariant),
-          ),
-
-
-          const SizedBox(height: 16),
-
-
-          _buildBusMapSection(),
-
-
-          const SizedBox(height: 18),
-
-
-          Expanded(
-            child: Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(16),
-
-              decoration: BoxDecoration(
-                color: cs.surfaceContainerLowest,
-                borderRadius: BorderRadius.circular(18),
-                border: Border.all(
-                  color: cs.outlineVariant,
-                ),
-              ),
-
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-
-                children: [
-
-                  Row(
-                    children: [
-
-                      Text(
-                        "Recent offers",
-
-                        style: Theme.of(context)
-                            .textTheme
-                            .titleMedium
-                            ?.copyWith(
-                                fontWeight:
-                                    FontWeight.w900),
-                      ),
-
-                      const Spacer(),
-
-                      OutlinedButton.icon(
-                        onPressed: loadingRecent
-                            ? null
-                            : _loadRecentOffers,
-
-                        icon: const Icon(Icons.refresh),
-
-                        label: const Text("Refresh"),
-                      ),
-                    ],
-                  ),
-
-
-                  const SizedBox(height: 12),
-
-
-                  if (loadingRecent)
-
-                    const Expanded(
-                      child: Center(
-                        child: CircularProgressIndicator(),
-                      ),
-                    )
-
-                  else if (recentOffers.isEmpty)
-
-                    const Expanded(
-                      child: Center(
-                        child: Text("No offers yet."),
-                      ),
-                    )
-
-                  else
-
-                    Expanded(
-                      child: ListView.separated(
-
-                        itemCount: recentOffers.length,
-
-                        separatorBuilder: (_, __) =>
-                            Divider(
-                              color: cs.outlineVariant,
-                            ),
-
-
-                        itemBuilder: (_, i) {
-
-  final row = recentOffers[i];
-
-  final id = row['id']?.toString() ?? '';
-
-  final production =
-      row['production']?.toString() ?? '—';
-
-  final company =
-      row['company']?.toString() ?? '';
-
-  final createdBy =
-      row['created_name']?.toString() ?? 'Unknown';
-
-  final updatedBy =
-      row['updated_name']?.toString() ?? 'Unknown';
-
-  final updatedDate = _fmtDateTime(
-    row['updated_at'] ?? row['created_at'],
-  );
-
-  final status =
-      row['status']?.toString() ?? '';
-
-  return ListTile(
-    contentPadding: EdgeInsets.zero,
-
-    // =========================
-    // TITLE
-    // =========================
-    title: Row(
-      crossAxisAlignment: CrossAxisAlignment.center,
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
 
       children: [
 
-        // Production
-        Text(
-          production,
-          style: const TextStyle(
-            fontWeight: FontWeight.w900,
-            fontSize: 16,
-          ),
+        // =========================
+        // BUS MAP (STORT)
+        // =========================
+        Expanded(
+          flex: 10,
+          child: _buildBusMapSection(),
         ),
 
-        // Company
-        if (company.isNotEmpty) ...[
-          const SizedBox(width: 6),
+        const SizedBox(height: 18),
 
-          Text(
-            "• $company",
-            style: const TextStyle(
-              fontSize: 13,
-              color: Colors.grey,
-            ),
-          ),
-        ],
+        // =========================
+        // RECENT OFFERS
+        // =========================
+        Expanded(
+          flex: 10,
 
-        // Status
-        if (status.isNotEmpty) ...[
-          const SizedBox(width: 8),
-
-          Container(
-            padding: const EdgeInsets.symmetric(
-              horizontal: 6,
-              vertical: 2,
-            ),
+          child: Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(16),
 
             decoration: BoxDecoration(
-              color: _statusColor(status),
-              borderRadius: BorderRadius.circular(10),
-            ),
-
-            child: Text(
-              status.toUpperCase(),
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 10,
-                fontWeight: FontWeight.w700,
+              color: cs.surfaceContainerLowest,
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(
+                color: cs.outlineVariant,
               ),
             ),
+
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+
+              children: [
+
+                // Header
+                Row(
+                  children: [
+
+                    Text(
+                      "Recent offers",
+                      style: Theme.of(context)
+                          .textTheme
+                          .titleMedium
+                          ?.copyWith(
+                            fontWeight: FontWeight.w900,
+                          ),
+                    ),
+
+                    const Spacer(),
+
+                    OutlinedButton.icon(
+                      onPressed:
+                          loadingRecent ? null : _loadRecentOffers,
+
+                      icon: const Icon(Icons.refresh),
+                      label: const Text("Refresh"),
+                    ),
+                  ],
+                ),
+
+                const SizedBox(height: 12),
+
+                // =========================
+                // LIST
+                // =========================
+                if (loadingRecent)
+
+                  const Expanded(
+                    child: Center(
+                      child: CircularProgressIndicator(),
+                    ),
+                  )
+
+                else if (recentOffers.isEmpty)
+
+                  const Expanded(
+                    child: Center(
+                      child: Text("No offers yet."),
+                    ),
+                  )
+
+                else
+
+                  Expanded(
+                    child: ListView.separated(
+
+                      itemCount: recentOffers.length,
+
+                      separatorBuilder: (_, __) =>
+                          Divider(
+                            color: cs.outlineVariant,
+                          ),
+
+                      itemBuilder: (_, i) {
+
+                        final row = recentOffers[i];
+
+                        final id =
+                            row['id']?.toString() ?? '';
+
+                        final production =
+                            row['production']?.toString() ?? '—';
+
+                        final company =
+                            row['company']?.toString() ?? '';
+
+                        final createdBy =
+                            row['created_name']?.toString() ?? 'Unknown';
+
+                        final updatedBy =
+                            row['updated_name']?.toString() ?? 'Unknown';
+
+                        final updatedDate = _fmtDateTime(
+                          row['updated_at'] ?? row['created_at'],
+                        );
+
+                        final status =
+                            row['status']?.toString() ?? '';
+
+                        return ListTile(
+                          contentPadding: EdgeInsets.zero,
+
+                          // TITLE
+                          title: Row(
+                            crossAxisAlignment:
+                                CrossAxisAlignment.center,
+
+                            children: [
+
+                              Text(
+                                production,
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w900,
+                                  fontSize: 16,
+                                ),
+                              ),
+
+                              if (company.isNotEmpty) ...[
+                                const SizedBox(width: 6),
+
+                                Text(
+                                  "• $company",
+                                  style: const TextStyle(
+                                    fontSize: 13,
+                                    color: Colors.grey,
+                                  ),
+                                ),
+                              ],
+
+                              if (status.isNotEmpty) ...[
+                                const SizedBox(width: 8),
+
+                                Container(
+                                  padding:
+                                      const EdgeInsets.symmetric(
+                                    horizontal: 6,
+                                    vertical: 2,
+                                  ),
+
+                                  decoration: BoxDecoration(
+                                    color: _statusColor(status),
+                                    borderRadius:
+                                        BorderRadius.circular(10),
+                                  ),
+
+                                  child: Text(
+                                    status.toUpperCase(),
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ],
+                          ),
+
+                          // SUBTITLE
+                          subtitle: Text(
+                            "Created: $createdBy • Updated: $updatedBy\n"
+                            "Last update: $updatedDate",
+
+                            style: const TextStyle(
+                              fontSize: 11,
+                              color: Colors.black54,
+                            ),
+                          ),
+
+                          // DELETE
+                          trailing: IconButton(
+                            icon: Icon(
+                              Icons.delete_outline,
+                              color: cs.error,
+                            ),
+
+                            tooltip: 'Delete draft',
+
+                            onPressed: id.isEmpty
+                                ? null
+                                : () => _confirmDeleteDraft(
+                                      id,
+                                      production,
+                                    ),
+                          ),
+
+                          onTap: id.isEmpty
+                              ? null
+                              : () => context.go("/new/$id"),
+                        );
+                      },
+                    ),
+                  ),
+              ],
+            ),
           ),
-        ],
+        ),
       ],
     ),
-
-    // =========================
-    // SUBTITLE
-    // =========================
-    subtitle: Text(
-      "Created: $createdBy • Updated: $updatedBy\n"
-      "Last update: $updatedDate",
-      style: const TextStyle(
-        fontSize: 11,
-        color: Colors.black54,
-      ),
-    ),
-
-    // =========================
-    // OPEN
-    // =========================
-        // =========================
-    // DELETE
-    // =========================
-    trailing: IconButton(
-      icon: Icon(
-        Icons.delete_outline,
-        color: cs.error,
-      ),
-
-      tooltip: 'Delete draft',
-
-      onPressed: id.isEmpty
-          ? null
-          : () => _confirmDeleteDraft(
-                id,
-                production,
-              ),
-    ),
-    onTap: id.isEmpty
-        ? null
-        : () => context.go("/new/$id"),
   );
-},
-                      ),
-                    ),
-                ],
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
+}
 }

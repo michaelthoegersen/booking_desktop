@@ -16,6 +16,7 @@ import '../widgets/offer_preview.dart';
 import '../services/offer_storage_service.dart';
 import 'package:go_router/go_router.dart';
 import '../widgets/new_company_dialog.dart';
+import '../services/pdf_tour_parser.dart';
 
 // ✅ NY: bruker routes db for autocomplete + route lookup
 import '../services/routes_service.dart';
@@ -32,12 +33,32 @@ class NewOfferPage extends StatefulWidget {
 }
 
 class _NewOfferPageState extends State<NewOfferPage> {
+
+  // ================= PDF CALC CACHE =================
+final Map<int, RoundCalcResult> _roundCalcCache = {};
   int roundIndex = 0;
   bool _busLoaded = false;
   final FocusNode _locationFocus = FocusNode();
 
   // ✅ MERGE-AWARE travel-flag for D.Drive
   List<bool> _travelBefore = [];
+
+  Future<void> _recalcAllRounds() async {
+  final Map<int, RoundCalcResult> newCache = {};
+
+  for (int i = 0; i < offer.rounds.length; i++) {
+    final res = await _calcRound(i);
+    newCache[i] = res;
+  }
+
+  if (!mounted) return;
+
+  setState(() {
+    _roundCalcCache
+      ..clear()
+      ..addAll(newCache);
+  });
+}
   // ------------------------------------------------------------
   // BUS PICKER (Calendar sync)
   // ------------------------------------------------------------
@@ -959,6 +980,172 @@ Future<void> _saveDraft() async {
     );
   }
 }
+// ------------------------------------------------------------
+// ✅ Scan PDF and import tour
+// ------------------------------------------------------------
+// ------------------------------------------------------------
+// ✅ Scan PDF and import tour
+// ------------------------------------------------------------
+// ------------------------------------------------------------
+Future<void> _exportPdf() async {
+  try {
+
+    // ===============================
+    // Kalkuler alle runder først
+    // ===============================
+    final Map<int, RoundCalcResult> roundCalc = {};
+
+    for (int i = 0; i < offer.rounds.length; i++) {
+      final res = await _calcRound(i);
+      roundCalc[i] = res;
+    }
+
+    // ===============================
+    // Generer PDF
+    // ===============================
+    final bytes = await OfferPdfService.generatePdf(
+      offer,
+      roundCalc,
+    );
+
+    // ===============================
+    // Lagre fil
+    // ===============================
+    final path = await _savePdfToFile(bytes);
+
+    if (!mounted) return;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text("PDF saved: $path")),
+    );
+
+  } catch (e, st) {
+
+    debugPrint("EXPORT ERROR:");
+    debugPrint(e.toString());
+    debugPrint(st.toString());
+
+    if (!mounted) return;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text("Export failed: $e"),
+        backgroundColor: Colors.red,
+      ),
+    );
+  }
+}
+// ------------------------------------------------------------
+// ✅ Scan PDF with preview
+// ------------------------------------------------------------
+Future<void> _scanPdf() async {
+  try {
+    debugPrint("===== PDF SCAN START =====");
+
+    final text =
+        await PdfTourParser.pickAndExtractText();
+
+    if (text == null || text.trim().isEmpty) {
+      debugPrint("❌ No text from PDF");
+      return;
+    }
+
+    debugPrint("===== RAW TEXT =====");
+    debugPrint(text.substring(0, text.length > 1000 ? 1000 : text.length));
+
+    final parsedRounds = PdfTourParser.parse(text);
+
+    debugPrint("===== PARSED ROUNDS =====");
+    debugPrint("Rounds found: ${parsedRounds.length}");
+
+    if (parsedRounds.isEmpty) {
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("No tour data found in PDF"),
+        ),
+      );
+
+      debugPrint("❌ Parser returned EMPTY");
+      return;
+    }
+
+    setState(() {
+
+      debugPrint("===== RESET UI ROUNDS =====");
+
+      // 🔹 RESET ALT FØRST
+      for (int i = 0; i < offer.rounds.length; i++) {
+        offer.rounds[i].startLocation = '';
+        offer.rounds[i].entries.clear();
+        offer.rounds[i].trailer = false;
+        offer.rounds[i].pickupEveningFirstDay = false;
+      }
+
+      debugPrint("===== APPLY PARSED DATA =====");
+
+      // 🔹 FYLL FRA PARSER
+      for (int i = 0;
+          i < parsedRounds.length && i < offer.rounds.length;
+          i++) {
+
+        final uiRound = offer.rounds[i];
+        final parsed = parsedRounds[i];
+
+        debugPrint("Round ${i + 1}: start=${parsed.startLocation}");
+
+        uiRound.startLocation =
+            _norm(parsed.startLocation);
+
+        for (final e in parsed.entries) {
+
+          debugPrint(
+            "  ${e.date} -> ${e.location}",
+          );
+
+          uiRound.entries.add(
+            RoundEntry(
+              date: e.date,
+              location: _norm(e.location),
+              extra: '',
+            ),
+          );
+        }
+      }
+
+      roundIndex = 0;
+      _syncRoundControllers();
+    });
+
+    await _recalcKm();
+
+    debugPrint("===== PDF IMPORT DONE =====");
+
+    if (!mounted) return;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text("PDF imported correctly ✅"),
+      ),
+    );
+
+  } catch (e, st) {
+
+    debugPrint("===== PDF IMPORT ERROR =====");
+    debugPrint(e.toString());
+    debugPrint(st.toString());
+
+    if (!mounted) return;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text("PDF import failed: $e"),
+        backgroundColor: Colors.red,
+      ),
+    );
+  }
+}
   // ------------------------------------------------------------
   // ✅ KM + ferry + toll + extra lookup from Supabase
   // ------------------------------------------------------------
@@ -1252,6 +1439,7 @@ Future<void> _recalcKm() async {
           "Missing routes in routes_all. Check place names / direction.";
     }
   });
+  await _recalcAllRounds();
 }
 
   // ------------------------------------------------------------
@@ -1323,6 +1511,7 @@ Future<void> _recalcKm() async {
   // ---------------- RECALC ----------------
 
   await _recalcKm();
+  await _recalcAllRounds();
 }
 
   Future<void> _pasteManyLines(List<String> lines) async {
@@ -1515,6 +1704,8 @@ Future<void> _editEntry(int index) async {
 // ------------------------------------------------------------
 // ✅ Per-round calc helper (Travel merge + Off = ignore)
 // ------------------------------------------------------------
+// ------------------------------------------------------------
+
 Future<RoundCalcResult> _calcRound(int ri) async {
 
   final round = offer.rounds[ri];
@@ -1522,16 +1713,16 @@ Future<RoundCalcResult> _calcRound(int ri) async {
   final entries = [...round.entries]
     ..sort((a, b) => a.date.compareTo(b.date));
 
-  final entryCount = entries
+  // ---------------- DATES ----------------
+  final dates = entries
       .map((e) => DateTime(e.date.year, e.date.month, e.date.day))
-      .toSet()
-      .length;
+      .toList();
 
-  // ---------------- EMPTY ----------------
-  if (entryCount == 0) {
-    return TripCalculator.calculateRound(
+  if (dates.isEmpty) {
+
+    final empty = TripCalculator.calculateRound(
       settings: SettingsStore.current,
-      entryCount: 0,
+      dates: const [],
       pickupEveningFirstDay: false,
       trailer: round.trailer,
       totalKm: 0,
@@ -1540,6 +1731,10 @@ Future<RoundCalcResult> _calcRound(int ri) async {
       tollCost: 0,
       hasTravelBefore: const [],
     );
+
+    _roundCalcCache[ri] = empty;
+
+    return empty;
   }
 
   final start = _norm(round.startLocation);
@@ -1554,9 +1749,7 @@ Future<RoundCalcResult> _calcRound(int ri) async {
   int? pendingTravelIndex;
   bool seenTravel = false;
 
-  // ===================================================
-  // LOOP (MATCHES _recalcKm 100%)
-  // ===================================================
+  // ================= LOOP =================
   for (int i = 0; i < entries.length; i++) {
 
     final from = _findPreviousRealLocation(
@@ -1571,7 +1764,7 @@ Future<RoundCalcResult> _calcRound(int ri) async {
     final bool isTravel = to == 'travel';
     final bool isOff = to == 'off';
 
-    // ---------------- OFF (IGNORE) ----------------
+    // ---------- OFF ----------
     if (isOff) {
 
       kmByIndex[i] = 0;
@@ -1585,7 +1778,7 @@ Future<RoundCalcResult> _calcRound(int ri) async {
       continue;
     }
 
-    // ---------------- TRAVEL (MERGE SOURCE) ----------------
+    // ---------- TRAVEL ----------
     if (isTravel) {
 
       kmByIndex[i] = 0;
@@ -1598,7 +1791,7 @@ Future<RoundCalcResult> _calcRound(int ri) async {
       continue;
     }
 
-    // ---------------- SAME PLACE ----------------
+    // ---------- SAME PLACE ----------
     if (_norm(from).toLowerCase() == to) {
 
       kmByIndex[i] = 0;
@@ -1611,7 +1804,7 @@ Future<RoundCalcResult> _calcRound(int ri) async {
       continue;
     }
 
-    // ---------------- LOOKUP ----------------
+    // ---------- LOOKUP ----------
     final km = await _fetchLegData(
       from: from,
       to: toRaw,
@@ -1621,20 +1814,17 @@ Future<RoundCalcResult> _calcRound(int ri) async {
     final ferry = _ferryByIndex[i] ?? 0;
     final toll = _tollByIndex[i] ?? 0;
 
-    // ---------------- MERGE WITH TRAVEL ----------------
+    // ---------- MERGE TRAVEL ----------
     if (pendingTravelIndex != null && km != null) {
 
-      // Flytt km til Travel-raden
       kmByIndex[pendingTravelIndex] = km;
       ferryByIndex[pendingTravelIndex] = ferry;
       tollByIndex[pendingTravelIndex] = toll;
 
-      // Denne dagen = 0
       kmByIndex[i] = 0;
       ferryByIndex[i] = 0;
       tollByIndex[i] = 0;
 
-      // Marker travel før
       travelBefore[pendingTravelIndex] = true;
       travelBefore[i] = true;
 
@@ -1644,7 +1834,7 @@ Future<RoundCalcResult> _calcRound(int ri) async {
       continue;
     }
 
-    // ---------------- NORMAL ----------------
+    // ---------- NORMAL ----------
     kmByIndex[i] = km ?? 0;
     ferryByIndex[i] = ferry;
     tollByIndex[i] = toll;
@@ -1657,15 +1847,13 @@ Future<RoundCalcResult> _calcRound(int ri) async {
     }
   }
 
-  // ===================================================
-  // SUM
-  // ===================================================
+  // ================= SUM =================
 
   final totalKm =
       kmByIndex.values.fold<double>(0, (a, b) => a + b);
 
   final legKm = List.generate(
-    entryCount,
+    entries.length,
     (i) => kmByIndex[i] ?? 0,
   );
 
@@ -1675,13 +1863,11 @@ Future<RoundCalcResult> _calcRound(int ri) async {
   final tollTotal =
       tollByIndex.values.fold<double>(0, (a, b) => a + b);
 
-  // ===================================================
-  // RESULT
-  // ===================================================
+  // ================= RESULT =================
 
-  return TripCalculator.calculateRound(
+  final result = TripCalculator.calculateRound(
     settings: SettingsStore.current,
-    entryCount: entryCount,
+    dates: dates,
     pickupEveningFirstDay: round.pickupEveningFirstDay,
     trailer: round.trailer,
     totalKm: totalKm,
@@ -1690,69 +1876,12 @@ Future<RoundCalcResult> _calcRound(int ri) async {
     tollCost: tollTotal,
     hasTravelBefore: travelBefore,
   );
+
+  // ✅ CACHE FOR PDF
+  _roundCalcCache[ri] = result;
+
+  return result;
 }
-  // ------------------------------------------------------------
-  // ✅ Build PDF bytes
-  // ------------------------------------------------------------
-  Future<Uint8List> _buildPdfBytes() async {
-    final Map<int, RoundCalcResult> calcByRound = {};
-
-    for (int i = 0; i < offer.rounds.length; i++) {
-      final r = offer.rounds[i];
-      final has = r.entries.isNotEmpty || r.startLocation.trim().isNotEmpty;
-      if (!has) continue;
-
-      final calc = await _calcRound(i);
-      calcByRound[i] = calc;
-    }
-
-    return OfferPdfService.buildPdf(
-      offer: offer,
-      settings: SettingsStore.current,
-      roundCalcByIndex: calcByRound,
-    );
-  }
-
-  // ------------------------------------------------------------
-  // ✅ Export PDF
-  // ------------------------------------------------------------
-  Future<void> _exportPdf() async {
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (_) => const AlertDialog(
-        content: SizedBox(
-          height: 70,
-          child: Row(
-            children: [
-              CircularProgressIndicator(),
-              SizedBox(width: 16),
-              Expanded(child: Text("Generating PDF...")),
-            ],
-          ),
-        ),
-      ),
-    );
-
-    try {
-      final bytes = await _buildPdfBytes().timeout(const Duration(seconds: 30));
-      final filePath = await _savePdfToFile(bytes);
-
-      if (!mounted) return;
-      Navigator.of(context, rootNavigator: true).pop();
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("PDF saved:\n$filePath")),
-      );
-    } catch (e) {
-      if (!mounted) return;
-      Navigator.of(context, rootNavigator: true).pop();
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("PDF export failed: $e")),
-      );
-    }
-  }
 
   // ------------------------------------------------------------
   // ✅ Save PDF (FilePicker)
@@ -1806,25 +1935,28 @@ Future<RoundCalcResult> _calcRound(int ri) async {
     final cs = Theme.of(context).colorScheme;
     final round = offer.rounds[roundIndex];
 
-    final entryCount = round.entries
-        .map((e) => DateTime(e.date.year, e.date.month, e.date.day))
-        .toSet()
-        .length;
+    // =====================================================
+// CURRENT ROUND CALC (MIDTPANEL)
+// =====================================================
 
-    final totalKm =
-        _kmByIndex.values.whereType<double>().fold<double>(0, (a, b) => a + b);
+final dates = round.entries
+    .map((e) => DateTime(e.date.year, e.date.month, e.date.day))
+    .toList();
 
-    final ferryTotal =
-        _ferryByIndex.values.fold<double>(0.0, (a, b) => a + b);
+final totalKm =
+    _kmByIndex.values.whereType<double>().fold<double>(0, (a, b) => a + b);
 
-    final tollTotal =
-        _tollByIndex.values.fold<double>(0.0, (a, b) => a + b);
+final ferryTotal =
+    _ferryByIndex.values.fold<double>(0.0, (a, b) => a + b);
 
-    final travelFlags = _travelBefore;
+final tollTotal =
+    _tollByIndex.values.fold<double>(0.0, (a, b) => a + b);
+
+final travelFlags = _travelBefore;
 
 final calc = TripCalculator.calculateRound(
   settings: SettingsStore.current,
-  entryCount: entryCount,
+  dates: dates,
   pickupEveningFirstDay: round.pickupEveningFirstDay,
   trailer: round.trailer,
   totalKm: totalKm,
@@ -1837,43 +1969,67 @@ final calc = TripCalculator.calculateRound(
   hasTravelBefore: travelFlags,
 );
 
-    final basePrice =
-        calc.totalCost - calc.ferryCost - calc.tollCost;
+// =====================================================
+// ALL ROUNDS TOTAL (RIGHT CARD / VAT / TOTAL)
+// =====================================================
 
-    final countryKm = _collectAllCountryKm();
+double allRoundsTotal = 0;
+double allRoundsFerry = 0;
+double allRoundsToll = 0;
 
-    final foreignVatMap = _calculateForeignVat(
-      basePrice: basePrice,
-      countryKm: countryKm,
-    );
+for (int i = 0; i < offer.rounds.length; i++) {
+  final r = _roundCalcCache[i];
 
-    final totalExVat = calc.totalCost;
+  if (r != null) {
+    allRoundsTotal += r.totalCost;
+    allRoundsFerry += r.ferryCost;
+    allRoundsToll += r.tollCost;
+  }
+}
 
-    final totalIncVat = totalExVat +
-        foreignVatMap.values.fold(0.0, (a, b) => a + b);
+// =====================================================
+// VAT CALC (BASED ON ALL ROUNDS)
+// =====================================================
 
-    if (_loadingDraft) {
-      return const Center(child: CircularProgressIndicator());
-    }
+final basePrice =
+    allRoundsTotal - allRoundsFerry - allRoundsToll;
 
-    return Padding(
-      padding: const EdgeInsets.all(18),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
+final countryKm = _collectAllCountryKm();
+
+final foreignVatMap = _calculateForeignVat(
+  basePrice: basePrice,
+  countryKm: countryKm,
+);
+
+final totalExVat = allRoundsTotal;
+
+final totalIncVat =
+    totalExVat +
+    foreignVatMap.values.fold(0.0, (a, b) => a + b);
 
           // ================= LEFT =================
-          SizedBox(
-            width: 300,
-            child: _LeftOfferCard(
-              offer: offer,
-              onExport: _exportPdf,
-              onSave: _saveDraft,
-              draftId: _draftId,
-            ),
-          ),
+          // ============ LEFT ============
 
-          const SizedBox(width: 14),
+return Padding(
+  padding: const EdgeInsets.all(18),
+  child: Row(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+
+      // ================= LEFT =================
+      SizedBox(
+        width: 300,
+        child: _LeftOfferCard(
+          offer: offer,
+          onExport: _exportPdf,
+          onSave: _saveDraft,
+          onScanPdf: _scanPdf,
+          draftId: _draftId,
+        ),
+      ),
+
+      const SizedBox(width: 14),
+
 
           // ================= CENTER =================
           Expanded(
@@ -2366,15 +2522,17 @@ class _LeftOfferCard extends StatefulWidget {
   final OfferDraft offer;
   final Future<void> Function() onExport;
   final Future<void> Function() onSave;
+  final Future<void> Function() onScanPdf;
   final String? draftId;
 
   const _LeftOfferCard({
-    super.key,
-    required this.offer,
-    required this.onExport,
-    required this.onSave,
-    required this.draftId,
-  });
+  super.key,
+  required this.offer,
+  required this.onExport,
+  required this.onSave,
+  required this.onScanPdf, // ✅ NY
+  required this.draftId,
+});
 
   @override
   State<_LeftOfferCard> createState() => _LeftOfferCardState();
@@ -2957,27 +3115,44 @@ Future<void> _createCompanyInline() async {
                       const SizedBox(height: 16),
 
                       // ================= BUTTONS =================
-                      Row(
-                        children: [
-                          Expanded(
-                            child: OutlinedButton.icon(
-                              onPressed: widget.onSave,
-                              icon: const Icon(Icons.save),
-                              label: const Text("Save draft"),
-                            ),
-                          ),
+                     Column(
+  children: [
 
-                          const SizedBox(width: 10),
+    // -------- SAVE --------
+    SizedBox(
+      width: double.infinity,
+      child: OutlinedButton.icon(
+        onPressed: widget.onSave,
+        icon: const Icon(Icons.save),
+        label: const Text("Save draft"),
+      ),
+    ),
 
-                          Expanded(
-                            child: FilledButton.icon(
-                              onPressed: widget.onExport,
-                              icon: const Icon(Icons.picture_as_pdf),
-                              label: const Text("Export PDF"),
-                            ),
-                          ),
-                        ],
-                      ),
+    const SizedBox(height: 8),
+
+    // -------- SCAN PDF --------
+SizedBox(
+  width: double.infinity,
+  child: OutlinedButton.icon(
+    onPressed: widget.onScanPdf, // ✅ KORREKT
+    icon: const Icon(Icons.picture_as_pdf),
+    label: const Text("Scan PDF"),
+  ),
+),
+
+    const SizedBox(height: 10),
+
+    // -------- EXPORT --------
+    SizedBox(
+      width: double.infinity,
+      child: FilledButton.icon(
+        onPressed: widget.onExport,
+        icon: const Icon(Icons.download),
+        label: const Text("Export PDF"),
+      ),
+    ),
+  ],
+),
 
                       const SizedBox(height: 12),
                     ],

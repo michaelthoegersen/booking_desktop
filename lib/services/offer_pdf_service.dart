@@ -5,7 +5,7 @@ import 'package:intl/intl.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import '../models/offer_draft.dart';
-import '../models/app_settings.dart';
+import '../state/settings_store.dart';
 import 'package:booking_desktop/services/trip_calculator.dart';
 
 class OfferPdfService {
@@ -57,35 +57,53 @@ This offer is valid for 7 days from today’s date and assumes that a vehicle is
 
 9. Acceptance
 """;
+// ============================================================
+// BUS TYPE IMAGE
+// ============================================================
 
+static String _busImageForType(BusType type) {
+  switch (type) {
+    case BusType.sleeper12:
+      return 'assets/pdf/buses/12_sleeper.png';
+
+    case BusType.sleeper14:
+      return 'assets/pdf/buses/14_sleeper.png';
+
+    case BusType.sleeper16:
+      return 'assets/pdf/buses/16_sleeper.png';
+
+    case BusType.sleeper18:
+      return 'assets/pdf/buses/18_sleeper.png';
+
+    case BusType.sleeper12StarRoom:
+      return 'assets/pdf/buses/12_sleeper.png';
+  }
+}
   // ============================================================
-  // BUS TYPE IMAGE
+  // MAIN ENTRY
   // ============================================================
 
-  static String _busImageForType(BusType type) {
-    switch (type) {
-      case BusType.sleeper12:
-        return 'assets/pdf/buses/12_sleeper.png';
-      case BusType.sleeper14:
-        return 'assets/pdf/buses/14_sleeper.png';
-      case BusType.sleeper16:
-        return 'assets/pdf/buses/16_sleeper.png';
-      case BusType.sleeper18:
-        return 'assets/pdf/buses/18_sleeper.png';
-      case BusType.sleeper12StarRoom:
-        return 'assets/pdf/buses/12_sleeper.png';
-    }
+  static Future<Uint8List> generatePdf(
+    OfferDraft offer,
+    Map<int, RoundCalcResult> roundCalc,
+  ) async {
+
+    return buildPdf(
+      offer: offer,
+      roundCalcByIndex: roundCalc,
+    );
   }
 
+
   // ============================================================
-  // MAIN
+  // REAL PDF BUILDER
   // ============================================================
 
   static Future<Uint8List> buildPdf({
     required OfferDraft offer,
-    required AppSettings settings,
     required Map<int, RoundCalcResult> roundCalcByIndex,
   }) async {
+
     final doc = pw.Document();
 
     final regular = pw.Font.ttf(
@@ -116,11 +134,14 @@ This offer is valid for 7 days from today’s date and assumes that a vehicle is
           .asUint8List(),
     );
 
+
     doc.addPage(
       pw.MultiPage(
         pageFormat: PdfPageFormat.a4,
         margin: const pw.EdgeInsets.fromLTRB(0, 0, 0, 40),
+
         build: (context) => [
+
           _buildTopBar(appLogo, regular),
 
           pw.SizedBox(height: 20),
@@ -140,7 +161,6 @@ This offer is valid for 7 days from today’s date and assumes that a vehicle is
 
           _buildTable(
             offer,
-            settings,
             roundCalcByIndex,
             regular,
             bold,
@@ -159,6 +179,10 @@ This offer is valid for 7 days from today’s date and assumes that a vehicle is
 
     return doc.save();
   }
+
+  // ============================================================
+  // MAIN
+  // ============================================================
 
   // ============================================================
 // BLACK BAR (FIXED ALIGNMENT)
@@ -333,7 +357,6 @@ static pw.Widget _buildOfferTitle(pw.Font bold) {
 }
   static pw.Widget _buildTable(
   OfferDraft offer,
-  AppSettings settings,
   Map<int, RoundCalcResult> calc,
   pw.Font regular,
   pw.Font bold,
@@ -381,7 +404,7 @@ static pw.Widget _buildOfferTitle(pw.Font bold) {
               ? result.legKm[r].toDouble()
               : 0.0;
 
-      final hasDDrive = km >= settings.dDriveKmThreshold;
+      final hasDDrive = km >= 600; // eller din terskel
 
       rows.add([
         DateFormat("dd.MM.yyyy").format(e.date),

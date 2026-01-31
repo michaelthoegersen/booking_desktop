@@ -115,7 +115,7 @@ class CalendarSyncService {
         // --------------------------------------------------
         final calc = TripCalculator.calculateRound(
           settings: SettingsStore.current,
-          entryCount: entries.length,
+          dates: entries.map((e) => e.date).toList(),
           pickupEveningFirstDay: round.pickupEveningFirstDay,
           trailer: round.trailer,
           totalKm: 0,

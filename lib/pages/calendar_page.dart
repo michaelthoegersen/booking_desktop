@@ -69,7 +69,36 @@ Color statusColor(String? status) {
   }
 }
 
+class CalendarCard extends StatelessWidget {
+  final Widget child;
 
+  const CalendarCard({super.key, required this.child});
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+
+    return Container(
+      margin: const EdgeInsets.only(top: 12),
+      padding: const EdgeInsets.all(16),
+
+      decoration: BoxDecoration(
+        color: cs.surface,
+        borderRadius: BorderRadius.circular(18),
+
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x11000000),
+            blurRadius: 12,
+            offset: Offset(0, 4),
+          ),
+        ],
+      ),
+
+      child: child,
+    );
+  }
+}
 // ============================================================
 // CALENDAR PAGE
 // ============================================================
@@ -83,6 +112,8 @@ class CalendarPage extends StatefulWidget {
 
 
 class _CalendarPageState extends State<CalendarPage> {
+
+  final ScrollController _hScrollCtrl = ScrollController();
 
   final supabase = Supabase.instance.client;
 
@@ -115,14 +146,17 @@ class _CalendarPageState extends State<CalendarPage> {
   // ============================================================
 
   @override
-  void initState() {
-    super.initState();
+void initState() {
+  super.initState();
 
-    weekStart = startOfWeek(DateTime.now());
-    monthStart = DateTime(DateTime.now().year, DateTime.now().month, 1);
+  weekStart = startOfWeek(DateTime.now());
+  monthStart = DateTime(DateTime.now().year, DateTime.now().month, 1);
 
-    loadWeek();
-  }
+  // 👉 Start i måned-visning
+  isMonthView = true;
+  loadMonth();
+}
+  
 
 
   // ============================================================
@@ -159,55 +193,67 @@ class _CalendarPageState extends State<CalendarPage> {
 
   Future<void> loadRange(DateTime start, DateTime end) async {
 
-    try {
+  // ✅ Lagre scroll-posisjon før reload
+  final oldOffset = _hScrollCtrl.hasClients
+      ? _hScrollCtrl.offset
+      : 0.0;
 
-      final res = await supabase
-          .from('samletdata')
-          .select()
-          .gte('dato', fmtDb(start))
-          .lte('dato', fmtDb(end));
+  try {
 
-      final rows = List<Map<String, dynamic>>.from(res);
+    final res = await supabase
+        .from('samletdata')
+        .select()
+        .gte('dato', fmtDb(start))
+        .lte('dato', fmtDb(end));
 
-      final map = <String, Map<DateTime, List<Map<String, dynamic>>>>{};
+    final rows = List<Map<String, dynamic>>.from(res);
 
-      for (final r in rows) {
+    final map = <String, Map<DateTime, List<Map<String, dynamic>>>>{};
 
-        final bus = r['kilde']?.toString();
-        final dateStr = r['dato'];
+    for (final r in rows) {
 
-        if (bus == null || dateStr == null) continue;
+      final bus = r['kilde']?.toString();
+      final dateStr = r['dato'];
 
-        final date = normalize(DateTime.parse(dateStr));
+      if (bus == null || dateStr == null) continue;
 
-        map.putIfAbsent(bus, () => {});
-        map[bus]!.putIfAbsent(date, () => []);
-        map[bus]![date]!.add(r);
+      final date = normalize(DateTime.parse(dateStr));
+
+      map.putIfAbsent(bus, () => {});
+      map[bus]!.putIfAbsent(date, () => []);
+      map[bus]![date]!.add(r);
+    }
+
+    if (!mounted) return;
+
+    setState(() {
+      data = map;
+    });
+
+    // ✅ Restore scroll etter rebuild
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_hScrollCtrl.hasClients) {
+        _hScrollCtrl.jumpTo(oldOffset);
       }
+    });
 
-      if (mounted) {
-        setState(() {
-          data = map;
-        });
-      }
+  } catch (e) {
 
-    } catch (e) {
+    if (mounted) {
+      setState(() {
+        error = e.toString();
+      });
+    }
 
-      if (mounted) {
-        setState(() {
-          error = e.toString();
-        });
-      }
+  } finally {
 
-    } finally {
-
-      if (mounted) {
-        setState(() {
-          loading = false;
-        });
-      }
+    if (mounted) {
+      setState(() {
+        loading = false;
+      });
     }
   }
+}
     // ============================================================
   // NAVIGATION
   // ============================================================
@@ -257,109 +303,146 @@ class _CalendarPageState extends State<CalendarPage> {
 
 
   // ============================================================
-  // BUILD
-  // ============================================================
+// BUILD
+// ============================================================
 
-  @override
-  Widget build(BuildContext context) {
+@override
+Widget build(BuildContext context) {
 
-    final days = isMonthView
-        ? List.generate(
-            DateTime(monthStart.year, monthStart.month + 1, 0).day,
-            (i) => DateTime(
-              monthStart.year,
-              monthStart.month,
-              i + 1,
-            ),
-          )
-        : List.generate(
-            7,
-            (i) => weekStart.add(Duration(days: i)),
-          );
+  final days = isMonthView
+      ? List.generate(
+          DateTime(monthStart.year, monthStart.month + 1, 0).day,
+          (i) => DateTime(
+            monthStart.year,
+            monthStart.month,
+            i + 1,
+          ),
+        )
+      : List.generate(
+          7,
+          (i) => weekStart.add(Duration(days: i)),
+        );
 
-    return Padding(
-      padding: const EdgeInsets.all(16),
+  final cs = Theme.of(context).colorScheme;
+
+  return Padding(
+    padding: const EdgeInsets.all(16),
+
+    child: Container(
+      width: double.infinity,
+
+      padding: const EdgeInsets.all(18),
+
+      decoration: BoxDecoration(
+        color: cs.surface,
+        borderRadius: BorderRadius.circular(20),
+
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x11000000),
+            blurRadius: 16,
+            offset: Offset(0, 6),
+          ),
+        ],
+      ),
 
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+
         children: [
 
+          // =========================
+          // HEADER
+          // =========================
           buildHeader(days),
+
+          const SizedBox(height: 16),
+
+          const Divider(height: 1),
 
           const SizedBox(height: 12),
 
-          buildContent(days),
+          // =========================
+          // CONTENT
+          // =========================
+          Expanded(
+            child: buildContent(days),
+          ),
         ],
       ),
-    );
-  }
+    ),
+  );
+}
     // ============================================================
   // HEADER
   // ============================================================
 
   Widget buildHeader(List<DateTime> days) {
+  final title = isMonthView
+      ? DateFormat("MMMM yyyy").format(monthStart)
+      : "${fmt(days.first)} – ${fmt(days.last)}";
 
-    final title = isMonthView
-        ? DateFormat("MMMM yyyy").format(monthStart)
-        : "${fmt(days.first)} - ${fmt(days.last)}";
+  return Row(
+    children: [
 
-    return Row(
-      children: [
+      Text(
+        "Calendar",
+        style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+              fontWeight: FontWeight.w900,
+            ),
+      ),
 
-        const Text(
-          "Calendar",
-          style: TextStyle(
-            fontSize: 24,
-            fontWeight: FontWeight.bold,
+      const SizedBox(width: 16),
+
+      Text(
+        title,
+        style: const TextStyle(
+          fontSize: 16,
+          color: Colors.grey,
+        ),
+      ),
+
+      const Spacer(),
+
+      IconButton(
+        icon: const Icon(Icons.chevron_left),
+        onPressed: prev,
+      ),
+
+      IconButton(
+        icon: const Icon(Icons.chevron_right),
+        onPressed: next,
+      ),
+
+      const SizedBox(width: 12),
+
+      SegmentedButton<bool>(
+        segments: const [
+          ButtonSegment(
+            value: false,
+            label: Text("Week"),
           ),
-        ),
+          ButtonSegment(
+            value: true,
+            label: Text("Month"),
+          ),
+        ],
 
-        const Spacer(),
+        selected: {isMonthView},
 
-        IconButton(
-          icon: const Icon(Icons.chevron_left),
-          onPressed: prev,
-        ),
+        onSelectionChanged: (v) {
+          final val = v.first;
 
-        Text(title),
+          setState(() {
+            isMonthView = val;
+          });
 
-        IconButton(
-          icon: const Icon(Icons.chevron_right),
-          onPressed: next,
-        ),
-
-        const SizedBox(width: 16),
-
-        SegmentedButton<bool>(
-
-          segments: const [
-
-            ButtonSegment(
-              value: false,
-              label: Text("Week"),
-            ),
-
-            ButtonSegment(
-              value: true,
-              label: Text("Month"),
-            ),
-          ],
-
-          selected: {isMonthView},
-
-          onSelectionChanged: (v) {
-
-            final val = v.first;
-
-            setState(() {
-              isMonthView = val;
-            });
-
-            val ? loadMonth() : loadWeek();
-          },
-        ),
-      ],
-    );
-  }
+          val ? loadMonth() : loadWeek();
+        },
+      ),
+    ],
+  );
+}
 
 
 
@@ -394,36 +477,200 @@ class _CalendarPageState extends State<CalendarPage> {
   // GRID
   // ============================================================
 
-  Widget buildGrid(List<DateTime> days) {
+  // ============================================================
+// GRID (STICKY BUS COLUMN)
+// ============================================================
 
-    final width = busWidth + dayWidth * days.length;
+// ============================================================
+// GRID (FIXED BUS + SCROLLABLE DAYS — NO OVERFLOW)
+// ============================================================
 
-    return Expanded(
-      child: SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
+// ============================================================
+// GRID (STICKY BUS + STICKY HEADER)
+// ============================================================
 
-        child: SizedBox(
-          width: width,
+Widget buildGrid(List<DateTime> days) {
+  final scrollWidth = dayWidth * days.length;
+
+  return Expanded(
+    child: Row(
+      children: [
+
+        // =====================================================
+        // LEFT: BUS COLUMN (FIXED)
+        // =====================================================
+        SizedBox(
+          width: busWidth + 16,
 
           child: Column(
             children: [
 
-              buildHeaderRow(days),
+              // Header spacer (same height as date row)
+              const SizedBox(height: 56),
 
+              // Bus list
               Expanded(
-                child: ListView(
-                  children: [
-                    for (final bus in buses)
-                      buildRow(bus, days),
-                  ],
+                child: ListView.builder(
+                  itemCount: buses.length,
+
+                  itemBuilder: (_, i) {
+                    return _buildBusOnlyRow(buses[i]);
+                  },
                 ),
               ),
             ],
           ),
         ),
-      ),
-    );
-  }
+
+        // =====================================================
+        // RIGHT: SCROLLABLE AREA
+        // =====================================================
+        Expanded(
+          child: ClipRect(
+
+            child: Scrollbar(
+              controller: _hScrollCtrl,
+              thumbVisibility: true,
+
+              child: SingleChildScrollView(
+                controller: _hScrollCtrl,
+                scrollDirection: Axis.horizontal,
+
+                child: SizedBox(
+                  width: scrollWidth,
+
+                  child: CustomScrollView(
+                    slivers: [
+
+                      // ===================================
+                      // STICKY DATE HEADER
+                      // ===================================
+                      SliverPersistentHeader(
+                        pinned: true,
+
+                        delegate: _CalendarHeaderDelegate(
+                          height: 56,
+
+                          child: SizedBox(
+                            width: scrollWidth,
+                            child: buildHeaderRow(days),
+                          ),
+                        ),
+                      ),
+
+                      // ===================================
+                      // BODY ROWS
+                      // ===================================
+                      SliverList(
+                        delegate: SliverChildBuilderDelegate(
+                          (context, index) {
+                            return _buildCalendarOnlyRow(
+                              buses[index],
+                              days,
+                            );
+                          },
+                          childCount: buses.length,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ],
+    ),
+  );
+}
+// ============================================================
+// BUS COLUMN ROW (FIXED)
+// ============================================================
+
+Widget _buildBusOnlyRow(String bus) {
+
+  return Container(
+    height: 72,
+
+    alignment: Alignment.centerLeft,
+
+    margin: const EdgeInsets.symmetric(vertical: 2),
+
+    child: BusCell(
+      bus,
+      busTypes: busTypes,
+    ),
+  );
+}
+// ============================================================
+// CALENDAR ROW (SCROLLING)
+// ============================================================
+
+Widget _buildCalendarOnlyRow(
+  String bus,
+  List<DateTime> days,
+) {
+
+  final segments = buildSegments(bus, days);
+
+  return DragTarget<DragBookingData>(
+
+    onWillAccept: (data) {
+      return data != null && data.fromBus != bus;
+    },
+
+    onAccept: (data) async {
+
+      await supabase
+          .from('samletdata')
+          .update({'kilde': bus})
+          .eq('produksjon', data.production)
+          .eq('kilde', data.fromBus)
+          .gte('dato', fmtDb(data.from))
+          .lte('dato', fmtDb(data.to));
+
+      await loadRange(
+        isMonthView
+            ? DateTime(monthStart.year, monthStart.month, 1)
+            : weekStart.subtract(const Duration(days: 7)),
+        isMonthView
+            ? DateTime(monthStart.year, monthStart.month + 1, 0)
+            : weekStart.add(const Duration(days: 14)),
+      );
+    },
+
+    builder: (context, candidate, rejected) {
+
+      final highlight = candidate.isNotEmpty;
+
+      return Container(
+        height: 72,
+
+        decoration: BoxDecoration(
+          color: highlight
+              ? Colors.blue.withOpacity(0.08)
+              : null,
+
+          border: Border(
+            bottom: BorderSide(
+              color: Colors.grey.shade200,
+            ),
+          ),
+        ),
+
+        child: Row(
+          children: [
+
+            SizedBox(
+              width: dayWidth * days.length,
+              child: Row(children: segments),
+            ),
+          ],
+        ),
+      );
+    },
+  );
+}
 
 
 
@@ -431,55 +678,71 @@ class _CalendarPageState extends State<CalendarPage> {
   // HEADER ROW
   // ============================================================
 
-  Widget buildHeaderRow(List<DateTime> days) {
+  // ============================================================
+// HEADER ROW (SYNC WIDTH)
+// ============================================================
 
-    return Container(
-      height: 48,
+Widget buildHeaderRow(List<DateTime> days) {
 
-      decoration: BoxDecoration(
-        color: Colors.grey.shade100,
+  return Container(
+    height: 56,
 
-        border: Border(
-          bottom: BorderSide(
-            color: Colors.grey.shade300,
-          ),
+    decoration: BoxDecoration(
+      color: Colors.grey.shade50,
+
+      border: Border(
+        bottom: BorderSide(
+          color: Colors.grey.shade300,
         ),
       ),
+    ),
 
-      child: Row(
-        children: [
+    child: Row(
+      children: [
 
-          const SizedBox(width: busWidth),
+        for (final d in days)
 
-          for (final d in days)
+          SizedBox(
+            width: dayWidth,
 
-            SizedBox(
-              width: dayWidth,
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
 
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
+              children: [
 
-                children: [
+                Text(
+                  DateFormat("EEE").format(d),
+                  style: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
 
-                  Text(
-                    DateFormat("EEE").format(d),
-                    style: const TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.bold,
-                    ),
+                const SizedBox(height: 2),
+
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 6,
+                    vertical: 2,
                   ),
 
-                  Text(
-                    DateFormat("dd.MM").format(d),
-                    style: const TextStyle(fontSize: 12),
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade200,
+                    borderRadius: BorderRadius.circular(6),
                   ),
-                ],
-              ),
+
+                  child: Text(
+                    DateFormat("dd").format(d),
+                    style: const TextStyle(fontSize: 11),
+                  ),
+                ),
+              ],
             ),
-        ],
-      ),
-    );
-  }
+          ),
+      ],
+    ),
+  );
+}
   // ============================================================
 // ROW
 // ============================================================
@@ -524,7 +787,7 @@ Widget buildRow(String bus, List<DateTime> days) {
       final highlight = candidate.isNotEmpty;
 
       return Container(
-        height: 64,
+        height: 72,
 
         decoration: BoxDecoration(
           color: highlight
@@ -533,10 +796,9 @@ Widget buildRow(String bus, List<DateTime> days) {
 
           border: Border(
             bottom: BorderSide(
-              color: Colors.grey.shade300,
-            ),
-          ),
-        ),
+            color: Colors.grey.shade200,
+  ),
+),        ),
 
         child: Row(
           children: [
@@ -706,29 +968,34 @@ class BookingSegment extends StatelessWidget {
   // ============================================================
 
   Future<void> _updateStatus(
-    BuildContext context,
-    String newStatus,
-  ) async {
+  BuildContext context,
+  String newStatus,
+) async {
 
-    final sb = Supabase.instance.client;
+  final sb = Supabase.instance.client;
 
-    await sb
-        .from('samletdata')
-        .update({'status': newStatus})
-        .eq('produksjon', title)
-        .eq('kilde', bus)
-        .gte('dato', fmtDb(from))
-        .lte('dato', fmtDb(to));
+  await sb
+      .from('samletdata')
+      .update({'status': newStatus})
+      .eq('produksjon', title)
+      .eq('kilde', bus)
+      .gte('dato', fmtDb(from))
+      .lte('dato', fmtDb(to));
 
+  if (!context.mounted) return;
 
-    if (context.mounted) {
+  final parent =
+      context.findAncestorStateOfType<_CalendarPageState>();
 
-      final parent =
-          context.findAncestorStateOfType<_CalendarPageState>();
+  if (parent == null) return;
 
-      parent?.loadWeek();
-    }
+  // ✅ Reload riktig view uten å hoppe
+  if (parent.isMonthView) {
+    await parent.loadMonth();
+  } else {
+    await parent.loadWeek();
   }
+}
 
 
 
@@ -808,7 +1075,11 @@ Widget _buildBody(BuildContext context) {
         final parent =
             context.findAncestorStateOfType<_CalendarPageState>();
 
-        parent?.loadWeek();
+        if (parent != null) {
+          parent.isMonthView
+              ? parent.loadMonth()
+              : parent.loadWeek();
+        }
       }
     },
 
@@ -818,18 +1089,30 @@ Widget _buildBody(BuildContext context) {
 
     child: Container(
       margin: const EdgeInsets.all(4),
-      padding: const EdgeInsets.all(6),
+      padding: const EdgeInsets.symmetric(
+        horizontal: 10,
+        vertical: 6,
+      ),
 
       decoration: BoxDecoration(
         color: statusColor(status),
-        borderRadius: BorderRadius.circular(6),
+        borderRadius: BorderRadius.circular(10),
+
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x22000000),
+            blurRadius: 4,
+            offset: Offset(0, 2),
+          ),
+        ],
       ),
 
       child: Text(
         title,
         overflow: TextOverflow.ellipsis,
         style: const TextStyle(
-          fontWeight: FontWeight.bold,
+          fontWeight: FontWeight.w700,
+          fontSize: 13,
         ),
       ),
     ),
@@ -924,9 +1207,17 @@ class BusCell extends StatelessWidget {
     final type = busTypes[bus] ?? '';
 
     return Container(
-      width: 140,
-      padding: const EdgeInsets.symmetric(horizontal: 12),
-      alignment: Alignment.centerLeft,
+  width: 140,
+  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+
+  decoration: BoxDecoration(
+    color: Colors.grey.shade50,
+    borderRadius: BorderRadius.circular(8),
+  ),
+
+  margin: const EdgeInsets.symmetric(horizontal: 6),
+
+  alignment: Alignment.centerLeft,
 
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
@@ -1034,69 +1325,77 @@ class _EditCalendarDialogState extends State<EditCalendarDialog> {
   // LOAD
   // ============================================================
 
-  Future<void> load() async {
+  // ============================================================
+// LOAD
+// ============================================================
 
-    final res = await supabase
-        .from('samletdata')
-        .select()
-        .eq('produksjon', widget.production)
-        .eq('kilde', widget.bus)
-        .gte('dato', fmtDb(widget.from))
-        .lte('dato', fmtDb(widget.to))
-        .order('dato');
+Future<void> load() async {
 
+  final res = await supabase
+      .from('samletdata')
+      .select()
+      .eq('produksjon', widget.production)
+      .eq('kilde', widget.bus)
+      .gte('dato', fmtDb(widget.from))
+      .lte('dato', fmtDb(widget.to))
 
-    final list = List<Map<String, dynamic>>.from(res);
-
-
-    if (list.isEmpty) {
-
-      setState(() {
-        loading = false;
-      });
-
-      return;
-    }
+      // ✅ KRITISK: alltid eldste → nyeste
+      .order('dato', ascending: true);
 
 
-    sjaforCtrl.text = list.first['sjafor'] ?? '';
-    statusCtrl.text = list.first['status'] ?? '';
+  final list = List<Map<String, dynamic>>.from(res);
 
 
-    rows.addAll(list);
+  if (list.isEmpty) {
 
+    setState(() {
+      loading = false;
+    });
 
-    for (final r in list) {
-
-      final id = r['id'].toString();
-
-
-      dDriveCtrls[id] =
-          TextEditingController(text: r['d_drive'] ?? '');
-
-      itinCtrls[id] =
-          TextEditingController(text: r['getin'] ?? '');
-
-      timeCtrls[id] =
-          TextEditingController(text: r['tid'] ?? '');
-
-      venueCtrls[id] =
-          TextEditingController(text: r['venue'] ?? '');
-
-      addrCtrls[id] =
-          TextEditingController(text: r['adresse'] ?? '');
-
-      commentCtrls[id] =
-          TextEditingController(text: r['kommentarer'] ?? '');
-    }
-
-
-    if (mounted) {
-      setState(() {
-        loading = false;
-      });
-    }
+    return;
   }
+
+
+  sjaforCtrl.text = list.first['sjafor'] ?? '';
+  statusCtrl.text = list.first['status'] ?? '';
+
+
+  rows.clear(); // 👈 sikkerhet
+  rows.addAll(list);
+
+
+  for (final r in list) {
+
+    final id = r['id'].toString();
+
+
+    dDriveCtrls[id] =
+        TextEditingController(text: r['d_drive'] ?? '');
+
+    itinCtrls[id] =
+        TextEditingController(text: r['getin'] ?? '');
+
+    timeCtrls[id] =
+        TextEditingController(text: r['tid'] ?? '');
+
+    venueCtrls[id] =
+        TextEditingController(text: r['venue'] ?? '');
+
+    addrCtrls[id] =
+        TextEditingController(text: r['adresse'] ?? '');
+
+    commentCtrls[id] =
+        TextEditingController(text: r['kommentarer'] ?? '');
+  }
+
+
+  if (mounted) {
+    setState(() {
+      loading = false;
+      activeIndex = 0; // ✅ start alltid på dag 1
+    });
+  }
+}
 
 
 
@@ -1398,5 +1697,42 @@ class _EditCalendarDialogState extends State<EditCalendarDialog> {
         ),
       ),
     );
+  }
+}
+// ============================================================
+// STICKY HEADER DELEGATE
+// ============================================================
+
+class _CalendarHeaderDelegate extends SliverPersistentHeaderDelegate {
+  final double height;
+  final Widget child;
+
+  _CalendarHeaderDelegate({
+    required this.height,
+    required this.child,
+  });
+
+  @override
+  double get minExtent => height;
+
+  @override
+  double get maxExtent => height;
+
+  @override
+  Widget build(
+    BuildContext context,
+    double shrinkOffset,
+    bool overlapsContent,
+  ) {
+    return Container(
+      color: Theme.of(context).colorScheme.surface,
+      child: child,
+    );
+  }
+
+  @override
+  bool shouldRebuild(_CalendarHeaderDelegate oldDelegate) {
+    return height != oldDelegate.height ||
+        child != oldDelegate.child;
   }
 }

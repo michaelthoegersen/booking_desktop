@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
 import '../ui/css_theme.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 class AppShell extends StatelessWidget {
   final Widget child;
@@ -41,6 +42,10 @@ class _TopBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final user = Supabase.instance.client.auth.currentUser;
+
+    final email = user?.email ?? "Unknown user";
+
     return Container(
       height: 70,
       padding: const EdgeInsets.symmetric(horizontal: 18),
@@ -52,49 +57,129 @@ class _TopBar extends StatelessWidget {
       ),
       child: Row(
         children: [
-          Text(
-            "Booking System",
-            style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                  fontWeight: FontWeight.w900,
-                  color: Colors.white,
-                ),
-          ),
+          // ---------------- Title ----------------
+RichText(
+  text: const TextSpan(
+    children: [
+
+      // Hovednavn
+      TextSpan(
+        text: "TourFlow",
+        style: TextStyle(
+          fontSize: 22,
+          fontWeight: FontWeight.w900,
+          color: Colors.white,
+        ),
+      ),
+
+      // Separator
+      TextSpan(
+        text: "  —  ",
+        style: TextStyle(
+          fontSize: 16,
+          color: Colors.white70,
+        ),
+      ),
+
+      // Undertittel
+      TextSpan(
+        text: "booking system for nightliners",
+        style: TextStyle(
+          fontSize: 14,
+          fontWeight: FontWeight.w500,
+          color: Colors.white70,
+        ),
+      ),
+    ],
+  ),
+),
 
           const SizedBox(width: 12),
 
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-            decoration: BoxDecoration(
-              color: Colors.white10,
-              borderRadius: BorderRadius.circular(999),
-              border: Border.all(color: Colors.white24),
-            ),
-            child: const Text(
-              "Desktop",
-              style: TextStyle(
-                fontWeight: FontWeight.w900,
-                color: Colors.white,
-              ),
-            ),
-          ),
+         
 
           const Spacer(),
 
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-            decoration: BoxDecoration(
-              color: Colors.white10,
-              borderRadius: BorderRadius.circular(999),
-              border: Border.all(color: Colors.white24),
-            ),
-            child: const Row(
-              children: [
-                Icon(Icons.person, color: Colors.white, size: 20),
-                SizedBox(width: 8),
-                Text("Signed in", style: TextStyle(color: Colors.white)),
-                SizedBox(width: 8),
-                Icon(Icons.keyboard_arrow_down, color: Colors.white70),
-              ],
+          // ---------------- USER MENU ----------------
+          PopupMenuButton<String>(
+            tooltip: "Account",
+
+            onSelected: (value) async {
+              if (value == "logout") {
+                await Supabase.instance.client.auth.signOut();
+
+                if (context.mounted) {
+                  context.go('/login');
+                }
+              }
+            },
+
+            itemBuilder: (context) => [
+
+              // 👤 Bruker-info (disabled)
+              PopupMenuItem(
+                enabled: false,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      "Signed in as",
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: Colors.grey,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      email,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
+              const PopupMenuDivider(),
+
+              // 🚪 Logout
+              const PopupMenuItem(
+                value: "logout",
+                child: Row(
+                  children: [
+                    Icon(Icons.logout, size: 18),
+                    SizedBox(width: 8),
+                    Text("Log out"),
+                  ],
+                ),
+              ),
+            ],
+
+            child: Container(
+              padding: const EdgeInsets.symmetric(
+                horizontal: 12,
+                vertical: 10,
+              ),
+              decoration: BoxDecoration(
+                color: Colors.white10,
+                borderRadius: BorderRadius.circular(999),
+                border: Border.all(color: Colors.white24),
+              ),
+              child: Row(
+                children: const [
+                  Icon(Icons.person, color: Colors.white, size: 20),
+                  SizedBox(width: 8),
+                  Text(
+                    "Signed in",
+                    style: TextStyle(color: Colors.white),
+                  ),
+                  SizedBox(width: 8),
+                  Icon(
+                    Icons.keyboard_arrow_down,
+                    color: Colors.white70,
+                  ),
+                ],
+              ),
             ),
           ),
         ],
@@ -124,41 +209,30 @@ class _SideNav extends StatelessWidget {
         child: Column(
           children: [
             // --------------------------------------------------
-// LOGO
+// --------------------------------------------------
+// LOGO (REN + STØRRE)
 // --------------------------------------------------
 Padding(
-  padding: const EdgeInsets.only(bottom: 12),
-  child: SizedBox(
-    height: 120, // 👈 juster her hvis du vil større/mindre
-    width: double.infinity,
-    child: DecoratedBox(
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: CssTheme.outline),
-      ),
-      child: Center(
-        child: Image.asset(
-          "assets/pdf/logos/TourFlowLogo.png",
-          height: 100, // 👈 selve logo-størrelsen
-          fit: BoxFit.contain,
+  padding: const EdgeInsets.only(bottom: 20, top: 10),
+  child: Center(
+    child: Image.asset(
+      "assets/pdf/logos/TourFlowLogo.png",
 
-          errorBuilder: (context, error, stack) {
-            return const Text(
-              "LOGO",
-              style: TextStyle(
-                fontWeight: FontWeight.bold,
-                color: Colors.black54,
-              ),
-            );
-          },
-        ),
-      ),
+      height: 150, // 👈 større logo
+      fit: BoxFit.contain,
+
+      errorBuilder: (context, error, stack) {
+        return const Text(
+          "TourFlow",
+          style: TextStyle(
+            fontWeight: FontWeight.bold,
+            fontSize: 24,
+          ),
+        );
+      },
     ),
   ),
 ),
-
-            const SizedBox(height: 14),
 
             // --------------------------------------------------
             // NAV ITEMS
