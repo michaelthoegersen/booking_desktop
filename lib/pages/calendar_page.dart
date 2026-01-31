@@ -916,15 +916,17 @@ List<Widget> buildSegments(
     // =====================================
 
     result.add(
-      BookingSegment(
-        title: prod,
-        span: span,
-        bus: bus,
-        from: start,
-        to: end,
-        status: items.first['status'],
-        width: dayWidth,
-      ),
+        BookingSegment(
+  title: prod,
+  span: span,
+  bus: bus,
+  from: start,
+  to: end,
+  status: items.first['status'],
+  width: dayWidth,
+
+  draftId: items.first['draft_id'].toString(), // ✅ RIKTIG
+),
     );
 
     i += span;
@@ -935,7 +937,23 @@ List<Widget> buildSegments(
   } // <-- SLUTT på _CalendarPageState
 
 
+// ============================================================
+// ROUND BLOCK (STATUS DIALOG)
+// ============================================================
 
+class _RoundBlock {
+  final String bus;
+  DateTime from;
+  DateTime to;
+  final List<String> ids;
+
+  _RoundBlock({
+    required this.bus,
+    required this.from,
+    required this.to,
+    required this.ids,
+  });
+}
 // ============================================================
 // BOOKING SEGMENT
 // ============================================================
@@ -949,17 +967,20 @@ class BookingSegment extends StatelessWidget {
   final DateTime to;
   final String? status;
   final double width;
+  final String draftId;
 
   const BookingSegment({
-    super.key,
-    required this.title,
-    required this.span,
-    required this.bus,
-    required this.from,
-    required this.to,
-    this.status,
-    required this.width,
-  });
+  super.key,
+  required this.title,
+  required this.span,
+  required this.bus,
+  required this.from,
+  required this.to,
+  this.status,
+  required this.width,
+
+  required this.draftId, // 👈 NY
+});
 
 
 
@@ -972,15 +993,16 @@ class BookingSegment extends StatelessWidget {
   String newStatus,
 ) async {
 
-  final sb = Supabase.instance.client;
+  final changed = await showDialog<bool>(
+    context: context,
 
-  await sb
-      .from('samletdata')
-      .update({'status': newStatus})
-      .eq('produksjon', title)
-      .eq('kilde', bus)
-      .gte('dato', fmtDb(from))
-      .lte('dato', fmtDb(to));
+    builder: (_) => StatusDatePickerDialog(
+  draftId: draftId, // 👈 HER
+  newStatus: newStatus,
+),
+  );
+
+  if (changed != true) return;
 
   if (!context.mounted) return;
 
@@ -989,7 +1011,6 @@ class BookingSegment extends StatelessWidget {
 
   if (parent == null) return;
 
-  // ✅ Reload riktig view uten å hoppe
   if (parent.isMonthView) {
     await parent.loadMonth();
   } else {
@@ -1734,5 +1755,180 @@ class _CalendarHeaderDelegate extends SliverPersistentHeaderDelegate {
   bool shouldRebuild(_CalendarHeaderDelegate oldDelegate) {
     return height != oldDelegate.height ||
         child != oldDelegate.child;
+  }
+}
+  class StatusDatePickerDialog extends StatefulWidget {
+
+  final String draftId;
+  final String newStatus;
+
+  const StatusDatePickerDialog({
+    super.key,
+    required this.draftId,
+    required this.newStatus,
+  });
+
+  @override
+  State<StatusDatePickerDialog> createState() =>
+      _StatusDatePickerDialogState();
+}
+
+class _StatusDatePickerDialogState
+    extends State<StatusDatePickerDialog> {
+  final sb = Supabase.instance.client;
+
+  bool loading = true;
+
+  final Map<String, bool> selected = {};
+  final List<_RoundBlock> blocks = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+  final res = await sb
+      .from('samletdata')
+      .select('id, dato, status, kilde')
+      .eq('draft_id', widget.draftId)
+      .order('dato');
+
+  final list = List<Map<String, dynamic>>.from(res);
+
+  if (list.isEmpty) {
+    setState(() => loading = false);
+    return;
+  }
+
+  list.sort((a, b) =>
+      DateTime.parse(a['dato'])
+          .compareTo(DateTime.parse(b['dato'])));
+
+  _RoundBlock? current;
+
+  for (final r in list) {
+    final date = DateTime.parse(r['dato']);
+    final bus = r['kilde'].toString();
+    final id = r['id'].toString();
+
+    if (current == null) {
+      current = _RoundBlock(
+        bus: bus,
+        from: date,
+        to: date,
+        ids: [id],
+      );
+      continue;
+    }
+
+    final isSameBus = bus == current.bus;
+    final isNextDay =
+        date.difference(current.to).inDays == 1;
+
+    if (isSameBus && isNextDay) {
+      current.to = date;
+      current.ids.add(id);
+    } else {
+      blocks.add(current);
+
+      current = _RoundBlock(
+        bus: bus,
+        from: date,
+        to: date,
+        ids: [id],
+      );
+    }
+  }
+
+  if (current != null) {
+    blocks.add(current);
+  }
+
+  for (final b in blocks) {
+    selected[b.hashCode.toString()] = true;
+  }
+
+  if (mounted) {
+    setState(() => loading = false);
+  }
+}
+
+  Future<void> _save() async {
+  final ids = <String>[];
+
+  for (final b in blocks) {
+    final key = b.hashCode.toString();
+
+    if (selected[key] == true) {
+      ids.addAll(b.ids);
+    }
+  }
+
+  if (ids.isEmpty) {
+    Navigator.pop(context);
+    return;
+  }
+
+  await sb
+      .from('samletdata')
+      .update({'status': widget.newStatus})
+      .inFilter('id', ids);
+
+  if (!mounted) return;
+
+  Navigator.pop(context, true);
+}
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text("Change status for days"),
+
+      content: SizedBox(
+        width: 420,
+        child: loading
+            ? const Center(child: CircularProgressIndicator())
+            : ListView.builder(
+                shrinkWrap: true,
+                itemCount: blocks.length,
+                itemBuilder: (_, i) {
+  final b = blocks[i];
+  final key = b.hashCode.toString();
+
+  return CheckboxListTile(
+    value: selected[key] ?? false,
+
+    onChanged: (v) {
+      setState(() {
+        selected[key] = v ?? false;
+      });
+    },
+
+    title: Text(
+      "${fmt(b.from)} – ${fmt(b.to)}  (${b.bus})",
+    ),
+
+    subtitle: Text(
+      "${b.ids.length} days",
+      style: const TextStyle(fontSize: 11),
+    ),
+  );
+},
+      ),      ),
+
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text("Cancel"),
+        ),
+
+        FilledButton(
+          onPressed: _save,
+          child: const Text("Update"),
+        ),
+      ],
+    );
   }
 }
