@@ -427,7 +427,25 @@ Future<void> _loadBusForDraft(String draftId) async {
   // ------------------------------------------------------------
   // Small helpers
   // ------------------------------------------------------------
+// ------------------------------------------------------------
+// MANUAL BUS CHANGE
+// ------------------------------------------------------------
+Future<void> _changeBusManually() async {
+  final picked = await _pickBus();
 
+  if (picked == null || picked.isEmpty) return;
+
+  setState(() {
+    offer.bus = picked;
+    _selectedBus = picked;
+  });
+
+  ScaffoldMessenger.of(context).showSnackBar(
+    SnackBar(
+      content: Text("Bus changed to $picked"),
+    ),
+  );
+}
   DateTime _getNextAvailableDate() {
   final entries = offer.rounds[roundIndex].entries;
 
@@ -2572,7 +2590,17 @@ class _LeftOfferCardState extends State<_LeftOfferCard> {
     _companyCtrl.dispose();
     super.dispose();
   }
+@override
+void didUpdateWidget(covariant _LeftOfferCard oldWidget) {
+  super.didUpdateWidget(oldWidget);
 
+  final company = widget.offer.company;
+
+  if (company.isNotEmpty) {
+    _companyCtrl.text = company;
+    _restore(company);
+  }
+}
   // --------------------------------------------------
   // RESTORE
   // --------------------------------------------------
@@ -2755,6 +2783,83 @@ Future<void> _createCompanyInline() async {
       _contacts = List<Map<String, dynamic>>.from(c);
     });
   }
+// --------------------------------------------------
+// PRODUCTION DIALOG
+// --------------------------------------------------
+Future<void> _openProductionDialog() async {
+  final nameCtrl = TextEditingController();
+
+  final result = await showDialog<String>(
+    context: context,
+    builder: (ctx) {
+      return AlertDialog(
+        title: const Text("New production"),
+
+        content: SizedBox(
+          width: 360,
+          child: TextField(
+            controller: nameCtrl,
+            decoration: const InputDecoration(
+              labelText: "Production name",
+            ),
+          ),
+        ),
+
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text("Cancel"),
+          ),
+
+          FilledButton(
+            onPressed: () {
+              final name = nameCtrl.text.trim();
+              if (name.isEmpty) return;
+
+              Navigator.pop(ctx, name);
+            },
+            child: const Text("Save"),
+          ),
+        ],
+      );
+    },
+  );
+
+  if (result == null || result.isEmpty) return;
+
+  if (_currentCompanyId == null) return;
+
+  try {
+    final saved = await _client
+        .from('productions')
+        .insert({
+          'company_id': _currentCompanyId,
+          'name': result,
+        })
+        .select()
+        .single();
+
+    if (!mounted) return;
+
+    // Reload
+    await _loadDetails(_currentCompanyId!);
+
+    setState(() {
+      _productionId = saved['id'].toString();
+      widget.offer.production = saved['name'] ?? '';
+    });
+
+  } catch (e) {
+    if (!mounted) return;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text("Save failed: $e"),
+        backgroundColor: Colors.red,
+      ),
+    );
+  }
+}
 
   // --------------------------------------------------
   // CONTACT DIALOG
@@ -3063,57 +3168,93 @@ Future<void> _createCompanyInline() async {
                       const SizedBox(height: 16),
 
                       // ================= PRODUCTION =================
-                      const Text(
-                        "Production",
-                        style: TextStyle(fontWeight: FontWeight.w900),
-                      ),
+                      // ================= PRODUCTION =================
+const Text(
+  "Production",
+  style: TextStyle(fontWeight: FontWeight.w900),
+),
 
-                      const SizedBox(height: 6),
+const SizedBox(height: 6),
 
-                      DropdownButtonFormField<String>(
-                        value: _productionId,
-                        isExpanded: true,
+Row(
+  children: [
 
-                        items: _productions.map((p) {
-                          return DropdownMenuItem(
-                            value: p['id'].toString(),
-                            child: Text(
-                              p['name'] ?? '',
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          );
-                        }).toList(),
+    Expanded(
+      child: DropdownButtonFormField<String>(
+        value: _productionId,
+        isExpanded: true,
 
-                        onChanged: (v) {
-                          if (v == null) return;
+        items: _productions.map((p) {
+          return DropdownMenuItem(
+            value: p['id'].toString(),
+            child: Text(
+              p['name'] ?? '',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          );
+        }).toList(),
 
-                          final pr = _productions.firstWhere(
-                            (e) => e['id'].toString() == v,
-                          );
+        onChanged: (v) {
+          if (v == null) return;
 
-                          setState(() {
-                            _productionId = v;
-                            widget.offer.production =
-                                pr['name'] ?? '';
-                          });
-                        },
-                      ),
+          final pr = _productions.firstWhere(
+            (e) => e['id'].toString() == v,
+          );
 
-                      const SizedBox(height: 18),
+          setState(() {
+            _productionId = v;
+            widget.offer.production = pr['name'] ?? '';
+          });
+        },
+      ),
+    ),
 
-                      // ================= BUS =================
-                      _BusSettingsCard(
-                        offer: widget.offer,
-                        onChanged: () => setState(() {}),
-                      ),
+    const SizedBox(width: 4),
 
-                      const SizedBox(height: 20),
+    // ➕ ADD PRODUCTION
+    IconButton(
+      icon: const Icon(Icons.add),
+      tooltip: "Add production",
+      onPressed: _currentCompanyId == null
+          ? null
+          : _openProductionDialog,
+    ),
+  ],
+),
+const SizedBox(height: 16),
 
-                      Divider(color: cs.outlineVariant),
+// ================= BUS =================
+Row(
+  children: [
 
-                      const SizedBox(height: 16),
+    const Text(
+      "Bus:",
+      style: TextStyle(fontWeight: FontWeight.w900),
+    ),
 
+    const SizedBox(width: 6),
+
+    Expanded(
+      child: Text(
+        widget.offer.bus ?? "Not selected",
+        style: const TextStyle(fontWeight: FontWeight.w700),
+        overflow: TextOverflow.ellipsis,
+      ),
+    ),
+
+    IconButton(
+      tooltip: "Change bus",
+      icon: const Icon(Icons.directions_bus),
+      onPressed: () {
+        final state =
+            context.findAncestorStateOfType<_NewOfferPageState>();
+
+        state?._changeBusManually();
+      },
+    ),
+  ],
+),
                       // ================= BUTTONS =================
                      Column(
   children: [
