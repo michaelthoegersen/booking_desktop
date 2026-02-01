@@ -21,6 +21,7 @@ import '../services/pdf_tour_parser.dart';
 // ✅ NY: bruker routes db for autocomplete + route lookup
 import '../services/routes_service.dart';
 import '../services/customers_service.dart';
+import '../state/current_offer_store.dart';
 
 class NewOfferPage extends StatefulWidget {
   /// ✅ Hvis du sender inn offerId -> åpner den eksisterende draft
@@ -221,37 +222,46 @@ final Map<int, RoundCalcResult> _roundCalcCache = {};
 }
 
   void _resetToBlankOffer() {
-    setState(() {
-  _draftId = null;
-  _selectedBus = null; // 👈 reset bus
-  roundIndex = 0;
+  setState(() {
+    // ✅ Clear global current offer
+    CurrentOfferStore.clear();
 
-      // reset offer til defaults
-      offer.company = 'Norsk Turnétransport AS';
-      offer.contact = 'Michael';
-      offer.production = 'Karpe';
-      offer.busCount = 1;
-      offer.busType = BusType.sleeper12;
+    _draftId = null;
+    _selectedBus = null; // 👈 reset bus
+    roundIndex = 0;
 
-      for (final r in offer.rounds) {
-        r.startLocation = '';
-        r.trailer = false;
-        r.pickupEveningFirstDay = false;
-        r.entries.clear();
-      }
+    // ---------------- RESET OFFER ----------------
+    offer.company = 'Norsk Turnétransport AS';
+    offer.contact = 'Michael';
+    offer.production = 'Karpe';
 
-      companyCtrl.text = offer.company;
-      contactCtrl.text = offer.contact;
-      productionCtrl.text = offer.production;
+    offer.status = 'Draft'; // ✅ reset status
 
-      _syncRoundControllers();
-    });
+    offer.busCount = 1;
+    offer.busType = BusType.sleeper12;
+    offer.bus = null;
 
-    _recalcKm();
-  }
+    // ---------------- RESET ROUNDS ----------------
+    for (final r in offer.rounds) {
+      r.startLocation = '';
+      r.trailer = false;
+      r.pickupEveningFirstDay = false;
+      r.entries.clear();
+    }
 
-  @override
-  @override
+    // ---------------- RESET CONTROLLERS ----------------
+    companyCtrl.text = offer.company;
+    contactCtrl.text = offer.contact;
+    productionCtrl.text = offer.production;
+
+    _syncRoundControllers();
+  });
+
+  // ---------------- RECALC ----------------
+  _recalcKm();
+}
+
+@override
 void dispose() {
   companyCtrl.dispose();
   contactCtrl.dispose();
@@ -263,7 +273,6 @@ void dispose() {
 
   super.dispose();
 }
-
   // ------------------------------------------------------------
   // ✅ Load existing draft
   // ------------------------------------------------------------
@@ -281,6 +290,8 @@ Future<void> _loadDraft(String id) async {
     // ---------------- LOAD DRAFT ----------------
     final loaded = await OfferStorageService.loadDraft(id);
 
+    CurrentOfferStore.set(loaded);
+
     if (loaded == null) {
       throw Exception("Draft not found");
     }
@@ -296,7 +307,7 @@ Future<void> _loadDraft(String id) async {
     // ✅ BUSS: hent fra MODELL
     offer.bus = loaded.bus;
     _selectedBus = loaded.bus;
-    offer.status = loaded.status; // ✅ NY
+    offer.status = _mapCalendarStatus(loaded.status); // ✅
     // ---------------- COPY ROUNDS ----------------
     for (int i = 0; i < offer.rounds.length; i++) {
 
@@ -667,11 +678,11 @@ Future<void> _pickDate() async {
 }
 String _validStatus(String? status) {
   const allowed = [
-    "Draft",
-    "Sent",
-    "Confirmed",
-    "Cancelled",
-  ];
+  "Draft",
+  "Inquiry",
+  "Confirmed",
+  "Cancelled",
+];
 
   if (status == null) return "Draft";
   if (allowed.contains(status)) return status;
@@ -692,6 +703,25 @@ static const Map<String, double> _vatRates = {
   'HR': 0.25,
   'Other': 0.0,
 };
+
+String _mapCalendarStatus(String? status) {
+  switch (status?.toLowerCase()) {
+    case 'draft':
+      return 'Draft';
+
+    case 'inquiry':
+      return 'Sent';
+
+    case 'confirmed':
+      return 'Confirmed';
+
+    case 'cancelled':
+      return 'Cancelled';
+
+    default:
+      return 'Draft';
+  }
+}
 
 // --------------------------------------------
 // Collect km from all rounds
@@ -955,20 +985,24 @@ offer.status = _validStatus(offer.status);
     // ----------------------------------------
     // Reload from DB (SOURCE OF TRUTH)
     // ----------------------------------------
-    final freshOffer =
-        await OfferStorageService.loadDraft(id);
+    
 
-    if (freshOffer == null) {
-      throw Exception("Reload after save failed");
-    }
+    
+final freshOffer =
+    await OfferStorageService.loadDraft(id);
 
-    debugPrint("Reloaded bus: ${freshOffer.bus}");
+if (freshOffer != null) {
+  freshOffer.status =
+      _mapCalendarStatus(freshOffer.status);
+}
+debugPrint("Reloaded bus: ${freshOffer.bus}");
 
+CurrentOfferStore.set(freshOffer);
     // ----------------------------------------
     // Sync back to state (FULL SYNC)
 offer.bus = freshOffer.bus;
 _selectedBus = freshOffer.bus;
-offer.status = freshOffer.status; // ✅ VIKTIG
+offer.status = _mapCalendarStatus(freshOffer.status); // ✅
 
     // ----------------------------------------
     // Sync calendar
@@ -2496,7 +2530,14 @@ final String routeText = isSpecial
                       CrossAxisAlignment.start,
                   children: [
 
-                    OfferPreview(offer: offer),
+                    ValueListenableBuilder<OfferDraft?>(
+  valueListenable: CurrentOfferStore.current,
+  builder: (_, current, __) {
+    return OfferPreview(
+      offer: current ?? offer,
+    );
+  },
+),
 
                     const SizedBox(height: 20),
                     // ================= STATUS =================
@@ -2533,23 +2574,23 @@ Container(
         ),
 
         items: const [
-          DropdownMenuItem(
-            value: "Draft",
-            child: Text("📝 Draft"),
-          ),
-          DropdownMenuItem(
-            value: "Sent",
-            child: Text("📤 Sent"),
-          ),
-          DropdownMenuItem(
-            value: "Confirmed",
-            child: Text("✅ Confirmed"),
-          ),
-          DropdownMenuItem(
-            value: "Cancelled",
-            child: Text("❌ Cancelled"),
-          ),
-        ],
+  DropdownMenuItem(
+    value: "Draft",
+    child: Text("📝 Draft"),
+  ),
+  DropdownMenuItem(
+    value: "Inquiry",
+    child: Text("📨 Inquiry"),
+  ),
+  DropdownMenuItem(
+    value: "Confirmed",
+    child: Text("✅ Confirmed"),
+  ),
+  DropdownMenuItem(
+    value: "Cancelled",
+    child: Text("❌ Cancelled"),
+  ),
+],
 
         onChanged: (v) {
           if (v == null) return;

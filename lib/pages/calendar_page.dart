@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-
+import 'package:go_router/go_router.dart';
 
 // ============================================================
 // HELPERS
@@ -1081,6 +1081,14 @@ Widget _buildBody(BuildContext context) {
   return GestureDetector(
     behavior: HitTestBehavior.opaque,
 
+    // ✅ KLIKK → ÅPNE OFFER
+    onTap: () {
+      if (!context.mounted) return;
+
+      context.go('/new?offerId=$draftId');
+    },
+
+    // ✅ DOBBELKLIKK → EDIT KALENDER
     onDoubleTap: () async {
       final changed = await showDialog<bool>(
         context: context,
@@ -1104,6 +1112,7 @@ Widget _buildBody(BuildContext context) {
       }
     },
 
+    // ✅ HØYREKLIKK → STATUS
     onSecondaryTapDown: (d) {
       _showStatusMenu(context, d);
     },
@@ -1139,7 +1148,6 @@ Widget _buildBody(BuildContext context) {
     ),
   );
 }
-
 // ============================================================
 // BUILD (DRAGGABLE + EXPANDED)
 // ============================================================

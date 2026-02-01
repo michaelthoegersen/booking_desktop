@@ -103,66 +103,77 @@ static Future<void> syncFromOffer(
     }
 
     // --------------------------------------------------
-    // 4️⃣ Bygg nye rader
-    // --------------------------------------------------
-    final rows = <Map<String, dynamic>>[];
+// 4️⃣ Bygg nye rader (AGGREGER PER DATO)
+// --------------------------------------------------
 
-    for (final round in offer.rounds) {
-      if (round.entries.isEmpty) continue;
+final Map<String, Map<String, dynamic>> rowByDate = {};
 
-      final entries = [...round.entries]
-        ..sort((a, b) => a.date.compareTo(b.date));
+for (final round in offer.rounds) {
+  if (round.entries.isEmpty) continue;
 
-      final List<bool> travelFlags = [];
+  final entries = [...round.entries]
+    ..sort((a, b) => a.date.compareTo(b.date));
 
-      for (int i = 0; i < entries.length; i++) {
-        travelFlags.add(_hasTravelBefore(entries, i));
-      }
+  final calc = TripCalculator.calculateRound(
+    settings: SettingsStore.current,
+    dates: entries.map((e) => e.date).toList(),
+    pickupEveningFirstDay: round.pickupEveningFirstDay,
+    trailer: round.trailer,
+    totalKm: 0,
+    legKm: const [],
+    ferryCost: 0,
+    tollCost: 0,
+    hasTravelBefore:
+        List.generate(entries.length, (i) => _hasTravelBefore(entries, i)),
+  );
 
-      final calc = TripCalculator.calculateRound(
-        settings: SettingsStore.current,
-        dates: entries.map((e) => e.date).toList(),
-        pickupEveningFirstDay: round.pickupEveningFirstDay,
-        trailer: round.trailer,
-        totalKm: 0,
-        legKm: const [],
-        ferryCost: 0,
-        tollCost: 0,
-        hasTravelBefore: travelFlags,
-      );
+  final vehicle =
+      "${offer.busType.label}${round.trailer ? ' + trailer' : ''}";
 
-      final vehicle =
-          "${offer.busType.label}${round.trailer ? ' + trailer' : ''}";
+  for (final e in entries) {
+    final dateStr =
+        e.date.toIso8601String().substring(0, 10);
 
-      for (final e in entries) {
-        final dateStr =
-            e.date.toIso8601String().substring(0, 10);
+    final bus =
+        existingBusByDate[dateStr] ?? selectedBus;
 
-        final bus =
-            existingBusByDate[dateStr] ?? selectedBus;
+    // Finn / opprett rad
+    final row = rowByDate.putIfAbsent(dateStr, () {
+      return {
+        'draft_id': draftId,
+        'dato': dateStr,
 
-        rows.add({
-          'draft_id': draftId,
-          'dato': dateStr,
+        'sted': '',
+        'km': '',
+        'tid': '',
 
-          'sted': e.location,
-          'km': '',
-          'tid': '',
+        'produksjon': offer.production,
+        'kjoretoy': vehicle,
 
-          'produksjon': offer.production,
-          'kjoretoy': vehicle,
+        'pris': calc.totalCost.toString(),
 
-          'pris': calc.totalCost.toString(),
+        'contact': offer.contact,
 
-          'contact': offer.contact,
+        'status': offer.status,
 
-          // ✅ BRUK MODELLENS STATUS
-          'status': offer.status,
+        'kilde': bus,
+      };
+    });
 
-          'kilde': bus,
-        });
+    // Append steder
+    final loc = e.location.trim();
+
+    if (loc.isNotEmpty) {
+      if ((row['sted'] as String).isEmpty) {
+        row['sted'] = loc;
+      } else {
+        row['sted'] = '${row['sted']}, $loc';
       }
     }
+  }
+}
+
+final rows = rowByDate.values.toList();
 
     // --------------------------------------------------
     // 5️⃣ UPSERT

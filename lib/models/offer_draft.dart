@@ -66,7 +66,7 @@ class OfferDraft {
 
   static const List<String> _allowedStatus = [
     'Draft',
-    'Sent',
+    'Inquiry',
     'Confirmed',
     'Cancelled',
   ];

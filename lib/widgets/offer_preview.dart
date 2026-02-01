@@ -16,7 +16,7 @@ class OfferPreview extends StatelessWidget {
     final cs = Theme.of(context).colorScheme;
 
     switch (offer.status) {
-      case "Sent":
+     case "Inquiry":
         return cs.secondaryContainer;
 
       case "Confirmed":
@@ -36,7 +36,7 @@ class OfferPreview extends StatelessWidget {
   // --------------------------------------------------
   String _statusLabel() {
     switch (offer.status) {
-      case "Sent":
+      case "Inquiry":
         return "📤 SENT";
 
       case "Confirmed":
