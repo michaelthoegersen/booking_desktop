@@ -2,7 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../services/google_routes_service.dart';
-import '../services/polyline_decoder.dart';
+import '../services/route_analyzer.dart';
 
 class GoogleTestPage extends StatefulWidget {
   const GoogleTestPage({super.key});
@@ -19,6 +19,7 @@ class _GoogleTestPageState extends State<GoogleTestPage> {
   String? _result;
 
   final _service = GoogleRoutesService();
+  final _analyzer = RouteAnalyzer();
 
   // ------------------------------------------------------------
   // TEST ROUTE
@@ -41,87 +42,70 @@ class _GoogleTestPageState extends State<GoogleTestPage> {
 
     try {
       // --------------------------------
-      // CALL API
+      // CALL GOOGLE
       // --------------------------------
-      debugPrint("📡 Calling GoogleRoutesService...");
+      debugPrint("📡 Calling Google API...");
 
       final data = await _service.getRoute(
         from: from,
         to: to,
       );
 
-      debugPrint("✅ Google response received");
+      debugPrint("✅ Google response OK");
 
-      // --------------------------------
-      // EXTRACT
-      // --------------------------------
-      final distance = data['distanceMeters'];
-      final polyline = data['polyline'];
-
-      if (polyline == null || polyline is! String) {
-        throw Exception("Polyline is null or invalid");
-      }
+      final distance = data['distanceMeters'] as int;
+      final polyline = data['polyline'] as String;
 
       debugPrint("📏 Distance: $distance m");
-      debugPrint("📐 Polyline length: ${polyline.length}");
+      debugPrint("📐 Polyline chars: ${polyline.length}");
 
       // --------------------------------
-      // DECODE
+      // ANALYZE
       // --------------------------------
-      debugPrint("🧩 Decoding polyline...");
+      debugPrint("🌍 Analyzing route countries...");
 
-      final points = PolylineDecoder.decode(polyline);
+      final analysis =
+  await _analyzer.kmPerCountry(
+    polyline,
+    googleKm: distance / 1000,
+  );
 
-      debugPrint("✅ Decoded ${points.length} points");
+      debugPrint("✅ Country analysis done");
 
-      if (points.isEmpty) {
-        throw Exception("No points decoded");
-      }
+      // --------------------------------
+      // BUILD RESULT
+      // --------------------------------
+      final buffer = StringBuffer();
 
-      final first = points.first;
-      final last = points.last;
+      buffer.writeln("ROUTE ANALYSIS");
+      buffer.writeln("======================");
+      buffer.writeln("");
 
-      debugPrint(
-        "📍 First: ${first.lat}, ${first.lng}",
+      buffer.writeln("FROM: $from");
+      buffer.writeln("TO:   $to");
+      buffer.writeln("");
+
+      buffer.writeln(
+        "TOTAL: ${(analysis.totalKm).toStringAsFixed(1)} km",
       );
 
-      debugPrint(
-        "🏁 Last: ${last.lat}, ${last.lng}",
-      );
+      buffer.writeln("POINTS: ${analysis.points}");
+      buffer.writeln("");
 
-      // --------------------------------
-      // RESULT TEXT
-      // --------------------------------
-      final text = '''
-ROUTE TEST RESULT
-=================
+      buffer.writeln("PER COUNTRY:");
+      buffer.writeln("");
 
-FROM: $from
-TO:   $to
+      analysis.perCountry.forEach((c, km) {
+        buffer.writeln(
+          "• $c: ${km.toStringAsFixed(1)} km",
+        );
+      });
 
-DISTANCE:
-$distance m
-${(distance / 1000).toStringAsFixed(1)} km
-
-POLYLINE:
-Length: ${polyline.length} chars
-
-POINTS:
-${points.length}
-
-FIRST POINT:
-${first.lat}, ${first.lng}
-
-LAST POINT:
-${last.lat}, ${last.lng}
-
-RAW POLYLINE (first 500 chars):
-${polyline.substring(0, polyline.length > 500 ? 500 : polyline.length)}
-...
-''';
+      buffer.writeln("");
+      buffer.writeln("RAW DISTANCE: $distance m");
 
       setState(() {
-        _result = text;
+        _result = buffer.toString();
       });
     } catch (e, st) {
       // --------------------------------
@@ -138,7 +122,9 @@ ERROR
 
 $e
 
-STACKTRACE:
+STACKTRACE
+----------
+
 $st
 ''';
       });
