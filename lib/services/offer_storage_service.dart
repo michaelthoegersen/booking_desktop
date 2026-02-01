@@ -95,12 +95,12 @@ class OfferStorageService {
 
   // 1. Hent offers
   final offersRes = await sb
-      .from('offers')
-      .select(
-        'id, production, company, created_at, updated_at, created_by, updated_by',
-      )
-      .order('updated_at', ascending: false)
-      .limit(limit);
+    .from('offers')
+    .select(
+      'id, production, company, created_at, updated_at, created_by, updated_by, payload, offer_json',
+    )
+    .order('updated_at', ascending: false)
+    .limit(limit);
 
   final offers = (offersRes as List).cast<Map<String, dynamic>>();
 

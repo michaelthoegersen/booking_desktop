@@ -72,7 +72,7 @@ class _NewOfferPageState extends State<NewOfferPage> {
   if (r.dDriveDays > 0) {
     b.writeln("");
     b.writeln(
-      "Dead drive: ${r.dDriveDays} × ${_nok(s.dDriveDayPrice)}"
+      "D.Drive: ${r.dDriveDays} × ${_nok(s.dDriveDayPrice)}"
       " = ${_nok(r.dDriveCost)}",
     );
   }

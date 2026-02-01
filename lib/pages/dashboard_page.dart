@@ -5,6 +5,7 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import '../services/offer_storage_service.dart';
 import '../widgets/bus_map_widget.dart';
+import 'dart:convert';
 
 class DashboardPage extends StatefulWidget {
   const DashboardPage({super.key});
@@ -441,6 +442,50 @@ Color _statusColor(String? status) {
       return Colors.grey.shade400;
   }
 }
+
+String _buildRoundsTooltip(Map<String, dynamic> row) {
+
+  dynamic raw = row['payload'] ?? row['offer_json'];
+
+  if (raw == null) return "No rounds";
+
+  final Map<String, dynamic> data =
+      raw is String ? jsonDecode(raw) : raw;
+
+  final rounds = data['rounds'] as List<dynamic>? ?? [];
+
+  if (rounds.isEmpty) return "No rounds";
+
+  final buffer = StringBuffer();
+
+  String fmt(DateTime d) =>
+      "${d.day.toString().padLeft(2, '0')}."
+      "${d.month.toString().padLeft(2, '0')}."
+      "${d.year}";
+
+  for (int i = 0; i < rounds.length; i++) {
+
+    final r = rounds[i];
+
+    final entries = r['entries'] as List<dynamic>? ?? [];
+
+    if (entries.isEmpty) continue;
+
+    final dates = entries
+        .map((e) => DateTime.tryParse(e['date'].toString()))
+        .whereType<DateTime>()
+        .toList()
+      ..sort();
+
+    if (dates.isEmpty) continue;
+
+    buffer.writeln(
+      "Round ${i + 1}: ${fmt(dates.first)} → ${fmt(dates.last)}",
+    );
+  }
+
+  return buffer.isEmpty ? "No rounds" : buffer.toString().trim();
+}
   // ------------------------------------------------------------
   // UI
   // ------------------------------------------------------------
@@ -539,136 +584,152 @@ Widget build(BuildContext context) {
 
                 else
 
-                  Expanded(
-                    child: ListView.separated(
+        Expanded(
+  child: ListView.separated(
 
-                      itemCount: recentOffers.length,
+    itemCount: recentOffers.length,
 
-                      separatorBuilder: (_, __) =>
-                          Divider(
-                            color: cs.outlineVariant,
-                          ),
+    separatorBuilder: (_, __) =>
+        Divider(
+          color: cs.outlineVariant,
+        ),
 
-                      itemBuilder: (_, i) {
+    itemBuilder: (_, i) {
 
-                        final row = recentOffers[i];
+      final row = recentOffers[i];
 
-                        final id =
-                            row['id']?.toString() ?? '';
+      final id = row['id']?.toString() ?? '';
 
-                        final production =
-                            row['production']?.toString() ?? '—';
+      final production =
+          row['production']?.toString() ?? '—';
 
-                        final company =
-                            row['company']?.toString() ?? '';
+      final company =
+          row['company']?.toString() ?? '';
 
-                        final createdBy =
-                            row['created_name']?.toString() ?? 'Unknown';
+      final createdBy =
+          row['created_name']?.toString() ?? 'Unknown';
 
-                        final updatedBy =
-                            row['updated_name']?.toString() ?? 'Unknown';
+      final updatedBy =
+          row['updated_name']?.toString() ?? 'Unknown';
 
-                        final updatedDate = _fmtDateTime(
-                          row['updated_at'] ?? row['created_at'],
-                        );
+      final updatedDate = _fmtDateTime(
+        row['updated_at'] ?? row['created_at'],
+      );
 
-                        final status =
-                            row['status']?.toString() ?? '';
+      final status =
+          row['status']?.toString() ?? '';
 
-                        return ListTile(
-                          contentPadding: EdgeInsets.zero,
+      // Tooltip-text
+      final roundsTooltip = _buildRoundsTooltip(row);
+      debugPrint("ROW KEYS: ${row.keys}");
 
-                          // TITLE
-                          title: Row(
-                            crossAxisAlignment:
-                                CrossAxisAlignment.center,
+      return ListTile(
+        contentPadding: EdgeInsets.zero,
 
-                            children: [
+        // TITLE
+        title: Tooltip(
+          message: roundsTooltip,
+          waitDuration: const Duration(milliseconds: 400),
 
-                              Text(
-                                production,
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.w900,
-                                  fontSize: 16,
-                                ),
-                              ),
+          textStyle: const TextStyle(
+            fontSize: 12,
+            height: 1.4,
+            color: Colors.white,
+          ),
 
-                              if (company.isNotEmpty) ...[
-                                const SizedBox(width: 6),
+          decoration: BoxDecoration(
+            color: Colors.black87,
+            borderRadius: BorderRadius.circular(8),
+          ),
 
-                                Text(
-                                  "• $company",
-                                  style: const TextStyle(
-                                    fontSize: 13,
-                                    color: Colors.grey,
-                                  ),
-                                ),
-                              ],
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
 
-                              if (status.isNotEmpty) ...[
-                                const SizedBox(width: 8),
+            children: [
 
-                                Container(
-                                  padding:
-                                      const EdgeInsets.symmetric(
-                                    horizontal: 6,
-                                    vertical: 2,
-                                  ),
+              Text(
+                production,
+                style: const TextStyle(
+                  fontWeight: FontWeight.w900,
+                  fontSize: 16,
+                ),
+              ),
 
-                                  decoration: BoxDecoration(
-                                    color: _statusColor(status),
-                                    borderRadius:
-                                        BorderRadius.circular(10),
-                                  ),
+              if (company.isNotEmpty) ...[
+                const SizedBox(width: 6),
 
-                                  child: Text(
-                                    status.toUpperCase(),
-                                    style: const TextStyle(
-                                      color: Colors.white,
-                                      fontSize: 10,
-                                      fontWeight: FontWeight.w700,
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ],
-                          ),
+                Text(
+                  "• $company",
+                  style: const TextStyle(
+                    fontSize: 13,
+                    color: Colors.grey,
+                  ),
+                ),
+              ],
 
-                          // SUBTITLE
-                          subtitle: Text(
-                            "Created: $createdBy • Updated: $updatedBy\n"
-                            "Last update: $updatedDate",
+              if (status.isNotEmpty) ...[
+                const SizedBox(width: 8),
 
-                            style: const TextStyle(
-                              fontSize: 11,
-                              color: Colors.black54,
-                            ),
-                          ),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 6,
+                    vertical: 2,
+                  ),
 
-                          // DELETE
-                          trailing: IconButton(
-                            icon: Icon(
-                              Icons.delete_outline,
-                              color: cs.error,
-                            ),
+                  decoration: BoxDecoration(
+                    color: _statusColor(status),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
 
-                            tooltip: 'Delete draft',
-
-                            onPressed: id.isEmpty
-                                ? null
-                                : () => _confirmDeleteDraft(
-                                      id,
-                                      production,
-                                    ),
-                          ),
-
-                          onTap: id.isEmpty
-                              ? null
-                              : () => context.go("/new/$id"),
-                        );
-                      },
+                  child: Text(
+                    status.toUpperCase(),
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 10,
+                      fontWeight: FontWeight.w700,
                     ),
                   ),
+                ),
+              ],
+            ],
+          ),
+        ),
+
+        // SUBTITLE
+        subtitle: Text(
+          "Created: $createdBy • Updated: $updatedBy\n"
+          "Last update: $updatedDate",
+
+          style: const TextStyle(
+            fontSize: 11,
+            color: Colors.black54,
+          ),
+        ),
+
+        // DELETE
+        trailing: IconButton(
+          icon: Icon(
+            Icons.delete_outline,
+            color: cs.error,
+          ),
+
+          tooltip: 'Delete draft',
+
+          onPressed: id.isEmpty
+              ? null
+              : () => _confirmDeleteDraft(
+                    id,
+                    production,
+                  ),
+        ),
+
+        onTap: id.isEmpty
+            ? null
+            : () => context.go("/new/$id"),
+      );
+    },
+  ),
+),
               ],
             ),
           ),
