@@ -7,7 +7,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:intl/intl.dart';
 import '../services/calendar_sync_service.dart';
 import '../supabase_clients.dart';
-
+import '../models/app_settings.dart';
 import '../models/offer_draft.dart';
 import 'package:booking_desktop/services/trip_calculator.dart';
 import '../services/offer_pdf_service.dart';
@@ -34,6 +34,75 @@ class NewOfferPage extends StatefulWidget {
 }
 
 class _NewOfferPageState extends State<NewOfferPage> {
+  String _buildRoundBreakdown(
+  int roundIndex,
+  RoundCalcResult r,
+  AppSettings s,
+
+) {
+  final b = StringBuffer();
+
+  b.writeln("ROUND CALCULATION");
+  b.writeln("----------------------------");
+
+  // ================= DAYS =================
+  b.writeln(
+    "${r.billableDays} days × ${_nok(s.dayPrice)}"
+    " = ${_nok(r.dayCost)}",
+  );
+
+  // ================= KM =================
+  b.writeln("");
+  b.writeln("KM:");
+
+  b.writeln("  Included: ${r.includedKm.toStringAsFixed(0)} km");
+  b.writeln("  Driven:   ${(r.includedKm + r.extraKm).toStringAsFixed(0)} km");
+
+  if (r.extraKm > 0) {
+    b.writeln(
+      "  Extra:    ${r.extraKm.toStringAsFixed(0)} × "
+      "${_nok(s.extraKmPrice)}"
+      " = ${_nok(r.extraKmCost)}",
+    );
+  } else {
+    b.writeln("  Extra:    0");
+  }
+
+  // ================= D.DRIVE =================
+  if (r.dDriveDays > 0) {
+    b.writeln("");
+    b.writeln(
+      "Dead drive: ${r.dDriveDays} × ${_nok(s.dDriveDayPrice)}"
+      " = ${_nok(r.dDriveCost)}",
+    );
+  }
+
+  // ================= TRAILER =================
+  final trailerTotal = r.trailerDayCost + r.trailerKmCost;
+
+  if (trailerTotal > 0) {
+    b.writeln("");
+    b.writeln("Trailer: ${_nok(trailerTotal)}");
+  }
+
+  // ================= FERRY =================
+  if (r.ferryCost > 0) {
+    b.writeln("");
+    b.writeln("Ferry: ${_nok(r.ferryCost)}");
+  }
+
+  // ================= TOLL =================
+  if (r.tollCost > 0) {
+    b.writeln("Toll:  ${_nok(r.tollCost)}");
+  }
+
+  // ================= TOTAL =================
+  b.writeln("");
+  b.writeln("----------------------------");
+  b.writeln("TOTAL: ${_nok(r.totalCost)}");
+
+  return b.toString();
+}
 
   // ================= PDF CALC CACHE =================
 final Map<int, RoundCalcResult> _roundCalcCache = {};
@@ -480,6 +549,8 @@ Future<void> _changeBusManually() async {
   final fromCtrl = TextEditingController(text: from ?? '');
   final toCtrl = TextEditingController(text: to ?? '');
   final kmCtrl = TextEditingController();
+  final tollCtrl = TextEditingController();
+  final extraCtrl = TextEditingController(); // ✅ NY // ✅ NY
 
   await showDialog(
     context: context,
@@ -489,39 +560,57 @@ Future<void> _changeBusManually() async {
         title: const Text("Add missing route"),
 
         content: SizedBox(
-          width: 420,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
+  width: 420,
+  child: Column(
+    mainAxisSize: MainAxisSize.min,
+    children: [
 
-              TextField(
-                controller: fromCtrl,
-                decoration: const InputDecoration(
-                  labelText: "From",
-                ),
-              ),
-
-              const SizedBox(height: 10),
-
-              TextField(
-                controller: toCtrl,
-                decoration: const InputDecoration(
-                  labelText: "To",
-                ),
-              ),
-
-              const SizedBox(height: 10),
-
-              TextField(
-                controller: kmCtrl,
-                keyboardType: TextInputType.number,
-                decoration: const InputDecoration(
-                  labelText: "KM",
-                ),
-              ),
-            ],
-          ),
+      TextField(
+        controller: fromCtrl,
+        decoration: const InputDecoration(
+          labelText: "From",
         ),
+      ),
+
+      const SizedBox(height: 10),
+
+      TextField(
+        controller: toCtrl,
+        decoration: const InputDecoration(
+          labelText: "To",
+        ),
+      ),
+
+      const SizedBox(height: 10),
+
+      TextField(
+        controller: kmCtrl,
+        keyboardType: TextInputType.number,
+        decoration: const InputDecoration(
+          labelText: "KM",
+        ),
+      ),
+
+      const SizedBox(height: 10),
+
+      // ✅ NY: TOLL
+      TextField(
+        controller: tollCtrl,
+        keyboardType: TextInputType.number,
+        decoration: const InputDecoration(
+          labelText: "Toll (Nightliner)",
+        ),
+      ),
+      // ✅ NY: EXTRA
+TextField(
+  controller: extraCtrl,
+  decoration: const InputDecoration(
+    labelText: "Extra (ex: Ferry)",
+  ),
+),
+    ],
+  ),
+),
 
         actions: [
 
@@ -537,6 +626,9 @@ Future<void> _changeBusManually() async {
               final to = _norm(toCtrl.text);
               final km =
                   double.tryParse(kmCtrl.text.replaceAll(',', '.'));
+              final toll =
+                  double.tryParse(tollCtrl.text.replaceAll(',', '.')) ?? 0.0;
+              final extra = extraCtrl.text.trim();    
 
               if (from.isEmpty || to.isEmpty || km == null) {
                 ScaffoldMessenger.of(context).showSnackBar(
@@ -554,7 +646,9 @@ Future<void> _changeBusManually() async {
                 'from_place': from,
                 'to_place': to,
                 'distance_total_km': km,
-});
+                'toll_nightliner': toll,              
+                'extra': extra,
+              });
 
                 if (!mounted) return;
 
@@ -1440,29 +1534,33 @@ Future<void> _recalcKm() async {
     final country = _countryKmByIndex[i] ?? {};
 
     // ---------------- MERGE WITH TRAVEL ----------------
-    if (pendingTravelIndex != null && km != null) {
+if (pendingTravelIndex != null && km != null) {
 
-      kmByIndex[pendingTravelIndex] = km;
-      ferryByIndex[pendingTravelIndex] = ferry;
-      tollByIndex[pendingTravelIndex] = toll;
-      extraByIndex[pendingTravelIndex] = extra;
-      countryKmByIndex[pendingTravelIndex] = country;
+  // Flytt ALT til travel-leg
+  kmByIndex[pendingTravelIndex] = km;
+  ferryByIndex[pendingTravelIndex] =
+      (ferryByIndex[pendingTravelIndex] ?? 0) + ferry;
 
-      kmByIndex[i] = 0;
-      ferryByIndex[i] = 0;
-      tollByIndex[i] = 0;
-      extraByIndex[i] = '';
-      countryKmByIndex[i] = {};
+  tollByIndex[pendingTravelIndex] =
+      (tollByIndex[pendingTravelIndex] ?? 0) + toll;
 
-      // Kun Travel påvirker D.Drive
-      travelBefore[pendingTravelIndex] = true;
-      travelBefore[i] = true;
+  countryKmByIndex[pendingTravelIndex] = country;
 
-      pendingTravelIndex = null;
-      seenTravel = false;
+  // Null ut original
+  kmByIndex[i] = 0;
+  ferryByIndex[i] = 0;
+  tollByIndex[i] = 0;
+  countryKmByIndex[i] = {};
 
-      continue;
-    }
+  // Flags
+  travelBefore[pendingTravelIndex] = true;
+  travelBefore[i] = true;
+
+  pendingTravelIndex = null;
+  seenTravel = false;
+
+  continue;
+}
 
     // ---------------- NORMAL ----------------
     kmByIndex[i] = km ?? 0;
@@ -1872,34 +1970,44 @@ Future<RoundCalcResult> _calcRound(int ri) async {
     }
 
     // ---------- LOOKUP ----------
-    final km = await _fetchLegData(
-      from: from,
-      to: toRaw,
-      index: i,
-    );
+final km = await _fetchLegData(
+  from: from,
+  to: toRaw,
+  index: i,
+);
 
-    final ferry = _ferryByIndex[i] ?? 0;
-    final toll = _tollByIndex[i] ?? 0;
+// ✅ HENT FRA CACHE (PER ROUTE, IKKE UI STATE)
+final key = _cacheKey(from, toRaw);
 
+final ferry = _ferryCache[key] ?? 0.0;
+final toll  = _tollCache[key] ?? 0.0;
+
+debugPrint("ROUND $ri LEG $i");
+debugPrint("  $from → $toRaw");
+debugPrint("  Ferry=$ferry Toll=$toll");
     // ---------- MERGE TRAVEL ----------
-    if (pendingTravelIndex != null && km != null) {
+if (pendingTravelIndex != null && km != null) {
 
-      kmByIndex[pendingTravelIndex] = km;
-      ferryByIndex[pendingTravelIndex] = ferry;
-      tollByIndex[pendingTravelIndex] = toll;
+  kmByIndex[pendingTravelIndex] = km;
 
-      kmByIndex[i] = 0;
-      ferryByIndex[i] = 0;
-      tollByIndex[i] = 0;
+  ferryByIndex[pendingTravelIndex] =
+      (ferryByIndex[pendingTravelIndex] ?? 0) + ferry;
 
-      travelBefore[pendingTravelIndex] = true;
-      travelBefore[i] = true;
+  tollByIndex[pendingTravelIndex] =
+      (tollByIndex[pendingTravelIndex] ?? 0) + toll;
 
-      pendingTravelIndex = null;
-      seenTravel = false;
+  kmByIndex[i] = 0;
+  ferryByIndex[i] = 0;
+  tollByIndex[i] = 0;
 
-      continue;
-    }
+  travelBefore[pendingTravelIndex] = true;
+  travelBefore[i] = true;
+
+  pendingTravelIndex = null;
+  seenTravel = false;
+
+  continue;
+}
 
     // ---------- NORMAL ----------
     kmByIndex[i] = km ?? 0;
@@ -1930,6 +2038,10 @@ Future<RoundCalcResult> _calcRound(int ri) async {
   final tollTotal =
       tollByIndex.values.fold<double>(0, (a, b) => a + b);
 
+      debugPrint("🖥️ UI RECALC");
+debugPrint("   → Ferry: $ferryTotal");
+debugPrint("   → Toll : $tollTotal");
+
   // ================= RESULT =================
 
   final result = TripCalculator.calculateRound(
@@ -1943,7 +2055,10 @@ Future<RoundCalcResult> _calcRound(int ri) async {
     tollCost: tollTotal,
     hasTravelBefore: travelBefore,
   );
-
+    debugPrint("📊 CALC ROUND");
+debugPrint("   → Ferry: $ferryTotal");
+debugPrint("   → Toll : $tollTotal");
+debugPrint("   → Total: ${result.totalCost}");
   // ✅ CACHE FOR PDF
   _roundCalcCache[ri] = result;
 
@@ -2002,7 +2117,7 @@ Future<RoundCalcResult> _calcRound(int ri) async {
     final cs = Theme.of(context).colorScheme;
     final round = offer.rounds[roundIndex];
 
-    // =====================================================
+// =====================================================
 // CURRENT ROUND CALC (MIDTPANEL)
 // =====================================================
 
@@ -2013,28 +2128,24 @@ final dates = round.entries
 final totalKm =
     _kmByIndex.values.whereType<double>().fold<double>(0, (a, b) => a + b);
 
-final ferryTotal =
-    _ferryByIndex.values.fold<double>(0.0, (a, b) => a + b);
-
-final tollTotal =
-    _tollByIndex.values.fold<double>(0.0, (a, b) => a + b);
-
 final travelFlags = _travelBefore;
 
-final calc = TripCalculator.calculateRound(
-  settings: SettingsStore.current,
-  dates: dates,
-  pickupEveningFirstDay: round.pickupEveningFirstDay,
-  trailer: round.trailer,
-  totalKm: totalKm,
-  legKm: _kmByIndex.values
-      .whereType<double>()
-      .map((e) => e.toDouble())
-      .toList(),
-  ferryCost: ferryTotal,
-  tollCost: tollTotal,
-  hasTravelBefore: travelFlags,
-);
+// ✅ BRUK CACHE FØRST (riktig per runde)
+final calc = _roundCalcCache[roundIndex] ??
+    TripCalculator.calculateRound(
+      settings: SettingsStore.current,
+      dates: dates,
+      pickupEveningFirstDay: round.pickupEveningFirstDay,
+      trailer: round.trailer,
+      totalKm: totalKm,
+      legKm: _kmByIndex.values
+          .whereType<double>()
+          .map((e) => e.toDouble())
+          .toList(),
+      ferryCost: _ferryByIndex.values.fold(0.0, (a, b) => a + b),
+      tollCost: _tollByIndex.values.fold(0.0, (a, b) => a + b),
+      hasTravelBefore: travelFlags,
+    );
 
 // =====================================================
 // ALL ROUNDS TOTAL (RIGHT CARD / VAT / TOTAL)
@@ -2424,85 +2535,97 @@ final String routeText = isSpecial
 
                           // ---------- COST ----------
                           Container(
-                            width: double.infinity,
-                            padding: const EdgeInsets.all(12),
-                            decoration: BoxDecoration(
-                              borderRadius:
-                                  BorderRadius.circular(12),
-                              border: Border.all(
-                                  color: cs.outlineVariant),
-                              color:
-                                  cs.surfaceContainerLowest,
-                            ),
-                            child: Column(
-                              crossAxisAlignment:
-                                  CrossAxisAlignment.start,
-                              children: [
+  width: double.infinity,
+  padding: const EdgeInsets.all(12),
+  decoration: BoxDecoration(
+    borderRadius: BorderRadius.circular(12),
+    border: Border.all(color: cs.outlineVariant),
+    color: cs.surfaceContainerLowest,
+  ),
+  child: Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
 
-                                Wrap(
-                                  spacing: 16,
-                                  runSpacing: 6,
-                                  children: [
-                                    Text(
-                                      "Days: ${_nok(calc.dayCost)}",
-                                      style: const TextStyle(
-                                          fontWeight:
-                                              FontWeight.w900),
-                                    ),
-                                    Text(
-                                      "Extra km: ${_nok(calc.extraKmCost)}",
-                                      style: const TextStyle(
-                                          fontWeight:
-                                              FontWeight.w900),
-                                    ),
-                                    if (calc.dDriveDays > 0)
-                                      Text(
-                                        "D.Drive (${calc.dDriveDays}): ${_nok(calc.dDriveCost)}",
-                                        style: const TextStyle(
-                                            fontWeight:
-                                                FontWeight.w900),
-                                      ),
-                                    if (round.trailer)
-                                      Text(
-                                        "Trailer: ${_nok(calc.trailerDayCost + calc.trailerKmCost)}",
-                                        style: const TextStyle(
-                                            fontWeight:
-                                                FontWeight.w900),
-                                      ),
-                                    if (ferryTotal > 0)
-                                      Text(
-                                        "Ferry: ${_nok(calc.ferryCost)}",
-                                        style: const TextStyle(
-                                            fontWeight:
-                                                FontWeight.w900),
-                                      ),
-                                    if (tollTotal > 0)
-                                      Text(
-                                        "Toll: ${_nok(calc.tollCost)}",
-                                        style: const TextStyle(
-                                            fontWeight:
-                                                FontWeight.w900),
-                                      ),
-                                  ],
-                                ),
+      // ================= COST ROWS =================
+      Wrap(
+        spacing: 16,
+        runSpacing: 6,
+        children: [
 
-                                const SizedBox(height: 10),
+          Text(
+            "Days: ${_nok(calc.dayCost)}",
+            style: const TextStyle(fontWeight: FontWeight.w900),
+          ),
 
-                                Align(
-                                  alignment:
-                                      Alignment.centerRight,
-                                  child: Text(
-                                    "TOTAL: ${_nok(calc.totalCost)}",
-                                    style: const TextStyle(
-                                      fontWeight:
-                                          FontWeight.w900,
-                                      fontSize: 14,
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
+          Text(
+            "Extra km: ${_nok(calc.extraKmCost)}",
+            style: const TextStyle(fontWeight: FontWeight.w900),
+          ),
+
+          if (calc.dDriveDays > 0)
+            Text(
+              "D.Drive (${calc.dDriveDays}): ${_nok(calc.dDriveCost)}",
+              style: const TextStyle(fontWeight: FontWeight.w900),
+            ),
+
+          if (round.trailer)
+            Text(
+              "Trailer: ${_nok(calc.trailerDayCost + calc.trailerKmCost)}",
+              style: const TextStyle(fontWeight: FontWeight.w900),
+            ),
+
+          if (calc.ferryCost > 0)
+            Text(
+              "Ferry: ${_nok(calc.ferryCost)}",
+              style: const TextStyle(fontWeight: FontWeight.w900),
+            ),
+
+          if (calc.tollCost > 0)
+            Text(
+              "Toll: ${_nok(calc.tollCost)}",
+              style: const TextStyle(fontWeight: FontWeight.w900),
+            ),
+        ],
+      ),
+
+      const SizedBox(height: 10),
+
+      // ================= TOTAL + BREAKDOWN =================
+      Tooltip(
+        message: _buildRoundBreakdown(
+          roundIndex,
+          calc,
+          SettingsStore.current,
+        ),
+
+        waitDuration: const Duration(milliseconds: 300),
+
+        textStyle: const TextStyle(
+          fontFamily: 'monospace', // 👈 pen kalkyle-visning
+          fontSize: 12,
+          height: 1.4,
+          color: Colors.white,
+        ),
+
+        decoration: BoxDecoration(
+          color: Colors.black87,
+          borderRadius: BorderRadius.circular(8),
+        ),
+
+        child: Align(
+          alignment: Alignment.centerRight,
+          child: Text(
+            "TOTAL: ${_nok(calc.totalCost)}",
+            style: const TextStyle(
+              fontWeight: FontWeight.w900,
+              fontSize: 14,
+            ),
+          ),
+        ),
+      ),
+    ],
+  ),
+),
                         ],
                       ),
                     ),
@@ -2511,6 +2634,8 @@ final String routeText = isSpecial
               ),
             ),
           ),
+            
+          
 
           const SizedBox(width: 14),
 
@@ -3378,7 +3503,15 @@ Row(
 ),
 const SizedBox(height: 16),
 
-// ================= BUS =================
+const SizedBox(height: 12),
+
+// ================= BUS SETTINGS =================
+_BusSettingsCard(
+  offer: widget.offer,
+  onChanged: () {
+    setState(() {});
+  },
+),
 Row(
   children: [
 
