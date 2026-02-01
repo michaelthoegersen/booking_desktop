@@ -43,7 +43,6 @@ class _TopBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final user = Supabase.instance.client.auth.currentUser;
-
     final email = user?.email ?? "Unknown user";
 
     return Container(
@@ -58,47 +57,73 @@ class _TopBar extends StatelessWidget {
       child: Row(
         children: [
           // ---------------- Title ----------------
-RichText(
-  text: const TextSpan(
-    children: [
+          RichText(
+            text: const TextSpan(
+              children: [
+                // Hovednavn
+                TextSpan(
+                  text: "TourFlow",
+                  style: TextStyle(
+                    fontSize: 22,
+                    fontWeight: FontWeight.w900,
+                    color: Colors.white,
+                  ),
+                ),
 
-      // Hovednavn
-      TextSpan(
-        text: "TourFlow",
-        style: TextStyle(
-          fontSize: 22,
-          fontWeight: FontWeight.w900,
-          color: Colors.white,
-        ),
-      ),
+                // Separator
+                TextSpan(
+                  text: "  —  ",
+                  style: TextStyle(
+                    fontSize: 16,
+                    color: Colors.white70,
+                  ),
+                ),
 
-      // Separator
-      TextSpan(
-        text: "  —  ",
-        style: TextStyle(
-          fontSize: 16,
-          color: Colors.white70,
-        ),
-      ),
-
-      // Undertittel
-      TextSpan(
-        text: "booking system for nightliners",
-        style: TextStyle(
-          fontSize: 14,
-          fontWeight: FontWeight.w500,
-          color: Colors.white70,
-        ),
-      ),
-    ],
-  ),
-),
+                // Undertittel
+                TextSpan(
+                  text: "booking system for nightliners",
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w500,
+                    color: Colors.white70,
+                  ),
+                ),
+              ],
+            ),
+          ),
 
           const SizedBox(width: 12),
 
-         
-
           const Spacer(),
+
+          // ================= GOOGLE TEST BUTTON =================
+          OutlinedButton.icon(
+            icon: const Icon(
+              Icons.public,
+              size: 18,
+              color: Colors.white,
+            ),
+            label: const Text(
+              "Google Test",
+              style: TextStyle(color: Colors.white),
+            ),
+            style: OutlinedButton.styleFrom(
+              side: const BorderSide(color: Colors.white24),
+              backgroundColor: Colors.white10,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(999),
+              ),
+              padding: const EdgeInsets.symmetric(
+                horizontal: 14,
+                vertical: 12,
+              ),
+            ),
+            onPressed: () {
+              context.push('/google-test');
+            },
+          ),
+
+          const SizedBox(width: 12),
 
           // ---------------- USER MENU ----------------
           PopupMenuButton<String>(
@@ -115,8 +140,7 @@ RichText(
             },
 
             itemBuilder: (context) => [
-
-              // 👤 Bruker-info (disabled)
+              // 👤 Bruker-info
               PopupMenuItem(
                 enabled: false,
                 child: Column(
@@ -165,8 +189,8 @@ RichText(
                 borderRadius: BorderRadius.circular(999),
                 border: Border.all(color: Colors.white24),
               ),
-              child: Row(
-                children: const [
+              child: const Row(
+                children: [
                   Icon(Icons.person, color: Colors.white, size: 20),
                   SizedBox(width: 8),
                   Text(

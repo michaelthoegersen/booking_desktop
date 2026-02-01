@@ -7,15 +7,13 @@ import '../pages/edit_offer_page.dart';
 import '../pages/customers_page.dart';
 import '../pages/settings_page.dart';
 import '../pages/routes_admin_page.dart';
+import '../pages/google_test_page.dart';
 
 import '../widgets/app_shell.dart';
 
 final GoRouter appRouter = GoRouter(
-  initialLocation: "/",
+  initialLocation: '/',
 
-  // --------------------------------------------------
-  // ERROR HANDLER
-  // --------------------------------------------------
   errorBuilder: (context, state) {
     return Scaffold(
       body: Center(
@@ -24,13 +22,16 @@ final GoRouter appRouter = GoRouter(
           children: [
             const Text(
               "Page not found",
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+              ),
             ),
             const SizedBox(height: 12),
             Text(state.error?.toString() ?? ""),
             const SizedBox(height: 24),
             FilledButton(
-              onPressed: () => context.go("/"),
+              onPressed: () => context.go('/'),
               child: const Text("Go to dashboard"),
             ),
           ],
@@ -40,64 +41,66 @@ final GoRouter appRouter = GoRouter(
   },
 
   routes: [
-    // 🔴 ROOT ROUTE (VIKTIG)
-    GoRoute(
-      path: "/",
-      builder: (context, state) => const SizedBox.shrink(),
+
+    // ================= SHELL =================
+    ShellRoute(
+      builder: (context, state, child) {
+        return AppShell(child: child);
+      },
+
       routes: [
-        // --------------------------------------------------
-        // SHELL
-        // --------------------------------------------------
-        ShellRoute(
-          builder: (context, state, child) => AppShell(child: child),
-          routes: [
-            // DASHBOARD
-            GoRoute(
-              path: "",
-              builder: (context, state) => const DashboardPage(),
-            ),
 
-            // NEW OFFER
-            GoRoute(
-              path: "new",
-              builder: (context, state) {
-                final id = state.uri.queryParameters['id'];
-                return NewOfferPage(offerId: id);
-              },
-            ),
+        // DASHBOARD
+        GoRoute(
+          path: '/',
+          builder: (context, state) => const DashboardPage(),
+        ),
 
-            GoRoute(
-              path: "new/:id",
-              builder: (context, state) {
-                final id = state.pathParameters['id']!;
-                return NewOfferPage(offerId: id);
-              },
-            ),
+        // NEW
+        GoRoute(
+          path: '/new',
+          builder: (context, state) {
+            final id = state.uri.queryParameters['id'];
+            return NewOfferPage(offerId: id);
+          },
+        ),
 
-            // EDIT OFFER
-            GoRoute(
-              path: "edit",
-              builder: (context, state) => const EditOfferPage(),
-            ),
+        GoRoute(
+          path: '/new/:id',
+          builder: (context, state) {
+            final id = state.pathParameters['id']!;
+            return NewOfferPage(offerId: id);
+          },
+        ),
 
-            // CUSTOMERS
-            GoRoute(
-              path: "customers",
-              builder: (context, state) => const CustomersPage(),
-            ),
+        // EDIT
+        GoRoute(
+          path: '/edit',
+          builder: (context, state) => const EditOfferPage(),
+        ),
 
-            // SETTINGS
-            GoRoute(
-              path: "settings",
-              builder: (context, state) => const SettingsPage(),
-            ),
+        // CUSTOMERS
+        GoRoute(
+          path: '/customers',
+          builder: (context, state) => const CustomersPage(),
+        ),
 
-            // ✅ ROUTES ADMIN — DEN FUNGERER NÅ
-            GoRoute(
-              path: "routes",
-              builder: (context, state) => const RoutesAdminPage(),
-            ),
-          ],
+        // SETTINGS
+        GoRoute(
+          path: '/settings',
+          builder: (context, state) => const SettingsPage(),
+        ),
+
+        // ROUTES
+        GoRoute(
+          path: '/routes',
+          builder: (context, state) => const RoutesAdminPage(),
+        ),
+
+        // ✅ GOOGLE TEST
+        GoRoute(
+          path: '/googletest',
+          builder: (context, state) => const GoogleTestPage(),
         ),
       ],
     ),

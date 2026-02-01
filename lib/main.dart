@@ -14,7 +14,7 @@ import 'pages/customers_page.dart';
 import 'pages/settings_page.dart';
 import 'pages/routes_admin_page.dart';
 import 'pages/calendar_page.dart'; // ✅ NY
-
+import 'pages/google_test_page.dart';
 import 'state/settings_store.dart';
 import 'ui/css_theme.dart';
 
@@ -190,6 +190,11 @@ class BookingApp extends StatelessWidget {
               builder: (context, state) =>
                   const RoutesAdminPage(),
             ),
+            // ---------------- GOOGLE TEST ----------------
+            GoRoute(
+              path: "/google-test",
+              builder: (context, state) => const GoogleTestPage(),
+            ),
           ],
         ),
       ],
@@ -201,5 +206,7 @@ class BookingApp extends StatelessWidget {
       theme: CssTheme.theme(),
       routerConfig: router,
     );
+    
   }
+  
 }
