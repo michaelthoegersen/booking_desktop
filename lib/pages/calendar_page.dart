@@ -34,6 +34,8 @@ final Map<String, String> busTypes = {
   "ESW 337": "14-sleeper",
   "WYN 802": "14-sleeper",
   "RLC 29G": "16-sleeper",
+  "Rental 1 (Hasse)": "16-sleeper",
+  "Rental 2 (Rickard)": "16-sleeper",
 };
 // ============================================================
 // DRAG DATA
@@ -138,6 +140,8 @@ class _CalendarPageState extends State<CalendarPage> {
     "ESW 337",
     "WYN 802",
     "RLC 29G",
+    "Rental 1 (Hasse)",
+    "Rental 2 (Rickard)",
   ];
 
 

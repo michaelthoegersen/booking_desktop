@@ -115,17 +115,21 @@ for (final round in offer.rounds) {
     ..sort((a, b) => a.date.compareTo(b.date));
 
   final calc = TripCalculator.calculateRound(
-    settings: SettingsStore.current,
-    dates: entries.map((e) => e.date).toList(),
-    pickupEveningFirstDay: round.pickupEveningFirstDay,
-    trailer: round.trailer,
-    totalKm: 0,
-    legKm: const [],
-    ferryCost: 0,
-    tollCost: 0,
-    hasTravelBefore:
-        List.generate(entries.length, (i) => _hasTravelBefore(entries, i)),
-  );
+  settings: SettingsStore.current,
+  dates: entries.map((e) => e.date).toList(),
+  pickupEveningFirstDay: round.pickupEveningFirstDay,
+  trailer: round.trailer,
+  totalKm: 0,
+  legKm: const [],
+  ferryCost: 0,
+  tollCost: 0,
+
+  // ✅ NY: ingen toll per leg her
+  tollPerLeg: const [],
+
+  hasTravelBefore:
+      List.generate(entries.length, (i) => _hasTravelBefore(entries, i)),
+);
 
   final vehicle =
       "${offer.busType.label}${round.trailer ? ' + trailer' : ''}";

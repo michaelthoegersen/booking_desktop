@@ -1,5 +1,3 @@
-// lib/services/trip_calculator.dart
-
 import '../models/app_settings.dart';
 
 
@@ -25,25 +23,38 @@ class RoundCalcResult {
   final double ferryCost;
   final double tollCost;
 
-  final double totalCost;
+  // ✅ NY: Toll per leg (samme rekkefølge som entries)
+  final List<double> tollPerLeg;
 
   // 👇 BRUKES I PDF
   final List<double> legKm;
 
+  final double totalCost;
+
   const RoundCalcResult({
     required this.billableDays,
+
     required this.includedKm,
     required this.extraKm,
+
     required this.dayCost,
     required this.extraKmCost,
+
     required this.dDriveDays,
     required this.dDriveCost,
+
     required this.trailerDayCost,
     required this.trailerKmCost,
+
     required this.ferryCost,
     required this.tollCost,
-    required this.totalCost,
+
+    // ✅ NY
+    required this.tollPerLeg,
+
     required this.legKm,
+
+    required this.totalCost,
   });
 }
 
@@ -63,6 +74,10 @@ class TripCalculator {
     required List<double> legKm,
     required double ferryCost,
     required double tollCost,
+
+    // ✅ NY
+    required List<double> tollPerLeg,
+
     required List<bool> hasTravelBefore,
   }) {
 
@@ -81,6 +96,10 @@ class TripCalculator {
     }
 
     if (hasTravelBefore.length != entryCount) {
+      return _emptyResult();
+    }
+
+    if (tollPerLeg.length != entryCount) {
       return _emptyResult();
     }
 
@@ -226,9 +245,12 @@ class TripCalculator {
       ferryCost: ferryCost,
       tollCost: tollCost,
 
-      totalCost: totalCost,
+      // ✅ NY
+      tollPerLeg: List<double>.from(tollPerLeg),
 
       legKm: List<double>.from(legKm),
+
+      totalCost: totalCost,
     );
   }
 
@@ -257,9 +279,12 @@ class TripCalculator {
       ferryCost: 0,
       tollCost: 0,
 
-      totalCost: 0,
+      // ✅ NY
+      tollPerLeg: [],
 
       legKm: [],
+
+      totalCost: 0,
     );
   }
 }

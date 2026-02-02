@@ -8,9 +8,13 @@ class RoutesService {
   // ------------------------------------------------------------
   String _norm(String s) => s.trim();
 
+  bool _hasValidKm(Map row) {
+    final v = row['distance_total_km'];
+    return v != null && v is num && v > 0;
+  }
+
   // ------------------------------------------------------------
-  // ✅ Finn route (IKKE maybeSingle!)
-  // Brukes av kalkulator / new offer
+  // FIND ROUTE (only if valid km)
   // ------------------------------------------------------------
   Future<Map<String, dynamic>?> findRoute({
     required String from,
@@ -22,6 +26,9 @@ class RoutesService {
     if (a.isEmpty || b.isEmpty) return null;
 
     const selectFields = '''
+      id,
+      from_place,
+      to_place,
       distance_total_km,
       ferry_price,
       toll_nightliner,
@@ -37,7 +44,7 @@ class RoutesService {
     ''';
 
     try {
-      // 1️⃣ Eksakt match
+      // EXACT
       final exact = await _client
           .from('routes_all')
           .select(selectFields)
@@ -46,10 +53,12 @@ class RoutesService {
           .limit(1);
 
       if (exact is List && exact.isNotEmpty) {
-        return Map<String, dynamic>.from(exact.first);
+        final row = Map<String, dynamic>.from(exact.first);
+
+        if (_hasValidKm(row)) return row;
       }
 
-      // 2️⃣ Reverse match
+      // REVERSE
       final reverse = await _client
           .from('routes_all')
           .select(selectFields)
@@ -58,19 +67,19 @@ class RoutesService {
           .limit(1);
 
       if (reverse is List && reverse.isNotEmpty) {
-        return Map<String, dynamic>.from(reverse.first);
+        final row = Map<String, dynamic>.from(reverse.first);
+
+        if (_hasValidKm(row)) return row;
       }
 
       return null;
-    } catch (e) {
-      // ⚠️ viktig: ikke la exceptions drepe kalkyle
+    } catch (_) {
       return null;
     }
   }
 
   // ------------------------------------------------------------
-  // ✅ Autocomplete: hent steder fra routes_all
-  // Brukes i NewOfferPage
+  // SEARCH
   // ------------------------------------------------------------
   Future<List<String>> searchPlaces(
     String query, {
@@ -111,19 +120,17 @@ class RoutesService {
       }
 
       final list = places.toList()..sort();
-      return list.length > limit ? list.take(limit).toList() : list;
+
+      return list.length > limit
+          ? list.take(limit).toList()
+          : list;
     } catch (_) {
       return [];
     }
   }
 
-  // ============================================================
-  // 🔧 ADMIN / CRUD
-  // Brukes KUN av RoutesAdminPage
-  // ============================================================
-
   // ------------------------------------------------------------
-  // READ ALL
+  // ADMIN: GET ALL
   // ------------------------------------------------------------
   Future<List<Map<String, dynamic>>> getAllRoutes() async {
     final res = await _client
@@ -135,21 +142,7 @@ class RoutesService {
   }
 
   // ------------------------------------------------------------
-  // READ ONE
-  // ------------------------------------------------------------
-  Future<Map<String, dynamic>?> getRouteById(String id) async {
-    final res = await _client
-        .from('routes_all')
-        .select()
-        .eq('id', id)
-        .maybeSingle();
-
-    if (res == null) return null;
-    return Map<String, dynamic>.from(res);
-  }
-
-  // ------------------------------------------------------------
-  // CREATE
+  // ADMIN: CREATE
   // ------------------------------------------------------------
   Future<void> createRoute({
     required String from,
@@ -171,7 +164,7 @@ class RoutesService {
   }
 
   // ------------------------------------------------------------
-  // UPDATE
+  // ADMIN: UPDATE
   // ------------------------------------------------------------
   Future<void> updateRoute({
     required String id,
@@ -197,9 +190,44 @@ class RoutesService {
   }
 
   // ------------------------------------------------------------
-  // DELETE
+  // ADMIN: DELETE
   // ------------------------------------------------------------
   Future<void> deleteRoute(String id) async {
     await _client.from('routes_all').delete().eq('id', id);
+  }
+
+  // ------------------------------------------------------------
+  // AUTO CACHE
+  // ------------------------------------------------------------
+  Future<Map<String, dynamic>> findOrCreateRoute({
+    required String from,
+    required String to,
+    required double totalKm,
+    required Map<String, double> countryKm,
+  }) async {
+    final existing = await findRoute(from: from, to: to);
+
+    if (existing != null) return existing;
+
+    final insertData = {
+      'from_place': from.trim(),
+      'to_place': to.trim(),
+      'distance_total_km': totalKm,
+
+      'km_dk': countryKm['DK'] ?? 0,
+      'km_de': countryKm['DE'] ?? 0,
+      'km_be': countryKm['BE'] ?? 0,
+      'km_pl': countryKm['PL'] ?? 0,
+      'km_au': countryKm['AT'] ?? 0,
+      'km_hr': countryKm['HR'] ?? 0,
+      'km_si': countryKm['SI'] ?? 0,
+      'km_other': countryKm['OTHER'] ?? 0,
+
+      'updated_at': DateTime.now().toIso8601String(),
+    };
+
+    await _client.from('routes_all').insert(insertData);
+
+    return (await findRoute(from: from, to: to))!;
   }
 }

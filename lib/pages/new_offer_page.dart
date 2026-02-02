@@ -17,6 +17,7 @@ import '../services/offer_storage_service.dart';
 import 'package:go_router/go_router.dart';
 import '../widgets/new_company_dialog.dart';
 import '../services/pdf_tour_parser.dart';
+import '../widgets/route_popup_dialog.dart';
 
 // ✅ NY: bruker routes db for autocomplete + route lookup
 import '../services/routes_service.dart';
@@ -91,10 +92,35 @@ class _NewOfferPageState extends State<NewOfferPage> {
     b.writeln("Ferry: ${_nok(r.ferryCost)}");
   }
 
-  // ================= TOLL =================
-  if (r.tollCost > 0) {
-    b.writeln("Toll:  ${_nok(r.tollCost)}");
+// ================= TOLL =================
+// ================= TOLL =================
+if (r.tollCost > 0) {
+  b.writeln("");
+  b.writeln("Toll:");
+
+  final round = offer.rounds[roundIndex];
+
+  for (int i = 0; i < round.entries.length; i++) {
+    final toll = r.tollPerLeg[i];
+
+    if (toll <= 0) continue;
+
+    final date = _fmtDate(round.entries[i].date);
+
+    final from = i == 0
+        ? _norm(round.startLocation)
+        : _norm(round.entries[i - 1].location);
+
+    final to = _norm(round.entries[i].location);
+
+    b.writeln(
+      "  $date  $from → $to: ${_nok(toll)}",
+    );
   }
+
+  b.writeln("  ----------------");
+  b.writeln("  Total: ${_nok(r.tollCost)}");
+}
 
   // ================= TOTAL =================
   b.writeln("");
@@ -148,6 +174,8 @@ final Map<int, RoundCalcResult> _roundCalcCache = {};
               _busTile(ctx, "ESW 337"),
               _busTile(ctx, "WYN 802"),
               _busTile(ctx, "RLC 29G"),
+              _busTile(ctx, "Rental 1 (Hasse)"),
+              _busTile(ctx, "Rental 2 (Rickard)"),
               
             ],
           ),
@@ -932,6 +960,85 @@ Widget _buildVatBox(
     ],
   );
 }
+
+// ------------------------------------------------------------
+// Open route preview for first missing leg
+// ------------------------------------------------------------
+Future<void> _openRoutePreview() async {
+
+  final round = offer.rounds[roundIndex];
+
+  if (round.entries.isEmpty) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text("No routes yet.")),
+    );
+    return;
+  }
+
+  String? from;
+  String? to;
+
+  // ================================
+  // FIND FIRST MISSING LEG
+  // ================================
+  for (int i = 0; i < round.entries.length; i++) {
+
+    final km = _kmByIndex[i];
+
+    final f = i == 0
+        ? _norm(round.startLocation)
+        : _norm(round.entries[i - 1].location);
+
+    final t = _norm(round.entries[i].location);
+
+    if (f == t) continue;
+    if (t.toLowerCase() == 'off') continue;
+    if (t.toLowerCase() == 'travel') continue;
+
+    if (km == null) {
+      from = f;
+      to = t;
+      break;
+    }
+  }
+
+  if (from == null || to == null) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text("No missing routes found ✅"),
+      ),
+    );
+    return;
+  }
+
+  // ================================
+  // COLLECT STOPS (FOR VIA)
+  // ================================
+  final stops = <String>[];
+
+  for (final e in round.entries) {
+    final loc = e.location.trim();
+
+    if (loc.isEmpty) continue;
+
+    final l = loc.toLowerCase();
+
+    if (l == 'off' || l == 'travel') continue;
+
+    stops.add(loc);
+  }
+
+  // ================================
+  // OPEN POPUP
+  // ================================
+  showDialog(
+    context: context,
+    builder: (_) => RoutePopupDialog(
+      start: from!,
+      stops: stops,
+    ),
+  );
+}
   Future<void> _onAddMissingRoutePressed() async {
 
   final round = offer.rounds[roundIndex];
@@ -1354,7 +1461,8 @@ Future<void> _scanPdf() async {
     }
 
     // ---------------- HOVEDDATA ----------------
-    final km = (res['distance_total_km'] as num?)?.toDouble();
+    final kmRaw = (res['distance_total_km'] as num?)?.toDouble();
+    final km = (kmRaw == null || kmRaw <= 0) ? null : kmRaw;
     final ferry = (res['ferry_price'] as num?)?.toDouble() ?? 0.0;
     final toll = (res['toll_nightliner'] as num?)?.toDouble() ?? 0.0;
     final extra = (res['extra'] as String?)?.trim() ?? '';
@@ -1424,10 +1532,16 @@ Future<void> _scanPdf() async {
 // ------------------------------------------------------------
 Future<void> _recalcKm() async {
 
+  // 🔁 Viktig: tøm cache når vi rekalkulerer
+  _distanceCache.clear();
+
   final round = offer.rounds[roundIndex];
   final start = _norm(round.startLocation);
 
+  // ---------------- EMPTY START ----------------
   if (start.isEmpty) {
+    if (!mounted) return;
+
     setState(() {
       _kmByIndex = {};
       _ferryByIndex = {};
@@ -1435,7 +1549,9 @@ Future<void> _recalcKm() async {
       _extraByIndex = {};
       _countryKmByIndex = {};
       _travelBefore = [];
+      _kmError = null;
     });
+
     return;
   }
 
@@ -1446,7 +1562,8 @@ Future<void> _recalcKm() async {
     _kmError = null;
   });
 
-  final Map<int, double> kmByIndex = {};
+  // ---------------- TEMP STORAGE ----------------
+  final Map<int, double?> kmByIndex = {};
   final Map<int, double> ferryByIndex = {};
   final Map<int, double> tollByIndex = {};
   final Map<int, String> extraByIndex = {};
@@ -1461,7 +1578,7 @@ Future<void> _recalcKm() async {
   bool seenTravel = false;
 
   // ===================================================
-  // LOOP
+  // MAIN LOOP
   // ===================================================
   for (int i = 0; i < entries.length; i++) {
 
@@ -1473,7 +1590,7 @@ Future<void> _recalcKm() async {
     final bool isTravel = to == 'travel';
     final bool isOff = to == 'off';
 
-    // ---------------- OFF (NO MERGE, NO FLAGS) ----------------
+    // ---------------- OFF ----------------
     if (isOff) {
 
       kmByIndex[i] = 0;
@@ -1482,7 +1599,6 @@ Future<void> _recalcKm() async {
       extraByIndex[i] = '';
       countryKmByIndex[i] = {};
 
-      // Off påvirker ingenting
       pendingTravelIndex = null;
       seenTravel = false;
       travelBefore[i] = false;
@@ -1490,7 +1606,7 @@ Future<void> _recalcKm() async {
       continue;
     }
 
-    // ---------------- TRAVEL (MERGE SOURCE) ----------------
+    // ---------------- TRAVEL ----------------
     if (isTravel) {
 
       kmByIndex[i] = 0;
@@ -1527,44 +1643,45 @@ Future<void> _recalcKm() async {
       index: i,
     );
 
-    if (km == null) missing = true;
+    if (km == null) {
+      missing = true;
+    }
 
     final ferry = _ferryByIndex[i] ?? 0;
-    final toll = _tollByIndex[i] ?? 0;
+    final toll  = _tollByIndex[i] ?? 0;
     final extra = _extraByIndex[i] ?? '';
     final country = _countryKmByIndex[i] ?? {};
 
-    // ---------------- MERGE WITH TRAVEL ----------------
-if (pendingTravelIndex != null && km != null) {
+    // ---------------- MERGE TRAVEL ----------------
+    if (pendingTravelIndex != null && km != null && km > 0) {
 
-  // Flytt ALT til travel-leg
-  kmByIndex[pendingTravelIndex] = km;
-  ferryByIndex[pendingTravelIndex] =
-      (ferryByIndex[pendingTravelIndex] ?? 0) + ferry;
+      kmByIndex[pendingTravelIndex] = km;
 
-  tollByIndex[pendingTravelIndex] =
-      (tollByIndex[pendingTravelIndex] ?? 0) + toll;
+      ferryByIndex[pendingTravelIndex] =
+          (ferryByIndex[pendingTravelIndex] ?? 0) + ferry;
 
-  countryKmByIndex[pendingTravelIndex] = country;
+      tollByIndex[pendingTravelIndex] =
+          (tollByIndex[pendingTravelIndex] ?? 0) + toll;
 
-  // Null ut original
-  kmByIndex[i] = 0;
-  ferryByIndex[i] = 0;
-  tollByIndex[i] = 0;
-  countryKmByIndex[i] = {};
+      countryKmByIndex[pendingTravelIndex] = country;
 
-  // Flags
-  travelBefore[pendingTravelIndex] = true;
-  travelBefore[i] = true;
+      // Null ut original
+      kmByIndex[i] = 0;
+      ferryByIndex[i] = 0;
+      tollByIndex[i] = 0;
+      countryKmByIndex[i] = {};
 
-  pendingTravelIndex = null;
-  seenTravel = false;
+      travelBefore[pendingTravelIndex] = true;
+      travelBefore[i] = true;
 
-  continue;
-}
+      pendingTravelIndex = null;
+      seenTravel = false;
+
+      continue;
+    }
 
     // ---------------- NORMAL ----------------
-    kmByIndex[i] = km ?? 0;
+    kmByIndex[i] = km;
     ferryByIndex[i] = ferry;
     tollByIndex[i] = toll;
     extraByIndex[i] = extra;
@@ -1579,7 +1696,7 @@ if (pendingTravelIndex != null && km != null) {
   }
 
   // ===================================================
-  // APPLY
+  // APPLY TO MODEL
   // ===================================================
   for (int i = 0; i < entries.length; i++) {
     entries[i] = entries[i].copyWith(
@@ -1590,6 +1707,9 @@ if (pendingTravelIndex != null && km != null) {
 
   if (!mounted) return;
 
+  // ===================================================
+  // APPLY TO STATE
+  // ===================================================
   setState(() {
     _kmByIndex = kmByIndex;
     _ferryByIndex = ferryByIndex;
@@ -1600,11 +1720,11 @@ if (pendingTravelIndex != null && km != null) {
 
     _loadingKm = false;
 
-    if (missing) {
-      _kmError =
-          "Missing routes in routes_all. Check place names / direction.";
-    }
+    _kmError = missing
+        ? "Missing routes in routes_all. Check place names / direction."
+        : null;
   });
+
   await _recalcAllRounds();
 }
 
@@ -1887,16 +2007,20 @@ Future<RoundCalcResult> _calcRound(int ri) async {
   if (dates.isEmpty) {
 
     final empty = TripCalculator.calculateRound(
-      settings: SettingsStore.current,
-      dates: const [],
-      pickupEveningFirstDay: false,
-      trailer: round.trailer,
-      totalKm: 0,
-      legKm: const [],
-      ferryCost: 0,
-      tollCost: 0,
-      hasTravelBefore: const [],
-    );
+  settings: SettingsStore.current,
+  dates: const [],
+  pickupEveningFirstDay: false,
+  trailer: round.trailer,
+  totalKm: 0,
+  legKm: const [],
+  ferryCost: 0,
+  tollCost: 0,
+
+  // ✅ NY
+  tollPerLeg: const [],
+
+  hasTravelBefore: const [],
+);
 
     _roundCalcCache[ri] = empty;
 
@@ -1987,7 +2111,8 @@ debugPrint("ROUND $ri LEG $i");
 debugPrint("  $from → $toRaw");
 debugPrint("  Ferry=$ferry Toll=$toll");
     // ---------- MERGE TRAVEL ----------
-if (pendingTravelIndex != null && km != null) {
+if (pendingTravelIndex != null && km != null && km > 0) {
+  debugPrint("🔥 MERGE TRIGGERED: km=$km");
 
   kmByIndex[pendingTravelIndex] = km;
 
@@ -2011,16 +2136,17 @@ if (pendingTravelIndex != null && km != null) {
 }
 
     // ---------- NORMAL ----------
-    kmByIndex[i] = km ?? 0;
-    ferryByIndex[i] = ferry;
-    tollByIndex[i] = toll;
+kmByIndex[i] = km ?? 0; // 👈 HER er fiksen
 
-    if (seenTravel) {
-      travelBefore[i] = true;
-      seenTravel = false;
-    } else {
-      travelBefore[i] = false;
-    }
+ferryByIndex[i] = ferry;
+tollByIndex[i] = toll;
+
+if (seenTravel) {
+  travelBefore[i] = true;
+  seenTravel = false;
+} else {
+  travelBefore[i] = false;
+}
   }
 
   // ================= SUM =================
@@ -2046,16 +2172,23 @@ debugPrint("   → Toll : $tollTotal");
   // ================= RESULT =================
 
   final result = TripCalculator.calculateRound(
-    settings: SettingsStore.current,
-    dates: dates,
-    pickupEveningFirstDay: round.pickupEveningFirstDay,
-    trailer: round.trailer,
-    totalKm: totalKm,
-    legKm: legKm,
-    ferryCost: ferryTotal,
-    tollCost: tollTotal,
-    hasTravelBefore: travelBefore,
-  );
+  settings: SettingsStore.current,
+  dates: dates,
+  pickupEveningFirstDay: round.pickupEveningFirstDay,
+  trailer: round.trailer,
+  totalKm: totalKm,
+  legKm: legKm,
+  ferryCost: ferryTotal,
+  tollCost: tollTotal,
+
+  // ✅ NY: per leg toll
+  tollPerLeg: List.generate(
+    entries.length,
+    (i) => tollByIndex[i] ?? 0,
+  ),
+
+  hasTravelBefore: travelBefore,
+);
     debugPrint("📊 CALC ROUND");
 debugPrint("   → Ferry: $ferryTotal");
 debugPrint("   → Toll : $tollTotal");
@@ -2134,19 +2267,25 @@ final travelFlags = _travelBefore;
 // ✅ BRUK CACHE FØRST (riktig per runde)
 final calc = _roundCalcCache[roundIndex] ??
     TripCalculator.calculateRound(
-      settings: SettingsStore.current,
-      dates: dates,
-      pickupEveningFirstDay: round.pickupEveningFirstDay,
-      trailer: round.trailer,
-      totalKm: totalKm,
-      legKm: _kmByIndex.values
-          .whereType<double>()
-          .map((e) => e.toDouble())
-          .toList(),
-      ferryCost: _ferryByIndex.values.fold(0.0, (a, b) => a + b),
-      tollCost: _tollByIndex.values.fold(0.0, (a, b) => a + b),
-      hasTravelBefore: travelFlags,
-    );
+  settings: SettingsStore.current,
+  dates: dates,
+  pickupEveningFirstDay: round.pickupEveningFirstDay,
+  trailer: round.trailer,
+  totalKm: totalKm,
+  legKm: _kmByIndex.values
+      .whereType<double>()
+      .toList(),
+  ferryCost: _ferryByIndex.values.fold(0.0, (a, b) => a + b),
+  tollCost: _tollByIndex.values.fold(0.0, (a, b) => a + b),
+
+  // ✅ NY
+  tollPerLeg: List.generate(
+    round.entries.length,
+    (i) => _tollByIndex[i] ?? 0,
+  ),
+
+  hasTravelBefore: travelFlags,
+);
 
 // =====================================================
 // ALL ROUNDS TOTAL (RIGHT CARD / VAT / TOTAL)
@@ -2414,89 +2553,96 @@ return Padding(
                   const SizedBox(height: 12),
 
                   // ---------- ROUTES ----------
-                  Expanded(
-                    child: Container(
-                      width: double.infinity,
-                      padding:
-                          const EdgeInsets.fromLTRB(12, 8, 12, 8),
-                      decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(14),
-                        border:
-                            Border.all(color: cs.outlineVariant),
-                        color: cs.surface,
-                      ),
-                      child: Column(
-                        children: [
+Expanded(
+  child: Container(
+    width: double.infinity,
+    padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+    decoration: BoxDecoration(
+      borderRadius: BorderRadius.circular(14),
+      border: Border.all(color: cs.outlineVariant),
+      color: cs.surface,
+    ),
+    child: Column(
+      children: [
 
-                          const _RoutesTableHeader(),
+        // ---------- HEADER + MAP BUTTON ----------
+Row(
+  children: [
 
-                          Divider(
-                            height: 14,
-                            color: cs.outlineVariant,
-                          ),
+    const Expanded(
+      child: _RoutesTableHeader(),
+    ),
 
-                          if (round.entries.isEmpty)
-                            const Expanded(
-                              child: Center(
-                                child: Text("No entries yet."),
-                              ),
-                            )
-                          else
-                            Expanded(
-                              child: ListView.separated(
-                                itemCount: round.entries.length,
-                                separatorBuilder: (_, __) =>
-                                    Divider(
-                                  height: 1,
-                                  color: cs.outlineVariant,
-                                ),
-                                itemBuilder: (_, i) {
-                                  final e = round.entries[i];
-                                  final km = _kmByIndex[i];
+    IconButton(
+  tooltip: "Show route map",
+  icon: const Icon(Icons.map),
+  onPressed: _openRoutePreview,
+),
+],
+),
 
-                                  final from = _findPreviousRealLocation(
-  round.entries,
-  i,
-  round.startLocation,
-);
+Divider(
+  height: 14,
+  color: cs.outlineVariant,
+),// ---------- LIST ----------
+        if (round.entries.isEmpty)
+          const Expanded(
+            child: Center(
+              child: Text("No entries yet."),
+            ),
+          )
+        else
+          Expanded(
+            child: ListView.separated(
+              itemCount: round.entries.length,
+              separatorBuilder: (_, __) => Divider(
+                height: 1,
+                color: cs.outlineVariant,
+              ),
+              itemBuilder: (_, i) {
+                final e = round.entries[i];
+                final km = _kmByIndex[i];
 
-final to = _norm(e.location);
-final toLower = to.toLowerCase();
+                final from = _findPreviousRealLocation(
+                  round.entries,
+                  i,
+                  round.startLocation,
+                );
 
-final bool isSpecial =
-    toLower == 'off' || toLower == 'travel';
+                final to = _norm(e.location);
+                final toLower = to.toLowerCase();
 
-final String routeText = isSpecial
-    ? to                    // Bare "Off" / "Travel"
-    : "${_norm(from)} → $to";
+                final bool isSpecial =
+                    toLower == 'off' || toLower == 'travel';
 
-                                  return _RoutesTableRow(
-                                    date: _fmtDate(e.date),
-                                    route: routeText,
-                                    km: km,
-                                    countryKm:
-                                        _countryKmByIndex[i] ?? {},
-                                    onEdit: () => _editEntry(i),
-                                    onDelete: () async {
-                                      setState(() {
-                                        offer.rounds[roundIndex]
-                                            .entries
-                                            .removeAt(i);
-                                      });
+                final String routeText = isSpecial
+                    ? to
+                    : "${_norm(from)} → $to";
 
-                                      await _recalcKm();
-                                    },
-                                  );
-                                },
-                              ),
-                            ),
+                return _RoutesTableRow(
+                  date: _fmtDate(e.date),
+                  route: routeText,
+                  km: km,
+                  countryKm: _countryKmByIndex[i] ?? {},
+                  onEdit: () => _editEntry(i),
+                  onDelete: () async {
+                    setState(() {
+                      offer.rounds[roundIndex]
+                          .entries
+                          .removeAt(i);
+                    });
 
-                          Divider(
-                            height: 14,
-                            color: cs.outlineVariant,
-                          ),
+                    await _recalcKm();
+                  },
+                );
+              },
+            ),
+          ),
 
-                          // ---------- SUMMARY ----------
+        Divider(
+          height: 14,
+          color: cs.outlineVariant,
+        ),// ---------- SUMMARY ----------
                           Wrap(
                             spacing: 14,
                             runSpacing: 6,
