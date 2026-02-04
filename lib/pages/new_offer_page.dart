@@ -374,10 +374,19 @@ Future<void> _recalcAllRounds() async {
       _selectedBus = loaded.bus;
 
       for (int i = 0; i < offer.rounds.length; i++) {
-        offer.rounds[i].entries
-          ..clear()
-          ..addAll(loaded.rounds[i].entries);
-      }
+
+  final src = loaded.rounds[i];
+  final dst = offer.rounds[i];
+
+  // ✅ Kopier ALT
+  dst.startLocation = src.startLocation;
+  dst.trailer = src.trailer;
+  dst.pickupEveningFirstDay = src.pickupEveningFirstDay;
+
+  dst.entries
+    ..clear()
+    ..addAll(src.entries);
+}
 
       _draftId = id;
 
@@ -1064,10 +1073,19 @@ offer.status = _validStatus(offer.status);
   try {
 
     // ----------------------------------------
-    // Sync start location
-    // ----------------------------------------
-    offer.rounds[roundIndex].startLocation =
-        _norm(startLocCtrl.text);
+// ✅ SYNC ALL ROUNDS BEFORE SAVE
+// ----------------------------------------
+for (int i = 0; i < offer.rounds.length; i++) {
+  final r = offer.rounds[i];
+
+  // Aktiv runde → fra input
+  if (i == roundIndex) {
+    r.startLocation = _norm(startLocCtrl.text);
+  }
+
+  // Normalize (safety)
+  r.startLocation = _norm(r.startLocation);
+}
 
     // ----------------------------------------
     // Pick / reuse bus (MODEL FIRST)
