@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../services/google_routes_service.dart';
 import '../services/route_country_analyzer.dart';
@@ -56,6 +57,36 @@ class _RoutePopupDialogState extends State<RoutePopupDialog> {
 
   final List<TextEditingController> _viaCtrls = [];
 
+  // ================= NEW FIELDS =================
+
+  bool _hasFerry = false;
+  bool _hasBridge = false;
+
+  final TextEditingController _ferryNameCtrl =
+      TextEditingController();
+
+  final TextEditingController _tollCtrl =
+      TextEditingController();
+
+  // =================================================
+  // RESOLVE LAST VALID PLACE (SKIP Travel / Off)
+  // =================================================
+  String _resolveValidPlace(List<String> places, int index) {
+    String lastValid = '';
+
+    for (int i = 0; i <= index && i < places.length; i++) {
+      final p = places[i].trim();
+
+      if (p.isNotEmpty &&
+          p.toLowerCase() != 'travel' &&
+          p.toLowerCase() != 'off') {
+        lastValid = p;
+      }
+    }
+
+    return lastValid;
+  }
+
   // =================================================
   // INIT
   // =================================================
@@ -63,19 +94,32 @@ class _RoutePopupDialogState extends State<RoutePopupDialog> {
   void initState() {
     super.initState();
 
-    // Start
-    _fromCtrl = TextEditingController(text: widget.start);
+    // Build full list
+    final allPlaces = [
+      widget.start,
+      ...widget.stops,
+    ];
 
-    // Slutt = siste stopp (ikke første!)
-    if (widget.stops.isNotEmpty) {
-      _toCtrl =
-          TextEditingController(text: widget.stops.last);
-    } else {
-      _toCtrl = TextEditingController();
-    }
+    // Resolve valid FROM / TO
+    final from = _resolveValidPlace(allPlaces, 0);
 
-    // ❗ Ikke fyll via automatisk
+    final to = allPlaces.isNotEmpty
+        ? _resolveValidPlace(
+            allPlaces,
+            allPlaces.length - 1,
+          )
+        : '';
+
+    _fromCtrl = TextEditingController(text: from);
+    _toCtrl = TextEditingController(text: to);
+
     _viaCtrls.clear();
+
+    // Reset extras
+    _hasFerry = false;
+    _hasBridge = false;
+    _ferryNameCtrl.clear();
+    _tollCtrl.clear();
 
     _loadRoute();
   }
@@ -84,6 +128,8 @@ class _RoutePopupDialogState extends State<RoutePopupDialog> {
   void dispose() {
     _fromCtrl.dispose();
     _toCtrl.dispose();
+    _ferryNameCtrl.dispose();
+    _tollCtrl.dispose();
 
     for (final c in _viaCtrls) {
       c.dispose();
@@ -93,7 +139,19 @@ class _RoutePopupDialogState extends State<RoutePopupDialog> {
   }
 
   // =================================================
-  // BUILD ALL PLACES (FOR CACHE CHECK)
+  // BUILD EXTRA FIELD
+  // =================================================
+  String _buildExtra() {
+    final parts = <String>[];
+
+    if (_hasFerry) parts.add("Ferry");
+    if (_hasBridge) parts.add("Bridge");
+
+    return parts.join("/");
+  }
+
+  // =================================================
+  // BUILD ALL PLACES
   // =================================================
   List<String> _buildAllPlaces() {
     final from = _fromCtrl.text.trim();
@@ -101,7 +159,6 @@ class _RoutePopupDialogState extends State<RoutePopupDialog> {
 
     if (from.isEmpty || to.isEmpty) return [];
 
-    // Kun manuelle via
     final vias = _viaCtrls
         .map((c) => c.text.trim())
         .where((e) => e.isNotEmpty)
@@ -126,7 +183,6 @@ class _RoutePopupDialogState extends State<RoutePopupDialog> {
           await _routes.findRoute(from: a, to: b);
 
       if (cached == null) {
-        debugPrint("MISSING: $a → $b");
         return [a, b];
       }
     }
@@ -135,7 +191,7 @@ class _RoutePopupDialogState extends State<RoutePopupDialog> {
   }
 
   // =================================================
-  // LOAD (AUTO CACHE ALL MISSING)
+  // LOAD ROUTE
   // =================================================
   Future<void> _loadRoute() async {
     setState(() {
@@ -153,9 +209,6 @@ class _RoutePopupDialogState extends State<RoutePopupDialog> {
         final from = segment[0];
         final to = segment[1];
 
-        debugPrint("CALCULATING: $from → $to");
-
-        // ---------- GOOGLE ----------
         final res = await _google.getRouteWithVia(
           places: [from, to],
         );
@@ -165,11 +218,9 @@ class _RoutePopupDialogState extends State<RoutePopupDialog> {
 
         final km = meters / 1000;
 
-        // ---------- COUNTRY ----------
         final countryKm =
             await _analyzer.kmPerCountry(polyline);
 
-        // ---------- MAP ----------
         final decoded =
             PolylineDecoder.decode(polyline);
 
@@ -178,10 +229,9 @@ class _RoutePopupDialogState extends State<RoutePopupDialog> {
             .toList();
 
         if (line.isEmpty) {
-          throw Exception("Empty route: $from → $to");
+          throw Exception("Empty route");
         }
 
-        // ---------- SAVE ----------
         await _routes.findOrCreateRoute(
           from: from,
           to: to,
@@ -196,13 +246,9 @@ class _RoutePopupDialogState extends State<RoutePopupDialog> {
         });
       }
 
-      setState(() {
-        _loading = false;
-      });
+      setState(() => _loading = false);
 
-    } catch (e, s) {
-      debugPrint("$e\n$s");
-
+    } catch (e) {
       setState(() {
         _error = e.toString();
         _loading = false;
@@ -213,8 +259,25 @@ class _RoutePopupDialogState extends State<RoutePopupDialog> {
   // =================================================
   // SAVE
   // =================================================
-  void _save() {
+  Future<void> _save() async {
     if (_distanceKm == null) return;
+
+    final extra = _buildExtra();
+    final ferryName = _ferryNameCtrl.text.trim();
+
+    final toll = double.tryParse(
+      _tollCtrl.text.replaceAll(',', '.'),
+    ) ?? 0.0;
+
+    await Supabase.instance.client
+        .from('routes_all')
+        .update({
+          'extra': extra,
+          'ferry_name': ferryName,
+          'toll_nightliner': toll,
+        })
+        .eq('from_place', _fromCtrl.text.trim())
+        .eq('to_place', _toCtrl.text.trim());
 
     Navigator.pop(
       context,
@@ -302,11 +365,15 @@ class _RoutePopupDialogState extends State<RoutePopupDialog> {
     );
   }
 
+  // =================================================
+  // EDITOR
+  // =================================================
   Widget _buildEditor() {
     return Padding(
       padding: const EdgeInsets.all(12),
       child: Column(
         children: [
+
           TextField(
             controller: _fromCtrl,
             decoration:
@@ -317,6 +384,41 @@ class _RoutePopupDialogState extends State<RoutePopupDialog> {
             controller: _toCtrl,
             decoration:
                 const InputDecoration(labelText: "To"),
+          ),
+
+          const SizedBox(height: 12),
+
+          CheckboxListTile(
+            title: const Text("Ferry"),
+            value: _hasFerry,
+            onChanged: (v) {
+              setState(() => _hasFerry = v ?? false);
+            },
+          ),
+
+          CheckboxListTile(
+            title: const Text("Bridge"),
+            value: _hasBridge,
+            onChanged: (v) {
+              setState(() => _hasBridge = v ?? false);
+            },
+          ),
+
+          TextField(
+            controller: _ferryNameCtrl,
+            decoration: const InputDecoration(
+              labelText: "Ferry / Bridge name",
+              prefixIcon: Icon(Icons.directions_boat),
+            ),
+          ),
+
+          TextField(
+            controller: _tollCtrl,
+            keyboardType: TextInputType.number,
+            decoration: const InputDecoration(
+              labelText: "Toll (Nightliner)",
+              prefixIcon: Icon(Icons.toll),
+            ),
           ),
 
           const SizedBox(height: 12),
@@ -365,6 +467,9 @@ class _RoutePopupDialogState extends State<RoutePopupDialog> {
     );
   }
 
+  // =================================================
+  // MAP
+  // =================================================
   Widget _buildMap() {
     if (_routeLine.isEmpty) {
       return const Center(

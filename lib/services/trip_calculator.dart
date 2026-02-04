@@ -1,6 +1,5 @@
 import '../models/app_settings.dart';
 
-
 // =======================================================
 // RESULT MODEL
 // =======================================================
@@ -23,11 +22,17 @@ class RoundCalcResult {
   final double ferryCost;
   final double tollCost;
 
-  // ✅ NY: Toll per leg (samme rekkefølge som entries)
+  // ✅ Toll per leg
   final List<double> tollPerLeg;
 
-  // 👇 BRUKES I PDF
+  // ✅ Km per leg
   final List<double> legKm;
+
+  // ✅ Ferry / Bridge per leg
+  final List<String> extraPerLeg;
+
+  // ✅ Travel-flag per leg
+  final List<bool> hasTravelBefore;
 
   final double totalCost;
 
@@ -49,15 +54,18 @@ class RoundCalcResult {
     required this.ferryCost,
     required this.tollCost,
 
-    // ✅ NY
     required this.tollPerLeg,
 
     required this.legKm,
 
+    required this.extraPerLeg,
+
+    // ✅ NY
+    required this.hasTravelBefore,
+
     required this.totalCost,
   });
 }
-
 
 // =======================================================
 // MAIN CALCULATOR
@@ -75,37 +83,45 @@ class TripCalculator {
     required double ferryCost,
     required double tollCost,
 
-    // ✅ NY
+    // ✅
     required List<double> tollPerLeg,
 
+    // ✅
+    required List<String> extraPerLeg,
+
+    // ✅
     required List<bool> hasTravelBefore,
   }) {
 
     // ----------------------------------------
-    // ENTRY COUNT = ANTALL LEGS
+    // ENTRY COUNT
     // ----------------------------------------
 
     final int entryCount = legKm.length;
 
     // ----------------------------------------
-    // SAFETY
+// SAFETY (FIX FOR TRAVEL / OFF)
+// ----------------------------------------
+
+if (entryCount == 0) {
+  return _emptyResult();
+}
+
+// Klipp alle lister til samme lengde
+final safeLen = [
+  legKm.length,
+  hasTravelBefore.length,
+  tollPerLeg.length,
+  extraPerLeg.length,
+].reduce((a, b) => a < b ? a : b);
+
+final safeLegKm = legKm.take(safeLen).toList();
+final safeTravel = hasTravelBefore.take(safeLen).toList();
+final safeToll = tollPerLeg.take(safeLen).toList();
+final safeExtra = extraPerLeg.take(safeLen).toList();
+
     // ----------------------------------------
-
-    if (entryCount == 0) {
-      return _emptyResult();
-    }
-
-    if (hasTravelBefore.length != entryCount) {
-      return _emptyResult();
-    }
-
-    if (tollPerLeg.length != entryCount) {
-      return _emptyResult();
-    }
-
-
-    // ----------------------------------------
-    // BILLABLE DAYS (UNIQUE DATES)
+    // BILLABLE DAYS
     // ----------------------------------------
 
     final Set<String> uniqueDays = {};
@@ -121,14 +137,12 @@ class TripCalculator {
       billableDays -= 1;
     }
 
-
     // ----------------------------------------
     // INCLUDED KM
     // ----------------------------------------
 
     final double includedKm =
         billableDays * settings.includedKmPerDay;
-
 
     // ----------------------------------------
     // EXTRA KM
@@ -137,7 +151,6 @@ class TripCalculator {
     final double extraKm =
         (totalKm - includedKm).clamp(0.0, double.infinity);
 
-
     // ----------------------------------------
     // DAY COST
     // ----------------------------------------
@@ -145,14 +158,12 @@ class TripCalculator {
     final double dayCost =
         billableDays * settings.dayPrice;
 
-
     // ----------------------------------------
     // EXTRA KM COST
     // ----------------------------------------
 
     final double extraKmCost =
         extraKm * settings.extraKmPrice;
-
 
     // ----------------------------------------
     // D.DRIVE
@@ -168,13 +179,10 @@ class TripCalculator {
       final double km = legKm[i];
       final bool hadTravel = hasTravelBefore[i];
 
-      // ---------- NO DRIVE ----------
       if (km <= 0) continue;
-
-      // ---------- UNDER THRESHOLD ----------
       if (km < threshold) continue;
 
-      // ---------- TRAVEL BEFORE ----------
+      // Travel-regel
       if (hadTravel) {
 
         if (km < hardLimit) continue;
@@ -183,14 +191,12 @@ class TripCalculator {
         continue;
       }
 
-      // ---------- NORMAL ----------
+      // Normal dag
       dDriveDays++;
     }
 
-
     final double dDriveCost =
         dDriveDays * settings.dDriveDayPrice;
-
 
     // ----------------------------------------
     // TRAILER
@@ -208,7 +214,6 @@ class TripCalculator {
           totalKm * settings.trailerKmPrice;
     }
 
-
     // ----------------------------------------
     // TOTAL
     // ----------------------------------------
@@ -221,7 +226,6 @@ class TripCalculator {
         trailerKmCost +
         ferryCost +
         tollCost;
-
 
     // ----------------------------------------
     // RESULT
@@ -245,15 +249,18 @@ class TripCalculator {
       ferryCost: ferryCost,
       tollCost: tollCost,
 
-      // ✅ NY
       tollPerLeg: List<double>.from(tollPerLeg),
 
       legKm: List<double>.from(legKm),
 
+      extraPerLeg: List<String>.from(extraPerLeg),
+
+      // ✅ VIKTIG
+      hasTravelBefore: List<bool>.from(hasTravelBefore),
+
       totalCost: totalCost,
     );
   }
-
 
   // ===================================================
   // EMPTY RESULT
@@ -279,10 +286,13 @@ class TripCalculator {
       ferryCost: 0,
       tollCost: 0,
 
-      // ✅ NY
       tollPerLeg: [],
 
       legKm: [],
+
+      extraPerLeg: [],
+
+      hasTravelBefore: [],
 
       totalCost: 0,
     );

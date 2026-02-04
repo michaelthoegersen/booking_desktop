@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:go_router/go_router.dart';
+import 'dart:async';
 
 // ============================================================
 // HELPERS
@@ -119,6 +120,8 @@ class _CalendarPageState extends State<CalendarPage> {
 
   final supabase = Supabase.instance.client;
 
+  late final StreamSubscription<AuthState> _authSub;
+
   static const double dayWidth = 90;
   static const double busWidth = 140;
 
@@ -144,24 +147,40 @@ class _CalendarPageState extends State<CalendarPage> {
     "Rental 2 (Rickard)",
   ];
 
-
   // ============================================================
   // INIT
   // ============================================================
 
   @override
-void initState() {
-  super.initState();
+  void initState() {
+    super.initState();
 
-  weekStart = startOfWeek(DateTime.now());
-  monthStart = DateTime(DateTime.now().year, DateTime.now().month, 1);
+    weekStart = startOfWeek(DateTime.now());
+    monthStart = DateTime(DateTime.now().year, DateTime.now().month, 1);
 
-  // 👉 Start i måned-visning
-  isMonthView = true;
-  loadMonth();
-}
-  
+    // 👉 Start i måned-visning
+    isMonthView = true;
+    loadMonth();
 
+    // ✅ Lytt på auth-endringer
+    _authSub = supabase.auth.onAuthStateChange.listen((data) {
+
+      final event = data.event;
+
+      if (event == AuthChangeEvent.signedOut) {
+        if (mounted) {
+          context.go('/login');
+        }
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _authSub.cancel();
+    _hScrollCtrl.dispose();
+    super.dispose();
+  }
 
   // ============================================================
   // LOAD
@@ -197,67 +216,68 @@ void initState() {
 
   Future<void> loadRange(DateTime start, DateTime end) async {
 
-  // ✅ Lagre scroll-posisjon før reload
-  final oldOffset = _hScrollCtrl.hasClients
-      ? _hScrollCtrl.offset
-      : 0.0;
+    // ✅ Lagre scroll-posisjon før reload
+    final oldOffset = _hScrollCtrl.hasClients
+        ? _hScrollCtrl.offset
+        : 0.0;
 
-  try {
+    try {
 
-    final res = await supabase
-        .from('samletdata')
-        .select()
-        .gte('dato', fmtDb(start))
-        .lte('dato', fmtDb(end));
+      final res = await supabase
+          .from('samletdata')
+          .select()
+          .gte('dato', fmtDb(start))
+          .lte('dato', fmtDb(end));
 
-    final rows = List<Map<String, dynamic>>.from(res);
+      final rows = List<Map<String, dynamic>>.from(res);
 
-    final map = <String, Map<DateTime, List<Map<String, dynamic>>>>{};
+      final map = <String, Map<DateTime, List<Map<String, dynamic>>>>{};
 
-    for (final r in rows) {
+      for (final r in rows) {
 
-      final bus = r['kilde']?.toString();
-      final dateStr = r['dato'];
+        final bus = r['kilde']?.toString();
+        final dateStr = r['dato'];
 
-      if (bus == null || dateStr == null) continue;
+        if (bus == null || dateStr == null) continue;
 
-      final date = normalize(DateTime.parse(dateStr));
+        final date = normalize(DateTime.parse(dateStr));
 
-      map.putIfAbsent(bus, () => {});
-      map[bus]!.putIfAbsent(date, () => []);
-      map[bus]![date]!.add(r);
-    }
-
-    if (!mounted) return;
-
-    setState(() {
-      data = map;
-    });
-
-    // ✅ Restore scroll etter rebuild
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_hScrollCtrl.hasClients) {
-        _hScrollCtrl.jumpTo(oldOffset);
+        map.putIfAbsent(bus, () => {});
+        map[bus]!.putIfAbsent(date, () => []);
+        map[bus]![date]!.add(r);
       }
-    });
 
-  } catch (e) {
+      if (!mounted) return;
 
-    if (mounted) {
       setState(() {
-        error = e.toString();
+        data = map;
       });
-    }
 
-  } finally {
-
-    if (mounted) {
-      setState(() {
-        loading = false;
+      // ✅ Restore scroll etter rebuild
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (_hScrollCtrl.hasClients) {
+          _hScrollCtrl.jumpTo(oldOffset);
+        }
       });
+
+    } catch (e) {
+
+      if (mounted) {
+        setState(() {
+          error = e.toString();
+        });
+      }
+
+    } finally {
+
+      if (mounted) {
+        setState(() {
+          loading = false;
+        });
+      }
     }
   }
-}
+
     // ============================================================
   // NAVIGATION
   // ============================================================
@@ -303,7 +323,8 @@ void initState() {
     }
 
     setState(() {});
-  }
+  } 
+
 
 
   // ============================================================

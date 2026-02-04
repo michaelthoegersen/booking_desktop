@@ -36,6 +36,9 @@ class OfferDraft {
 
   String company;
   String contact;
+  // ✅ NYE
+  String phone;
+  String email;
   String production;
 
   /// ✅ GLOBAL STATUS
@@ -53,6 +56,8 @@ class OfferDraft {
     this.userId,
     this.company = '',
     this.contact = '',
+    this.phone = '',
+    this.email = '',
     this.production = '',
     this.status = 'Draft',
     this.busCount = 1,
@@ -98,22 +103,28 @@ class OfferDraft {
   // ------------------------------------------------------------
 
   Map<String, dynamic> toJson() {
-    return {
-      'userId': userId,
-      'company': company,
-      'contact': contact,
-      'production': production,
+  return {
+    'userId': userId,
+    'company': company,
+    'contact': contact,
 
-      // ✅ SAFE STATUS
-      'status': _safeStatus(status),
+    // ✅ LEGG TIL DISSE
+    'phone': phone,
+    'email': email,
 
-      'busCount': busCount,
-      'busType': busType.name,
-      'bus': bus,
+    'production': production,
 
-      'rounds': rounds.map((r) => r.toJson()).toList(),
-    };
-  }
+    // ✅ SAFE STATUS
+    'status': _safeStatus(status),
+
+    'busCount': busCount,
+    'busType': busType.name,
+    'bus': bus,
+
+    'rounds': rounds.map((r) => r.toJson()).toList(),
+  };
+}
+
 
   static OfferDraft fromJson(Map<String, dynamic> json) {
     final draft = OfferDraft(
@@ -121,6 +132,9 @@ class OfferDraft {
 
       company: (json['company'] ?? '') as String,
       contact: (json['contact'] ?? '') as String,
+      // ✅
+      phone: (json['phone'] ?? '') as String,
+      email: (json['email'] ?? '') as String,
       production: (json['production'] ?? '') as String,
 
       // ✅ SAFE LOAD
@@ -156,6 +170,38 @@ class OfferDraft {
     }
     return BusType.sleeper12;
   }
+  // ------------------------------------------------------------
+// COPY WITH SELECTED ROUNDS (FOR PDF PAGING)
+// ------------------------------------------------------------
+OfferDraft copyWithRounds(List<int> indexes) {
+  final draft = OfferDraft(
+    userId: this.userId,
+
+    company: this.company,
+    contact: this.contact,
+    phone: this.phone,
+    email: this.email,
+    production: this.production,
+
+    status: this.status,
+
+    busCount: this.busCount,
+    busType: this.busType,
+    bus: this.bus,
+  );
+
+  // Clear default rounds
+  draft.rounds.clear();
+
+  // Add only selected rounds
+  for (final i in indexes) {
+    if (i >= 0 && i < this.rounds.length) {
+      draft.rounds.add(this.rounds[i]);
+    }
+  }
+
+  return draft;
+}
 }
 
 // ============================================================
@@ -223,6 +269,10 @@ class OfferRound {
 
     return r;
   }
+  // ------------------------------------------------------------
+// COPY WITH SELECTED ROUNDS (FOR PDF PAGING)
+// ------------------------------------------------------------
+
 }
 
 // ============================================================

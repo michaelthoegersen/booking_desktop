@@ -100,85 +100,136 @@ static String _busImageForType(BusType type) {
   // ============================================================
 
   static Future<Uint8List> buildPdf({
-    required OfferDraft offer,
-    required Map<int, RoundCalcResult> roundCalcByIndex,
-  }) async {
+  required OfferDraft offer,
+  required Map<int, RoundCalcResult> roundCalcByIndex,
+}) async {
 
-    final doc = pw.Document();
+  // ---------------- FAILSAFE ----------------
+  final doc = pw.Document();
 
-    final regular = pw.Font.ttf(
-      await rootBundle.load('assets/fonts/calibri.ttf'),
-    );
-
-    final bold = pw.Font.ttf(
-      await rootBundle.load('assets/fonts/calibrib.ttf'),
-    );
-
-    final appLogo = pw.MemoryImage(
-      (await rootBundle.load('assets/pdf/logos/LOGOapp.png'))
-          .buffer
-          .asUint8List(),
-    );
-
-    final busLayout = pw.MemoryImage(
-      (await rootBundle.load('assets/pdf/buses/DDBus.png'))
-          .buffer
-          .asUint8List(),
-    );
-
-    final busTypeImage = pw.MemoryImage(
-      (await rootBundle.load(
-        _busImageForType(offer.busType),
-      ))
-          .buffer
-          .asUint8List(),
-    );
-
-
+  // Hvis absolutt ingen data
+  if (offer.rounds.isEmpty) {
     doc.addPage(
-      pw.MultiPage(
-        pageFormat: PdfPageFormat.a4,
-        margin: const pw.EdgeInsets.fromLTRB(0, 0, 0, 40),
-
-        build: (context) => [
-
-          _buildTopBar(appLogo, regular),
-
-          pw.SizedBox(height: 20),
-
-          _buildTopContent(
-            offer,
-            busLayout,
-            busTypeImage,
-            regular,
-          ),
-
-          pw.SizedBox(height: 30),
-
-          _buildOfferTitle(bold),
-
-          pw.SizedBox(height: 15),
-
-          _buildTable(
-            offer,
-            roundCalcByIndex,
-            regular,
-            bold,
-          ),
-
-          pw.SizedBox(height: 30),
-
-          _buildTerms(regular, bold),
-
-          pw.SizedBox(height: 30),
-
-          _buildSignature(regular),
-        ],
+      pw.Page(
+        build: (context) => pw.Center(
+          child: pw.Text("No data"),
+        ),
       ),
     );
 
     return doc.save();
   }
+
+  // ---------------- FONTS ----------------
+  final regular = pw.Font.ttf(
+    await rootBundle.load('assets/fonts/calibri.ttf'),
+  );
+
+  final bold = pw.Font.ttf(
+    await rootBundle.load('assets/fonts/calibrib.ttf'),
+  );
+
+  // ---------------- IMAGES ----------------
+  final appLogo = pw.MemoryImage(
+    (await rootBundle.load('assets/pdf/logos/LOGOapp.png'))
+        .buffer
+        .asUint8List(),
+  );
+
+  final busLayout = pw.MemoryImage(
+    (await rootBundle.load('assets/pdf/buses/DDBus.png'))
+        .buffer
+        .asUint8List(),
+  );
+
+  final busTypeImage = pw.MemoryImage(
+    (await rootBundle.load(
+      _busImageForType(offer.busType),
+    ))
+        .buffer
+        .asUint8List(),
+  );
+
+  // ---------------- SPLIT ROUNDS ----------------
+  const int roundsPerPage = 2;
+
+  final chunks = <List<int>>[];
+
+  for (int i = 0; i < offer.rounds.length; i += roundsPerPage) {
+    chunks.add(
+      List.generate(
+        roundsPerPage,
+        (j) => i + j,
+      ).where((e) => e < offer.rounds.length).toList(),
+    );
+  }
+
+  // ---------------- BUILD PAGES ----------------
+  for (int page = 0; page < chunks.length; page++) {
+    final roundIndexes = chunks[page];
+
+    final partialCalc = <int, RoundCalcResult>{};
+
+    for (final i in roundIndexes) {
+      if (roundCalcByIndex.containsKey(i)) {
+        partialCalc[i] = roundCalcByIndex[i]!;
+      }
+    }
+
+    doc.addPage(
+      pw.MultiPage(
+        pageFormat: PdfPageFormat.a4,
+        margin: const pw.EdgeInsets.fromLTRB(0, 0, 0, 40),
+        maxPages: 1000,
+
+        build: (context) => [
+
+          // ---------- HEADER (FIRST PAGE)
+          if (page == 0) ...[
+            _buildTopBar(appLogo, regular),
+
+            pw.SizedBox(height: 20),
+
+            _buildTopContent(
+              offer,
+              busLayout,
+              busTypeImage,
+              regular,
+            ),
+
+            pw.SizedBox(height: 30),
+
+            _buildOfferTitle(bold),
+
+            pw.SizedBox(height: 15),
+          ],
+
+          // ---------- TABLE
+          ..._buildTable(
+  offer.copyWithRounds(roundIndexes),
+  partialCalc,
+  regular,
+  bold,
+),
+
+          // ---------- FOOTER (LAST PAGE)
+          if (page == chunks.length - 1) ...[
+            pw.SizedBox(height: 30),
+
+            _buildTerms(regular, bold),
+
+            pw.SizedBox(height: 30),
+
+            _buildSignature(regular),
+          ],
+        ],
+      ),
+    );
+  }
+
+  // ---------------- FINAL RETURN ----------------
+  return doc.save();
+}
 
   // ============================================================
   // MAIN
@@ -313,16 +364,16 @@ static pw.Widget _whiteText(String text, pw.Font font) {
               crossAxisAlignment: pw.CrossAxisAlignment.start,
               children: [
                 _rightInfo("Company", offer.company, font),
-                _rightInfo("Name", offer.contact, font),
-                _rightInfo("Phone", "", font),
-                _rightInfo("Email", "", font),
-                _rightInfo("Production", offer.production, font),
+_rightInfo("Name", offer.contact, font),
+_rightInfo("Phone", offer.phone ?? "", font),
+_rightInfo("Email", offer.email ?? "", font),
+_rightInfo("Production", offer.production, font),
                 _rightInfo(
                   "Vehicle",
                   "${offer.busCount} x ${offer.busType.label}",
                   font,
                 ),
-                _rightInfo("Date", _offerDateSpan(offer), font),
+                _rightInfo("Date", _todayDate(), font),
                 _rightInfo("Valid until", _validUntil(), font),
 
                 pw.SizedBox(height: 12),
@@ -355,7 +406,7 @@ static pw.Widget _buildOfferTitle(pw.Font bold) {
     ),
   );
 }
-  static pw.Widget _buildTable(
+  static List<pw.Widget> _buildTable(
   OfferDraft offer,
   Map<int, RoundCalcResult> calc,
   pw.Font regular,
@@ -363,15 +414,35 @@ static pw.Widget _buildOfferTitle(pw.Font bold) {
 ) {
   final widgets = <pw.Widget>[];
 
-  const double boxWidth = 220;
+  // ================= TOTAL ACCUMULATORS =================
+
+  double grandTotal = 0;
+  final Map<String, double> allCountryKm = {};
+
+  // ================= ROUNDS =================
 
   for (int i = 0; i < offer.rounds.length; i++) {
     final round = offer.rounds[i];
     final result = calc[i];
 
-    if (round.entries.isEmpty) continue;
+    if (round.entries.isEmpty || result == null) continue;
 
-    // ---------------- Round title
+    // ➜ Summer total
+    if (result.totalCost != null) {
+      grandTotal += result.totalCost!;
+    }
+
+    // ➜ Summer km per land
+    for (final entry in round.entries) {
+      entry.countryKm.forEach((country, km) {
+        if (km <= 0) return;
+
+        allCountryKm[country] =
+            (allCountryKm[country] ?? 0) + km;
+      });
+    }
+
+    // ---------------- ROUND TITLE
     widgets.add(
       pw.Text(
         "Round ${i + 1}",
@@ -384,7 +455,7 @@ static pw.Widget _buildOfferTitle(pw.Font bold) {
 
     widgets.add(pw.SizedBox(height: 8));
 
-    // ---------------- Headers
+    // ---------------- HEADERS
     final headers = [
       "Date",
       "Location",
@@ -395,30 +466,114 @@ static pw.Widget _buildOfferTitle(pw.Font bold) {
 
     final rows = <List<String>>[];
 
-    // ---------------- Rows
-    for (int r = 0; r < round.entries.length; r++) {
-      final e = round.entries[r];
+    // ---------------- ROWS
+    // ---------------- ROWS (TRAVEL LOOKUP VIA ROUTE)
 
-      final double km =
-          (result != null && r < result.legKm.length)
-              ? result.legKm[r].toDouble()
-              : 0.0;
+// 🔍 DEBUG: sjekk at alle lister matcher
+print("PDF ROWS DEBUG:");
+print(" entries = ${round.entries.length}");
+print(" km      = ${result.legKm.length}");
+print(" toll    = ${result.tollPerLeg.length}");
+print(" extra   = ${result.extraPerLeg.length}");
+print(" travel  = ${result.hasTravelBefore.length}");
 
-      final hasDDrive = km >= 600; // eller din terskel
+// ✅ Finn minste felles lengde (hindrer RangeError)
+final int maxRows = [
+  round.entries.length,
+  result.legKm.length,
+  result.tollPerLeg.length,
+  result.extraPerLeg.length,
+  result.hasTravelBefore.length,
+].reduce((a, b) => a < b ? a : b);
 
-      rows.add([
-        DateFormat("dd.MM.yyyy").format(e.date),
-        e.location,
-        km > 0 ? "${km.round()}" : "",
-        _calcTimeText(km: km, hasDDrive: hasDDrive),
-        _buildExtraText(
-          hasDDrive: hasDDrive,
-          extraField: e.extra,
-        ),
-      ]);
+print(" → Using maxRows = $maxRows");
+
+for (int r = 0; r < maxRows; r++) {
+  final e = round.entries[r];
+
+  final String loc =
+      e.location.trim().toLowerCase();
+
+  final bool isTravel = loc == 'travel';
+  final bool isOff = loc == 'off';
+
+  // ---------------- TRAVEL FLAG ----------------
+  final bool hadTravelBefore =
+      result.hasTravelBefore[r];
+
+  // ---------------- KM ----------------
+  final double km =
+      result.legKm[r].toDouble();
+
+  // ---------------- D.DRIVE ----------------
+  final bool hasDDrive = hadTravelBefore
+      ? km >= 1200 // Travel-merge
+      : km >= 600; // Normal
+
+  // ---------------- EXTRA (FRA CALC) ----------------
+  String extraText =
+      result.extraPerLeg[r];
+
+  // ================= FIND FROM / TO =================
+
+  int? fromIndex;
+  int? toIndex;
+
+  for (int i = r - 1; i >= 0; i--) {
+    if (round.entries[i]
+            .location
+            .trim()
+            .toLowerCase() !=
+        "travel") {
+      fromIndex = i;
+      break;
     }
+  }
 
-    // ---------------- Table
+  for (int i = r + 1;
+      i < round.entries.length;
+      i++) {
+    if (round.entries[i]
+            .location
+            .trim()
+            .toLowerCase() !=
+        "travel") {
+      toIndex = i;
+      break;
+    }
+  }
+
+  // ================= BUILD EXTRA =================
+  // ✅ Alltid bygg fra calc + legg på D.Drive
+
+  if (!isOff) {
+    extraText = _buildExtraText(
+      hasDDrive: hasDDrive,
+      extraField: extraText,
+    );
+  }
+
+  // ================= ROW DEBUG =================
+
+  print(
+    "ROW $r | ${e.location} | km=$km | travel=$hadTravelBefore | ddrive=$hasDDrive | extra=$extraText",
+  );
+
+  // ================= ADD ROW =================
+
+  rows.add([
+    DateFormat("dd.MM.yyyy").format(e.date),
+    e.location,
+    km > 0 ? "${km.round()}" : "",
+    _calcTimeText(
+      km: km,
+      hasDDrive: hasDDrive,
+    ),
+    extraText,
+  ]);
+}
+
+    // ---------------- TABLE
     widgets.add(
       pw.Table.fromTextArray(
         headers: headers,
@@ -453,64 +608,20 @@ static pw.Widget _buildOfferTitle(pw.Font bold) {
       ),
     );
 
-    // ---------------- Subtotal + VAT
-    if (result != null && result.totalCost != null) {
+    // ---------------- SUBTOTAL (PER ROUND)
+    if (result.totalCost != null) {
       widgets.add(pw.SizedBox(height: 6));
 
-      // Subtotal
-      widgets.add(
-  pw.Align(
-    alignment: pw.Alignment.centerRight,
-    child: pw.Text(
-      "Subtotal: ${_formatNok(result.totalCost)}",
-      textAlign: pw.TextAlign.right,
-      style: pw.TextStyle(
-        font: bold,
-        fontSize: 9,
-      ),
-    ),
-  ),
-);
-
-      widgets.add(pw.SizedBox(height: 6));
-
-      // -------- VAT KM (FROM ROUTES, SAME AS NEW OFFER PAGE)
-
-final Map<String, double> countryKm = {};
-
-for (final entry in round.entries) {
-  entry.countryKm.forEach((country, km) {
-    if (km <= 0) return;
-
-    countryKm[country] = (countryKm[country] ?? 0) + km;
-  });
-}
-
-// Base price (SAME AS UI)
-final double basePrice = result.totalCost;
-
-      final vatMap = _calculateForeignVat(
-        basePrice: basePrice,
-        countryKm: countryKm,
-      );
-
-      final double totalExVat = result.totalCost ?? 0;
-
-      final double totalIncVat =
-          totalExVat +
-          vatMap.values.fold(0.0, (a, b) => a + b);
-
-      // VAT Box
       widgets.add(
         pw.Align(
           alignment: pw.Alignment.centerRight,
-          child: _buildVatBox(
-  vatMap,
-  totalExVat,
-  totalIncVat,
-  regular,
-  bold,
-),
+          child: pw.Text(
+            "Subtotal: ${_formatNok(result.totalCost)}",
+            style: pw.TextStyle(
+              font: bold,
+              fontSize: 9,
+            ),
+          ),
         ),
       );
     }
@@ -518,14 +629,72 @@ final double basePrice = result.totalCost;
     widgets.add(pw.SizedBox(height: 25));
   }
 
-  // ---------------- Wrapper
-  return pw.Padding(
-    padding: const pw.EdgeInsets.symmetric(horizontal: 40),
-    child: pw.Column(
-      crossAxisAlignment: pw.CrossAxisAlignment.start,
-      children: widgets,
-    ),
-  );
+  // ================= GRAND TOTAL =================
+
+  if (grandTotal > 0) {
+
+    final vatMap = _calculateForeignVat(
+      basePrice: grandTotal,
+      countryKm: allCountryKm,
+    );
+
+    final totalIncVat =
+        grandTotal +
+        vatMap.values.fold(0.0, (a, b) => a + b);
+
+    widgets.add(pw.SizedBox(height: 10));
+
+    // Divider
+    widgets.add(
+      pw.Divider(thickness: 1),
+    );
+
+    widgets.add(pw.SizedBox(height: 10));
+
+    // TOTAL TITLE
+    widgets.add(
+      pw.Align(
+        alignment: pw.Alignment.centerRight,
+        child: pw.Text(
+          "TOTAL",
+          style: pw.TextStyle(
+            font: bold,
+            fontSize: 12,
+          ),
+        ),
+      ),
+    );
+
+    widgets.add(pw.SizedBox(height: 6));
+
+    // TOTAL BOX (EXCL + VAT + INCL)
+    widgets.add(
+      pw.Align(
+        alignment: pw.Alignment.centerRight,
+        child: _buildVatBox(
+          vatMap,
+          grandTotal,
+          totalIncVat,
+          regular,
+          bold,
+        ),
+      ),
+    );
+
+    widgets.add(pw.SizedBox(height: 20));
+  }
+
+  // ================= WRAPPER =================
+
+  return widgets
+    .map(
+      (w) => pw.Padding(
+        padding:
+            const pw.EdgeInsets.symmetric(horizontal: 40),
+        child: w,
+      ),
+    )
+    .toList();
 }
 
 
@@ -602,7 +771,9 @@ final double basePrice = result.totalCost;
     if (v == null || v == 0) return "";
     return "kr ${NumberFormat('#,###').format(v)}";
   }
-
+static String _todayDate() {
+  return DateFormat("dd.MM.yyyy").format(DateTime.now());
+}
   static String _offerDateSpan(OfferDraft offer) {
     DateTime? first;
     DateTime? last;
@@ -704,7 +875,8 @@ static pw.Widget _buildVatBox(
   pw.Font regular,
   pw.Font bold,
 ) {
-  const double valueWidth = 95;
+  const double labelWidth = 120;
+  const double valueWidth = 90;
 
   pw.Widget row(
     String label,
@@ -721,25 +893,26 @@ static pw.Widget _buildVatBox(
 
     return pw.Row(
       mainAxisSize: pw.MainAxisSize.min,
-      crossAxisAlignment: pw.CrossAxisAlignment.center,
       children: [
-        // LABEL → auto width
-        pw.Text(
-          label,
-          style: style,
-          textAlign: pw.TextAlign.right,
+        // LABEL (fast bredde)
+        pw.SizedBox(
+          width: labelWidth,
+          child: pw.Text(
+            label,
+            style: style,
+            textAlign: pw.TextAlign.right,
+          ),
         ),
 
-        // MINIMALT mellomrom
-        pw.SizedBox(width: -400),
+        pw.SizedBox(width: 6),
 
-        // VALUE → fast høyrejustert
+        // VALUE (fast bredde)
         pw.SizedBox(
           width: valueWidth,
           child: pw.Text(
             value,
-            textAlign: pw.TextAlign.right,
             style: style,
+            textAlign: pw.TextAlign.right,
           ),
         ),
       ],
@@ -748,7 +921,7 @@ static pw.Widget _buildVatBox(
 
   final rows = <pw.Widget>[];
 
-  // ---- TOTAL EXCL
+  // ---- EXCL
   rows.add(
     row(
       "Total excl VAT",
@@ -757,7 +930,7 @@ static pw.Widget _buildVatBox(
     ),
   );
 
-  // ---- VAT lines
+  // ---- VAT
   vatMap.forEach((country, value) {
     final rate =
         ((_vatRates[country] ?? 0) * 100).round();
@@ -773,7 +946,18 @@ static pw.Widget _buildVatBox(
 
   rows.add(pw.SizedBox(height: 4));
 
-  // ---- TOTAL INCL
+  // Divider
+  rows.add(
+    pw.Container(
+      width: labelWidth + valueWidth + 6,
+      height: 0.5,
+      color: PdfColors.grey,
+    ),
+  );
+
+  rows.add(pw.SizedBox(height: 4));
+
+  // ---- INCL
   rows.add(
     row(
       "Total incl VAT",
@@ -782,12 +966,9 @@ static pw.Widget _buildVatBox(
     ),
   );
 
-  return pw.Align(
-    alignment: pw.Alignment.centerRight,
-    child: pw.Column(
-      crossAxisAlignment: pw.CrossAxisAlignment.end,
-      children: rows,
-    ),
+  return pw.Column(
+    crossAxisAlignment: pw.CrossAxisAlignment.end,
+    children: rows,
   );
 }
 

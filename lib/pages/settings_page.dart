@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../state/settings_store.dart';
 
@@ -20,9 +21,14 @@ class _SettingsPageState extends State<SettingsPage> {
   late TextEditingController flightTicketCtrl;
   late TextEditingController dropboxCtrl;
 
+  // =====================================================
+  // INIT
+  // =====================================================
+
   @override
   void initState() {
     super.initState();
+
     final s = SettingsStore.current;
 
     dayPriceCtrl =
@@ -50,13 +56,153 @@ class _SettingsPageState extends State<SettingsPage> {
     dDriveDayCtrl.dispose();
     flightTicketCtrl.dispose();
     dropboxCtrl.dispose();
+
     super.dispose();
   }
+
+  // =====================================================
+  // HELPERS
+  // =====================================================
 
   double _parseDouble(String s, double fallback) {
     final clean = s.replaceAll(" ", "").replaceAll(",", ".");
     return double.tryParse(clean) ?? fallback;
   }
+
+  // =====================================================
+  // ADD USER DIALOG
+  // =====================================================
+
+  Future<void> _openAddUserDialog() async {
+    final emailCtrl = TextEditingController();
+    final nameCtrl = TextEditingController();
+    final roleCtrl = TextEditingController(text: "user");
+
+    await showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text("Add user"),
+
+          content: SizedBox(
+            width: 400,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+
+                TextField(
+                  controller: nameCtrl,
+                  decoration: const InputDecoration(
+                    labelText: "Name",
+                  ),
+                ),
+
+                const SizedBox(height: 10),
+
+                TextField(
+                  controller: emailCtrl,
+                  decoration: const InputDecoration(
+                    labelText: "Email",
+                  ),
+                ),
+
+                const SizedBox(height: 10),
+
+                TextField(
+                  controller: roleCtrl,
+                  decoration: const InputDecoration(
+                    labelText: "Role (admin / user)",
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+          actions: [
+
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text("Cancel"),
+            ),
+
+            FilledButton(
+              onPressed: () async {
+
+                await _createProfileUser(
+                  name: nameCtrl.text.trim(),
+                  email: emailCtrl.text.trim(),
+                  role: roleCtrl.text.trim(),
+                );
+
+                if (!mounted) return;
+
+                Navigator.pop(context);
+
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text("User created")),
+                );
+              },
+              child: const Text("Create"),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  // =====================================================
+  // CALL EDGE FUNCTION
+  // =====================================================
+
+  Future<void> _createProfileUser({
+    required String name,
+    required String email,
+    required String role,
+  }) async {
+
+    if (name.isEmpty || email.isEmpty) {
+      debugPrint("❌ Name or email empty");
+      return;
+    }
+
+    try {
+
+      final supabase = Supabase.instance.client;
+
+      final token =
+          supabase.auth.currentSession?.accessToken;
+
+      if (token == null) {
+        debugPrint("❌ No auth token (not logged in)");
+        return;
+      }
+final session = supabase.auth.currentSession;
+
+debugPrint("SESSION: $session");
+      final res = await supabase.functions.invoke(
+        'create-user',
+        body: {
+          'name': name,
+          'email': email,
+          'role': role.isEmpty ? 'user' : role,
+        },
+        headers: {
+          'Authorization': 'Bearer $token',
+        },
+      );
+
+      debugPrint("✅ Create user result: ${res.data}");
+
+    } catch (e, st) {
+      debugPrint("❌ Create user error:");
+      debugPrint(e.toString());
+      debugPrint(st.toString());
+    }
+  }
+
+  // =====================================================
+  // DROPBOX
+  // =====================================================
 
   Future<void> _chooseDropboxFolder() async {
     final result = await FilePicker.platform.getDirectoryPath(
@@ -72,6 +218,10 @@ class _SettingsPageState extends State<SettingsPage> {
       dropboxCtrl.text = result;
     });
   }
+
+  // =====================================================
+  // SAVE SETTINGS
+  // =====================================================
 
   Future<void> _save() async {
     final current = SettingsStore.current;
@@ -101,6 +251,10 @@ class _SettingsPageState extends State<SettingsPage> {
     setState(() {});
   }
 
+  // =====================================================
+  // FIELD
+  // =====================================================
+
   Widget _field(
     String label,
     TextEditingController ctrl,
@@ -115,6 +269,10 @@ class _SettingsPageState extends State<SettingsPage> {
       ),
     );
   }
+
+  // =====================================================
+  // UI
+  // =====================================================
 
   @override
   Widget build(BuildContext context) {
@@ -132,9 +290,9 @@ class _SettingsPageState extends State<SettingsPage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // -------------------------
-            // TITLE
-            // -------------------------
+
+            // ---------------- TITLE ----------------
+
             Text(
               "Settings",
               style: Theme.of(context)
@@ -145,9 +303,8 @@ class _SettingsPageState extends State<SettingsPage> {
 
             const SizedBox(height: 14),
 
-            // -------------------------
-            // DROPBOX
-            // -------------------------
+            // ---------------- DROPBOX ----------------
+
             Text(
               "Dropbox",
               style: Theme.of(context)
@@ -160,6 +317,7 @@ class _SettingsPageState extends State<SettingsPage> {
 
             Row(
               children: [
+
                 Expanded(
                   child: TextField(
                     controller: dropboxCtrl,
@@ -170,7 +328,9 @@ class _SettingsPageState extends State<SettingsPage> {
                     ),
                   ),
                 ),
+
                 const SizedBox(width: 10),
+
                 FilledButton.icon(
                   onPressed: _chooseDropboxFolder,
                   icon: const Icon(Icons.folder_open),
@@ -183,78 +343,66 @@ class _SettingsPageState extends State<SettingsPage> {
             Divider(color: cs.outlineVariant),
             const SizedBox(height: 18),
 
-            // -------------------------
-            // PRICES
-            // -------------------------
+            // ---------------- PRICES ----------------
+
             Wrap(
               spacing: 12,
               runSpacing: 12,
               children: [
+
                 SizedBox(
-                    width: 240,
-                    child: _field("Day price", dayPriceCtrl, "NOK")),
+                  width: 240,
+                  child: _field("Day price", dayPriceCtrl, "NOK"),
+                ),
+
                 SizedBox(
-                    width: 240,
-                    child:
-                        _field("Extra km price", extraKmCtrl, "NOK/km")),
+                  width: 240,
+                  child: _field("Extra km price", extraKmCtrl, "NOK/km"),
+                ),
+
                 SizedBox(
-                    width: 240,
-                    child: _field(
-                        "Trailer day price", trailerDayCtrl, "NOK/day")),
+                  width: 240,
+                  child: _field("Trailer day price", trailerDayCtrl, "NOK/day"),
+                ),
+
                 SizedBox(
-                    width: 240,
-                    child: _field(
-                        "Trailer km price", trailerKmCtrl, "NOK/km")),
+                  width: 240,
+                  child: _field("Trailer km price", trailerKmCtrl, "NOK/km"),
+                ),
+
                 SizedBox(
-                    width: 240,
-                    child: _field(
-                        "D.Drive day price", dDriveDayCtrl, "NOK/day")),
+                  width: 240,
+                  child: _field("D.Drive day price", dDriveDayCtrl, "NOK/day"),
+                ),
+
                 SizedBox(
-                    width: 240,
-                    child: _field(
-                        "Flight ticket price", flightTicketCtrl, "NOK")),
+                  width: 240,
+                  child: _field("Flight ticket price", flightTicketCtrl, "NOK"),
+                ),
               ],
-            ),
-
-            const SizedBox(height: 24),
-            Divider(color: cs.outlineVariant),
-            const SizedBox(height: 12),
-
-            // -------------------------
-            // ABOUT
-            // -------------------------
-            ListTile(
-              leading: const Icon(Icons.info_outline),
-              title: const Text("About TourFlow"),
-              onTap: () {
-                showAboutDialog(
-                  context: context,
-                  applicationName: "TourFlow",
-                  applicationVersion: "1.0.0",
-                  applicationLegalese:
-                      "© Coach Service Scandinavia",
-                  children: const [
-                    SizedBox(height: 12),
-                    Text(
-                        "TourFlow – Tour & booking management system"),
-                  ],
-                );
-              },
             ),
 
             const Spacer(),
 
-            // -------------------------
-            // SAVE
-            // -------------------------
-            Align(
-              alignment: Alignment.centerRight,
-              child: FilledButton.icon(
-                onPressed: _save,
-                icon: const Icon(Icons.save),
-                label: const Text("Save"),
-              ),
-            )
+            // ---------------- BUTTONS ----------------
+
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+
+                FilledButton.icon(
+                  onPressed: _openAddUserDialog,
+                  icon: const Icon(Icons.person_add),
+                  label: const Text("Add user"),
+                ),
+
+                FilledButton.icon(
+                  onPressed: _save,
+                  icon: const Icon(Icons.save),
+                  label: const Text("Save"),
+                ),
+              ],
+            ),
           ],
         ),
       ),

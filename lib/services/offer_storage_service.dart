@@ -209,12 +209,16 @@ class OfferStorageService {
   return {
     'company': offer.company,
     'contact': offer.contact,
+
+    // ✅ LEGG TIL
+    'phone': offer.phone,
+    'email': offer.email,
+
     'production': offer.production,
 
     'busCount': offer.busCount,
     'busType': offer.busType.name,
 
-    // ✅ BUSS INNI PAYLOAD
     'bus': offer.bus,
 
     'rounds': offer.rounds.map((r) {
@@ -233,7 +237,6 @@ class OfferStorageService {
     }).toList(),
   };
 }
-
   // ============================================================
   // FROM DB
   // ============================================================
@@ -247,9 +250,13 @@ class OfferStorageService {
   final draft = OfferDraft(
   company: (data['company'] ?? '') as String,
   contact: (data['contact'] ?? '') as String,
+
+  // ✅ LEGG TIL
+  phone: (data['phone'] ?? '') as String,
+  email: (data['email'] ?? '') as String,
+
   production: (data['production'] ?? '') as String,
 
-  // ✅ LAST STATUS FRA DB
   status: (row['status'] ?? 'Draft') as String,
 
   busCount: (data['busCount'] ?? 1) as int,

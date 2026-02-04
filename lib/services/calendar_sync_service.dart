@@ -126,7 +126,7 @@ for (final round in offer.rounds) {
 
   // ✅ NY: ingen toll per leg her
   tollPerLeg: const [],
-
+  extraPerLeg: List.filled(entries.length, ''),
   hasTravelBefore:
       List.generate(entries.length, (i) => _hasTravelBefore(entries, i)),
 );

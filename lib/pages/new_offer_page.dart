@@ -18,6 +18,7 @@ import 'package:go_router/go_router.dart';
 import '../widgets/new_company_dialog.dart';
 import '../services/pdf_tour_parser.dart';
 import '../widgets/route_popup_dialog.dart';
+import 'package:flutter/foundation.dart';
 
 // ✅ NY: bruker routes db for autocomplete + route lookup
 import '../services/routes_service.dart';
@@ -35,111 +36,158 @@ class NewOfferPage extends StatefulWidget {
 }
 
 class _NewOfferPageState extends State<NewOfferPage> {
-  String _buildRoundBreakdown(
-  int roundIndex,
-  RoundCalcResult r,
-  AppSettings s,
 
-) {
-  final b = StringBuffer();
+  // ===================================================
+  // STATE FIELDS
+  // ===================================================
 
-  b.writeln("ROUND CALCULATION");
-  b.writeln("----------------------------");
-
-  // ================= DAYS =================
-  b.writeln(
-    "${r.billableDays} days × ${_nok(s.dayPrice)}"
-    " = ${_nok(r.dayCost)}",
-  );
-
-  // ================= KM =================
-  b.writeln("");
-  b.writeln("KM:");
-
-  b.writeln("  Included: ${r.includedKm.toStringAsFixed(0)} km");
-  b.writeln("  Driven:   ${(r.includedKm + r.extraKm).toStringAsFixed(0)} km");
-
-  if (r.extraKm > 0) {
-    b.writeln(
-      "  Extra:    ${r.extraKm.toStringAsFixed(0)} × "
-      "${_nok(s.extraKmPrice)}"
-      " = ${_nok(r.extraKmCost)}",
-    );
-  } else {
-    b.writeln("  Extra:    0");
-  }
-
-  // ================= D.DRIVE =================
-  if (r.dDriveDays > 0) {
-    b.writeln("");
-    b.writeln(
-      "D.Drive: ${r.dDriveDays} × ${_nok(s.dDriveDayPrice)}"
-      " = ${_nok(r.dDriveCost)}",
-    );
-  }
-
-  // ================= TRAILER =================
-  final trailerTotal = r.trailerDayCost + r.trailerKmCost;
-
-  if (trailerTotal > 0) {
-    b.writeln("");
-    b.writeln("Trailer: ${_nok(trailerTotal)}");
-  }
-
-  // ================= FERRY =================
-  if (r.ferryCost > 0) {
-    b.writeln("");
-    b.writeln("Ferry: ${_nok(r.ferryCost)}");
-  }
-
-// ================= TOLL =================
-// ================= TOLL =================
-if (r.tollCost > 0) {
-  b.writeln("");
-  b.writeln("Toll:");
-
-  final round = offer.rounds[roundIndex];
-
-  for (int i = 0; i < round.entries.length; i++) {
-    final toll = r.tollPerLeg[i];
-
-    if (toll <= 0) continue;
-
-    final date = _fmtDate(round.entries[i].date);
-
-    final from = i == 0
-        ? _norm(round.startLocation)
-        : _norm(round.entries[i - 1].location);
-
-    final to = _norm(round.entries[i].location);
-
-    b.writeln(
-      "  $date  $from → $to: ${_nok(toll)}",
-    );
-  }
-
-  b.writeln("  ----------------");
-  b.writeln("  Total: ${_nok(r.tollCost)}");
-}
-
-  // ================= TOTAL =================
-  b.writeln("");
-  b.writeln("----------------------------");
-  b.writeln("TOTAL: ${_nok(r.totalCost)}");
-
-  return b.toString();
-}
-
-  // ================= PDF CALC CACHE =================
-final Map<int, RoundCalcResult> _roundCalcCache = {};
   int roundIndex = 0;
+
   bool _busLoaded = false;
+
   final FocusNode _locationFocus = FocusNode();
 
-  // ✅ MERGE-AWARE travel-flag for D.Drive
-  List<bool> _travelBefore = [];
+  final Map<int, RoundCalcResult> _roundCalcCache = {};
 
-  Future<void> _recalcAllRounds() async {
+  List<bool> _travelBefore = [];
+// ✅ MANGLER DISSE
+  List<String> _locationSuggestions = [];
+  bool _loadingSuggestions = false;
+
+// ---------------------------------------------------
+// KM / ROUTE STATE (MANGLER – MÅ VÆRE MED)
+// ---------------------------------------------------
+
+bool _loadingKm = false;
+String? _kmError;
+
+// Per entry (current round)
+Map<int, double?> _kmByIndex = {};
+Map<int, double> _ferryByIndex = {};
+Map<int, double> _tollByIndex = {};
+Map<int, String> _extraByIndex = {};
+Map<int, Map<String, double>> _countryKmByIndex = {};
+
+// Global caches (per route)
+final Map<String, double?> _distanceCache = {};
+final Map<String, double> _ferryCache = {};
+final Map<String, double> _tollCache = {};
+final Map<String, String> _extraCache = {};
+final Map<String, Map<String, double>> _countryKmCache = {};
+  // ===================================================
+  // ROUND BREAKDOWN
+  // ===================================================
+
+  String _buildRoundBreakdown(
+    int roundIndex,
+    RoundCalcResult r,
+    AppSettings s,
+  ) {
+    final b = StringBuffer();
+
+    b.writeln("ROUND CALCULATION");
+    b.writeln("----------------------------");
+
+    // ================= DAYS =================
+
+    b.writeln(
+      "${r.billableDays} days × ${_nok(s.dayPrice)}"
+      " = ${_nok(r.dayCost)}",
+    );
+
+    // ================= KM =================
+
+    b.writeln("");
+    b.writeln("KM:");
+
+    b.writeln("  Included: ${r.includedKm.toStringAsFixed(0)} km");
+    b.writeln(
+      "  Driven:   ${(r.includedKm + r.extraKm).toStringAsFixed(0)} km",
+    );
+
+    if (r.extraKm > 0) {
+      b.writeln(
+        "  Extra:    ${r.extraKm.toStringAsFixed(0)} × "
+        "${_nok(s.extraKmPrice)}"
+        " = ${_nok(r.extraKmCost)}",
+      );
+    } else {
+      b.writeln("  Extra:    0");
+    }
+
+    // ================= D.DRIVE =================
+
+    if (r.dDriveDays > 0) {
+      b.writeln("");
+      b.writeln(
+        "D.Drive: ${r.dDriveDays} × ${_nok(s.dDriveDayPrice)}"
+        " = ${_nok(r.dDriveCost)}",
+      );
+    }
+
+    // ================= TRAILER =================
+
+    final trailerTotal = r.trailerDayCost + r.trailerKmCost;
+
+    if (trailerTotal > 0) {
+      b.writeln("");
+      b.writeln("Trailer: ${_nok(trailerTotal)}");
+    }
+
+    // ================= FERRY =================
+
+    if (r.ferryCost > 0) {
+      b.writeln("");
+      b.writeln("Ferry: ${_nok(r.ferryCost)}");
+    }
+
+    // ================= TOLL =================
+
+    if (r.tollCost > 0) {
+      b.writeln("");
+      b.writeln("Toll:");
+
+      final round = offer.rounds[roundIndex];
+
+      final int maxLegs = [
+        round.entries.length,
+        r.tollPerLeg.length,
+      ].reduce((a, b) => a < b ? a : b);
+
+      for (int i = 0; i < maxLegs; i++) {
+        final toll = r.tollPerLeg[i];
+
+        if (toll <= 0) continue;
+
+        final date = _fmtDate(round.entries[i].date);
+
+        final from = i == 0
+            ? _norm(round.startLocation)
+            : _norm(round.entries[i - 1].location);
+
+        final to = _norm(round.entries[i].location);
+
+        b.writeln(
+          "  $date  $from → $to: ${_nok(toll)}",
+        );
+      }
+
+      b.writeln("  ----------------");
+      b.writeln("  Total: ${_nok(r.tollCost)}");
+    }
+
+    // ================= TOTAL =================
+
+    b.writeln("");
+    b.writeln("----------------------------");
+    b.writeln("TOTAL: ${_nok(r.totalCost)}");
+
+    return b.toString();
+  }
+// ---------------------------------------------------
+// Recalculate all rounds (for PDF + totals)
+// ---------------------------------------------------
+Future<void> _recalcAllRounds() async {
   final Map<int, RoundCalcResult> newCache = {};
 
   for (int i = 0; i < offer.rounds.length; i++) {
@@ -155,9 +203,11 @@ final Map<int, RoundCalcResult> _roundCalcCache = {};
       ..addAll(newCache);
   });
 }
-  // ------------------------------------------------------------
-  // BUS PICKER (Calendar sync)
-  // ------------------------------------------------------------
+
+  // ===================================================
+  // BUS PICKER
+  // ===================================================
+
   Future<String?> _pickBus() async {
     return showDialog<String>(
       context: context,
@@ -176,7 +226,6 @@ final Map<int, RoundCalcResult> _roundCalcCache = {};
               _busTile(ctx, "RLC 29G"),
               _busTile(ctx, "Rental 1 (Hasse)"),
               _busTile(ctx, "Rental 2 (Rickard)"),
-              
             ],
           ),
           actions: [
@@ -198,14 +247,17 @@ final Map<int, RoundCalcResult> _roundCalcCache = {};
     );
   }
 
-  // ------------------------------------------------------------
+
+  // ===================================================
   // DEFAULT OFFER
-  // ------------------------------------------------------------
+  // ===================================================
+
   final OfferDraft offer = OfferDraft(
     company: '',
     contact: '',
     production: '',
   );
+
 
   final TextEditingController companyCtrl = TextEditingController();
   final TextEditingController contactCtrl = TextEditingController();
@@ -214,54 +266,34 @@ final Map<int, RoundCalcResult> _roundCalcCache = {};
   final TextEditingController startLocCtrl = TextEditingController();
   final TextEditingController locationCtrl = TextEditingController();
 
+
   DateTime? selectedDate;
 
-  // ------------------------------------------------------------
-  // Draft
-  // ------------------------------------------------------------
+
+  // ===================================================
+  // DRAFT
+  // ===================================================
+
   String? _draftId;
+
   bool _loadingDraft = false;
-  // ✅ Remember selected bus
+
   String? _selectedBus;
 
-  // ------------------------------------------------------------
-  // Routes service
-  // ------------------------------------------------------------
-  final RoutesService _routesService = RoutesService();
 
-  List<String> _locationSuggestions = [];
-  bool _loadingSuggestions = false;
+  // ===================================================
+  // SERVICES
+  // ===================================================
+
+  final RoutesService _routesService = RoutesService();
 
   SupabaseClient get sb => Supabase.instance.client;
 
-  // ------------------------------------------------------------
-  // CACHES (GLOBAL PER ROUTE)
-  // ------------------------------------------------------------
-  final Map<String, double?> _distanceCache = {};
-  final Map<String, double> _ferryCache = {};
-  final Map<String, double> _tollCache = {};
-  final Map<String, String> _extraCache = {};
 
-  // ✅ NY: Land-km cache
-  final Map<String, Map<String, double>> _countryKmCache = {};
+  // ===================================================
+  // LIFECYCLE
+  // ===================================================
 
-  // ------------------------------------------------------------
-  // PER ENTRY (CURRENT ROUND)
-  // ------------------------------------------------------------
-  bool _loadingKm = false;
-  String? _kmError;
-
-  Map<int, double?> _kmByIndex = {};
-  Map<int, double> _ferryByIndex = {};
-  Map<int, double> _tollByIndex = {};
-  Map<int, String> _extraByIndex = {};
-
-  // ✅ NY: Land-km per entry
-  Map<int, Map<String, double>> _countryKmByIndex = {};
-
-  // ------------------------------------------------------------
-  // Lifecycle
-  // ------------------------------------------------------------
   @override
   void initState() {
     super.initState();
@@ -283,190 +315,106 @@ final Map<int, RoundCalcResult> _roundCalcCache = {};
     });
   }
 
-  /// ✅ KRITISK: Når vi klikker nytt draft i dashboard mens vi allerede er på /new
-  /// initState kjøres ikke igjen. Derfor må vi reagere på ny widget.offerId her.
+
   @override
-  void didUpdateWidget(covariant NewOfferPage oldWidget) {
-    super.didUpdateWidget(oldWidget);
+  void dispose() {
+    companyCtrl.dispose();
+    contactCtrl.dispose();
+    productionCtrl.dispose();
+    startLocCtrl.dispose();
+    locationCtrl.dispose();
 
-    final newId = widget.offerId?.trim();
-    final oldId = oldWidget.offerId?.trim();
+    _locationFocus.dispose();
 
-    // Hvis vi får ny ID -> last nytt draft
-    if (newId != null && newId.isNotEmpty && newId != oldId) {
-      _loadDraft(newId);
-    }
-
-    // Hvis vi går fra draft -> blank new offer
-    if ((newId == null || newId.isEmpty) &&
-        (oldId != null && oldId.isNotEmpty)) {
-      _resetToBlankOffer();
-    }
+    super.dispose();
   }
+  
+
+  // ===================================================
+  // HELPERS
+  // ===================================================
 
   void _syncRoundControllers() {
-  startLocCtrl.text = offer.rounds[roundIndex].startLocation;
+    startLocCtrl.text =
+        offer.rounds[roundIndex].startLocation;
 
-  // ✅ AUTO-SET NEXT DATE
-  selectedDate = _getNextAvailableDate();
+    selectedDate = _getNextAvailableDate();
 
-  locationCtrl.text = '';
-  _kmError = null;
+    locationCtrl.text = '';
+  }
+  
 
-  _kmByIndex = {};
-  _ferryByIndex = {};
-  _tollByIndex = {};
-  _extraByIndex = {};
-}
 
-  void _resetToBlankOffer() {
-  setState(() {
-    // ✅ Clear global current offer
-    CurrentOfferStore.clear();
+  // ===================================================
+  // DRAFT LOADING
+  // ===================================================
 
-    _draftId = null;
-    _selectedBus = null; // 👈 reset bus
-    roundIndex = 0;
+  Future<void> _loadDraft(String id) async {
 
-    // ---------------- RESET OFFER ----------------
-    offer.company = 'Norsk Turnétransport AS';
-    offer.contact = 'Michael';
-    offer.production = 'Karpe';
+    setState(() {
+      _loadingDraft = true;
+    });
 
-    offer.status = 'Draft'; // ✅ reset status
+    try {
 
-    offer.busCount = 1;
-    offer.busType = BusType.sleeper12;
-    offer.bus = null;
+      final loaded =
+          await OfferStorageService.loadDraft(id);
 
-    // ---------------- RESET ROUNDS ----------------
-    for (final r in offer.rounds) {
-      r.startLocation = '';
-      r.trailer = false;
-      r.pickupEveningFirstDay = false;
-      r.entries.clear();
-    }
+      if (loaded == null) {
+        throw Exception("Draft not found");
+      }
 
-    // ---------------- RESET CONTROLLERS ----------------
-    companyCtrl.text = offer.company;
-    contactCtrl.text = offer.contact;
-    productionCtrl.text = offer.production;
+      CurrentOfferStore.set(loaded);
 
-    _syncRoundControllers();
-  });
+      offer.company = loaded.company;
+      offer.contact = loaded.contact;
+      offer.production = loaded.production;
 
-  // ---------------- RECALC ----------------
-  _recalcKm();
-}
+      offer.bus = loaded.bus;
+      _selectedBus = loaded.bus;
 
-@override
-void dispose() {
-  companyCtrl.dispose();
-  contactCtrl.dispose();
-  productionCtrl.dispose();
-  startLocCtrl.dispose();
-  locationCtrl.dispose();
+      for (int i = 0; i < offer.rounds.length; i++) {
+        offer.rounds[i].entries
+          ..clear()
+          ..addAll(loaded.rounds[i].entries);
+      }
 
-  _locationFocus.dispose(); // ✅ NY
+      _draftId = id;
 
-  super.dispose();
-}
-  // ------------------------------------------------------------
-  // ✅ Load existing draft
-  // ------------------------------------------------------------
-  // ------------------------------------------------------------
-// ✅ Load existing draft (with saved bus)
-// ------------------------------------------------------------
-Future<void> _loadDraft(String id) async {
+      roundIndex = 0;
 
-  setState(() {
-    _loadingDraft = true;
-  });
+      _syncRoundControllers();
 
-  try {
+      if (!mounted) return;
 
-    // ---------------- LOAD DRAFT ----------------
-    final loaded = await OfferStorageService.loadDraft(id);
+      setState(() {});
 
-    CurrentOfferStore.set(loaded);
+      await _recalcKm();
 
-    if (loaded == null) {
-      throw Exception("Draft not found");
-    }
+    } finally {
 
-    // ---------------- COPY BASIC DATA ----------------
-    offer.company = loaded.company;
-    offer.contact = loaded.contact;
-    offer.production = loaded.production;
-
-    offer.busCount = loaded.busCount;
-    offer.busType = loaded.busType;
-
-    // ✅ BUSS: hent fra MODELL
-    offer.bus = loaded.bus;
-    _selectedBus = loaded.bus;
-    offer.status = _mapCalendarStatus(loaded.status); // ✅
-    // ---------------- COPY ROUNDS ----------------
-    for (int i = 0; i < offer.rounds.length; i++) {
-
-      offer.rounds[i].startLocation =
-          loaded.rounds[i].startLocation;
-
-      offer.rounds[i].trailer =
-          loaded.rounds[i].trailer;
-
-      offer.rounds[i].pickupEveningFirstDay =
-          loaded.rounds[i].pickupEveningFirstDay;
-
-      offer.rounds[i].entries
-        ..clear()
-        ..addAll(loaded.rounds[i].entries);
-    }
-
-    // ---------------- UPDATE CONTROLLERS ----------------
-    companyCtrl.text = offer.company;
-    contactCtrl.text = offer.contact;
-    productionCtrl.text = offer.production;
-
-    // ---------------- SET DRAFT ID ----------------
-    _draftId = id;
-
-    // ---------------- RESET UI ----------------
-    roundIndex = 0;
-    _syncRoundControllers();
-
-    if (!mounted) return;
-
-    // ---------------- REFRESH UI ----------------
-    setState(() {});
-
-    // ---------------- RECALC ----------------
-    await _recalcKm();
-
-  } catch (e, st) {
-
-    debugPrint("LOAD ERROR:");
-    debugPrint(e.toString());
-    debugPrint(st.toString());
-
-    if (!mounted) return;
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text("Load draft failed: $e"),
-        backgroundColor: Colors.red,
-      ),
-    );
-
-  } finally {
-
-    if (mounted) {
-      setState(() {
-        _loadingDraft = false;
-      });
+      if (mounted) {
+        setState(() {
+          _loadingDraft = false;
+        });
+      }
     }
   }
-}
+
+
+  DateTime _getNextAvailableDate() {
+    final entries = offer.rounds[roundIndex].entries;
+
+    if (entries.isEmpty) {
+      return DateTime.now();
+    }
+
+    final latest = entries
+        .map((e) => e.date)
+        .reduce((a, b) => a.isAfter(b) ? a : b);
+
+    return latest.add(const Duration(days: 1));
+  }
 // ------------------------------------------------------------
 // ✅ Load bus from samletdata for this draft
 // ------------------------------------------------------------
@@ -489,10 +437,10 @@ Future<void> _loadBusForDraft(String draftId) async {
 
     setState(() {
       if (bus != null && bus.isNotEmpty) {
-        _selectedBus = bus; // ✅ SETT AKTIV BUSS
+        _selectedBus = bus;
       }
 
-      _busLoaded = true; // ✅ ferdig uansett
+      _busLoaded = true;
     });
 
     debugPrint("Loaded bus: $_selectedBus");
@@ -505,10 +453,11 @@ Future<void> _loadBusForDraft(String draftId) async {
     }
   }
 }
-  // ------------------------------------------------------------
-  // ✅ DB autocomplete for location
-  // ------------------------------------------------------------
-  Future<void> _loadPlaceSuggestions(String query) async {
+
+// ------------------------------------------------------------
+// ✅ DB autocomplete for location
+// ------------------------------------------------------------
+Future<void> _loadPlaceSuggestions(String query) async {
     final q = query.trim();
 
     // justerer terskel om du vil, men 2 tegn fungerer fint
@@ -532,6 +481,7 @@ Future<void> _loadBusForDraft(String draftId) async {
       setState(() => _loadingSuggestions = false);
     }
   }
+  
 
   // ------------------------------------------------------------
   // Small helpers
@@ -554,21 +504,6 @@ Future<void> _changeBusManually() async {
       content: Text("Bus changed to $picked"),
     ),
   );
-}
-  DateTime _getNextAvailableDate() {
-  final entries = offer.rounds[roundIndex].entries;
-
-  if (entries.isEmpty) {
-    return DateTime.now();
-  }
-
-  // Finn seneste dato
-  final latest = entries
-      .map((e) => e.date)
-      .reduce((a, b) => a.isAfter(b) ? a : b);
-
-  // Neste dag
-  return latest.add(const Duration(days: 1));
 }
   Future<void> _openMissingRouteDialog({
   String? from,
@@ -1268,7 +1203,10 @@ Future<void> _exportPdf() async {
       final res = await _calcRound(i);
       roundCalc[i] = res;
     }
-
+debugPrint("=== EXPORT DEBUG ===");
+debugPrint("Name: ${offer.contact}");
+debugPrint("Phone: ${offer.phone}");
+debugPrint("Email: ${offer.email}");
     // ===============================
     // Generer PDF
     // ===============================
@@ -1426,7 +1364,7 @@ Future<void> _scanPdf() async {
   final fromN = _norm(from);
   final toN = _norm(to);
   final key = _cacheKey(fromN, toN);
-
+debugPrint("LOOKUP: '$fromN' → '$toN'");
   // ---------------- CACHE HIT ----------------
   if (_distanceCache.containsKey(key)) {
     _ferryByIndex[index] = _ferryCache[key] ?? 0.0;
@@ -1532,9 +1470,6 @@ Future<void> _scanPdf() async {
 // ------------------------------------------------------------
 Future<void> _recalcKm() async {
 
-  // 🔁 Viktig: tøm cache når vi rekalkulerer
-  _distanceCache.clear();
-
   final round = offer.rounds[roundIndex];
   final start = _norm(round.startLocation);
 
@@ -1585,10 +1520,12 @@ Future<void> _recalcKm() async {
     final from = _findPreviousRealLocation(entries, i, start);
 
     final toRaw = _norm(entries[i].location);
-    final to = toRaw.toLowerCase();
+    final to = toRaw;
 
-    final bool isTravel = to == 'travel';
-    final bool isOff = to == 'off';
+    final tLower = to.toLowerCase();
+
+    final bool isTravel = tLower == 'travel';
+    final bool isOff = tLower == 'off';
 
     // ---------------- OFF ----------------
     if (isOff) {
@@ -1607,22 +1544,26 @@ Future<void> _recalcKm() async {
     }
 
     // ---------------- TRAVEL ----------------
-    if (isTravel) {
+if (isTravel) {
 
-      kmByIndex[i] = 0;
-      ferryByIndex[i] = 0;
-      tollByIndex[i] = 0;
-      extraByIndex[i] = '';
-      countryKmByIndex[i] = {};
+  kmByIndex[i] = 0;
+  ferryByIndex[i] = 0;
+  tollByIndex[i] = 0;
+  extraByIndex[i] = '';
+  countryKmByIndex[i] = {};
 
-      pendingTravelIndex = i;
-      seenTravel = true;
+  // ✅ Kun sett hvis vi ikke allerede er i en travel-sekvens
+  if (pendingTravelIndex == null) {
+    pendingTravelIndex = i;   // 👈 første Travel
+  }
 
-      continue;
-    }
+  seenTravel = true;
+
+  continue;
+}
 
     // ---------------- SAME PLACE ----------------
-    if (_norm(from).toLowerCase() == to) {
+    if (_norm(from).toLowerCase() == to.toLowerCase()) {
 
       kmByIndex[i] = 0;
       ferryByIndex[i] = 0;
@@ -1636,49 +1577,54 @@ Future<void> _recalcKm() async {
       continue;
     }
 
-    // ---------------- LOOKUP ----------------
-    final km = await _fetchLegData(
-      from: from,
-      to: toRaw,
-      index: i,
-    );
+    // ---------- LOOKUP ----------
+final km = await _fetchLegData(
+  from: from,
+  to: toRaw,
+  index: i,
+);
+if (km == null) {
+  missing = true;
+}
+final key = _cacheKey(from, toRaw);
 
-    if (km == null) {
-      missing = true;
-    }
+final ferry = _ferryCache[key] ?? 0.0;
+final toll  = _tollCache[key] ?? 0.0;
+final extra = _extraCache[key] ?? ''; // ✅ HER ER FIKSEN
+final country = _countryKmCache[key] ?? {};
 
-    final ferry = _ferryByIndex[i] ?? 0;
-    final toll  = _tollByIndex[i] ?? 0;
-    final extra = _extraByIndex[i] ?? '';
-    final country = _countryKmByIndex[i] ?? {};
 
-    // ---------------- MERGE TRAVEL ----------------
-    if (pendingTravelIndex != null && km != null && km > 0) {
+// ---------- MERGE TRAVEL ----------
+if (pendingTravelIndex != null && km != null && km > 0) {
 
-      kmByIndex[pendingTravelIndex] = km;
+  kmByIndex[pendingTravelIndex] = km;
 
-      ferryByIndex[pendingTravelIndex] =
-          (ferryByIndex[pendingTravelIndex] ?? 0) + ferry;
+  ferryByIndex[pendingTravelIndex] =
+      (ferryByIndex[pendingTravelIndex] ?? 0) + ferry;
 
-      tollByIndex[pendingTravelIndex] =
-          (tollByIndex[pendingTravelIndex] ?? 0) + toll;
+  tollByIndex[pendingTravelIndex] =
+      (tollByIndex[pendingTravelIndex] ?? 0) + toll;
 
-      countryKmByIndex[pendingTravelIndex] = country;
+  // ✅ BRUK DB-EXTRA
+  extraByIndex[pendingTravelIndex] = extra;
 
-      // Null ut original
-      kmByIndex[i] = 0;
-      ferryByIndex[i] = 0;
-      tollByIndex[i] = 0;
-      countryKmByIndex[i] = {};
+  countryKmByIndex[pendingTravelIndex] = country;
 
-      travelBefore[pendingTravelIndex] = true;
-      travelBefore[i] = true;
+  // Null ut original
+  kmByIndex[i] = 0;
+  ferryByIndex[i] = 0;
+  tollByIndex[i] = 0;
+  extraByIndex[i] = '';
+  countryKmByIndex[i] = {};
 
-      pendingTravelIndex = null;
-      seenTravel = false;
+  travelBefore[pendingTravelIndex] = true;
+  travelBefore[i] = true;
 
-      continue;
-    }
+  pendingTravelIndex = null;
+  seenTravel = false;
+
+  continue;
+}
 
     // ---------------- NORMAL ----------------
     kmByIndex[i] = km;
@@ -2018,7 +1964,7 @@ Future<RoundCalcResult> _calcRound(int ri) async {
 
   // ✅ NY
   tollPerLeg: const [],
-
+  extraPerLeg: const [], // 👈 LEGG TIL
   hasTravelBefore: const [],
 );
 
@@ -2030,8 +1976,9 @@ Future<RoundCalcResult> _calcRound(int ri) async {
   final start = _norm(round.startLocation);
 
   final Map<int, double> kmByIndex = {};
-  final Map<int, double> ferryByIndex = {};
-  final Map<int, double> tollByIndex = {};
+final Map<int, double> ferryByIndex = {};
+final Map<int, double> tollByIndex = {};
+final Map<int, String> extraByIndex = {}; // 👈 NY
 
   final List<bool> travelBefore =
       List<bool>.filled(entries.length, false);
@@ -2049,7 +1996,7 @@ Future<RoundCalcResult> _calcRound(int ri) async {
     );
 
     final toRaw = _norm(entries[i].location);
-    final to = toRaw.toLowerCase();
+    final to = toRaw;
 
     final bool isTravel = to == 'travel';
     final bool isOff = to == 'off';
@@ -2069,20 +2016,26 @@ Future<RoundCalcResult> _calcRound(int ri) async {
     }
 
     // ---------- TRAVEL ----------
-    if (isTravel) {
+    // ---------------- TRAVEL ----------------
+if (isTravel) {
 
-      kmByIndex[i] = 0;
-      ferryByIndex[i] = 0;
-      tollByIndex[i] = 0;
+  kmByIndex[i] = 0;
+  ferryByIndex[i] = 0;
+  tollByIndex[i] = 0;
+  extraByIndex[i] = '';
 
-      pendingTravelIndex = i;
-      seenTravel = true;
+  // ✅ Kun første travel i bolk
+  if (pendingTravelIndex == null) {
+    pendingTravelIndex = i;
+  }
 
-      continue;
-    }
+  seenTravel = true;
+
+  continue;
+}
 
     // ---------- SAME PLACE ----------
-    if (_norm(from).toLowerCase() == to) {
+    if (_norm(from).toLowerCase() == to.toLowerCase()) {
 
       kmByIndex[i] = 0;
       ferryByIndex[i] = 0;
@@ -2106,13 +2059,13 @@ final key = _cacheKey(from, toRaw);
 
 final ferry = _ferryCache[key] ?? 0.0;
 final toll  = _tollCache[key] ?? 0.0;
+final extra = _extraCache[key] ?? '';
 
 debugPrint("ROUND $ri LEG $i");
 debugPrint("  $from → $toRaw");
 debugPrint("  Ferry=$ferry Toll=$toll");
     // ---------- MERGE TRAVEL ----------
 if (pendingTravelIndex != null && km != null && km > 0) {
-  debugPrint("🔥 MERGE TRIGGERED: km=$km");
 
   kmByIndex[pendingTravelIndex] = km;
 
@@ -2121,6 +2074,8 @@ if (pendingTravelIndex != null && km != null && km > 0) {
 
   tollByIndex[pendingTravelIndex] =
       (tollByIndex[pendingTravelIndex] ?? 0) + toll;
+
+  extraByIndex[pendingTravelIndex] = extra; // 👈 NY
 
   kmByIndex[i] = 0;
   ferryByIndex[i] = 0;
@@ -2133,6 +2088,7 @@ if (pendingTravelIndex != null && km != null && km > 0) {
   seenTravel = false;
 
   continue;
+
 }
 
     // ---------- NORMAL ----------
@@ -2140,7 +2096,7 @@ kmByIndex[i] = km ?? 0; // 👈 HER er fiksen
 
 ferryByIndex[i] = ferry;
 tollByIndex[i] = toll;
-
+extraByIndex[i] = extra; // 👈 NY
 if (seenTravel) {
   travelBefore[i] = true;
   seenTravel = false;
@@ -2169,6 +2125,30 @@ if (seenTravel) {
 debugPrint("   → Ferry: $ferryTotal");
 debugPrint("   → Toll : $tollTotal");
 
+// ================= NORMALIZE LISTS =================
+
+// Sørg for at alle lister har riktig lengde
+final int len = entries.length;
+
+final safeLegKm = List.generate(
+  len,
+  (i) => kmByIndex[i] ?? 0.0,
+);
+
+final safeToll = List.generate(
+  len,
+  (i) => tollByIndex[i] ?? 0.0,
+);
+
+final safeExtra = List.generate(
+  len,
+  (i) => extraByIndex[i] ?? '',
+);
+
+final safeTravel = List.generate(
+  len,
+  (i) => travelBefore[i],
+);
   // ================= RESULT =================
 
   final result = TripCalculator.calculateRound(
@@ -2177,17 +2157,13 @@ debugPrint("   → Toll : $tollTotal");
   pickupEveningFirstDay: round.pickupEveningFirstDay,
   trailer: round.trailer,
   totalKm: totalKm,
-  legKm: legKm,
+  legKm: safeLegKm,
   ferryCost: ferryTotal,
   tollCost: tollTotal,
 
-  // ✅ NY: per leg toll
-  tollPerLeg: List.generate(
-    entries.length,
-    (i) => tollByIndex[i] ?? 0,
-  ),
-
-  hasTravelBefore: travelBefore,
+  tollPerLeg: safeToll,
+  extraPerLeg: safeExtra,
+  hasTravelBefore: safeTravel,
 );
     debugPrint("📊 CALC ROUND");
 debugPrint("   → Ferry: $ferryTotal");
@@ -2280,11 +2256,16 @@ final calc = _roundCalcCache[roundIndex] ??
 
   // ✅ NY
   tollPerLeg: List.generate(
-    round.entries.length,
-    (i) => _tollByIndex[i] ?? 0,
-  ),
+  round.entries.length,
+  (i) => _tollByIndex[i] ?? 0,
+),
 
-  hasTravelBefore: travelFlags,
+extraPerLeg: List.generate(
+  round.entries.length,
+  (i) => _extraByIndex[i] ?? '',
+), // 👈 NY
+
+hasTravelBefore: travelFlags,
 );
 
 // =====================================================
@@ -3405,9 +3386,13 @@ Future<void> _openProductionDialog() async {
     await _reloadContacts();
 
     setState(() {
-      _contactId = result['id'].toString();
-      widget.offer.contact = result['name'] ?? '';
-    });
+  _contactId = result['id'].toString();
+
+  widget.offer.contact = result['name'] ?? '';
+  widget.offer.phone   = result['phone'] ?? '';
+  widget.offer.email   = result['email'] ?? '';
+});
+CurrentOfferStore.set(widget.offer);
   }
 }
 
@@ -3485,113 +3470,118 @@ Future<void> _openProductionDialog() async {
     const SizedBox(width: 6),
 
     // ================= ADD COMPANY =================
+IconButton(
+  tooltip: "Add new company",
+  icon: const Icon(Icons.add_business),
+  onPressed: _createCompanyInline,
+),
+],
+),
+
+if (_companySuggestions.isNotEmpty)
+  Container(
+    margin: const EdgeInsets.only(top: 4),
+    constraints: const BoxConstraints(maxHeight: 180),
+    decoration: BoxDecoration(
+      color: cs.surface,
+      border: Border.all(color: cs.outlineVariant),
+      borderRadius: BorderRadius.circular(12),
+    ),
+    child: ListView.builder(
+      shrinkWrap: true,
+      itemCount: _companySuggestions.length,
+      itemBuilder: (_, i) {
+        final c = _companySuggestions[i];
+
+        return ListTile(
+          dense: true,
+          title: Text(c['name'] ?? ''),
+          onTap: () => _select(c),
+        );
+      },
+    ),
+  ),
+
+const SizedBox(height: 16),
+
+// ================= CONTACT =================
+const Text(
+  "Contact",
+  style: TextStyle(fontWeight: FontWeight.w900),
+),
+
+const SizedBox(height: 6),
+
+Row(
+  children: [
+
+    Expanded(
+      child: DropdownButtonFormField<String>(
+        value: _contactId,
+        isExpanded: true,
+
+        items: _contacts.map((c) {
+          return DropdownMenuItem(
+            value: c['id'].toString(),
+            child: Text(
+              c['name'] ?? '',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          );
+        }).toList(),
+
+        onChanged: (v) {
+
+  final ct = _contacts.firstWhere(
+    (e) => e['id'].toString() == v,
+  );
+
+  debugPrint("CONTACT DATA: $ct"); // 👈 LEGG TIL DENNE
+
+  setState(() {
+  _contactId = v;
+
+  widget.offer.contact = ct['name'] ?? '';
+  widget.offer.phone   = ct['phone'] ?? '';
+  widget.offer.email   = ct['email'] ?? '';
+});
+
+// 🔥 SYNC GLOBAL STATE
+CurrentOfferStore.set(widget.offer);
+        },
+      ),
+    ),
+
+    const SizedBox(width: 4),
+
+    // ➕ ADD CONTACT
     IconButton(
-      tooltip: "Add new company",
-      icon: const Icon(Icons.add_business),
-      onPressed: _createCompanyInline,
+      icon: const Icon(Icons.add),
+      tooltip: "Add contact",
+      onPressed: _currentCompanyId == null
+          ? null
+          : () => _openContactDialog(),
+    ),
+
+    // ✏️ EDIT CONTACT
+    IconButton(
+      icon: const Icon(Icons.edit),
+      tooltip: "Edit contact",
+      onPressed: _contactId == null
+          ? null
+          : () {
+              final c = _contacts.firstWhere(
+                (e) => e['id'].toString() == _contactId,
+              );
+
+              _openContactDialog(existing: c);
+            },
     ),
   ],
 ),
 
-                      if (_companySuggestions.isNotEmpty)
-                        Container(
-                          margin: const EdgeInsets.only(top: 4),
-                          constraints:
-                              const BoxConstraints(maxHeight: 180),
-                          decoration: BoxDecoration(
-                            color: cs.surface,
-                            border: Border.all(color: cs.outlineVariant),
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          child: ListView.builder(
-                            shrinkWrap: true,
-                            itemCount: _companySuggestions.length,
-                            itemBuilder: (_, i) {
-                              final c = _companySuggestions[i];
-
-                              return ListTile(
-                                dense: true,
-                                title: Text(c['name'] ?? ''),
-                                onTap: () => _select(c),
-                              );
-                            },
-                          ),
-                        ),
-
-                      const SizedBox(height: 16),
-
-                      // ================= CONTACT =================
-                      const Text(
-                        "Contact",
-                        style: TextStyle(fontWeight: FontWeight.w900),
-                      ),
-
-                      const SizedBox(height: 6),
-
-                      Row(
-                        children: [
-
-                          Expanded(
-                            child: DropdownButtonFormField<String>(
-                              value: _contactId,
-                              isExpanded: true,
-
-                              items: _contacts.map((c) {
-                                return DropdownMenuItem(
-                                  value: c['id'].toString(),
-                                  child: Text(
-                                    c['name'] ?? '',
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                );
-                              }).toList(),
-
-                              onChanged: (v) {
-                                if (v == null) return;
-
-                                final ct = _contacts.firstWhere(
-                                  (e) => e['id'].toString() == v,
-                                );
-
-                                setState(() {
-                                  _contactId = v;
-                                  widget.offer.contact =
-                                      ct['name'] ?? '';
-                                });
-                              },
-                            ),
-                          ),
-
-                          const SizedBox(width: 4),
-
-                          IconButton(
-                            icon: const Icon(Icons.add),
-                            tooltip: "Add contact",
-                            onPressed: _currentCompanyId == null
-                                ? null
-                                : () => _openContactDialog(),
-                          ),
-
-                          IconButton(
-                            icon: const Icon(Icons.edit),
-                            tooltip: "Edit contact",
-                            onPressed: _contactId == null
-                                ? null
-                                : () {
-                                    final c = _contacts.firstWhere(
-                                      (e) =>
-                                          e['id'].toString() ==
-                                          _contactId,
-                                    );
-
-                                    _openContactDialog(existing: c);
-                                  },
-                          ),
-                        ],
-                      ),
-
-                      const SizedBox(height: 16),
+const SizedBox(height: 16),
 
                       // ================= PRODUCTION =================
                       // ================= PRODUCTION =================
