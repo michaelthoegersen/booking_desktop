@@ -16,6 +16,9 @@ class RoundCalcResult {
   final int dDriveDays;
   final double dDriveCost;
 
+  final int flightTickets;
+  final double flightCost;
+
   final double trailerDayCost;
   final double trailerKmCost;
 
@@ -47,6 +50,9 @@ class RoundCalcResult {
 
     required this.dDriveDays,
     required this.dDriveCost,
+
+    required this.flightTickets,
+    required this.flightCost,
 
     required this.trailerDayCost,
     required this.trailerKmCost,
@@ -100,25 +106,24 @@ class TripCalculator {
     final int entryCount = legKm.length;
 
     // ----------------------------------------
-// SAFETY (FIX FOR TRAVEL / OFF)
-// ----------------------------------------
+    // SAFETY
+    // ----------------------------------------
 
-if (entryCount == 0) {
-  return _emptyResult();
-}
+    if (entryCount == 0) {
+      return _emptyResult();
+    }
 
-// Klipp alle lister til samme lengde
-final safeLen = [
-  legKm.length,
-  hasTravelBefore.length,
-  tollPerLeg.length,
-  extraPerLeg.length,
-].reduce((a, b) => a < b ? a : b);
+    if (hasTravelBefore.length != entryCount) {
+      return _emptyResult();
+    }
 
-final safeLegKm = legKm.take(safeLen).toList();
-final safeTravel = hasTravelBefore.take(safeLen).toList();
-final safeToll = tollPerLeg.take(safeLen).toList();
-final safeExtra = extraPerLeg.take(safeLen).toList();
+    if (tollPerLeg.length != entryCount) {
+      return _emptyResult();
+    }
+
+    if (extraPerLeg.length != entryCount) {
+      return _emptyResult();
+    }
 
     // ----------------------------------------
     // BILLABLE DAYS
@@ -166,37 +171,64 @@ final safeExtra = extraPerLeg.take(safeLen).toList();
         extraKm * settings.extraKmPrice;
 
     // ----------------------------------------
-    // D.DRIVE
-    // ----------------------------------------
+// D.DRIVE + TRAVEL
+// ----------------------------------------
 
-    int dDriveDays = 0;
+final List<int> dDriveIndexes = [];
 
-    final double threshold = settings.dDriveKmThreshold;
-    final double hardLimit = threshold * 2;
+final double threshold = settings.dDriveKmThreshold;
+final double hardLimit = threshold * 2;
 
-    for (int i = 0; i < entryCount; i++) {
+// Finn alle DDrive-dager
+for (int i = 0; i < entryCount; i++) {
+  final km = legKm[i];
+  final hadTravel = hasTravelBefore[i];
 
-      final double km = legKm[i];
-      final bool hadTravel = hasTravelBefore[i];
+  if (km <= 0) continue;
+  if (km < threshold) continue;
 
-      if (km <= 0) continue;
-      if (km < threshold) continue;
+  if (hadTravel && km < hardLimit) continue;
 
-      // Travel-regel
-      if (hadTravel) {
+  dDriveIndexes.add(i);
+}
 
-        if (km < hardLimit) continue;
+// Gruppér sammenhengende
+final List<List<int>> groups = [];
 
-        dDriveDays++;
-        continue;
-      }
+for (final idx in dDriveIndexes) {
+  if (groups.isEmpty) {
+    groups.add([idx]);
+    continue;
+  }
 
-      // Normal dag
-      dDriveDays++;
-    }
+  final last = groups.last.last;
 
-    final double dDriveCost =
-        dDriveDays * settings.dDriveDayPrice;
+  if (idx == last + 1) {
+    groups.last.add(idx);
+  } else {
+    groups.add([idx]);
+  }
+}
+
+// Tell dager + reise
+int dDriveDays = 0;
+int travelDays = 0;
+int flightTickets = 0;
+
+for (final g in groups) {
+  dDriveDays += g.length;
+
+  // Før/etter hvis alene eller langt fra andre
+  travelDays += 2;
+  flightTickets += 2;
+}
+
+// Kostnader
+final double dDriveCost =
+    dDriveDays * settings.dDriveDayPrice;
+
+final double flightCost =
+    flightTickets * settings.flightTicketPrice;
 
     // ----------------------------------------
     // TRAILER
@@ -225,8 +257,9 @@ final safeExtra = extraPerLeg.take(safeLen).toList();
         trailerDayCost +
         trailerKmCost +
         ferryCost +
+        flightCost +
         tollCost;
-
+        
     // ----------------------------------------
     // RESULT
     // ----------------------------------------
@@ -243,11 +276,15 @@ final safeExtra = extraPerLeg.take(safeLen).toList();
       dDriveDays: dDriveDays,
       dDriveCost: dDriveCost,
 
+      flightTickets: flightTickets,
+      flightCost: flightCost,
+
       trailerDayCost: trailerDayCost,
       trailerKmCost: trailerKmCost,
 
       ferryCost: ferryCost,
       tollCost: tollCost,
+      
 
       tollPerLeg: List<double>.from(tollPerLeg),
 
@@ -279,6 +316,9 @@ final safeExtra = extraPerLeg.take(safeLen).toList();
 
       dDriveDays: 0,
       dDriveCost: 0,
+
+      flightTickets: 0,
+      flightCost: 0,
 
       trailerDayCost: 0,
       trailerKmCost: 0,
