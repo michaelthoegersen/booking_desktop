@@ -1357,6 +1357,7 @@ Future<void> _scanPdf() async {
   // ✅ KM + ferry + toll + extra lookup from Supabase
   // ------------------------------------------------------------
   Future<double?> _fetchLegData({
+    
   required String from,
   required String to,
   required int index,
@@ -2243,30 +2244,29 @@ final travelFlags = _travelBefore;
 // ✅ BRUK CACHE FØRST (riktig per runde)
 final calc = _roundCalcCache[roundIndex] ??
     TripCalculator.calculateRound(
-  settings: SettingsStore.current,
-  dates: dates,
-  pickupEveningFirstDay: round.pickupEveningFirstDay,
-  trailer: round.trailer,
-  totalKm: totalKm,
-  legKm: _kmByIndex.values
-      .whereType<double>()
-      .toList(),
-  ferryCost: _ferryByIndex.values.fold(0.0, (a, b) => a + b),
-  tollCost: _tollByIndex.values.fold(0.0, (a, b) => a + b),
+      settings: SettingsStore.current,
+      dates: dates,
+      pickupEveningFirstDay: round.pickupEveningFirstDay,
+      trailer: round.trailer,
+      totalKm: totalKm,
+      legKm: _kmByIndex.values
+          .whereType<double>()
+          .toList(),
+      ferryCost: _ferryByIndex.values.fold(0.0, (a, b) => a + b),
+      tollCost: _tollByIndex.values.fold(0.0, (a, b) => a + b),
 
-  // ✅ NY
-  tollPerLeg: List.generate(
-  round.entries.length,
-  (i) => _tollByIndex[i] ?? 0,
-),
+      tollPerLeg: List.generate(
+        round.entries.length,
+        (i) => _tollByIndex[i] ?? 0,
+      ),
 
-extraPerLeg: List.generate(
-  round.entries.length,
-  (i) => _extraByIndex[i] ?? '',
-), // 👈 NY
+      extraPerLeg: List.generate(
+        round.entries.length,
+        (i) => _extraByIndex[i] ?? '',
+      ),
 
-hasTravelBefore: travelFlags,
-);
+      hasTravelBefore: travelFlags,
+    );
 
 // =====================================================
 // ALL ROUNDS TOTAL (RIGHT CARD / VAT / TOTAL)
@@ -2306,7 +2306,7 @@ final totalIncVat =
     totalExVat +
     foreignVatMap.values.fold(0.0, (a, b) => a + b);
 
-          // ================= LEFT =================
+
           // ============ LEFT ============
 
 return Padding(
@@ -2435,18 +2435,24 @@ return Padding(
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           Checkbox(
-                            value: round.trailer,
-                            onChanged: (v) {
-                              setState(() {
-                                round.trailer = v ?? false;
-                              });
-                            },
-                          ),
+  value: round.trailer,
+  onChanged: (v) async {
+    setState(() {
+      round.trailer = v ?? false;
+    });
+
+    await _recalcAllRounds();
+    
+  },
+),
+                            
+                        
                           const Text("Trailer"),
                         ],
                       ),
                     ],
                   ),
+              
 
                   const SizedBox(height: 12),
 
@@ -2623,7 +2629,9 @@ Divider(
         Divider(
           height: 14,
           color: cs.outlineVariant,
-        ),// ---------- SUMMARY ----------
+        ),
+        
+        // ---------- SUMMARY ----------
                           Wrap(
                             spacing: 14,
                             runSpacing: 6,
@@ -2660,9 +2668,18 @@ Divider(
                           ),
 
                           const SizedBox(height: 10),
+                          // LUKKER ROUTES COLUMN
+], // children
+), // Column
+
+// LUKKER ROUTES CONTAINER
+), // Container
+
+),// LUKKER ROUTES EXPANDED
+
 
                           // ---------- COST ----------
-                          Container(
+Container(
   width: double.infinity,
   padding: const EdgeInsets.all(12),
   decoration: BoxDecoration(
@@ -2729,7 +2746,7 @@ Divider(
         waitDuration: const Duration(milliseconds: 300),
 
         textStyle: const TextStyle(
-          fontFamily: 'monospace', // 👈 pen kalkyle-visning
+          fontFamily: 'monospace',
           fontSize: 12,
           height: 1.4,
           color: Colors.white,
@@ -2740,32 +2757,35 @@ Divider(
           borderRadius: BorderRadius.circular(8),
         ),
 
-        child: Align(
-          alignment: Alignment.centerRight,
-          child: Text(
-            "TOTAL: ${_nok(calc.totalCost)}",
-            style: const TextStyle(
-              fontWeight: FontWeight.w900,
-              fontSize: 14,
-            ),
-          ),
-        ),
-      ),
+        child: MouseRegion(
+          cursor: SystemMouseCursors.help,
+          child: Align(
+            alignment: Alignment.centerRight,
+            child: Text(
+              "TOTAL: ${_nok(calc.totalCost)}",
+              style: const TextStyle(
+                fontWeight: FontWeight.w900,
+                fontSize: 14,
+                            ),
+            ), // Text
+          ), // Align
+        ), // MouseRegion
+      ), // Tooltip
+
     ],
-  ),
-),
-                        ],
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-            
+  ), // Column (COST)
+), // Container (COST)
+
+], // children (CENTER Column)
+), // Column (CENTER)
+), // Container (CENTER)
+), // Expanded (CENTER)// Expanded (CENTER)
+
+// ================= RIGHT =================
           
 
-          const SizedBox(width: 14),
+  
+
 
           // ================= RIGHT =================
           SizedBox(
@@ -2892,42 +2912,7 @@ Container(
     ],
   ),
 ),
-                    // ---------- VAT ----------
-                    Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.all(14),
-                      decoration: BoxDecoration(
-                        color: cs.surface,
-                        borderRadius:
-                            BorderRadius.circular(12),
-                        border: Border.all(
-                          color: cs.outlineVariant,
-                        ),
-                      ),
-                      child: Column(
-                        crossAxisAlignment:
-                            CrossAxisAlignment.end,
-                        children: [
-
-                          const Text(
-                            "VAT summary",
-                            style: TextStyle(
-                              fontWeight:
-                                  FontWeight.w900,
-                              fontSize: 14,
-                            ),
-                          ),
-
-                          const SizedBox(height: 10),
-
-                          _buildVatBox(
-                            foreignVatMap,
-                            totalExVat,
-                            totalIncVat,
-                          ),
-                        ],
-                      ),
-                    ),
+                    
                   ],
                 ),
               ),
