@@ -170,62 +170,70 @@ class TripCalculator {
     final double extraKmCost =
         extraKm * settings.extraKmPrice;
 
-    // ----------------------------------------
-// D.DRIVE + TRAVEL
 // ----------------------------------------
-
-final List<int> dDriveIndexes = [];
+// D.DRIVE + CLUSTER LOGIC
+// ----------------------------------------
 
 final double threshold = settings.dDriveKmThreshold;
 final double hardLimit = threshold * 2;
 
-// Finn alle DDrive-dager
+// 1️⃣ Finn alle D.Drive-dager (indekser)
+final List<int> dDriveIndexes = [];
+
 for (int i = 0; i < entryCount; i++) {
-  final km = legKm[i];
-  final hadTravel = hasTravelBefore[i];
+  final double km = legKm[i];
+  final bool hadTravel = hasTravelBefore[i];
 
   if (km <= 0) continue;
   if (km < threshold) continue;
 
+  // Travel-regel
   if (hadTravel && km < hardLimit) continue;
 
   dDriveIndexes.add(i);
 }
 
-// Gruppér sammenhengende
-final List<List<int>> groups = [];
+// 2️⃣ Gruppér i blokker
+final List<List<int>> clusters = [];
+
+List<int> current = [];
 
 for (final idx in dDriveIndexes) {
-  if (groups.isEmpty) {
-    groups.add([idx]);
+  if (current.isEmpty) {
+    current.add(idx);
     continue;
   }
 
-  final last = groups.last.last;
+  final prev = current.last;
 
-  if (idx == last + 1) {
-    groups.last.add(idx);
+  // Avstand i dager
+  if (idx - prev <= 2) {
+    current.add(idx);
   } else {
-    groups.add([idx]);
+    clusters.add(List.from(current));
+    current = [idx];
   }
 }
 
-// Tell dager + reise
-int dDriveDays = 0;
-int travelDays = 0;
-int flightTickets = 0;
-
-for (final g in groups) {
-  dDriveDays += g.length;
-
-  // Før/etter hvis alene eller langt fra andre
-  travelDays += 2;
-  flightTickets += 2;
+if (current.isNotEmpty) {
+  clusters.add(current);
 }
 
-// Kostnader
+// 3️⃣ Kalkuler kostnader
+final int baseDDriveDays = dDriveIndexes.length;
+
+// +1 før og +1 etter per blokk
+final int extraDays = clusters.length * 2;
+
+final int totalDDriveDays =
+    baseDDriveDays + extraDays;
+
+// Flybilletter: 2 per blokk
+final int flightTickets =
+    clusters.length * 2;
+
 final double dDriveCost =
-    dDriveDays * settings.dDriveDayPrice;
+    totalDDriveDays * settings.dDriveDayPrice;
 
 final double flightCost =
     flightTickets * settings.flightTicketPrice;
@@ -265,6 +273,7 @@ final double flightCost =
     // ----------------------------------------
 
     return RoundCalcResult(
+
       billableDays: billableDays,
 
       includedKm: includedKm,
@@ -273,8 +282,9 @@ final double flightCost =
       dayCost: dayCost,
       extraKmCost: extraKmCost,
 
-      dDriveDays: dDriveDays,
+      dDriveDays: totalDDriveDays,
       dDriveCost: dDriveCost,
+
 
       flightTickets: flightTickets,
       flightCost: flightCost,
