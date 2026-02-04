@@ -2731,6 +2731,12 @@ Container(
               style: const TextStyle(fontWeight: FontWeight.w900),
             ),
 
+          if (calc.flightTickets > 0)
+            Text(
+              "Flights (${calc.flightTickets}): ${_nok(calc.flightCost)}",
+              style: const TextStyle(fontWeight: FontWeight.w900),
+            ),  
+
           if (round.trailer)
             Text(
               "Trailer: ${_nok(calc.trailerDayCost + calc.trailerKmCost)}",
