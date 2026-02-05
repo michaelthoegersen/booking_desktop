@@ -222,15 +222,31 @@ if (current.isNotEmpty) {
 // 3️⃣ Kalkuler kostnader
 final int baseDDriveDays = dDriveIndexes.length;
 
-// +1 før og +1 etter per blokk
-final int extraDays = clusters.length * 2;
+int extraDays = 0;
+int flightTickets = 0;
+
+for (final cluster in clusters) {
+  final int first = cluster.first;
+  final int last = cluster.last;
+
+  final bool startsTour = first == 0;
+  final bool endsTour = last == entryCount - 1;
+
+  // Før tur
+  if (!startsTour) {
+    extraDays++;
+    flightTickets++;
+  }
+
+  // Etter tur
+  if (!endsTour) {
+    extraDays++;
+    flightTickets++;
+  }
+}
 
 final int totalDDriveDays =
     baseDDriveDays + extraDays;
-
-// Flybilletter: 2 per blokk
-final int flightTickets =
-    clusters.length * 2;
 
 final double dDriveCost =
     totalDDriveDays * settings.dDriveDayPrice;

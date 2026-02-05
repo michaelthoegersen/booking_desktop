@@ -9,6 +9,7 @@ import '../state/settings_store.dart';
 import 'package:booking_desktop/services/trip_calculator.dart';
 
 class OfferPdfService {
+  
   // ============================================================
   // TERMS
   // ============================================================
@@ -338,6 +339,16 @@ static pw.Widget _whiteText(String text, pw.Font font) {
   pw.ImageProvider busTypeImage,
   pw.Font font,
 ) {
+  for (var i = 0; i < offer.rounds.length; i++) {
+  print("PDF ROUND $i trailer = ${offer.rounds[i].trailer}");
+}
+  // ✅ LEGG HER (FØR return)
+  final hasTrailer =
+      offer.rounds.any((r) => r.trailer);
+
+  final vehicle =
+      "${offer.busCount} x ${offer.busType.label}"
+      "${hasTrailer ? " + trailer" : ""}";
   return pw.Container(
     height: 95, // Nok plass → ingen clipping
     padding: const pw.EdgeInsets.only(top: -25),
@@ -369,10 +380,10 @@ _rightInfo("Phone", offer.phone ?? "", font),
 _rightInfo("Email", offer.email ?? "", font),
 _rightInfo("Production", offer.production, font),
                 _rightInfo(
-                  "Vehicle",
-                  "${offer.busCount} x ${offer.busType.label}",
-                  font,
-                ),
+  "Vehicle",
+  vehicle,
+  font,
+),
                 _rightInfo("Date", _todayDate(), font),
                 _rightInfo("Valid until", _validUntil(), font),
 
@@ -468,51 +479,38 @@ static pw.Widget _buildOfferTitle(pw.Font bold) {
 
     // ---------------- ROWS
     // ---------------- ROWS (TRAVEL LOOKUP VIA ROUTE)
-
-// 🔍 DEBUG: sjekk at alle lister matcher
-print("PDF ROWS DEBUG:");
-print(" entries = ${round.entries.length}");
-print(" km      = ${result.legKm.length}");
-print(" toll    = ${result.tollPerLeg.length}");
-print(" extra   = ${result.extraPerLeg.length}");
-print(" travel  = ${result.hasTravelBefore.length}");
-
-// ✅ Finn minste felles lengde (hindrer RangeError)
-final int maxRows = [
-  round.entries.length,
-  result.legKm.length,
-  result.tollPerLeg.length,
-  result.extraPerLeg.length,
-  result.hasTravelBefore.length,
-].reduce((a, b) => a < b ? a : b);
-
-print(" → Using maxRows = $maxRows");
-
-for (int r = 0; r < maxRows; r++) {
+for (int r = 0; r < round.entries.length; r++) {
   final e = round.entries[r];
 
-  final String loc =
-      e.location.trim().toLowerCase();
+  final isTravel =
+      e.location.trim().toLowerCase() == 'travel';
 
-  final bool isTravel = loc == 'travel';
-  final bool isOff = loc == 'off';
+  final isOff =
+      e.location.trim().toLowerCase() == 'off';
 
-  // ---------------- TRAVEL FLAG ----------------
   final bool hadTravelBefore =
-      result.hasTravelBefore[r];
+      (r < result.hasTravelBefore.length)
+          ? result.hasTravelBefore[r]
+          : false;
 
   // ---------------- KM ----------------
-  final double km =
-      result.legKm[r].toDouble();
+  double km = 0;
+
+  if (r < result.legKm.length) {
+    km = result.legKm[r].toDouble();
+  }
 
   // ---------------- D.DRIVE ----------------
   final bool hasDDrive = hadTravelBefore
-      ? km >= 1200 // Travel-merge
-      : km >= 600; // Normal
+      ? km >= 1200   // Travel-merge-regel
+      : km >= 600;   // Normal dag
 
   // ---------------- EXTRA (FRA CALC) ----------------
-  String extraText =
-      result.extraPerLeg[r];
+  String extraText = "";
+
+  if (r < result.extraPerLeg.length) {
+    extraText = result.extraPerLeg[r];
+  }
 
   // ================= FIND FROM / TO =================
 
@@ -522,7 +520,6 @@ for (int r = 0; r < maxRows; r++) {
   for (int i = r - 1; i >= 0; i--) {
     if (round.entries[i]
             .location
-            .trim()
             .toLowerCase() !=
         "travel") {
       fromIndex = i;
@@ -530,12 +527,9 @@ for (int r = 0; r < maxRows; r++) {
     }
   }
 
-  for (int i = r + 1;
-      i < round.entries.length;
-      i++) {
+  for (int i = r + 1; i < round.entries.length; i++) {
     if (round.entries[i]
             .location
-            .trim()
             .toLowerCase() !=
         "travel") {
       toIndex = i;
@@ -543,21 +537,15 @@ for (int r = 0; r < maxRows; r++) {
     }
   }
 
-  // ================= BUILD EXTRA =================
-  // ✅ Alltid bygg fra calc + legg på D.Drive
+  // ================= BUILD EXTRA TEXT =================
+  // ✅ Bruk alltid calc-extra (og legg på D.Drive hvis aktuelt)
 
   if (!isOff) {
     extraText = _buildExtraText(
       hasDDrive: hasDDrive,
-      extraField: extraText,
+      extraField: extraText, // 👈 VIKTIG: fra result.extraPerLeg
     );
   }
-
-  // ================= ROW DEBUG =================
-
-  print(
-    "ROW $r | ${e.location} | km=$km | travel=$hadTravelBefore | ddrive=$hasDDrive | extra=$extraText",
-  );
 
   // ================= ADD ROW =================
 
@@ -565,10 +553,7 @@ for (int r = 0; r < maxRows; r++) {
     DateFormat("dd.MM.yyyy").format(e.date),
     e.location,
     km > 0 ? "${km.round()}" : "",
-    _calcTimeText(
-      km: km,
-      hasDDrive: hasDDrive,
-    ),
+    _calcTimeText(km: km, hasDDrive: hasDDrive),
     extraText,
   ]);
 }

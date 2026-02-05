@@ -262,6 +262,8 @@ Future<void> _recalcAllRounds() async {
   final TextEditingController companyCtrl = TextEditingController();
   final TextEditingController contactCtrl = TextEditingController();
   final TextEditingController productionCtrl = TextEditingController();
+  final TextEditingController phoneCtrl = TextEditingController();
+  final TextEditingController emailCtrl = TextEditingController();
 
   final TextEditingController startLocCtrl = TextEditingController();
   final TextEditingController locationCtrl = TextEditingController();
@@ -301,6 +303,8 @@ Future<void> _recalcAllRounds() async {
     companyCtrl.text = offer.company;
     contactCtrl.text = offer.contact;
     productionCtrl.text = offer.production;
+    phoneCtrl.text = offer.phone ?? '';
+    emailCtrl.text = offer.email ?? '';
 
     _syncRoundControllers();
 
@@ -323,6 +327,8 @@ Future<void> _recalcAllRounds() async {
     productionCtrl.dispose();
     startLocCtrl.dispose();
     locationCtrl.dispose();
+    phoneCtrl.dispose();
+    emailCtrl.dispose();
 
     _locationFocus.dispose();
 
@@ -333,6 +339,20 @@ Future<void> _recalcAllRounds() async {
   // ===================================================
   // HELPERS
   // ===================================================
+
+  DateTime _getNextAvailableDate() {
+  final entries = offer.rounds[roundIndex].entries;
+
+  if (entries.isEmpty) {
+    return DateTime.now();
+  }
+
+  final latest = entries
+      .map((e) => e.date)
+      .reduce((a, b) => a.isAfter(b) ? a : b);
+
+  return latest.add(const Duration(days: 1));
+}
 
   void _syncRoundControllers() {
     startLocCtrl.text =
@@ -350,80 +370,63 @@ Future<void> _recalcAllRounds() async {
   // ===================================================
 
   Future<void> _loadDraft(String id) async {
+  _loadingDraft = true;
+
+  try {
+    final fresh =
+        await OfferStorageService.loadDraft(id);
+
+    if (fresh == null || !mounted) return;
 
     setState(() {
-      _loadingDraft = true;
-    });
 
-    try {
+      // ✅ KOPIER DATA – IKKE ERSTATT OBJEKT
+      offer.company    = fresh.company;
+      offer.contact    = fresh.contact;
+      offer.phone      = fresh.phone;
+      offer.email      = fresh.email;
+      offer.production = fresh.production;
+      offer.status     = fresh.status;
+      offer.bus        = fresh.bus;
+      offer.busCount   = fresh.busCount;
+      offer.busType    = fresh.busType;
 
-      final loaded =
-          await OfferStorageService.loadDraft(id);
+      // Rounds
+      for (int i = 0; i < offer.rounds.length; i++) {
+        final src = fresh.rounds[i];
+        final dst = offer.rounds[i];
 
-      if (loaded == null) {
-        throw Exception("Draft not found");
+        dst.startLocation = src.startLocation;
+        dst.trailer = src.trailer;
+        dst.pickupEveningFirstDay =
+            src.pickupEveningFirstDay;
+
+        dst.entries
+          ..clear()
+          ..addAll(src.entries);
       }
 
-      CurrentOfferStore.set(loaded);
-
-      offer.company = loaded.company;
-      offer.contact = loaded.contact;
-      offer.production = loaded.production;
-
-      offer.bus = loaded.bus;
-      _selectedBus = loaded.bus;
-
-      for (int i = 0; i < offer.rounds.length; i++) {
-
-  final src = loaded.rounds[i];
-  final dst = offer.rounds[i];
-
-  // ✅ Kopier ALT
-  dst.startLocation = src.startLocation;
-  dst.trailer = src.trailer;
-  dst.pickupEveningFirstDay = src.pickupEveningFirstDay;
-
-  dst.entries
-    ..clear()
-    ..addAll(src.entries);
-}
+      // ✅ Sync textfields
+      companyCtrl.text = offer.company;
+      contactCtrl.text = offer.contact;
+      productionCtrl.text = offer.production;
+      phoneCtrl.text = offer.phone ?? '';
+      emailCtrl.text = offer.email ?? '';
 
       _draftId = id;
-
       roundIndex = 0;
 
       _syncRoundControllers();
+    });
 
-      if (!mounted) return;
+    CurrentOfferStore.set(offer);
 
-      setState(() {});
+    await _recalcKm();
 
-      await _recalcKm();
-
-    } finally {
-
-      if (mounted) {
-        setState(() {
-          _loadingDraft = false;
-        });
-      }
-    }
+  } finally {
+    _loadingDraft = false;
   }
-
-
-  DateTime _getNextAvailableDate() {
-    final entries = offer.rounds[roundIndex].entries;
-
-    if (entries.isEmpty) {
-      return DateTime.now();
-    }
-
-    final latest = entries
-        .map((e) => e.date)
-        .reduce((a, b) => a.isAfter(b) ? a : b);
-
-    return latest.add(const Duration(days: 1));
-  }
+}
 // ------------------------------------------------------------
 // ✅ Load bus from samletdata for this draft
 // ------------------------------------------------------------
@@ -1118,6 +1121,32 @@ for (int i = 0; i < offer.rounds.length; i++) {
     // ----------------------------------------
     // ✅ Lagre i MODELL (ÉN GANG)
     // ----------------------------------------
+    // 🔥 SYNC UI → MODEL
+    final current = CurrentOfferStore.current.value;
+
+if (current != null) {
+
+  // 🔥 FULL SYNC FRA STORE
+  offer.company    = current.company;
+  offer.contact    = current.contact;
+  offer.phone      = current.phone;
+  offer.email      = current.email;
+  offer.production = current.production;
+  offer.bus        = current.bus;
+  offer.busCount   = current.busCount;
+  offer.busType    = current.busType;
+
+  // ✅ VIKTIG: SYNC ROUNDS (inkl trailer)
+  for (int i = 0; i < offer.rounds.length; i++) {
+    if (i >= current.rounds.length) break;
+
+    offer.rounds[i].trailer =
+        current.rounds[i].trailer;
+
+    offer.rounds[i].pickupEveningFirstDay =
+        current.rounds[i].pickupEveningFirstDay;
+  }
+}
     offer.bus = selectedBus;
     _selectedBus = selectedBus;
 
@@ -1145,6 +1174,19 @@ for (int i = 0; i < offer.rounds.length; i++) {
     
 final freshOffer =
     await OfferStorageService.loadDraft(id);
+    // 🔥 FULL SYNC BACK TO MAIN MODEL
+offer.company    = freshOffer.company;
+offer.contact    = freshOffer.contact;
+offer.phone      = freshOffer.phone;
+offer.email      = freshOffer.email;
+offer.production = freshOffer.production;
+offer.status     = freshOffer.status;
+offer.bus        = freshOffer.bus;
+offer.busCount   = freshOffer.busCount;
+offer.busType    = freshOffer.busType;
+
+phoneCtrl.text = offer.phone ?? '';
+emailCtrl.text = offer.email ?? '';
 
 if (freshOffer != null) {
   freshOffer.status =
@@ -1210,6 +1252,22 @@ offer.status = _mapCalendarStatus(freshOffer.status); // ✅
 // ------------------------------------------------------------
 // ------------------------------------------------------------
 Future<void> _exportPdf() async {
+
+  // 🔥 HENT SISTE SYNC FRA STORE
+  final current = CurrentOfferStore.current.value;
+
+  if (current != null) {
+    offer.company    = current.company;
+    offer.contact    = current.contact;
+    offer.phone      = current.phone;
+    offer.email      = current.email;
+    offer.production = current.production;
+    offer.bus        = current.bus;
+  } else {
+    // fallback (burde nesten aldri skje)
+    offer.phone = phoneCtrl.text.trim();
+    offer.email = emailCtrl.text.trim();
+  }
   try {
 
     // ===============================
@@ -1228,6 +1286,11 @@ debugPrint("Email: ${offer.email}");
     // ===============================
     // Generer PDF
     // ===============================
+    debugPrint("===== PDF TRAILER DEBUG =====");
+
+for (int i = 0; i < offer.rounds.length; i++) {
+  debugPrint("EXPORT round $i trailer = ${offer.rounds[i].trailer}");
+}
     final bytes = await OfferPdfService.generatePdf(
       offer,
       roundCalc,
@@ -3138,21 +3201,22 @@ Future<void> _createCompanyInline() async {
 
     _currentCompanyId = id;
 
-    setState(() {
-      _companyCtrl.text = name;
+   setState(() {
+  _companyCtrl.text = name;
 
-      widget.offer.company = name;
-      widget.offer.contact = '';
-      widget.offer.production = '';
+  widget.offer.company = name;
 
-      _contacts.clear();
-      _productions.clear();
+  // IKKE WIPE HER
+  // La bruker/DB styre dette
 
-      _contactId = null;
-      _productionId = null;
+  _contacts.clear();
+  _productions.clear();
 
-      _companySuggestions.clear();
-    });
+  _contactId = null;
+  _productionId = null;
+
+  _companySuggestions.clear();
+});
 
     await _loadDetails(id);
   }
@@ -3545,20 +3609,26 @@ Row(
   final ct = _contacts.firstWhere(
     (e) => e['id'].toString() == v,
   );
+final phone = ct['phone'] ?? '';
+final email = ct['email'] ?? '';
 
-  debugPrint("CONTACT DATA: $ct"); // 👈 LEGG TIL DENNE
-
-  setState(() {
+setState(() {
   _contactId = v;
 
   widget.offer.contact = ct['name'] ?? '';
-  widget.offer.phone   = ct['phone'] ?? '';
-  widget.offer.email   = ct['email'] ?? '';
+  widget.offer.phone   = phone;
+  widget.offer.email   = email;
+
+  // 🔥 SYNC TIL TEXTFIELDS
+  final page =
+      context.findAncestorStateOfType<_NewOfferPageState>();
+
+  page?.phoneCtrl.text = phone;
+  page?.emailCtrl.text = email;
 });
 
-// 🔥 SYNC GLOBAL STATE
-CurrentOfferStore.set(widget.offer);
-        },
+  CurrentOfferStore.set(widget.offer);
+}
       ),
     ),
 

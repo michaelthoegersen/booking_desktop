@@ -14,6 +14,13 @@ class OfferPreview extends StatelessWidget {
   // --------------------------------------------------
   Color _statusColor(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
+    // ✅ Sjekk om noen runder har trailer
+final hasTrailer = offer.rounds.any((r) => r.trailer);
+
+// ✅ Bygg vehicle-tekst
+final vehicle =
+    "${offer.bus ?? ""}"
+    "${hasTrailer ? " + trailer" : ""}";
 
     switch (offer.status) {
      case "Inquiry":
@@ -52,8 +59,14 @@ class OfferPreview extends StatelessWidget {
   }
 
   @override
-  Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
+Widget build(BuildContext context) {
+  final cs = Theme.of(context).colorScheme;
+
+  final hasTrailer = offer.rounds.any((r) => r.trailer);
+
+  final vehicle =
+      "${offer.bus ?? ""}"
+      "${hasTrailer ? " + trailer" : ""}";
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -152,7 +165,7 @@ class OfferPreview extends StatelessWidget {
               _PreviewLine(label: "Company", value: offer.company),
               _PreviewLine(label: "Contact", value: offer.contact),
               _PreviewLine(label: "Production", value: offer.production),
-              _PreviewLine(label: "Bus", value: offer.bus ?? ""),
+              _PreviewLine(label: "Bus", value: vehicle),
 
               const SizedBox(height: 14),
               Divider(color: cs.outlineVariant),
@@ -308,6 +321,7 @@ class _PreviewLine extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    
     final cs = Theme.of(context).colorScheme;
 
     return Padding(
