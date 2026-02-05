@@ -9,7 +9,7 @@ import '../services/calendar_sync_service.dart';
 import '../supabase_clients.dart';
 import '../models/app_settings.dart';
 import '../models/offer_draft.dart';
-import 'package:booking_desktop/services/trip_calculator.dart';
+import 'package:tourflow/services/trip_calculator.dart';
 import '../services/offer_pdf_service.dart';
 import '../state/settings_store.dart';
 import '../widgets/offer_preview.dart';
@@ -36,6 +36,7 @@ class NewOfferPage extends StatefulWidget {
 }
 
 class _NewOfferPageState extends State<NewOfferPage> {
+
 
   // ===================================================
   // STATE FIELDS
@@ -422,7 +423,7 @@ Future<void> _recalcAllRounds() async {
     CurrentOfferStore.set(offer);
 
     await _recalcKm();
-
+    
   } finally {
     _loadingDraft = false;
   }

@@ -441,6 +441,8 @@ Widget build(BuildContext context) {
 
       const SizedBox(width: 12),
 
+const SizedBox(width: 8),
+
       SegmentedButton<bool>(
         segments: const [
           ButtonSegment(

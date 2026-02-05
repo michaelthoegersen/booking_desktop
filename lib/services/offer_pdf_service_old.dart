@@ -6,7 +6,7 @@ import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 
 import '../models/app_settings.dart';
-import 'package:booking_desktop/services/trip_calculator.dart';
+import 'package:tourflow/services/trip_calculator.dart';
 
 class OfferPdfService {
   // ============================================================

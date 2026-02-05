@@ -1,5 +1,5 @@
-name: booking_desktop
-description: "A new Flutter project."
+name: tourflow
+description: TourFlow booking and tour management system
 publish_to: 'none'
 
 version: 1.0.0+1
@@ -7,30 +7,63 @@ version: 1.0.0+1
 environment:
   sdk: ">=3.0.0 <4.0.0"
 
+# =============================================================
+# DEPENDENCIES
+# =============================================================
+
 dependencies:
   flutter:
     sdk: flutter
+
   flutter_map: ^6.1.0
   latlong2: ^0.9.0
   go_router: ^14.6.2
   supabase_flutter: ^2.8.0
   flutter_dotenv: ^5.1.0
-  
+
   shared_preferences: ^2.3.2
   flutter_map_marker_cluster: ^1.3.5
   cupertino_icons: ^1.0.8
+
   pdf: ^3.11.0
   printing: ^5.13.0
   intl: ^0.19.0
+
   flutter_polyline_points: ^2.0.0
   http: ^1.2.0
   webview_flutter: ^4.7.0
   file_picker: ^6.1.1
+
   syncfusion_flutter_pdf: ^24.1.41
 
+
+# =============================================================
+# DEV DEPENDENCIES
+# =============================================================
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+
+  flutter_lints: ^6.0.0
+
+  flutter_launcher_icons: ^0.13.1
+
+
+# =============================================================
+# APP ICON CONFIG (ALL PLATFORMS)
+# =============================================================
+
 flutter_icons:
-  android: true
-  ios: true
+
+  # MASTER ICON
+  image_path: "assets/icon/TourFlowIcon.png"
+
+  android:
+    generate: true
+
+  ios:
+    generate: true
 
   macos:
     generate: true
@@ -38,28 +71,34 @@ flutter_icons:
   windows:
     generate: true
 
-  image_path: "assets/icon/TourFlowIcon.png"
 
-dev_dependencies:
-  flutter_test:
-    sdk: flutter
-  flutter_lints: ^6.0.0
-  flutter_launcher_icons: ^0.13.1
+# =============================================================
+# FLUTTER CONFIG
+# =============================================================
 
 flutter:
   uses-material-design: true
+
   assets:
     - .env
+
+    # PDF logos
     - assets/pdf/logos/CSSLogo.png
     - assets/pdf/logos/Starcoachlogo.png
     - assets/pdf/logos/LOGOapp.png
+    - assets/pdf/logos/TourFlowLogo.png
+
+    # Bus images
     - assets/pdf/buses/12_sleeper.png
     - assets/pdf/buses/14_sleeper.png
     - assets/pdf/buses/16_sleeper.png
     - assets/pdf/buses/18_sleeper.png
     - assets/pdf/buses/DDBus.png
     - assets/pdf/buses/DDBuskart.png
+
+    # Templates
     - assets/pdf/template_page0.png
-    - assets/pdf/logos/TourFlowLogo.png
+
+    # Fonts
     - assets/fonts/Calibri.ttf
     - assets/fonts/Calibrib.ttf

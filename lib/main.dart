@@ -4,7 +4,6 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 
 import 'pages/login_page.dart';
-import 'pages/customers_admin_page.dart';
 import 'widgets/app_shell.dart';
 
 import 'pages/dashboard_page.dart';
@@ -13,10 +12,12 @@ import 'pages/edit_offer_page.dart';
 import 'pages/customers_page.dart';
 import 'pages/settings_page.dart';
 import 'pages/routes_admin_page.dart';
-import 'pages/calendar_page.dart'; // ✅ NY
+import 'pages/calendar_page.dart';
 import 'pages/google_test_page.dart';
+
 import 'state/settings_store.dart';
 import 'ui/css_theme.dart';
+
 
 // ------------------------------------------------------------
 // MAIN
@@ -24,14 +25,30 @@ import 'ui/css_theme.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
+  String? supabaseUrl;
+  String? supabaseKey;
+
   try {
-    await dotenv.load(fileName: ".env");
+    // 👉 Prøv først dart-define (Release / DMG)
+    const envUrl = String.fromEnvironment('SUPABASE_URL');
+    const envKey = String.fromEnvironment('SUPABASE_ANON_KEY');
 
-    final supabaseUrl = dotenv.env['SUPABASE_URL'];
-    final supabaseKey = dotenv.env['SUPABASE_ANON_KEY'];
+    if (envUrl.isNotEmpty && envKey.isNotEmpty) {
+      supabaseUrl = envUrl;
+      supabaseKey = envKey;
+    } else {
+      // 👉 Fallback til .env (VSCode / flutter run)
+      await dotenv.load(fileName: ".env");
 
-    if (supabaseUrl == null || supabaseKey == null) {
-      throw Exception("Missing SUPABASE_URL or SUPABASE_ANON_KEY in .env");
+      supabaseUrl = dotenv.env['SUPABASE_URL'];
+      supabaseKey = dotenv.env['SUPABASE_ANON_KEY'];
+    }
+
+    if (supabaseUrl == null ||
+        supabaseKey == null ||
+        supabaseUrl.isEmpty ||
+        supabaseKey.isEmpty) {
+      throw Exception("Missing Supabase config");
     }
 
     await Supabase.initialize(
@@ -40,12 +57,16 @@ Future<void> main() async {
     );
 
     await SettingsStore.load();
-  } catch (e) {
+
+    debugPrint("Supabase initialized OK");
+  } catch (e, st) {
     debugPrint("MAIN INIT ERROR: $e");
+    debugPrint("$st");
   }
 
   runApp(const BookingApp());
 }
+
 
 // ------------------------------------------------------------
 // AUTH HELPERS
@@ -53,6 +74,7 @@ Future<void> main() async {
 final supabase = Supabase.instance.client;
 
 bool get isLoggedIn => supabase.auth.currentSession != null;
+
 
 // ------------------------------------------------------------
 // SUPABASE AUTH REFRESHER
@@ -64,6 +86,7 @@ class SupabaseAuthRefresher extends ChangeNotifier {
     });
   }
 }
+
 
 // ------------------------------------------------------------
 // APP
@@ -83,7 +106,6 @@ class BookingApp extends StatelessWidget {
       // --------------------------------------------------
       redirect: (context, state) {
         final loggedIn = isLoggedIn;
-
         final goingToLogin = state.matchedLocation == "/login";
 
         if (!loggedIn && !goingToLogin) {
@@ -108,7 +130,10 @@ class BookingApp extends StatelessWidget {
               children: [
                 const Text(
                   "Page not found",
-                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
                 const SizedBox(height: 12),
                 Text(state.error?.toString() ?? ""),
@@ -124,6 +149,7 @@ class BookingApp extends StatelessWidget {
       },
 
       routes: [
+
         // ---------------- LOGIN ----------------
         GoRoute(
           path: "/login",
@@ -136,6 +162,7 @@ class BookingApp extends StatelessWidget {
             return AppShell(child: child);
           },
           routes: [
+
             // ---------------- DASHBOARD ----------------
             GoRoute(
               path: "/",
@@ -165,7 +192,7 @@ class BookingApp extends StatelessWidget {
               builder: (context, state) => const EditOfferPage(),
             ),
 
-            // ---------------- CALENDAR ---------------- ✅ NY
+            // ---------------- CALENDAR ----------------
             GoRoute(
               path: "/calendar",
               builder: (context, state) => const CalendarPage(),
@@ -174,8 +201,7 @@ class BookingApp extends StatelessWidget {
             // ---------------- CUSTOMERS ----------------
             GoRoute(
               path: "/customers",
-              builder: (context, state) =>
-                  const CustomersPage(),
+              builder: (context, state) => const CustomersPage(),
             ),
 
             // ---------------- SETTINGS ----------------
@@ -184,12 +210,12 @@ class BookingApp extends StatelessWidget {
               builder: (context, state) => const SettingsPage(),
             ),
 
-            // ---------------- ROUTES ADMIN ----------------
+            // ---------------- ROUTES ----------------
             GoRoute(
               path: "/routes",
-              builder: (context, state) =>
-                  const RoutesAdminPage(),
+              builder: (context, state) => const RoutesAdminPage(),
             ),
+
             // ---------------- GOOGLE TEST ----------------
             GoRoute(
               path: "/google-test",
@@ -206,7 +232,5 @@ class BookingApp extends StatelessWidget {
       theme: CssTheme.theme(),
       routerConfig: router,
     );
-    
   }
-  
 }

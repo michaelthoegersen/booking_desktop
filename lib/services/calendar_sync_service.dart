@@ -51,9 +51,10 @@ static Future<void> syncFromOffer(
     // 1️⃣ Hent eksisterende rader
     // --------------------------------------------------
     final existing = await sb
-        .from('samletdata')
-        .select('dato, kilde')
-        .eq('draft_id', draftId);
+    .from('samletdata')
+    .select('dato, kilde')
+    .eq('draft_id', draftId)
+    .eq('manual_block', false);
 
     final Map<String, String> existingBusByDate = {};
 
