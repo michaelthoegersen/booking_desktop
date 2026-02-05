@@ -61,6 +61,8 @@ class DragBookingData {
 
 Color statusColor(String? status) {
   switch ((status ?? '').toLowerCase()) {
+    case 'manual':
+      return Colors.blueGrey.shade400;
     case 'draft':
       return Colors.purple.shade300;
     case 'inquiry':
@@ -429,10 +431,19 @@ Widget build(BuildContext context) {
 
       const Spacer(),
 
-      IconButton(
-        icon: const Icon(Icons.chevron_left),
-        onPressed: prev,
-      ),
+// ➕ ADD BLOCK
+FilledButton.icon(
+  onPressed: _openManualBlockDialog,
+  icon: const Icon(Icons.add),
+  label: const Text("Block"),
+),
+
+const SizedBox(width: 12),
+
+IconButton(
+  icon: const Icon(Icons.chevron_left),
+  onPressed: prev,
+),
 
       IconButton(
         icon: const Icon(Icons.chevron_right),
@@ -873,16 +884,23 @@ List<Widget> buildSegments(
       continue;
     }
 
-    final prod = items.first['produksjon']?.toString() ?? '';
+    final isManual = items.first['manual_block'] == true;
 
-    if (prod.isEmpty) {
-      result.add(
-        SizedBox(width: dayWidth),
-      );
-      i++;
-      continue;
-    }
+final String title = isManual
+    ? (items.first['note'] ?? 'Blocked')
+    : (items.first['produksjon'] ?? '');
 
+if (title.isEmpty) {
+  result.add(
+    SizedBox(width: dayWidth),
+  );
+  i++;
+  continue;
+}
+
+final String groupKey = isManual
+    ? 'M:$title'
+    : 'P:$title';
     // =====================================
     // FIND FULL RANGE IN DATA (BACK + FORTH)
     // =====================================
@@ -896,11 +914,14 @@ List<Widget> buildSegments(
     while (true) {
       final prevItems = data[bus]?[prev];
 
-      if (prevItems == null ||
-          prevItems.isEmpty ||
-          prevItems.first['produksjon'] != prod) {
-        break;
-      }
+if (prevItems == null || prevItems.isEmpty) break;
+
+final prevKey =
+    prevItems.first['manual_block'] == true
+        ? 'M:${prevItems.first['note'] ?? ''}'
+        : 'P:${prevItems.first['produksjon'] ?? ''}';
+
+if (prevKey != groupKey) break;
 
       start = prev;
       prev = prev.subtract(const Duration(days: 1));
@@ -912,11 +933,14 @@ List<Widget> buildSegments(
     while (true) {
       final nextItems = data[bus]?[next];
 
-      if (nextItems == null ||
-          nextItems.isEmpty ||
-          nextItems.first['produksjon'] != prod) {
-        break;
-      }
+if (nextItems == null || nextItems.isEmpty) break;
+
+final nextKey =
+    nextItems.first['manual_block'] == true
+        ? 'M:${nextItems.first['note'] ?? ''}'
+        : 'P:${nextItems.first['produksjon'] ?? ''}';
+
+if (nextKey != groupKey) break;
 
       end = next;
       next = next.add(const Duration(days: 1));
@@ -944,12 +968,14 @@ List<Widget> buildSegments(
 
     result.add(
         BookingSegment(
-  title: prod,
+  title: isManual
+    ? (items.first['note'] ?? 'Blocked')
+    : (items.first['produksjon'] ?? ''),
   span: span,
   bus: bus,
   from: start,
   to: end,
-  status: items.first['status'],
+  status: isManual ? 'manual' : items.first['status'],
   width: dayWidth,
 
   draftId: items.first['draft_id'].toString(), // ✅ RIKTIG
@@ -960,6 +986,18 @@ List<Widget> buildSegments(
   }
 
   return result;
+}
+Future<void> _openManualBlockDialog() async {
+  final changed = await showDialog<bool>(
+    context: context,
+    builder: (_) => _ManualBlockDialog(
+      buses: buses,
+    ),
+  );
+
+  if (changed == true && mounted) {
+    isMonthView ? loadMonth() : loadWeek();
+  }
 }
   } // <-- SLUTT på _CalendarPageState
 
@@ -1117,27 +1155,51 @@ Widget _buildBody(BuildContext context) {
 
     // ✅ DOBBELKLIKK → EDIT KALENDER
     onDoubleTap: () async {
-      final changed = await showDialog<bool>(
-        context: context,
-        builder: (_) => EditCalendarDialog(
-          production: title,
-          bus: bus,
-          from: from,
-          to: to,
-        ),
-      );
+  final parent =
+      context.findAncestorStateOfType<_CalendarPageState>();
 
-      if (changed == true && context.mounted) {
-        final parent =
-            context.findAncestorStateOfType<_CalendarPageState>();
+  if (parent == null) return;
 
-        if (parent != null) {
-          parent.isMonthView
-              ? parent.loadMonth()
-              : parent.loadWeek();
-        }
-      }
-    },
+  // ✅ MANUAL BLOCK → EDIT BLOCK
+  if (status == 'manual') {
+    final changed = await showDialog<bool>(
+      context: context,
+      builder: (_) => _ManualBlockDialog(
+        buses: parent.buses,
+
+        initialBus: bus,
+        initialFrom: from,
+        initialTo: to,
+        initialNote: title,
+      ),
+    );
+
+    if (changed == true && context.mounted) {
+      parent.isMonthView
+          ? parent.loadMonth()
+          : parent.loadWeek();
+    }
+
+    return;
+  }
+
+  // ✅ NORMAL BOOKING → OLD EDIT
+  final changed = await showDialog<bool>(
+    context: context,
+    builder: (_) => EditCalendarDialog(
+      production: title,
+      bus: bus,
+      from: from,
+      to: to,
+    ),
+  );
+
+  if (changed == true && context.mounted) {
+    parent.isMonthView
+        ? parent.loadMonth()
+        : parent.loadWeek();
+  }
+},
 
     // ✅ HØYREKLIKK → STATUS
     onSecondaryTapDown: (d) {
@@ -1240,6 +1302,7 @@ Widget build(BuildContext context) {
     ),
   );
 }
+
 }
 // ============================================================
 // BUS CELL
@@ -1810,6 +1873,7 @@ class _CalendarHeaderDelegate extends SliverPersistentHeaderDelegate {
 
 class _StatusDatePickerDialogState
     extends State<StatusDatePickerDialog> {
+
   final sb = Supabase.instance.client;
 
   bool loading = true;
@@ -1823,145 +1887,475 @@ class _StatusDatePickerDialogState
     _load();
   }
 
+  // ============================================================
+  // LOAD
+  // ============================================================
+
   Future<void> _load() async {
-  final res = await sb
-      .from('samletdata')
-      .select('id, dato, status, kilde')
-      .eq('draft_id', widget.draftId)
-      .order('dato');
+    final res = await sb
+        .from('samletdata')
+        .select('id, dato, status, kilde')
+        .eq('draft_id', widget.draftId)
+        .order('dato');
 
-  final list = List<Map<String, dynamic>>.from(res);
+    final list = List<Map<String, dynamic>>.from(res);
 
-  if (list.isEmpty) {
-    setState(() => loading = false);
-    return;
-  }
-
-  list.sort((a, b) =>
-      DateTime.parse(a['dato'])
-          .compareTo(DateTime.parse(b['dato'])));
-
-  _RoundBlock? current;
-
-  for (final r in list) {
-    final date = DateTime.parse(r['dato']);
-    final bus = r['kilde'].toString();
-    final id = r['id'].toString();
-
-    if (current == null) {
-      current = _RoundBlock(
-        bus: bus,
-        from: date,
-        to: date,
-        ids: [id],
-      );
-      continue;
+    if (list.isEmpty) {
+      if (mounted) {
+        setState(() => loading = false);
+      }
+      return;
     }
 
-    final isSameBus = bus == current.bus;
-    final isNextDay =
-        date.difference(current.to).inDays == 1;
+    list.sort(
+      (a, b) => DateTime.parse(a['dato'])
+          .compareTo(DateTime.parse(b['dato'])),
+    );
 
-    if (isSameBus && isNextDay) {
-      current.to = date;
-      current.ids.add(id);
-    } else {
+    _RoundBlock? current;
+
+    for (final r in list) {
+      final date = DateTime.parse(r['dato']);
+      final bus = r['kilde'].toString();
+      final id = r['id'].toString();
+
+      if (current == null) {
+        current = _RoundBlock(
+          bus: bus,
+          from: date,
+          to: date,
+          ids: [id],
+        );
+        continue;
+      }
+
+      final isSameBus = bus == current.bus;
+      final isNextDay =
+          date.difference(current.to).inDays == 1;
+
+      if (isSameBus && isNextDay) {
+        current.to = date;
+        current.ids.add(id);
+      } else {
+        blocks.add(current);
+
+        current = _RoundBlock(
+          bus: bus,
+          from: date,
+          to: date,
+          ids: [id],
+        );
+      }
+    }
+
+    if (current != null) {
       blocks.add(current);
+    }
 
-      current = _RoundBlock(
-        bus: bus,
-        from: date,
-        to: date,
-        ids: [id],
-      );
+    // Default: alle valgt
+    for (final b in blocks) {
+      selected[b.hashCode.toString()] = true;
+    }
+
+    if (mounted) {
+      setState(() => loading = false);
     }
   }
 
-  if (current != null) {
-    blocks.add(current);
-  }
+  // ============================================================
+  // APPLY STATUS
+  // ============================================================
 
-  for (final b in blocks) {
-    selected[b.hashCode.toString()] = true;
-  }
-
-  if (mounted) {
-    setState(() => loading = false);
-  }
-}
-
-  Future<void> _save() async {
-  final ids = <String>[];
-
+  Future<void> _apply() async {
   for (final b in blocks) {
     final key = b.hashCode.toString();
 
-    if (selected[key] == true) {
-      ids.addAll(b.ids);
-    }
-  }
+    if (selected[key] != true) continue;
 
-  if (ids.isEmpty) {
-    Navigator.pop(context);
-    return;
-  }
+    final ids = b.ids.join(',');
 
-  await sb
-      .from('samletdata')
-      .update({'status': widget.newStatus})
-      .inFilter('id', ids);
+    await sb
+        .from('samletdata')
+        .update({'status': widget.newStatus})
+        .filter('id', 'in', '($ids)');
+  }
 
   if (!mounted) return;
 
   Navigator.pop(context, true);
 }
 
+  // ============================================================
+  // UI
+  // ============================================================
+
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: const Text("Change status for days"),
+      title: const Text("Select dates"),
 
       content: SizedBox(
         width: 420,
         child: loading
-            ? const Center(child: CircularProgressIndicator())
-            : ListView.builder(
+            ? const Center(
+                child: CircularProgressIndicator(),
+              )
+            : ListView(
                 shrinkWrap: true,
-                itemCount: blocks.length,
-                itemBuilder: (_, i) {
-  final b = blocks[i];
-  final key = b.hashCode.toString();
+                children: blocks.map((b) {
+                  final key = b.hashCode.toString();
 
-  return CheckboxListTile(
-    value: selected[key] ?? false,
+                  return CheckboxListTile(
+                    value: selected[key] ?? false,
 
-    onChanged: (v) {
-      setState(() {
-        selected[key] = v ?? false;
-      });
-    },
+                    title: Text(
+                      "${fmt(b.from)} – ${fmt(b.to)} (${b.bus})",
+                    ),
 
-    title: Text(
-      "${fmt(b.from)} – ${fmt(b.to)}  (${b.bus})",
-    ),
-
-    subtitle: Text(
-      "${b.ids.length} days",
-      style: const TextStyle(fontSize: 11),
-    ),
-  );
-},
-      ),      ),
+                    onChanged: (v) {
+                      setState(() {
+                        selected[key] = v ?? false;
+                      });
+                    },
+                  );
+                }).toList(),
+              ),
+      ),
 
       actions: [
+
         TextButton(
           onPressed: () => Navigator.pop(context),
           child: const Text("Cancel"),
         ),
 
         FilledButton(
-          onPressed: _save,
-          child: const Text("Update"),
+          onPressed: _apply,
+          child: const Text("Apply"),
+        ),
+      ],
+    );
+  }
+}
+class _ManualBlockDialog extends StatefulWidget {
+  final List<String> buses;
+
+  final String? initialBus;
+  final DateTime? initialFrom;
+  final DateTime? initialTo;
+  final String? initialNote;
+
+  const _ManualBlockDialog({
+    super.key,
+    required this.buses,
+    this.initialBus,
+    this.initialFrom,
+    this.initialTo,
+    this.initialNote,
+  });
+
+  @override
+  State<_ManualBlockDialog> createState() =>
+      _ManualBlockDialogState();
+}
+
+class _ManualBlockDialogState
+    extends State<_ManualBlockDialog> {
+
+  final sb = Supabase.instance.client;
+
+  String? bus;
+  DateTime? from;
+  DateTime? to;
+
+  late bool isEdit;
+
+  final noteCtrl = TextEditingController();
+
+  bool saving = false;
+
+  // ============================================================
+  // INIT
+  // ============================================================
+
+  @override
+  void initState() {
+    super.initState();
+
+    isEdit = widget.initialFrom != null;
+
+    bus = widget.initialBus;
+    from = widget.initialFrom;
+    to = widget.initialTo;
+
+    noteCtrl.text = widget.initialNote ?? '';
+  }
+
+  // ============================================================
+  // DISPOSE
+  // ============================================================
+
+  @override
+  void dispose() {
+    noteCtrl.dispose();
+    super.dispose();
+  }
+
+  // ============================================================
+  // DATE PICKERS
+  // ============================================================
+
+  Future<void> _pickFrom() async {
+    final d = await showDatePicker(
+      context: context,
+      firstDate: DateTime(2020),
+      lastDate: DateTime(2035),
+      initialDate: from ?? DateTime.now(),
+    );
+
+    if (d != null) {
+      setState(() => from = d);
+    }
+  }
+
+  Future<void> _pickTo() async {
+    final d = await showDatePicker(
+      context: context,
+      firstDate: DateTime(2020),
+      lastDate: DateTime(2035),
+      initialDate: to ?? from ?? DateTime.now(),
+    );
+
+    if (d != null) {
+      setState(() => to = d);
+    }
+  }
+
+  // ============================================================
+  // DELETE (ONLY FOR EDIT)
+  // ============================================================
+
+  Future<void> _delete() async {
+    if (!isEdit) return;
+
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text("Delete block?"),
+        content: const Text(
+          "This will permanently remove this manual block.\n\nAre you sure?",
+        ),
+        actions: [
+
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text("Cancel"),
+          ),
+
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: Colors.red,
+            ),
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text("Delete"),
+          ),
+        ],
+      ),
+    );
+
+    if (ok != true) return;
+
+    await sb
+        .from('samletdata')
+        .delete()
+        .eq('manual_block', true)
+        .eq('kilde', widget.initialBus!)
+        .gte('dato', fmtDb(widget.initialFrom!))
+        .lte('dato', fmtDb(widget.initialTo!));
+
+    if (!mounted) return;
+
+    Navigator.pop(context, true);
+  }
+
+  // ============================================================
+  // SAVE (ADD + EDIT)
+  // ============================================================
+
+  Future<void> _save() async {
+    if (saving) return;
+
+    if (bus == null || from == null || to == null) return;
+
+    setState(() => saving = true);
+
+    try {
+
+      // =====================================
+      // DELETE OLD (ONLY IF EDITING)
+      // =====================================
+      if (isEdit) {
+        await sb
+            .from('samletdata')
+            .delete()
+            .eq('manual_block', true)
+            .eq('kilde', widget.initialBus!)
+            .gte('dato', fmtDb(widget.initialFrom!))
+            .lte('dato', fmtDb(widget.initialTo!));
+      }
+
+      // =====================================
+      // INSERT NEW
+      // =====================================
+      final rows = <Map<String, dynamic>>[];
+
+      DateTime d = normalize(from!);
+      final end = normalize(to!);
+
+      while (!d.isAfter(end)) {
+        rows.add({
+          'dato': fmtDb(d),
+          'kilde': bus,
+          'produksjon': '[BLOCK]',
+          'manual_block': true,
+          'note': noteCtrl.text.trim(),
+          'status': 'manual',
+        });
+
+        d = d.add(const Duration(days: 1));
+      }
+
+      await sb.from('samletdata').insert(rows);
+
+      if (!mounted) return;
+
+      Navigator.pop(context, true);
+
+    } finally {
+      if (mounted) {
+        setState(() => saving = false);
+      }
+    }
+  }
+
+  // ============================================================
+  // UI
+  // ============================================================
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text(isEdit ? "Edit block" : "Add block"),
+
+      content: SizedBox(
+        width: 420,
+
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+
+          children: [
+
+            // ================= BUS =================
+            DropdownButtonFormField<String>(
+              value: bus,
+
+              decoration: const InputDecoration(
+                labelText: "Bus",
+                border: OutlineInputBorder(),
+              ),
+
+              items: widget.buses
+                  .map(
+                    (b) => DropdownMenuItem(
+                      value: b,
+                      child: Text(b),
+                    ),
+                  )
+                  .toList(),
+
+              onChanged: (v) => setState(() => bus = v),
+            ),
+
+            const SizedBox(height: 12),
+
+            // ================= FROM =================
+            TextField(
+              readOnly: true,
+              onTap: _pickFrom,
+
+              decoration: InputDecoration(
+                labelText: "From",
+                border: const OutlineInputBorder(),
+                hintText: from == null
+                    ? ''
+                    : DateFormat('dd.MM.yyyy').format(from!),
+              ),
+            ),
+
+            const SizedBox(height: 12),
+
+            // ================= TO =================
+            TextField(
+              readOnly: true,
+              onTap: _pickTo,
+
+              decoration: InputDecoration(
+                labelText: "To",
+                border: const OutlineInputBorder(),
+                hintText: to == null
+                    ? ''
+                    : DateFormat('dd.MM.yyyy').format(to!),
+              ),
+            ),
+
+            const SizedBox(height: 12),
+
+            // ================= NOTE =================
+            TextField(
+              controller: noteCtrl,
+              maxLines: 2,
+
+              decoration: const InputDecoration(
+                labelText: "Note",
+                border: OutlineInputBorder(),
+              ),
+            ),
+          ],
+        ),
+      ),
+
+      actions: [
+
+        // DELETE (ONLY WHEN EDITING)
+        if (isEdit)
+          TextButton.icon(
+            onPressed: saving ? null : _delete,
+            icon: const Icon(Icons.delete, color: Colors.red),
+            label: const Text(
+              "Delete",
+              style: TextStyle(color: Colors.red),
+            ),
+          ),
+
+        if (isEdit) const Spacer(),
+
+        // CANCEL
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text("Cancel"),
+        ),
+
+        // SAVE
+        FilledButton(
+          onPressed: saving ? null : _save,
+
+          child: saving
+              ? const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Text("Save"),
         ),
       ],
     );
