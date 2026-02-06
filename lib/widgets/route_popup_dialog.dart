@@ -240,9 +240,9 @@ String _buildExtra() {
   }
 
   // =================================================
-  // SAVE
-  // =================================================
-  Future<void> _save() async {
+// SAVE
+// =================================================
+Future<void> _save() async {
   if (_distanceKm == null) return;
 
   try {
@@ -257,21 +257,62 @@ String _buildExtra() {
     final from = _fromCtrl.text.trim();
     final to = _toCtrl.text.trim();
 
+    // ----------------------------------------
+    // ALLOWED COUNTRIES ONLY
+    // ----------------------------------------
+
+    const allowed = {
+      'dk',
+      'be',
+      'pl',
+      'at',
+      'hr',
+      'si',
+      'de'
+    };
+
+    final Map<String, double> countryFields = {};
+
+    _countryKm.forEach((country, km) {
+      final code = country.toLowerCase();
+
+      if (allowed.contains(code)) {
+        countryFields['km_$code'] = km;
+      }
+    });
+
+    debugPrint("🌍 Country KM (filtered): $countryFields");
+
+    // ----------------------------------------
+    // BUILD DATA
+    // ----------------------------------------
+
+    final data = {
+      'from_place': from,
+      'to_place': to,
+
+      // metadata
+      'extra': extra,
+      'ferry_name': ferryName,
+      'toll_nightliner': toll,
+
+      // total
+      'distance_total_km': _distanceKm,
+
+      // per country (only allowed)
+      ...countryFields,
+    };
+
+    debugPrint("💾 Saving route: $data");
+
+    // ----------------------------------------
+    // SAVE
+    // ----------------------------------------
+
     await Supabase.instance.client
         .from('routes_all')
         .upsert(
-          {
-            'from_place': from,
-            'to_place': to,
-
-            // metadata
-            'extra': extra,
-            'ferry_name': ferryName,
-            'toll_nightliner': toll,
-
-            // ✅ riktig kolonne
-            'distance_total_km': _distanceKm,
-          },
+          data,
           onConflict: 'from_place,to_place',
         );
 
@@ -279,9 +320,7 @@ String _buildExtra() {
 
     Navigator.pop(context, true);
 
-  } 
-  
-  catch (e, st) {
+  } catch (e, st) {
     debugPrint("❌ Save failed: $e");
     debugPrint("$st");
 

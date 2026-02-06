@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../state/settings_store.dart';
+import '../pages/routes_admin_page.dart';
 
 class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key});
@@ -387,22 +388,35 @@ debugPrint("SESSION: $session");
             // ---------------- BUTTONS ----------------
 
             Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
+  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+  children: [
 
-                FilledButton.icon(
-                  onPressed: _openAddUserDialog,
-                  icon: const Icon(Icons.person_add),
-                  label: const Text("Add user"),
-                ),
+    FilledButton.icon(
+      onPressed: () {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => const RoutesAdminPage(),
+          ),
+        );
+      },
+      icon: const Icon(Icons.route),
+      label: const Text("Manage routes"),
+    ),
 
-                FilledButton.icon(
-                  onPressed: _save,
-                  icon: const Icon(Icons.save),
-                  label: const Text("Save"),
-                ),
-              ],
-            ),
+    FilledButton.icon(
+      onPressed: _openAddUserDialog,
+      icon: const Icon(Icons.person_add),
+      label: const Text("Add user"),
+    ),
+
+    FilledButton.icon(
+      onPressed: _save,
+      icon: const Icon(Icons.save),
+      label: const Text("Save"),
+    ),
+  ],
+),
           ],
         ),
       ),

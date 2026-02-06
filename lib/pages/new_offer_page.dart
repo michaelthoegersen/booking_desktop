@@ -1526,8 +1526,8 @@ debugPrint("LOOKUP: '$fromN' → '$toN'");
       if ((res['km_pl'] as num?) != null && (res['km_pl'] as num) > 0)
         'PL': (res['km_pl'] as num).toDouble(),
 
-      if ((res['km_au'] as num?) != null && (res['km_au'] as num) > 0)
-        'AT': (res['km_au'] as num).toDouble(),
+      if ((res['km_at'] as num?) != null && (res['km_at'] as num) > 0)
+        'AT': (res['km_at'] as num).toDouble(),
 
       if ((res['km_hr'] as num?) != null && (res['km_hr'] as num) > 0)
         'HR': (res['km_hr'] as num).toDouble(),
@@ -1698,7 +1698,9 @@ final key = _cacheKey(from, toRaw);
 final ferry = _ferryCache[key] ?? 0.0;
 final toll  = _tollCache[key] ?? 0.0;
 final extra = _extraCache[key] ?? ''; // ✅ HER ER FIKSEN
-final country = _countryKmCache[key] ?? {};
+final country = Map<String, double>.from(
+  _countryKmCache[key] ?? {},
+);
 
 
 // ---------- MERGE TRAVEL ----------
@@ -1715,7 +1717,8 @@ if (pendingTravelIndex != null && km != null && km > 0) {
   // ✅ BRUK DB-EXTRA
   extraByIndex[pendingTravelIndex] = extra;
 
-  countryKmByIndex[pendingTravelIndex] = country;
+  countryKmByIndex[pendingTravelIndex] =
+    Map<String, double>.from(country);
 
   // Null ut original
   kmByIndex[i] = 0;
@@ -1738,7 +1741,8 @@ if (pendingTravelIndex != null && km != null && km > 0) {
     ferryByIndex[i] = ferry;
     tollByIndex[i] = toll;
     extraByIndex[i] = extra;
-    countryKmByIndex[i] = country;
+    countryKmByIndex[i] =
+    Map<String, double>.from(country);
 
     if (seenTravel) {
       travelBefore[i] = true;

@@ -37,7 +37,7 @@ class RoutesService {
       km_de,
       km_be,
       km_pl,
-      km_au,
+      km_at,
       km_hr,
       km_si,
       km_other
@@ -218,7 +218,7 @@ class RoutesService {
       'km_de': countryKm['DE'] ?? 0,
       'km_be': countryKm['BE'] ?? 0,
       'km_pl': countryKm['PL'] ?? 0,
-      'km_au': countryKm['AT'] ?? 0,
+      'km_at': countryKm['AT'] ?? 0,
       'km_hr': countryKm['HR'] ?? 0,
       'km_si': countryKm['SI'] ?? 0,
       'km_other': countryKm['OTHER'] ?? 0,
