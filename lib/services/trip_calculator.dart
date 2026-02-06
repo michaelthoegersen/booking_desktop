@@ -171,29 +171,62 @@ class TripCalculator {
         extraKm * settings.extraKmPrice;
 
 // ----------------------------------------
-// D.DRIVE + CLUSTER LOGIC
+// D.DRIVE + DAY-BASED CLUSTER LOGIC
 // ----------------------------------------
 
 final double threshold = settings.dDriveKmThreshold;
 final double hardLimit = threshold * 2;
 
-// 1️⃣ Finn alle D.Drive-dager (indekser)
-final List<int> dDriveIndexes = [];
+// 1️⃣ Group legs by date
+final Map<String, List<int>> dayToIndexes = {};
 
 for (int i = 0; i < entryCount; i++) {
-  final double km = legKm[i];
-  final bool hadTravel = hasTravelBefore[i];
+  final d = dates[i];
+
+  final key = '${d.year}-${d.month}-${d.day}';
+
+  dayToIndexes.putIfAbsent(key, () => []);
+  dayToIndexes[key]!.add(i);
+}
+
+// 2️⃣ Calculate km per day
+final Map<String, double> dayKm = {};
+
+dayToIndexes.forEach((day, indexes) {
+  double sum = 0;
+
+  for (final i in indexes) {
+    sum += legKm[i];
+  }
+
+  dayKm[day] = sum;
+});
+
+// 3️⃣ Find D.Drive days
+final List<int> dDriveIndexes = [];
+
+for (final entry in dayToIndexes.entries) {
+  final day = entry.key;
+  final indexes = entry.value;
+
+  final double km = dayKm[day] ?? 0;
 
   if (km <= 0) continue;
   if (km < threshold) continue;
 
-  // Travel-regel
+  final bool hadTravel =
+      indexes.any((i) => hasTravelBefore[i]);
+
   if (hadTravel && km < hardLimit) continue;
 
-  dDriveIndexes.add(i);
+  // Mark all legs on this day
+  dDriveIndexes.addAll(indexes);
 }
 
-// 2️⃣ Gruppér i blokker
+// Sort for clustering
+dDriveIndexes.sort();
+
+// 4️⃣ Cluster logic (unchanged)
 final List<List<int>> clusters = [];
 
 List<int> current = [];
@@ -206,7 +239,6 @@ for (final idx in dDriveIndexes) {
 
   final prev = current.last;
 
-  // Avstand i dager
   if (idx - prev <= 2) {
     current.add(idx);
   } else {
@@ -219,8 +251,11 @@ if (current.isNotEmpty) {
   clusters.add(current);
 }
 
-// 3️⃣ Kalkuler kostnader
-final int baseDDriveDays = dDriveIndexes.length;
+// 5️⃣ Cost calculation
+final int baseDDriveDays =
+    dayKm.entries
+        .where((e) => e.value >= threshold)
+        .length;
 
 int extraDays = 0;
 int flightTickets = 0;
@@ -232,13 +267,11 @@ for (final cluster in clusters) {
   final bool startsTour = first == 0;
   final bool endsTour = last == entryCount - 1;
 
-  // Før tur
   if (!startsTour) {
     extraDays++;
     flightTickets++;
   }
 
-  // Etter tur
   if (!endsTour) {
     extraDays++;
     flightTickets++;

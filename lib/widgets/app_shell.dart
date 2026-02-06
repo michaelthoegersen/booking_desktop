@@ -37,8 +37,53 @@ class AppShell extends StatelessWidget {
 // ------------------------------------------------------------
 // TOP BAR
 // ------------------------------------------------------------
-class _TopBar extends StatelessWidget {
+class _TopBar extends StatefulWidget {
   const _TopBar();
+
+  @override
+  State<_TopBar> createState() => _TopBarState();
+}
+
+class _TopBarState extends State<_TopBar> {
+  String? fullName;
+  bool loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadUser();
+  }
+
+  Future<void> _loadUser() async {
+    final sb = Supabase.instance.client;
+    final user = sb.auth.currentUser;
+
+    if (user == null) return;
+
+    try {
+      final res = await sb
+          .from('profiles') // 👈 endre hvis tabellen heter noe annet
+          .select('name')
+          .eq('id', user.id)
+          .single();
+
+      if (!mounted) return;
+
+      setState(() {
+        fullName = res['name'];
+        loading = false;
+      });
+
+    } catch (e) {
+      debugPrint("User load failed: $e");
+
+      if (!mounted) return;
+
+      setState(() {
+        loading = false;
+      });
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -95,35 +140,6 @@ class _TopBar extends StatelessWidget {
           const SizedBox(width: 12),
 
           const Spacer(),
-
-          // ================= GOOGLE TEST BUTTON =================
-          OutlinedButton.icon(
-            icon: const Icon(
-              Icons.public,
-              size: 18,
-              color: Colors.white,
-            ),
-            label: const Text(
-              "Google Test",
-              style: TextStyle(color: Colors.white),
-            ),
-            style: OutlinedButton.styleFrom(
-              side: const BorderSide(color: Colors.white24),
-              backgroundColor: Colors.white10,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(999),
-              ),
-              padding: const EdgeInsets.symmetric(
-                horizontal: 14,
-                vertical: 12,
-              ),
-            ),
-            onPressed: () {
-              context.push('/google-test');
-            },
-          ),
-
-          const SizedBox(width: 12),
 
           // ---------------- USER MENU ----------------
           PopupMenuButton<String>(
@@ -189,21 +205,29 @@ class _TopBar extends StatelessWidget {
                 borderRadius: BorderRadius.circular(999),
                 border: Border.all(color: Colors.white24),
               ),
-              child: const Row(
-                children: [
-                  Icon(Icons.person, color: Colors.white, size: 20),
-                  SizedBox(width: 8),
-                  Text(
-                    "Signed in",
-                    style: TextStyle(color: Colors.white),
-                  ),
-                  SizedBox(width: 8),
-                  Icon(
-                    Icons.keyboard_arrow_down,
-                    color: Colors.white70,
-                  ),
-                ],
-              ),
+              child: Row(
+  children: [
+    const Icon(Icons.person, color: Colors.white, size: 20),
+    const SizedBox(width: 8),
+
+    Text(
+  loading
+      ? "..."
+      : (fullName ?? email.split('@').first),
+  style: const TextStyle(
+    color: Colors.white,
+    fontWeight: FontWeight.w600,
+  ),
+),
+
+    const SizedBox(width: 8),
+
+    const Icon(
+      Icons.keyboard_arrow_down,
+      color: Colors.white70,
+    ),
+  ],
+),
             ),
           ),
         ],

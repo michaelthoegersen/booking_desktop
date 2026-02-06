@@ -341,6 +341,16 @@ Future<void> _recalcAllRounds() async {
   // HELPERS
   // ===================================================
 
+  void _clearAllRouteCache() {
+  _distanceCache.clear();
+  _ferryCache.clear();
+  _tollCache.clear();
+  _extraCache.clear();
+  _countryKmCache.clear();
+
+  debugPrint("🔥 Route cache cleared");
+}
+
   DateTime _getNextAvailableDate() {
   final entries = offer.rounds[roundIndex].entries;
 
@@ -620,16 +630,25 @@ TextField(
 
                 // ---------------- SAVE TO DB ----------------
                 await sb.from('routes_all').insert({
-                'from_place': from,
-                'to_place': to,
-                'distance_total_km': km,
-                'toll_nightliner': toll,              
-                'extra': extra,
-              });
+  'from_place': from,
+  'to_place': to,
+  'distance_total_km': km,
+  'toll_nightliner': toll,              
+  'extra': extra,
+});
 
-                if (!mounted) return;
+// 🔥 CLEAR CACHE
+final key = _cacheKey(from, to);
 
-                Navigator.pop(ctx);
+_distanceCache.remove(key);
+_ferryCache.remove(key);
+_tollCache.remove(key);
+_extraCache.remove(key);
+_countryKmCache.remove(key);
+
+if (!mounted) return;
+
+Navigator.pop(ctx);
 
                 // ---------------- RECALC ----------------
                 await _recalcKm();
@@ -781,7 +800,7 @@ String _mapCalendarStatus(String? status) {
       return 'Draft';
 
     case 'inquiry':
-      return 'Sent';
+      return 'Inquiry';
 
     case 'confirmed':
       return 'Confirmed';
@@ -979,13 +998,18 @@ Future<void> _openRoutePreview() async {
   // ================================
   // OPEN POPUP
   // ================================
-  showDialog(
-    context: context,
-    builder: (_) => RoutePopupDialog(
-      start: from!,
-      stops: stops,
-    ),
-  );
+  final updated = await showDialog<bool>(
+  context: context,
+  builder: (_) => RoutePopupDialog(
+    start: from!,
+    stops: stops,
+  ),
+);
+
+if (updated == true) {
+  _clearAllRouteCache();   // 👈 NY
+  await _recalcKm();       // 👈 TVING RELOAD
+}
 }
   Future<void> _onAddMissingRoutePressed() async {
 

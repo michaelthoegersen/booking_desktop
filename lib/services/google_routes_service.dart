@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:http/http.dart' as http;
@@ -16,10 +17,9 @@ class GoogleRoutesService {
       dotenv.env['GOOGLE_MAPS_API_KEY'] ?? '';
 
   // ============================================================
-  // ROUTE WITH VIA SUPPORT (ROBUST)
+  // ROUTE WITH VIA + ALTERNATIVES
   // ============================================================
   Future<Map<String, dynamic>> getRouteWithVia({
-    
     required List<String> places,
   }) async {
     if (_apiKey.isEmpty) {
@@ -31,7 +31,9 @@ class GoogleRoutesService {
     }
 
     final url = Uri.parse(_baseUrl);
-debugPrint("🔥 NEW ROUTE SERVICE ACTIVE");
+
+    debugPrint("🔥 GOOGLE ROUTES (MULTI)");
+
     // ----------------------------------------------------------
     // BUILD BODY
     // ----------------------------------------------------------
@@ -41,17 +43,21 @@ debugPrint("🔥 NEW ROUTE SERVICE ACTIVE");
 
     final intermediates = places
         .sublist(1, places.length - 1)
-        .map((p) => {
-              "address": p,
-            })
+        .map((p) => {"address": p})
         .toList();
 
     final body = {
       "origin": {"address": origin},
       "destination": {"address": destination},
+
       if (intermediates.isNotEmpty)
         "intermediates": intermediates,
+
       "travelMode": "DRIVE",
+
+      // Request multiple routes
+      "computeAlternativeRoutes": true,
+
       "routingPreference": "TRAFFIC_AWARE",
     };
 
@@ -71,7 +77,7 @@ debugPrint("🔥 NEW ROUTE SERVICE ACTIVE");
               'Content-Type': 'application/json',
               'X-Goog-Api-Key': _apiKey,
 
-              // 👇 IMPORTANT: ask for legs too
+              // Ask only what we need
               'X-Goog-FieldMask':
                   'routes.distanceMeters,'
                   'routes.legs.distanceMeters,'
@@ -109,112 +115,104 @@ debugPrint("🔥 NEW ROUTE SERVICE ACTIVE");
       );
     }
 
-    final route = routes[0];
+    // ----------------------------------------------------------
+    // PARSE ALL ROUTES
+    // ----------------------------------------------------------
 
-    final polyline =
-        route['polyline']?['encodedPolyline'];
+    final List<Map<String, dynamic>> parsedRoutes = [];
 
-    if (polyline == null) {
-      throw Exception('Missing polyline in route');
-    }
+    for (final route in routes) {
+      final polyline =
+          route['polyline']?['encodedPolyline'];
 
-    // ==========================================================
-// DISTANCE (SAFE HANDLING)
-// ==========================================================
+      if (polyline == null) continue;
 
-num? distanceMeters = route['distanceMeters'];
+      num? distanceMeters = route['distanceMeters'];
 
-// Fallback 1: sum legs
-if (distanceMeters == null) {
-  final legs = route['legs'];
+      // ==================================================
+      // DISTANCE FALLBACKS
+      // ==================================================
 
-  if (legs is List && legs.isNotEmpty) {
-    num sum = 0;
+      // Fallback 1: sum legs
+      if (distanceMeters == null) {
+        final legs = route['legs'];
 
-    for (final leg in legs) {
-      final d = leg['distanceMeters'];
+        if (legs is List && legs.isNotEmpty) {
+          num sum = 0;
 
-      if (d is num) {
-        sum += d;
+          for (final leg in legs) {
+            final d = leg['distanceMeters'];
+
+            if (d is num) {
+              sum += d;
+            }
+          }
+
+          if (sum > 0) {
+            distanceMeters = sum;
+          }
+        }
       }
+
+      // Fallback 2: calculate from polyline
+      if (distanceMeters == null) {
+        try {
+          final points = _decodePolyline(polyline);
+
+          double total = 0;
+
+          for (int i = 0; i < points.length - 1; i++) {
+            total += _haversine(
+              points[i][0],
+              points[i][1],
+              points[i + 1][0],
+              points[i + 1][1],
+            );
+          }
+
+          if (total > 0) {
+            distanceMeters = total;
+          }
+        } catch (_) {}
+      }
+
+      // Fallback 3: straight-line estimate
+      if (distanceMeters == null) {
+        final points = _decodePolyline(polyline);
+
+        if (points.length >= 2) {
+          final start = points.first;
+          final end = points.last;
+
+          final direct = _haversine(
+            start[0],
+            start[1],
+            end[0],
+            end[1],
+          );
+
+          // Inflate to simulate roads
+          distanceMeters = direct * 1.25;
+        } else {
+          distanceMeters = 50000; // 50km hard fallback
+        }
+      }
+
+      parsedRoutes.add({
+        "distanceMeters": distanceMeters,
+        "polyline": polyline,
+      });
     }
 
-    if (sum > 0) {
-      distanceMeters = sum;
-
-      debugPrint(
-        "⚠️ Used legs distance fallback: $sum m",
-      );
+    if (parsedRoutes.isEmpty) {
+      throw Exception("No valid routes returned");
     }
-  }
-}
-
-// Fallback 2: calculate from polyline
-if (distanceMeters == null) {
-  try {
-    final points = _decodePolyline(polyline);
-
-    double total = 0;
-
-    for (int i = 0; i < points.length - 1; i++) {
-      total += _haversine(
-        points[i][0],
-        points[i][1],
-        points[i + 1][0],
-        points[i + 1][1],
-      );
-    }
-
-    if (total > 0) {
-      distanceMeters = total;
-
-      debugPrint(
-        "⚠️ Used polyline distance fallback: ${total.toStringAsFixed(0)} m",
-      );
-    }
-  } catch (e) {
-    debugPrint("❌ Polyline calc failed: $e");
-  }
-}
-
-// Still missing = hard error
-// FINAL FALLBACK: straight-line estimate
-if (distanceMeters == null) {
-  debugPrint("⚠️ Using straight-line fallback");
-
-  final points = _decodePolyline(polyline);
-
-  if (points.length >= 2) {
-    final start = points.first;
-    final end = points.last;
-
-    final direct = _haversine(
-      start[0],
-      start[1],
-      end[0],
-      end[1],
-    );
-
-    // Inflate by 25% to simulate roads
-    distanceMeters = direct * 1.25;
-
-    debugPrint(
-      "⚠️ Estimated distance: ${distanceMeters.toStringAsFixed(0)} m",
-    );
-  } else {
-    // Absolute worst case
-    distanceMeters = 50000; // 50 km default
-    debugPrint("⚠️ Used hard fallback: 50km");
-  }
-
-}
 
     // ----------------------------------------------------------
-    // RESULT
+    // RESULT (MULTI)
     // ----------------------------------------------------------
     return {
-      "distanceMeters": distanceMeters,
-      "polyline": polyline,
+      "routes": parsedRoutes,
     };
   }
 
@@ -229,77 +227,82 @@ if (distanceMeters == null) {
       places: [from, to],
     );
   }
-  // ==========================================================
-// POLYLINE DISTANCE UTILS
-// ==========================================================
 
-List<List<double>> _decodePolyline(String encoded) {
-  List<List<double>> points = [];
+  // ============================================================
+  // POLYLINE UTILS
+  // ============================================================
 
-  int index = 0;
-  int lat = 0;
-  int lng = 0;
+  List<List<double>> _decodePolyline(String encoded) {
+    List<List<double>> points = [];
 
-  while (index < encoded.length) {
-    int shift = 0;
-    int result = 0;
+    int index = 0;
+    int lat = 0;
+    int lng = 0;
 
-    int b;
-    do {
-      b = encoded.codeUnitAt(index++) - 63;
-      result |= (b & 0x1f) << shift;
-      shift += 5;
-    } while (b >= 0x20);
+    while (index < encoded.length) {
+      int shift = 0;
+      int result = 0;
 
-    int dlat =
-        (result & 1) != 0 ? ~(result >> 1) : (result >> 1);
-    lat += dlat;
+      int b;
 
-    shift = 0;
-    result = 0;
+      do {
+        b = encoded.codeUnitAt(index++) - 63;
+        result |= (b & 0x1f) << shift;
+        shift += 5;
+      } while (b >= 0x20);
 
-    do {
-      b = encoded.codeUnitAt(index++) - 63;
-      result |= (b & 0x1f) << shift;
-      shift += 5;
-    } while (b >= 0x20);
+      int dlat =
+          (result & 1) != 0 ? ~(result >> 1) : (result >> 1);
 
-    int dlng =
-        (result & 1) != 0 ? ~(result >> 1) : (result >> 1);
-    lng += dlng;
+      lat += dlat;
 
-    points.add([
-      lat / 1E5,
-      lng / 1E5,
-    ]);
+      shift = 0;
+      result = 0;
+
+      do {
+        b = encoded.codeUnitAt(index++) - 63;
+        result |= (b & 0x1f) << shift;
+        shift += 5;
+      } while (b >= 0x20);
+
+      int dlng =
+          (result & 1) != 0 ? ~(result >> 1) : (result >> 1);
+
+      lng += dlng;
+
+      points.add([
+        lat / 1E5,
+        lng / 1E5,
+      ]);
+    }
+
+    return points;
   }
 
-  return points;
-}
+  double _haversine(
+    double lat1,
+    double lon1,
+    double lat2,
+    double lon2,
+  ) {
+    const R = 6371000; // meters
 
-double _haversine(
-  double lat1,
-  double lon1,
-  double lat2,
-  double lon2,
-) {
-  const R = 6371000; // meters
+    final dLat = _deg2rad(lat2 - lat1);
+    final dLon = _deg2rad(lon2 - lon1);
 
-  final dLat = _deg2rad(lat2 - lat1);
-  final dLon = _deg2rad(lon2 - lon1);
+    final a =
+        sin(dLat / 2) * sin(dLat / 2) +
+            cos(_deg2rad(lat1)) *
+                cos(_deg2rad(lat2)) *
+                sin(dLon / 2) *
+                sin(dLon / 2);
 
-  final a =
-      (sin(dLat / 2) * sin(dLat / 2)) +
-          cos(_deg2rad(lat1)) *
-              cos(_deg2rad(lat2)) *
-              (sin(dLon / 2) * sin(dLon / 2));
+    final c = 2 * atan2(sqrt(a), sqrt(1 - a));
 
-  final c = 2 * atan2(sqrt(a), sqrt(1 - a));
+    return R * c;
+  }
 
-  return R * c;
-}
-
-double _deg2rad(double deg) {
-  return deg * (pi / 180);
-}
+  double _deg2rad(double deg) {
+    return deg * (pi / 180);
+  }
 }

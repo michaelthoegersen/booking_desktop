@@ -47,14 +47,17 @@ class DragBookingData {
   final String fromBus;
   final DateTime from;
   final DateTime to;
+  final String draftId; // 👈 NY
 
   DragBookingData({
     required this.production,
     required this.fromBus,
     required this.from,
     required this.to,
+    required this.draftId,
   });
 }
+
 // ============================================================
 // STATUS COLORS
 // ============================================================
@@ -648,17 +651,45 @@ Widget _buildCalendarOnlyRow(
   String bus,
   List<DateTime> days,
 ) {
-
   final segments = buildSegments(bus, days);
 
   return DragTarget<DragBookingData>(
 
-    onWillAccept: (data) {
-      return data != null && data.fromBus != bus;
+    // =====================================================
+    // 🚫 IKKE TILLAT DROP PÅ OPPTATTE DATOER
+    // =====================================================
+    onWillAccept: (drag) {
+      if (drag == null) return false;
+
+      // Samme buss → ikke lov
+      if (drag.fromBus == bus) return false;
+
+      // Sjekk om hele perioden er ledig
+      DateTime d = normalize(drag.from);
+      final end = normalize(drag.to);
+
+      while (!d.isAfter(end)) {
+        final items = data[bus]?[d];
+
+        // Finnes det noe denne dagen → stopp
+        if (items != null && items.isNotEmpty) {
+          return false;
+        }
+
+        d = d.add(const Duration(days: 1));
+      }
+
+      return true; // Alt ledig → OK
     },
 
+    // =====================================================
+    // ✅ VED DROP
+    // =====================================================
     onAccept: (data) async {
 
+      // ============================
+      // 1️⃣ FLYTT BOOKING
+      // ============================
       await supabase
           .from('samletdata')
           .update({'kilde': bus})
@@ -667,16 +698,39 @@ Widget _buildCalendarOnlyRow(
           .gte('dato', fmtDb(data.from))
           .lte('dato', fmtDb(data.to));
 
-      await loadRange(
-        isMonthView
-            ? DateTime(monthStart.year, monthStart.month, 1)
-            : weekStart.subtract(const Duration(days: 7)),
-        isMonthView
-            ? DateTime(monthStart.year, monthStart.month + 1, 0)
-            : weekStart.add(const Duration(days: 14)),
+      if (!mounted) return;
+
+      // ============================
+      // 2️⃣ VIS STATUS-DIALOG
+      // ============================
+      final changed = await showDialog<bool>(
+        context: context,
+        builder: (_) => StatusDatePickerDialog(
+          draftId: data.draftId, // 👈 riktig ID
+          newStatus: 'confirmed',
+        ),
       );
+
+      if (!mounted) return;
+
+      // ============================
+      // 3️⃣ RELOAD
+      // ============================
+      if (changed == true) {
+        await loadRange(
+          isMonthView
+              ? DateTime(monthStart.year, monthStart.month, 1)
+              : weekStart.subtract(const Duration(days: 7)),
+          isMonthView
+              ? DateTime(monthStart.year, monthStart.month + 1, 0)
+              : weekStart.add(const Duration(days: 14)),
+        );
+      }
     },
 
+    // =====================================================
+    // 🎨 UI
+    // =====================================================
     builder: (context, candidate, rejected) {
 
       final highlight = candidate.isNotEmpty;
@@ -1248,11 +1302,12 @@ Widget build(BuildContext context) {
 
     child: Draggable<DragBookingData>(
       data: DragBookingData(
-        production: title,
-        fromBus: bus,
-        from: from,
-        to: to,
-      ),
+  production: title,
+  fromBus: bus,
+  from: from,
+  to: to,
+  draftId: draftId, // 👈 HER
+),
 
       affinity: Axis.vertical,
 

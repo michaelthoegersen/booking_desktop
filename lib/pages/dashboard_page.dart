@@ -6,6 +6,9 @@ import 'package:latlong2/latlong.dart';
 import '../services/offer_storage_service.dart';
 import '../widgets/bus_map_widget.dart';
 import 'dart:convert';
+import '../models/bus_position.dart';
+import '../data/city_coords.dart';
+import '../services/openroute_routing.dart';
 
 class DashboardPage extends StatefulWidget {
   const DashboardPage({super.key});
@@ -13,8 +16,29 @@ class DashboardPage extends StatefulWidget {
   @override
   State<DashboardPage> createState() => _DashboardPageState();
 }
-
 class _DashboardPageState extends State<DashboardPage> {
+  String? _extractTime(String? raw) {
+  if (raw == null) return null;
+
+  final match = RegExp(r'(\d{2}:\d{2})').firstMatch(raw);
+
+  return match?.group(1);
+}
+
+  DateTime? _parseDateTime(String date, String? time) {
+  try {
+    final safeTime =
+        (time == null || time.trim().isEmpty)
+            ? "00:00"
+            : time.trim();
+
+    return DateTime.parse("$date $safeTime");
+  } catch (e) {
+    debugPrint("⛔ Date parse failed: $date $time");
+    return null;
+  }
+
+}
 // ------------------------------------------------------------
 // CITY → COORDINATES (FOR MAP)
 // ------------------------------------------------------------
@@ -49,7 +73,7 @@ class _DashboardPageState extends State<DashboardPage> {
   // BUS LOCATIONS (TODAY)
   // ------------------------------------------------------------
 
-  Map<String, String> busLocationsToday = {};
+  Map<String, BusPosition> busLocationsToday = {};
 
   bool loadingBusLocations = false;
   String? busLocationError;
@@ -230,80 +254,179 @@ class _DashboardPageState extends State<DashboardPage> {
 
   try {
     final today = DateTime.now();
-
     final todayStr =
-        "${today.year}-"
-        "${today.month.toString().padLeft(2, '0')}-"
-        "${today.day.toString().padLeft(2, '0')}";
+        "${today.year}-${today.month.toString().padLeft(2, '0')}-${today.day.toString().padLeft(2, '0')}";
 
     final res = await sb
         .from('samletdata')
-        .select('kilde, sted')
-        .eq('dato', todayStr);
+        .select('kilde, sted, dato, getin')
+        .lte('dato', todayStr)
+        .order('dato', ascending: false);
 
     final rows = List<Map<String, dynamic>>.from(res);
 
-    final Map<String, String> map = {};
+    debugPrint("BUS ROWS: ${rows.length}");
+
+    // Gruppér per buss
+    final Map<String, List<Map<String, dynamic>>> grouped = {};
 
     for (final r in rows) {
-      final bus = r['kilde']?.toString().trim();
-      final place = r['sted']?.toString().trim();
+      final bus = r['kilde']?.toString();
+      if (bus == null) continue;
 
-      if (bus == null || bus.isEmpty) continue;
-
-      // Kun én per buss (første vinner)
-      if (!map.containsKey(bus)) {
-        map[bus] =
-            (place == null || place.isEmpty)
-                ? 'Linköping'
-                : place;
-      }
+      grouped.putIfAbsent(bus, () => []);
+      grouped[bus]!.add(r);
     }
 
-    debugPrint("BUS MAP: $map"); // 👈 debug
+    final Map<String, BusPosition> result = {};
+
+    // Behandle hver buss
+    await Future.forEach(
+      grouped.entries,
+      (MapEntry<String, List<Map<String, dynamic>>> entry) async {
+        final bus = entry.key;
+        final list = entry.value;
+
+        if (list.isEmpty) return;
+
+        final latest = list[0];
+
+        final place = latest['sted']?.toString();
+        final date = latest['dato']?.toString();
+        final raw = latest['getin']?.toString();
+
+        if (place == null || date == null) return;
+
+        // Kun én rad → statisk
+        if (list.length < 2 || raw == null || raw.isEmpty) {
+          result[bus] = BusPosition(place: place);
+          return;
+        }
+
+        final prev = list[1];
+
+        final prevPlace = prev['sted']?.toString();
+        final prevDate = prev['dato']?.toString();
+        final prevRaw = prev['getin']?.toString();
+
+        if (prevPlace == null || prevDate == null) {
+          result[bus] = BusPosition(place: place);
+          return;
+        }
+
+        final startTime =
+            _parseDateTime(prevDate, _extractTime(prevRaw));
+
+        final endTime =
+            _parseDateTime(date, _extractTime(raw));
+
+        if (startTime == null || endTime == null) {
+          result[bus] = BusPosition(place: place);
+          return;
+        }
+
+        final now = DateTime.now();
+
+        // Ikke underveis
+        if (!now.isAfter(startTime) || !now.isBefore(endTime)) {
+          result[bus] = BusPosition(place: place);
+          return;
+        }
+
+        final from = cityCoords[prevPlace.toLowerCase()];
+        final to = cityCoords[place.toLowerCase()];
+
+        if (from == null || to == null) {
+          result[bus] = BusPosition(place: place);
+          return;
+        }
+
+        final total = endTime.difference(startTime).inSeconds;
+        final passed = now.difference(startTime).inSeconds;
+
+        final p = passed / total;
+
+        // Hent rute
+        List<LatLng> route = [];
+
+        try {
+          route = await OpenRouteService.getRoute(from, to);
+        } catch (e) {
+          debugPrint("⚠️ Routing failed for $bus: $e");
+        }
+
+        // Fallback → rett linje
+        if (route.isEmpty) {
+          debugPrint("⚠️ Using linear fallback for $bus");
+
+          final lat =
+              from.latitude + (to.latitude - from.latitude) * p;
+
+          final lng =
+              from.longitude + (to.longitude - from.longitude) * p;
+
+          result[bus] = BusPosition(
+            livePos: LatLng(lat, lng),
+          );
+
+          return;
+        }
+
+        // Finn punkt på ruten
+        final index =
+            (p * (route.length - 1))
+                .clamp(0, route.length - 1)
+                .toInt();
+
+        final pos = route[index];
+
+        result[bus] = BusPosition(livePos: pos);
+      },
+    );
+
+    if (!mounted) return;
 
     setState(() {
-      busLocationsToday = map;
+      busLocationsToday = result;
     });
-  } catch (e) {
+  } catch (e, st) {
     debugPrint("BUS MAP ERROR: $e");
+    debugPrint(st.toString());
+
+    if (!mounted) return;
 
     setState(() {
       busLocationError = e.toString();
       busLocationsToday = {};
     });
   } finally {
-    setState(() => loadingBusLocations = false);
+    if (mounted) {
+      setState(() => loadingBusLocations = false);
+    }
   }
 }
 
+// ------------------------------------------------------------
+// FORMAT DATETIME
+// ------------------------------------------------------------
+String _fmtDateTime(dynamic value) {
+  try {
+    if (value == null) return "";
 
-  // ------------------------------------------------------------
-  // FORMAT DATETIME
-  // ------------------------------------------------------------
+    final d = value is DateTime
+        ? value
+        : DateTime.parse(value.toString());
 
-  String _fmtDateTime(dynamic value) {
-
-    try {
-
-      if (value == null) return "";
-
-      final d = value is DateTime
-          ? value
-          : DateTime.parse(value.toString());
-
-      return
-          "${d.day.toString().padLeft(2, '0')}."
-          "${d.month.toString().padLeft(2, '0')}."
-          "${d.year} "
-          "${d.hour.toString().padLeft(2, '0')}:"
-          "${d.minute.toString().padLeft(2, '0')}";
-
-    } catch (_) {
-      return "";
-    }
+    return
+        "${d.day.toString().padLeft(2, '0')}."
+        "${d.month.toString().padLeft(2, '0')}."
+        "${d.year} "
+        "${d.hour.toString().padLeft(2, '0')}:"
+        "${d.minute.toString().padLeft(2, '0')}";
+  } catch (_) {
+    return "";
   }
-
+}
 // ------------------------------------------------------------
 // DELETE DRAFT (FROM DASHBOARD)
 // ------------------------------------------------------------
