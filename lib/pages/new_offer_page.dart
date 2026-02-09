@@ -24,6 +24,7 @@ import 'package:flutter/foundation.dart';
 import '../services/routes_service.dart';
 import '../services/customers_service.dart';
 import '../state/current_offer_store.dart';
+import '../models/round_calc_result.dart';
 
 class NewOfferPage extends StatefulWidget {
   /// ✅ Hvis du sender inn offerId -> åpner den eksisterende draft
@@ -2063,19 +2064,18 @@ Future<RoundCalcResult> _calcRound(int ri) async {
 
   if (dates.isEmpty) {
 
-    final empty = TripCalculator.calculateRound(
+  final empty = TripCalculator.calculateRound(
   settings: SettingsStore.current,
   dates: const [],
   pickupEveningFirstDay: false,
   trailer: round.trailer,
   totalKm: 0,
   legKm: const [],
-  ferryCost: 0,
-  tollCost: 0,
 
-  // ✅ NY
+  ferries: SettingsStore.current.ferries, // ✅
+
   tollPerLeg: const [],
-  extraPerLeg: const [], // 👈 LEGG TIL
+  extraPerLeg: const [],
   hasTravelBefore: const [],
 );
 
@@ -2269,8 +2269,8 @@ final safeTravel = List.generate(
   trailer: round.trailer,
   totalKm: totalKm,
   legKm: safeLegKm,
-  ferryCost: ferryTotal,
-  tollCost: tollTotal,
+
+  ferries: SettingsStore.current.ferries, // ✅
 
   tollPerLeg: safeToll,
   extraPerLeg: safeExtra,
@@ -2359,22 +2359,18 @@ final calc = _roundCalcCache[roundIndex] ??
       pickupEveningFirstDay: round.pickupEveningFirstDay,
       trailer: round.trailer,
       totalKm: totalKm,
-      legKm: _kmByIndex.values
-          .whereType<double>()
-          .toList(),
-      ferryCost: _ferryByIndex.values.fold(0.0, (a, b) => a + b),
-      tollCost: _tollByIndex.values.fold(0.0, (a, b) => a + b),
+      legKm: _kmByIndex.values.whereType<double>().toList(),
+
+      ferries: SettingsStore.current.ferries, // ✅
 
       tollPerLeg: List.generate(
         round.entries.length,
         (i) => _tollByIndex[i] ?? 0,
       ),
-
       extraPerLeg: List.generate(
         round.entries.length,
         (i) => _extraByIndex[i] ?? '',
       ),
-
       hasTravelBefore: travelFlags,
     );
 

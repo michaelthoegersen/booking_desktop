@@ -1,3 +1,5 @@
+import 'ferry_definition.dart';
+
 class AppSettings {
   final double dayPrice;
   final double extraKmPrice;
@@ -14,6 +16,9 @@ class AppSettings {
   /// ✅ NEW: Dropbox root folder path
   final String dropboxRootPath;
 
+  /// ✅ NEW: Ferry definitions (used by TripCalculator)
+  final List<FerryDefinition> ferries;
+
   const AppSettings({
     required this.dayPrice,
     required this.extraKmPrice,
@@ -21,9 +26,13 @@ class AppSettings {
     required this.trailerKmPrice,
     required this.dDriveDayPrice,
     required this.flightTicketPrice,
+
     this.includedKmPerDay = 300,
     this.dDriveKmThreshold = 600,
     this.dropboxRootPath = '',
+
+    /// ✅ NEW
+    this.ferries = const [],
   });
 
   AppSettings copyWith({
@@ -36,6 +45,9 @@ class AppSettings {
     double? includedKmPerDay,
     double? dDriveKmThreshold,
     String? dropboxRootPath,
+
+    /// ✅ NEW
+    List<FerryDefinition>? ferries,
   }) {
     return AppSettings(
       dayPrice: dayPrice ?? this.dayPrice,
@@ -47,6 +59,9 @@ class AppSettings {
       includedKmPerDay: includedKmPerDay ?? this.includedKmPerDay,
       dDriveKmThreshold: dDriveKmThreshold ?? this.dDriveKmThreshold,
       dropboxRootPath: dropboxRootPath ?? this.dropboxRootPath,
+
+      /// ✅ NEW
+      ferries: ferries ?? this.ferries,
     );
   }
 }

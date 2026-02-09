@@ -122,10 +122,9 @@ for (final round in offer.rounds) {
   trailer: round.trailer,
   totalKm: 0,
   legKm: const [],
-  ferryCost: 0,
-  tollCost: 0,
 
-  // ✅ NY: ingen toll per leg her
+  ferries: SettingsStore.current.ferries, // ✅
+
   tollPerLeg: const [],
   extraPerLeg: List.filled(entries.length, ''),
   hasTravelBefore:

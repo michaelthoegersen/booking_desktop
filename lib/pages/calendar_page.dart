@@ -1578,62 +1578,105 @@ Future<void> load() async {
   // ============================================================
 
   Future<void> save() async {
+  if (saving) return;
 
-    if (saving) return;
+  setState(() {
+    saving = true;
+  });
 
+  try {
+    // =====================================================
+    // 0️⃣ HENT DRAFT ID (JOBB-ID)
+    // =====================================================
 
-    setState(() {
-      saving = true;
-    });
+    final draftId = rows.first['draft_id']?.toString();
 
+    if (draftId == null || draftId.isEmpty) {
+      throw Exception("Missing draft_id – cannot save");
+    }
 
-    try {
+    // =====================================================
+    // 1️⃣ HENT GAMMEL SJÅFØR (ÉN RAD)
+    // =====================================================
+
+    final prev = await supabase
+        .from('samletdata')
+        .select('sjafor')
+        .eq('draft_id', draftId)
+        .limit(1)
+        .maybeSingle();
+
+    final oldSjafor = (prev?['sjafor'] as String?)?.trim();
+    final newSjafor = sjaforCtrl.text.trim();
+
+    // =====================================================
+    // 2️⃣ OPPDATER FELLES FELT (ÉN GANG PER JOBB)
+    // =====================================================
+
+    await supabase
+        .from('samletdata')
+        .update({
+          'sjafor': newSjafor,
+          'status': statusCtrl.text.trim(),
+        })
+        .eq('draft_id', draftId);
+
+    // =====================================================
+    // 3️⃣ OPPDATER PER-DAG FELTER (UENDRET LOGIKK)
+    // =====================================================
+
+    for (final r in rows) {
+      final id = r['id'].toString();
 
       await supabase
           .from('samletdata')
           .update({
-            'sjafor': sjaforCtrl.text.trim(),
-            'status': statusCtrl.text.trim(),
+            'd_drive': dDriveCtrls[id]?.text.trim() ?? '',
+            'getin': itinCtrls[id]?.text.trim() ?? '',
+            'tid': timeCtrls[id]?.text.trim() ?? '',
+            'venue': venueCtrls[id]?.text.trim() ?? '',
+            'adresse': addrCtrls[id]?.text.trim() ?? '',
+            'kommentarer': commentCtrls[id]?.text.trim() ?? '',
           })
-          .eq('produksjon', widget.production)
-          .eq('kilde', widget.bus)
-          .gte('dato', fmtDb(widget.from))
-          .lte('dato', fmtDb(widget.to));
+          .eq('id', id);
+    }
 
+    // =====================================================
+    // 4️⃣ SEND PUSH – KUN FØRSTE GANG SJÅFØR SETTES
+    // =====================================================
 
-      for (final r in rows) {
+    final shouldSendPush =
+        (oldSjafor == null || oldSjafor.isEmpty) &&
+        newSjafor.isNotEmpty;
 
-        final id = r['id'].toString();
+    if (shouldSendPush) {
+      await supabase.functions.invoke(
+        'send-push',
+        body: {
+          'driver_name': newSjafor,
+          'production': widget.production,
+          'draft_id': draftId,
+        },
+      );
+    }
 
+    // =====================================================
+    // 5️⃣ FERDIG
+    // =====================================================
 
-        await supabase
-            .from('samletdata')
-            .update({
+    if (!mounted) return;
+    Navigator.pop(context, true);
 
-              'd_drive': dDriveCtrls[id]?.text.trim() ?? '',
-              'getin': itinCtrls[id]?.text.trim() ?? '',
-              'tid': timeCtrls[id]?.text.trim() ?? '',
-              'venue': venueCtrls[id]?.text.trim() ?? '',
-              'adresse': addrCtrls[id]?.text.trim() ?? '',
-              'kommentarer': commentCtrls[id]?.text.trim() ?? '',
-            })
-            .eq('id', id);
-      }
-
-
-      if (!mounted) return;
-
-      Navigator.pop(context, true);
-
-    } finally {
-
-      if (mounted) {
-        setState(() {
-          saving = false;
-        });
-      }
+  } catch (e) {
+    rethrow;
+  } finally {
+    if (mounted) {
+      setState(() {
+        saving = false;
+      });
     }
   }
+}
 
 
 

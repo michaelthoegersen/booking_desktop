@@ -7,6 +7,7 @@ import 'package:pdf/widgets.dart' as pw;
 import '../models/offer_draft.dart';
 import '../state/settings_store.dart';
 import 'package:tourflow/services/trip_calculator.dart';
+import '../models/round_calc_result.dart';
 
 class OfferPdfService {
   
