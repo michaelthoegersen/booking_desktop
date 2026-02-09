@@ -1,3 +1,5 @@
+
+
 import 'dart:typed_data';
 import 'dart:io';
 import 'dart:async';
@@ -75,6 +77,8 @@ final Map<String, double?> _distanceCache = {};
 final Map<String, double> _ferryCache = {};
 final Map<String, double> _tollCache = {};
 final Map<String, String> _extraCache = {};
+final Map<String, String> _ferryNameCache = {};
+Map<int, String> _ferryNameByIndex = {};
 final Map<String, Map<String, double>> _countryKmCache = {};
   // ===================================================
   // ROUND BREAKDOWN
@@ -1464,23 +1468,25 @@ Future<void> _scanPdf() async {
   // ✅ KM + ferry + toll + extra lookup from Supabase
   // ------------------------------------------------------------
   Future<double?> _fetchLegData({
-    
   required String from,
   required String to,
   required int index,
 }) async {
   final fromN = _norm(from);
-  final toN = _norm(to);
-  final key = _cacheKey(fromN, toN);
-debugPrint("LOOKUP: '$fromN' → '$toN'");
-  // ---------------- CACHE HIT ----------------
-  if (_distanceCache.containsKey(key)) {
-    _ferryByIndex[index] = _ferryCache[key] ?? 0.0;
-    _tollByIndex[index] = _tollCache[key] ?? 0.0;
-    _extraByIndex[index] = _extraCache[key] ?? '';
+  final toN   = _norm(to);
+  final key   = _cacheKey(fromN, toN);
 
-    // ✅ VIKTIG: land-cache også
-    _countryKmByIndex[index] = _countryKmCache[key] ?? {};
+  debugPrint("LOOKUP: '$fromN' → '$toN'");
+
+  // ===================================================
+  // CACHE HIT
+  // ===================================================
+  if (_distanceCache.containsKey(key)) {
+    _ferryByIndex[index]     = _ferryCache[key] ?? 0.0;
+    _tollByIndex[index]      = _tollCache[key] ?? 0.0;
+    _extraByIndex[index]     = _extraCache[key] ?? '';
+    _ferryNameByIndex[index]= _ferryNameCache[key] ?? '';
+    _countryKmByIndex[index]= _countryKmCache[key] ?? {};
 
     return _distanceCache[key];
   }
@@ -1491,79 +1497,105 @@ debugPrint("LOOKUP: '$fromN' → '$toN'");
       to: toN,
     );
 
+    // ===================================================
+    // NO ROUTE FOUND
+    // ===================================================
     if (res == null) {
-      _distanceCache[key] = null;
-      _ferryCache[key] = 0.0;
-      _tollCache[key] = 0.0;
-      _extraCache[key] = '';
-      _countryKmCache[key] = {};
+      _distanceCache[key]  = null;
+      _ferryCache[key]     = 0.0;
+      _tollCache[key]      = 0.0;
+      _extraCache[key]     = '';
+      _ferryNameCache[key]= '';
+      _countryKmCache[key]= {};
 
-      _ferryByIndex[index] = 0.0;
-      _tollByIndex[index] = 0.0;
-      _extraByIndex[index] = '';
-      _countryKmByIndex[index] = {};
+      _ferryByIndex[index]     = 0.0;
+      _tollByIndex[index]      = 0.0;
+      _extraByIndex[index]     = '';
+      _ferryNameByIndex[index]= '';
+      _countryKmByIndex[index]= {};
 
       return null;
     }
 
-    // ---------------- HOVEDDATA ----------------
-    final kmRaw = (res['distance_total_km'] as num?)?.toDouble();
-    final km = (kmRaw == null || kmRaw <= 0) ? null : kmRaw;
-    final ferry = (res['ferry_price'] as num?)?.toDouble() ?? 0.0;
-    final toll = (res['toll_nightliner'] as num?)?.toDouble() ?? 0.0;
-    final extra = (res['extra'] as String?)?.trim() ?? '';
+    // ===================================================
+    // READ DB FIELDS (SINGLE SOURCE OF TRUTH)
+    // ===================================================
+    final kmRaw      = (res['distance_total_km'] as num?)?.toDouble();
+    final km         = (kmRaw == null || kmRaw <= 0) ? null : kmRaw;
 
-    // ---------------- LAND-FORDELING ----------------
+    final ferryPrice =
+        (res['ferry_price'] as num?)?.toDouble() ?? 0.0;
+
+    final ferryName =
+        (res['ferry_name'] as String?)?.trim() ?? '';
+
+    final toll =
+        (res['toll_nightliner'] as num?)?.toDouble() ?? 0.0;
+
+    final extra =
+        (res['extra'] as String?)?.trim() ?? '';
+
+    // ===================================================
+    // COUNTRY KM BREAKDOWN
+    // ===================================================
     final Map<String, double> countryKm = {
       if ((res['km_dk'] as num?) != null && (res['km_dk'] as num) > 0)
         'DK': (res['km_dk'] as num).toDouble(),
-
       if ((res['km_de'] as num?) != null && (res['km_de'] as num) > 0)
         'DE': (res['km_de'] as num).toDouble(),
-
       if ((res['km_be'] as num?) != null && (res['km_be'] as num) > 0)
         'BE': (res['km_be'] as num).toDouble(),
-
       if ((res['km_pl'] as num?) != null && (res['km_pl'] as num) > 0)
         'PL': (res['km_pl'] as num).toDouble(),
-
       if ((res['km_at'] as num?) != null && (res['km_at'] as num) > 0)
         'AT': (res['km_at'] as num).toDouble(),
-
       if ((res['km_hr'] as num?) != null && (res['km_hr'] as num) > 0)
         'HR': (res['km_hr'] as num).toDouble(),
-
       if ((res['km_si'] as num?) != null && (res['km_si'] as num) > 0)
         'SI': (res['km_si'] as num).toDouble(),
-
       if ((res['km_other'] as num?) != null && (res['km_other'] as num) > 0)
         'Other': (res['km_other'] as num).toDouble(),
     };
 
-    // ---------------- CACHE ----------------
-    _distanceCache[key] = km;
-    _ferryCache[key] = ferry;
-    _tollCache[key] = toll;
-    _extraCache[key] = extra;
+    // ===================================================
+    // CACHE WRITE
+    // ===================================================
+    _distanceCache[key]   = km;
+    _ferryCache[key]      = ferryPrice;
+    _tollCache[key]       = toll;
+    _extraCache[key]      = extra;
+    _ferryNameCache[key] = ferryName;
     _countryKmCache[key] = countryKm;
 
-    // ---------------- PER ENTRY ----------------
-    _ferryByIndex[index] = ferry;
-    _tollByIndex[index] = toll;
-    _extraByIndex[index] = extra;
+    // ===================================================
+    // PER-INDEX WRITE (UI + CALC)
+    // ===================================================
+    _ferryByIndex[index]      = ferryPrice;
+    _tollByIndex[index]       = toll;
+    _extraByIndex[index]      = extra;
+    _ferryNameByIndex[index] = ferryName;
     _countryKmByIndex[index] = countryKm;
 
+    debugPrint(
+      "[ROUTE] $fromN → $toN | km=$km ferry='$ferryName' price=$ferryPrice",
+    );
+
     return km;
-  } catch (e) {
-    _distanceCache[key] = null;
-    _ferryCache[key] = 0.0;
-    _tollCache[key] = 0.0;
-    _extraCache[key] = '';
+  } catch (e, st) {
+    debugPrint("❌ ROUTE LOOKUP FAILED: $e");
+    debugPrint(st.toString());
+
+    _distanceCache[key]   = null;
+    _ferryCache[key]      = 0.0;
+    _tollCache[key]       = 0.0;
+    _extraCache[key]      = '';
+    _ferryNameCache[key] = '';
     _countryKmCache[key] = {};
 
-    _ferryByIndex[index] = 0.0;
-    _tollByIndex[index] = 0.0;
-    _extraByIndex[index] = '';
+    _ferryByIndex[index]      = 0.0;
+    _tollByIndex[index]       = 0.0;
+    _extraByIndex[index]      = '';
+    _ferryNameByIndex[index] = '';
     _countryKmByIndex[index] = {};
 
     return null;
@@ -1577,7 +1609,6 @@ debugPrint("LOOKUP: '$fromN' → '$toN'");
 // Recalculate legs for CURRENT round (with Travel merge only)
 // ------------------------------------------------------------
 Future<void> _recalcKm() async {
-
   final round = offer.rounds[roundIndex];
   final start = _norm(round.startLocation);
 
@@ -1590,6 +1621,7 @@ Future<void> _recalcKm() async {
       _ferryByIndex = {};
       _tollByIndex = {};
       _extraByIndex = {};
+      _ferryNameByIndex = {};
       _countryKmByIndex = {};
       _travelBefore = [];
       _kmError = null;
@@ -1610,6 +1642,7 @@ Future<void> _recalcKm() async {
   final Map<int, double> ferryByIndex = {};
   final Map<int, double> tollByIndex = {};
   final Map<int, String> extraByIndex = {};
+  final Map<int, String> ferryNameByIndex = {};
   final Map<int, Map<String, double>> countryKmByIndex = {};
 
   final List<bool> travelBefore =
@@ -1618,139 +1651,125 @@ Future<void> _recalcKm() async {
   bool missing = false;
 
   int? pendingTravelIndex;
-  bool seenTravel = false;
+  bool inTravelBlock = false;
 
   // ===================================================
   // MAIN LOOP
   // ===================================================
   for (int i = 0; i < entries.length; i++) {
-
     final from = _findPreviousRealLocation(entries, i, start);
-
     final toRaw = _norm(entries[i].location);
-    final to = toRaw;
+    final toLower = toRaw.toLowerCase();
 
-    final tLower = to.toLowerCase();
-
-    final bool isTravel = tLower == 'travel';
-    final bool isOff = tLower == 'off';
+    final bool isTravel = toLower == 'travel';
+    final bool isOff    = toLower == 'off';
 
     // ---------------- OFF ----------------
     if (isOff) {
-
       kmByIndex[i] = 0;
       ferryByIndex[i] = 0;
       tollByIndex[i] = 0;
       extraByIndex[i] = '';
+      ferryNameByIndex[i] = '';
       countryKmByIndex[i] = {};
 
       pendingTravelIndex = null;
-      seenTravel = false;
+      inTravelBlock = false;
       travelBefore[i] = false;
-
       continue;
     }
 
     // ---------------- TRAVEL ----------------
-if (isTravel) {
-
-  kmByIndex[i] = 0;
-  ferryByIndex[i] = 0;
-  tollByIndex[i] = 0;
-  extraByIndex[i] = '';
-  countryKmByIndex[i] = {};
-
-  // ✅ Kun sett hvis vi ikke allerede er i en travel-sekvens
-  if (pendingTravelIndex == null) {
-    pendingTravelIndex = i;   // 👈 første Travel
-  }
-
-  seenTravel = true;
-
-  continue;
-}
-
-    // ---------------- SAME PLACE ----------------
-    if (_norm(from).toLowerCase() == to.toLowerCase()) {
-
+    if (isTravel) {
       kmByIndex[i] = 0;
       ferryByIndex[i] = 0;
       tollByIndex[i] = 0;
       extraByIndex[i] = '';
+      ferryNameByIndex[i] = '';
       countryKmByIndex[i] = {};
 
-      pendingTravelIndex = null;
-      seenTravel = false;
+      if (pendingTravelIndex == null) {
+        pendingTravelIndex = i; // første Travel i blokken
+      }
 
+      inTravelBlock = true;
       continue;
     }
 
-    // ---------- LOOKUP ----------
-final km = await _fetchLegData(
-  from: from,
-  to: toRaw,
-  index: i,
-);
-if (km == null) {
-  missing = true;
-}
-final key = _cacheKey(from, toRaw);
+    // ---------------- SAME PLACE ----------------
+    if (_norm(from).toLowerCase() == toLower) {
+      kmByIndex[i] = 0;
+      ferryByIndex[i] = 0;
+      tollByIndex[i] = 0;
+      extraByIndex[i] = '';
+      ferryNameByIndex[i] = '';
+      countryKmByIndex[i] = {};
 
-final ferry = _ferryCache[key] ?? 0.0;
-final toll  = _tollCache[key] ?? 0.0;
-final extra = _extraCache[key] ?? ''; // ✅ HER ER FIKSEN
-final country = Map<String, double>.from(
-  _countryKmCache[key] ?? {},
-);
+      pendingTravelIndex = null;
+      inTravelBlock = false;
+      continue;
+    }
 
+    // ---------------- LOOKUP ----------------
+    final km = await _fetchLegData(
+      from: from,
+      to: toRaw,
+      index: i,
+    );
 
-// ---------- MERGE TRAVEL ----------
-if (pendingTravelIndex != null && km != null && km > 0) {
+    if (km == null) {
+      missing = true;
+    }
 
-  kmByIndex[pendingTravelIndex] = km;
+    final key = _cacheKey(from, toRaw);
 
-  ferryByIndex[pendingTravelIndex] =
-      (ferryByIndex[pendingTravelIndex] ?? 0) + ferry;
+    final ferry = _ferryCache[key] ?? 0.0;
+    final toll  = _tollCache[key] ?? 0.0;
+    final extra = _extraCache[key] ?? '';
+    final ferryName = _ferryNameCache[key] ?? '';
+    final country = Map<String, double>.from(
+      _countryKmCache[key] ?? {},
+    );
 
-  tollByIndex[pendingTravelIndex] =
-      (tollByIndex[pendingTravelIndex] ?? 0) + toll;
+    // ===================================================
+    // MERGE TRAVEL BLOCK
+    // ===================================================
+    if (pendingTravelIndex != null && km != null && km > 0) {
+      kmByIndex[pendingTravelIndex] = km;
+      ferryByIndex[pendingTravelIndex] = ferry;
+      tollByIndex[pendingTravelIndex] = toll;
+      extraByIndex[pendingTravelIndex] = extra;
+      ferryNameByIndex[pendingTravelIndex] = ferryName;
+      countryKmByIndex[pendingTravelIndex] = country;
 
-  // ✅ BRUK DB-EXTRA
-  extraByIndex[pendingTravelIndex] = extra;
+      // null ut dagens leg
+      kmByIndex[i] = 0;
+      ferryByIndex[i] = 0;
+      tollByIndex[i] = 0;
+      extraByIndex[i] = '';
+      ferryNameByIndex[i] = '';
+      countryKmByIndex[i] = {};
 
-  countryKmByIndex[pendingTravelIndex] =
-    Map<String, double>.from(country);
+      travelBefore[pendingTravelIndex] = true;
+      travelBefore[i] = true;
 
-  // Null ut original
-  kmByIndex[i] = 0;
-  ferryByIndex[i] = 0;
-  tollByIndex[i] = 0;
-  extraByIndex[i] = '';
-  countryKmByIndex[i] = {};
+      pendingTravelIndex = null;
+      inTravelBlock = false;
+      continue;
+    }
 
-  travelBefore[pendingTravelIndex] = true;
-  travelBefore[i] = true;
-
-  pendingTravelIndex = null;
-  seenTravel = false;
-
-  continue;
-}
-
-    // ---------------- NORMAL ----------------
-    kmByIndex[i] = km;
+    // ===================================================
+    // NORMAL LEG
+    // ===================================================
+    kmByIndex[i] = km ?? 0;
     ferryByIndex[i] = ferry;
     tollByIndex[i] = toll;
     extraByIndex[i] = extra;
-    countryKmByIndex[i] =
-    Map<String, double>.from(country);
+    ferryNameByIndex[i] = ferryName;
+    countryKmByIndex[i] = country;
 
-    if (seenTravel) {
-      travelBefore[i] = true;
-      seenTravel = false;
-    } else {
-      travelBefore[i] = false;
-    }
+    travelBefore[i] = inTravelBlock;
+    inTravelBlock = false;
   }
 
   // ===================================================
@@ -1773,11 +1792,11 @@ if (pendingTravelIndex != null && km != null && km > 0) {
     _ferryByIndex = ferryByIndex;
     _tollByIndex = tollByIndex;
     _extraByIndex = extraByIndex;
+    _ferryNameByIndex = ferryNameByIndex;
     _countryKmByIndex = countryKmByIndex;
     _travelBefore = travelBefore;
 
     _loadingKm = false;
-
     _kmError = missing
         ? "Missing routes in routes_all. Check place names / direction."
         : null;
@@ -2064,32 +2083,29 @@ Future<RoundCalcResult> _calcRound(int ri) async {
 
   if (dates.isEmpty) {
 
-  final empty = TripCalculator.calculateRound(
-  settings: SettingsStore.current,
-  dates: const [],
-  pickupEveningFirstDay: false,
-  trailer: round.trailer,
-  totalKm: 0,
-  legKm: const [],
-
-  ferries: SettingsStore.current.ferries, // ✅
-
-  tollPerLeg: const [],
-  extraPerLeg: const [],
-  hasTravelBefore: const [],
-);
+    final empty = TripCalculator.calculateRound(
+      settings: SettingsStore.current,
+      dates: const [],
+      pickupEveningFirstDay: false,
+      trailer: round.trailer,
+      totalKm: 0,
+      legKm: const [],
+      ferries: SettingsStore.current.ferries,
+      tollPerLeg: const [],
+      extraPerLeg: const [],
+      hasTravelBefore: const [],
+    );
 
     _roundCalcCache[ri] = empty;
-
     return empty;
   }
 
   final start = _norm(round.startLocation);
 
   final Map<int, double> kmByIndex = {};
-final Map<int, double> ferryByIndex = {};
-final Map<int, double> tollByIndex = {};
-final Map<int, String> extraByIndex = {}; // 👈 NY
+  final Map<int, double> ferryByIndex = {};
+  final Map<int, double> tollByIndex = {};
+  final Map<int, String> extraByIndex = {};
 
   final List<bool> travelBefore =
       List<bool>.filled(entries.length, false);
@@ -2114,175 +2130,161 @@ final Map<int, String> extraByIndex = {}; // 👈 NY
 
     // ---------- OFF ----------
     if (isOff) {
-
       kmByIndex[i] = 0;
       ferryByIndex[i] = 0;
       tollByIndex[i] = 0;
-
       pendingTravelIndex = null;
       seenTravel = false;
       travelBefore[i] = false;
-
       continue;
     }
 
     // ---------- TRAVEL ----------
-    // ---------------- TRAVEL ----------------
-if (isTravel) {
+    if (isTravel) {
+      kmByIndex[i] = 0;
+      ferryByIndex[i] = 0;
+      tollByIndex[i] = 0;
+      extraByIndex[i] = '';
 
-  kmByIndex[i] = 0;
-  ferryByIndex[i] = 0;
-  tollByIndex[i] = 0;
-  extraByIndex[i] = '';
+      if (pendingTravelIndex == null) {
+        pendingTravelIndex = i;
+      }
 
-  // ✅ Kun første travel i bolk
-  if (pendingTravelIndex == null) {
-    pendingTravelIndex = i;
-  }
-
-  seenTravel = true;
-
-  continue;
-}
+      seenTravel = true;
+      continue;
+    }
 
     // ---------- SAME PLACE ----------
     if (_norm(from).toLowerCase() == to.toLowerCase()) {
+      kmByIndex[i] = 0;
+      ferryByIndex[i] = 0;
+      tollByIndex[i] = 0;
+      pendingTravelIndex = null;
+      seenTravel = false;
+      continue;
+    }
+
+    // ---------- LOOKUP ----------
+    final km = await _fetchLegData(
+      from: from,
+      to: toRaw,
+      index: i,
+    );
+
+    final key = _cacheKey(from, toRaw);
+
+    final ferry = _ferryCache[key] ?? 0.0;
+    final toll  = _tollCache[key] ?? 0.0;
+    final extra = _extraCache[key] ?? '';
+
+    debugPrint("ROUND $ri LEG $i");
+    debugPrint("  $from → $toRaw");
+    debugPrint("  Ferry=$ferry Toll=$toll");
+
+    // ---------- MERGE TRAVEL ----------
+    if (pendingTravelIndex != null && km != null && km > 0) {
+
+      kmByIndex[pendingTravelIndex] = km;
+
+      ferryByIndex[pendingTravelIndex] =
+          (ferryByIndex[pendingTravelIndex] ?? 0) + ferry;
+
+      tollByIndex[pendingTravelIndex] =
+          (tollByIndex[pendingTravelIndex] ?? 0) + toll;
+
+      _ferryNameByIndex[pendingTravelIndex] =
+          _ferryNameCache[key] ?? ''; // 🔧 ENDRET (kun her brukes ferry_name)
 
       kmByIndex[i] = 0;
       ferryByIndex[i] = 0;
       tollByIndex[i] = 0;
 
+      travelBefore[pendingTravelIndex] = true;
+      travelBefore[i] = true;
+
       pendingTravelIndex = null;
       seenTravel = false;
-
       continue;
     }
 
-    // ---------- LOOKUP ----------
-final km = await _fetchLegData(
-  from: from,
-  to: toRaw,
-  index: i,
-);
-
-// ✅ HENT FRA CACHE (PER ROUTE, IKKE UI STATE)
-final key = _cacheKey(from, toRaw);
-
-final ferry = _ferryCache[key] ?? 0.0;
-final toll  = _tollCache[key] ?? 0.0;
-final extra = _extraCache[key] ?? '';
-
-debugPrint("ROUND $ri LEG $i");
-debugPrint("  $from → $toRaw");
-debugPrint("  Ferry=$ferry Toll=$toll");
-    // ---------- MERGE TRAVEL ----------
-if (pendingTravelIndex != null && km != null && km > 0) {
-
-  kmByIndex[pendingTravelIndex] = km;
-
-  ferryByIndex[pendingTravelIndex] =
-      (ferryByIndex[pendingTravelIndex] ?? 0) + ferry;
-
-  tollByIndex[pendingTravelIndex] =
-      (tollByIndex[pendingTravelIndex] ?? 0) + toll;
-
-  extraByIndex[pendingTravelIndex] = extra; // 👈 NY
-
-  kmByIndex[i] = 0;
-  ferryByIndex[i] = 0;
-  tollByIndex[i] = 0;
-
-  travelBefore[pendingTravelIndex] = true;
-  travelBefore[i] = true;
-
-  pendingTravelIndex = null;
-  seenTravel = false;
-
-  continue;
-
-}
-
     // ---------- NORMAL ----------
-kmByIndex[i] = km ?? 0; // 👈 HER er fiksen
+    kmByIndex[i] = km ?? 0;
+    ferryByIndex[i] = ferry;
+    tollByIndex[i] = toll;
+    extraByIndex[i] = extra;
 
-ferryByIndex[i] = ferry;
-tollByIndex[i] = toll;
-extraByIndex[i] = extra; // 👈 NY
-if (seenTravel) {
-  travelBefore[i] = true;
-  seenTravel = false;
-} else {
-  travelBefore[i] = false;
-}
+    // 🔧 ENDRET: ferry_name lagres også på normale legs
+    _ferryNameByIndex[i] = _ferryNameCache[key] ?? '';
+
+    if (seenTravel) {
+      travelBefore[i] = true;
+      seenTravel = false;
+    } else {
+      travelBefore[i] = false;
+    }
   }
 
   // ================= SUM =================
-
   final totalKm =
       kmByIndex.values.fold<double>(0, (a, b) => a + b);
 
-  final legKm = List.generate(
-    entries.length,
-    (i) => kmByIndex[i] ?? 0,
-  );
+  debugPrint("🖥️ UI RECALC");
+  debugPrint("   → Ferry: ${ferryByIndex.values.fold(0.0, (a, b) => a + b)}");
+  debugPrint("   → Toll : ${tollByIndex.values.fold(0.0, (a, b) => a + b)}");
 
-  final ferryTotal =
-      ferryByIndex.values.fold<double>(0, (a, b) => a + b);
+  final int len = entries.length;
 
-  final tollTotal =
-      tollByIndex.values.fold<double>(0, (a, b) => a + b);
-
-      debugPrint("🖥️ UI RECALC");
-debugPrint("   → Ferry: $ferryTotal");
-debugPrint("   → Toll : $tollTotal");
-
-// ================= NORMALIZE LISTS =================
-
-// Sørg for at alle lister har riktig lengde
-final int len = entries.length;
-
-final safeLegKm = List.generate(
+  final safeLegKm = List<double>.generate(
   len,
   (i) => kmByIndex[i] ?? 0.0,
 );
 
-final safeToll = List.generate(
+final safeToll = List<double>.generate(
   len,
   (i) => tollByIndex[i] ?? 0.0,
 );
 
-final safeExtra = List.generate(
+final safeExtra = List<String>.generate(
   len,
   (i) => extraByIndex[i] ?? '',
 );
 
-final safeTravel = List.generate(
+final safeTravel = List<bool>.generate(
   len,
-  (i) => travelBefore[i],
+  (i) => i < travelBefore.length ? travelBefore[i] : false,
 );
+
+final safeFerryPerLeg = List<String?>.generate(
+  len,
+  (i) {
+    final name = _ferryNameByIndex[i];
+    return (name != null && name.trim().isNotEmpty)
+        ? name.trim()
+        : null;
+  },
+);
+
   // ================= RESULT =================
-
   final result = TripCalculator.calculateRound(
-  settings: SettingsStore.current,
-  dates: dates,
-  pickupEveningFirstDay: round.pickupEveningFirstDay,
-  trailer: round.trailer,
-  totalKm: totalKm,
-  legKm: safeLegKm,
+    settings: SettingsStore.current,
+    dates: dates,
+    pickupEveningFirstDay: round.pickupEveningFirstDay,
+    trailer: round.trailer,
+    totalKm: totalKm,
+    legKm: safeLegKm,
+    ferries: SettingsStore.current.ferries,
+    ferryPerLeg: safeFerryPerLeg, // 🔥 nå korrekt
+    tollPerLeg: safeToll,
+    extraPerLeg: safeExtra,
+    hasTravelBefore: safeTravel,
+  );
 
-  ferries: SettingsStore.current.ferries, // ✅
+  debugPrint("📊 CALC ROUND");
+  debugPrint("   → Ferry: ${result.ferryCost}");
+  debugPrint("   → Toll : ${result.tollCost}");
+  debugPrint("   → Total: ${result.totalCost}");
 
-  tollPerLeg: safeToll,
-  extraPerLeg: safeExtra,
-  hasTravelBefore: safeTravel,
-);
-    debugPrint("📊 CALC ROUND");
-debugPrint("   → Ferry: $ferryTotal");
-debugPrint("   → Toll : $tollTotal");
-debugPrint("   → Total: ${result.totalCost}");
-  // ✅ CACHE FOR PDF
   _roundCalcCache[ri] = result;
-
   return result;
 }
 
@@ -2352,28 +2354,52 @@ final totalKm =
 final travelFlags = _travelBefore;
 
 // ✅ BRUK CACHE FØRST (riktig per runde)
+final int len = round.entries.length;
+
+final fallbackLegKm = List<double>.generate(
+  len,
+  (i) => _kmByIndex[i] ?? 0.0,
+);
+
+final fallbackToll = List<double>.generate(
+  len,
+  (i) => _tollByIndex[i] ?? 0.0,
+);
+
+final fallbackExtra = List<String>.generate(
+  len,
+  (i) => _extraByIndex[i] ?? '',
+);
+
+final fallbackTravel = List<bool>.generate(
+  len,
+  (i) => i < _travelBefore.length ? _travelBefore[i] : false,
+);
+
+final fallbackFerryPerLeg = List<String?>.generate(
+  len,
+  (i) {
+    final name = _ferryNameByIndex[i];
+    return (name != null && name.trim().isNotEmpty)
+        ? name.trim()
+        : null;
+  },
+);
+
 final calc = _roundCalcCache[roundIndex] ??
     TripCalculator.calculateRound(
       settings: SettingsStore.current,
       dates: dates,
       pickupEveningFirstDay: round.pickupEveningFirstDay,
       trailer: round.trailer,
-      totalKm: totalKm,
-      legKm: _kmByIndex.values.whereType<double>().toList(),
-
-      ferries: SettingsStore.current.ferries, // ✅
-
-      tollPerLeg: List.generate(
-        round.entries.length,
-        (i) => _tollByIndex[i] ?? 0,
-      ),
-      extraPerLeg: List.generate(
-        round.entries.length,
-        (i) => _extraByIndex[i] ?? '',
-      ),
-      hasTravelBefore: travelFlags,
+      totalKm: fallbackLegKm.fold(0.0, (a, b) => a + b),
+      legKm: fallbackLegKm,
+      ferries: SettingsStore.current.ferries,
+      ferryPerLeg: fallbackFerryPerLeg,
+      tollPerLeg: fallbackToll,
+      extraPerLeg: fallbackExtra,
+      hasTravelBefore: fallbackTravel,
     );
-
 // =====================================================
 // ALL ROUNDS TOTAL (RIGHT CARD / VAT / TOTAL)
 // =====================================================

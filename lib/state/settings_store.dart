@@ -1,4 +1,5 @@
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../models/app_settings.dart';
 import '../models/ferry_definition.dart';
@@ -19,8 +20,6 @@ class SettingsStore {
     flightTicketPrice: 2500,
     dDriveKmThreshold: 600,
     dropboxRootPath: '',
-
-    // ✅ NY – MÅ VÆRE MED
     ferries: [],
   );
 
@@ -46,10 +45,8 @@ class SettingsStore {
     final prefs = await SharedPreferences.getInstance();
 
     current = current.copyWith(
-      dayPrice:
-          prefs.getDouble(_kDayPrice) ?? current.dayPrice,
-      extraKmPrice:
-          prefs.getDouble(_kExtraKmPrice) ?? current.extraKmPrice,
+      dayPrice: prefs.getDouble(_kDayPrice) ?? current.dayPrice,
+      extraKmPrice: prefs.getDouble(_kExtraKmPrice) ?? current.extraKmPrice,
       trailerDayPrice:
           prefs.getDouble(_kTrailerDayPrice) ?? current.trailerDayPrice,
       trailerKmPrice:
@@ -64,9 +61,6 @@ class SettingsStore {
           prefs.getDouble(_kDDriveKmThreshold) ?? current.dDriveKmThreshold,
       dropboxRootPath:
           prefs.getString(_kDropboxRootPath) ?? current.dropboxRootPath,
-
-      // 🚫 ferries lastes IKKE her
-      // → behold eksisterende i memory
       ferries: current.ferries,
     );
   }
@@ -87,21 +81,50 @@ class SettingsStore {
     await prefs.setDouble(_kFlightTicketPrice, current.flightTicketPrice);
     await prefs.setDouble(_kDDriveKmThreshold, current.dDriveKmThreshold);
     await prefs.setString(_kDropboxRootPath, current.dropboxRootPath);
-
-    // 🚫 ferries lagres IKKE i prefs
   }
 
   // ===================================================
-  // ✅ SET FERRIES (FROM DB)
+  // ✅ LOAD FERRIES FROM SUPABASE (Riktig felt!)
+  // ===================================================
+
+  static Future<void> loadFerries() async {
+    final res = await Supabase.instance.client
+        .from('ferries')
+        .select()
+        .order('name');
+
+    final List<FerryDefinition> ferries =
+        (res as List).map((row) {
+      return FerryDefinition(
+        name: row['name'] as String,
+
+        // ✅ KORREKT: base_price
+        price: row['base_price'] == null
+            ? 0.0
+            : (row['base_price'] as num).toDouble(),
+
+        trailerPrice: row['trailer_price'] == null
+            ? null
+            : (row['trailer_price'] as num).toDouble(),
+      );
+    }).toList();
+
+    current = current.copyWith(ferries: ferries);
+
+    // Debug
+    print(
+      "⛴️ Ferries loaded (${ferries.length}): "
+      "${ferries.map((f) => '${f.name}=${f.price}').join(', ')}",
+    );
+  }
+
+  // ===================================================
+  // OPTIONAL SETTERS
   // ===================================================
 
   static void setFerries(List<FerryDefinition> ferries) {
     current = current.copyWith(ferries: ferries);
   }
-
-  // ===================================================
-  // OPTIONAL FULL REPLACE
-  // ===================================================
 
   static void set(AppSettings settings) {
     current = settings;

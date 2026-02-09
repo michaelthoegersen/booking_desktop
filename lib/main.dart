@@ -57,6 +57,7 @@ Future<void> main() async {
     );
 
     await SettingsStore.load();
+    await SettingsStore.loadFerries();
 
     debugPrint("Supabase initialized OK");
   } catch (e, st) {

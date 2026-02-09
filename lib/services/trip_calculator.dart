@@ -5,6 +5,16 @@ import 'ferry_resolver.dart';
 
 class TripCalculator {
 
+  /// 🔧 Slå debug av/på her
+  static const bool debug = true;
+
+  static void _log(String msg) {
+    if (debug) {
+      // ignore: avoid_print
+      print('[TRIP] $msg');
+    }
+  }
+
   static RoundCalcResult calculateRound({
     required AppSettings settings,
     required List<DateTime> dates,
@@ -13,21 +23,43 @@ class TripCalculator {
     required double totalKm,
     required List<double> legKm,
 
-    // 🔥 NYTT – ferry-definisjoner fra settings / DB
+    /// 🔥 Ferry-definisjoner fra DB / settings
     required List<FerryDefinition> ferries,
 
-    required List<double> tollPerLeg,
+    /// 🆕 ferry_name per leg (fra routes_all)
+    List<String?>? ferryPerLeg,
+
+    /// 🟡 Legacy / UI (IKKE brukt til ferry-prising)
     required List<String> extraPerLeg,
+
+    required List<double> tollPerLeg,
     required List<bool> hasTravelBefore,
   }) {
-    final int entryCount = legKm.length;
+    // ✅ RIKTIG KILDE: dates er sannheten
+    final int entryCount = dates.length;
 
     if (entryCount == 0 ||
+        legKm.length != entryCount ||
         hasTravelBefore.length != entryCount ||
         tollPerLeg.length != entryCount ||
-        extraPerLeg.length != entryCount) {
+        extraPerLeg.length != entryCount ||
+        (ferryPerLeg != null && ferryPerLeg.length != entryCount)) {
+      _log('❌ Invalid input lengths → empty result');
       return _emptyResult();
     }
+
+    // ===================================================
+    // ✅ SAFE ferryPerLeg (aldri null-lister videre)
+    // ===================================================
+    final List<String?> safeFerryPerLeg =
+        ferryPerLeg != null && ferryPerLeg.length == entryCount
+            ? ferryPerLeg
+            : List<String?>.filled(entryCount, null);
+
+    _log('--- START ROUND CALC ---');
+    _log('Trailer: $trailer');
+    _log('Total km: $totalKm');
+    _log('Ferry per leg: $safeFerryPerLeg');
 
     // ----------------------------------------
     // BILLABLE DAYS
@@ -43,6 +75,8 @@ class TripCalculator {
       billableDays -= 1;
     }
 
+    _log('Billable days: $billableDays');
+
     // ----------------------------------------
     // KM
     // ----------------------------------------
@@ -53,6 +87,9 @@ class TripCalculator {
     final double extraKm =
         (totalKm - includedKm).clamp(0.0, double.infinity);
 
+    _log('Included km: $includedKm');
+    _log('Extra km: $extraKm');
+
     // ----------------------------------------
     // BASE COSTS
     // ----------------------------------------
@@ -62,6 +99,9 @@ class TripCalculator {
 
     final double extraKmCost =
         extraKm * settings.extraKmPrice;
+
+    _log('Day cost: $dayCost');
+    _log('Extra km cost: $extraKmCost');
 
     // ----------------------------------------
     // D.DRIVE LOGIC
@@ -140,6 +180,11 @@ class TripCalculator {
     final double flightCost =
         flightTickets * settings.flightTicketPrice;
 
+    _log('DDrive days: $totalDDriveDays');
+    _log('DDrive cost: $dDriveCost');
+    _log('Flight tickets: $flightTickets');
+    _log('Flight cost: $flightCost');
+
     // ----------------------------------------
     // TRAILER
     // ----------------------------------------
@@ -154,22 +199,28 @@ class TripCalculator {
           totalKm * settings.trailerKmPrice;
     }
 
+    _log('Trailer day cost: $trailerDayCost');
+    _log('Trailer km cost: $trailerKmCost');
+
     // ----------------------------------------
-    // ✅ FERRY – AUTO MATCH FRA extraPerLeg
+    // ✅ FERRY – KUN ferry_name
     // ----------------------------------------
 
     final double ferryCost =
         FerryResolver.resolveTotalFerryCost(
-          extraPerLeg: extraPerLeg,
           ferries: ferries,
           trailer: trailer,
+          ferryPerLeg: safeFerryPerLeg,
         );
 
+    _log('FERRY COST: $ferryCost');
+
     // ----------------------------------------
-    // ✅ TOLL – FAST MODELL
+    // TOLL (midlertidig fast modell)
     // ----------------------------------------
 
     final double tollCost = totalKm * 2.8;
+    _log('Toll cost: $tollCost');
 
     // ----------------------------------------
     // TOTAL
@@ -184,6 +235,9 @@ class TripCalculator {
         ferryCost +
         flightCost +
         tollCost;
+
+    _log('TOTAL COST: $totalCost');
+    _log('--- END ROUND CALC ---');
 
     return RoundCalcResult(
       billableDays: billableDays,

@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 class RoutesService {
@@ -23,14 +24,18 @@ class RoutesService {
     final a = _norm(from);
     final b = _norm(to);
 
-    if (a.isEmpty || b.isEmpty) return null;
+    if (a.isEmpty || b.isEmpty) {
+      debugPrint('[ROUTE] ❌ Empty from/to');
+      return null;
+    }
 
     const selectFields = '''
       id,
       from_place,
       to_place,
       distance_total_km,
-      ferry_price,
+      ferry_name,
+      base_price:ferry_price,
       toll_nightliner,
       extra,
       km_dk,
@@ -43,8 +48,10 @@ class RoutesService {
       km_other
     ''';
 
+    debugPrint('[ROUTE] 🔍 Lookup: "$a" → "$b"');
+
     try {
-      // EXACT
+      // ================= EXACT =================
       final exact = await _client
           .from('routes_all')
           .select(selectFields)
@@ -55,10 +62,19 @@ class RoutesService {
       if (exact is List && exact.isNotEmpty) {
         final row = Map<String, dynamic>.from(exact.first);
 
+        debugPrint(
+          '[ROUTE] ✅ EXACT HIT $a → $b | '
+          'km=${row['distance_total_km']} '
+          'ferry_name="${row['ferry_name']}" '
+          'ferry_price=${row['ferry_price']}',
+        );
+
         if (_hasValidKm(row)) return row;
+
+        debugPrint('[ROUTE] ⚠️ EXACT found but invalid km');
       }
 
-      // REVERSE
+      // ================= REVERSE =================
       final reverse = await _client
           .from('routes_all')
           .select(selectFields)
@@ -69,17 +85,30 @@ class RoutesService {
       if (reverse is List && reverse.isNotEmpty) {
         final row = Map<String, dynamic>.from(reverse.first);
 
+        debugPrint(
+          '[ROUTE] 🔁 REVERSE HIT $b → $a | '
+          'km=${row['distance_total_km']} '
+          'ferry_name="${row['ferry_name']}" '
+          'ferry_price=${row['ferry_price']}',
+        );
+
         if (_hasValidKm(row)) return row;
+
+        debugPrint('[ROUTE] ⚠️ REVERSE found but invalid km');
       }
 
+      debugPrint('[ROUTE] ❌ NO ROUTE FOUND: $a → $b');
       return null;
-    } catch (_) {
+
+    } catch (e, st) {
+      debugPrint('[ROUTE] 💥 LOOKUP FAILED: $e');
+      debugPrint(st.toString());
       return null;
     }
   }
 
   // ------------------------------------------------------------
-  // SEARCH
+  // SEARCH (autocomplete)
   // ------------------------------------------------------------
   Future<List<String>> searchPlaces(
     String query, {
@@ -121,10 +150,14 @@ class RoutesService {
 
       final list = places.toList()..sort();
 
+      debugPrint('[ROUTE] 🔎 searchPlaces("$q") → ${list.length} results');
+
       return list.length > limit
           ? list.take(limit).toList()
           : list;
-    } catch (_) {
+
+    } catch (e) {
+      debugPrint('[ROUTE] ❌ searchPlaces failed: $e');
       return [];
     }
   }
@@ -138,7 +171,8 @@ class RoutesService {
         .select()
         .order('from_place');
 
-    return (res as List).cast<Map<String, dynamic>>();
+    debugPrint('[ROUTE] 📦 getAllRoutes → ${(res as List).length} rows');
+    return (res).cast<Map<String, dynamic>>();
   }
 
   // ------------------------------------------------------------
@@ -152,6 +186,10 @@ class RoutesService {
     double toll = 0,
     String extra = '',
   }) async {
+    debugPrint(
+      '[ROUTE] ➕ CREATE $from → $to | km=$km ferry=$ferry toll=$toll',
+    );
+
     await _client.from('routes_all').insert({
       'from_place': from.trim(),
       'to_place': to.trim(),
@@ -175,6 +213,10 @@ class RoutesService {
     double toll = 0,
     String extra = '',
   }) async {
+    debugPrint(
+      '[ROUTE] ✏️ UPDATE id=$id | $from → $to | km=$km ferry=$ferry toll=$toll',
+    );
+
     await _client
         .from('routes_all')
         .update({
@@ -193,6 +235,7 @@ class RoutesService {
   // ADMIN: DELETE
   // ------------------------------------------------------------
   Future<void> deleteRoute(String id) async {
+    debugPrint('[ROUTE] 🗑️ DELETE id=$id');
     await _client.from('routes_all').delete().eq('id', id);
   }
 
@@ -205,15 +248,20 @@ class RoutesService {
     required double totalKm,
     required Map<String, double> countryKm,
   }) async {
-    final existing = await findRoute(from: from, to: to);
+    debugPrint('[ROUTE] 🔁 findOrCreate $from → $to');
 
-    if (existing != null) return existing;
+    final existing = await findRoute(from: from, to: to);
+    if (existing != null) {
+      debugPrint('[ROUTE] ♻️ Using existing route');
+      return existing;
+    }
+
+    debugPrint('[ROUTE] 🆕 Auto-create route');
 
     final insertData = {
       'from_place': from.trim(),
       'to_place': to.trim(),
       'distance_total_km': totalKm,
-
       'km_dk': countryKm['DK'] ?? 0,
       'km_de': countryKm['DE'] ?? 0,
       'km_be': countryKm['BE'] ?? 0,
@@ -222,12 +270,14 @@ class RoutesService {
       'km_hr': countryKm['HR'] ?? 0,
       'km_si': countryKm['SI'] ?? 0,
       'km_other': countryKm['OTHER'] ?? 0,
-
       'updated_at': DateTime.now().toIso8601String(),
     };
 
     await _client.from('routes_all').insert(insertData);
 
-    return (await findRoute(from: from, to: to))!;
+    final created = await findRoute(from: from, to: to);
+    debugPrint('[ROUTE] ✅ Auto-created route confirmed');
+
+    return created!;
   }
 }
