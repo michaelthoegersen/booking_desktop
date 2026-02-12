@@ -65,8 +65,13 @@ Widget build(BuildContext context) {
   final hasTrailer = offer.rounds.any((r) => r.trailer);
 
   final vehicle =
-      "${offer.bus ?? ""}"
-      "${hasTrailer ? " + trailer" : ""}";
+    offer.rounds
+        .firstWhere(
+          (r) => r.bus != null && r.bus!.isNotEmpty,
+          orElse: () => OfferRound(),
+        )
+        .bus ??
+    "";
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -229,9 +234,14 @@ Widget build(BuildContext context) {
 
                     final title = "Round ${i + 1}";
 
-                    final subtitle = has
-                        ? "${r.startLocation.isEmpty ? "—" : r.startLocation} • ${r.entries.length} date(s)"
-                        : "—";
+                    final busText =
+    r.bus?.isNotEmpty == true
+        ? r.bus!
+        : (offer.bus ?? "No bus");
+
+final subtitle = has
+    ? "$busText • ${r.entries.length} date(s)"
+    : "—";
 
                     return Padding(
                       padding: const EdgeInsets.symmetric(vertical: 6),

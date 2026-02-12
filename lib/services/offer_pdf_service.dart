@@ -81,52 +81,139 @@ static String _busImageForType(BusType type) {
       return 'assets/pdf/buses/12_sleeper.png';
   }
 }
-  // ============================================================
-  // MAIN ENTRY
-  // ============================================================
 
-  static Future<Uint8List> generatePdf(
-    OfferDraft offer,
-    Map<int, RoundCalcResult> roundCalc,
-  ) async {
+// ============================================================
+// MAIN ENTRY
+// ============================================================
 
-    return buildPdf(
-      offer: offer,
-      roundCalcByIndex: roundCalc,
+static Future<Uint8List> generatePdf(
+  OfferDraft offer,
+  Map<int, RoundCalcResult> roundCalc,
+) async {
+  return buildPdf(
+    offer: offer,
+    roundCalcByIndex: roundCalc,
+  );
+}
+
+// ============================================================
+// TABLE BUILDER FOR PAGE (FLERE RUNDER, ÉN TOTAL)
+// ============================================================
+
+static List<pw.Widget> _buildTableForIndexes(
+  OfferDraft offer,
+  Map<int, RoundCalcResult> calc,
+  List<int> visibleRounds,
+  pw.Font regular,
+  pw.Font bold, {
+  bool showGrandTotal = false,
+}) {
+  final widgets = <pw.Widget>[];
+
+  double grandTotal = 0;
+  final Map<String, double> allCountryKm = {};
+
+  // ================= ROUNDS =================
+  for (final roundIndex in visibleRounds) {
+    final round = offer.rounds[roundIndex];
+    final result = calc[roundIndex];
+
+    if (round.entries.isEmpty || result == null) continue;
+
+    // ---- totalsamling
+    if (result.totalCost != null) {
+      grandTotal += result.totalCost!;
+    }
+
+    for (final entry in round.entries) {
+      entry.countryKm.forEach((country, km) {
+        if (km <= 0) return;
+        allCountryKm[country] =
+            (allCountryKm[country] ?? 0) + km;
+      });
+    }
+
+    // ---- bygg EN runde (samme spacing/design som før)
+    widgets.addAll(
+      _buildTable(
+        offer.copyWithRounds([roundIndex]),
+        {0: result},                 // 👈 indeks reset med vilje
+        regular,
+        bold,
+        roundNumberOverride: roundIndex + 1, // 👈 RIKTIG NUMMER
+      ),
     );
   }
 
+  // ================= GRAND TOTAL (KUN ÉN GANG) =================
+  if (showGrandTotal && grandTotal > 0) {
+    final vatMap = _calculateForeignVat(
+      basePrice: grandTotal,
+      countryKm: allCountryKm,
+    );
 
-  // ============================================================
-  // REAL PDF BUILDER
-  // ============================================================
+    final totalIncVat =
+        grandTotal +
+        vatMap.values.fold(0.0, (a, b) => a + b);
 
-  static Future<Uint8List> buildPdf({
+    widgets.add(
+  pw.Padding(
+    padding: const pw.EdgeInsets.symmetric(horizontal: 40),
+    child: pw.Row(
+      mainAxisAlignment: pw.MainAxisAlignment.end,
+      children: [
+        pw.Container(
+          width: 260, // 🔒 FAST BREDDE – NØKKELEN
+          child: pw.Column(
+            crossAxisAlignment: pw.CrossAxisAlignment.end,
+            children: [
+              pw.SizedBox(height: 10),
+              pw.Divider(thickness: 1),
+              pw.SizedBox(height: 10),
+
+              pw.Text(
+                "TOTAL",
+                style: pw.TextStyle(font: bold, fontSize: 12),
+              ),
+
+              pw.SizedBox(height: 6),
+
+              _buildVatBox(
+                vatMap,
+                grandTotal,
+                totalIncVat,
+                regular,
+                bold,
+              ),
+
+              // 🔒 Gir lik høyde også uten VAT
+              pw.SizedBox(height: 16),
+            ],
+          ),
+        ),
+      ],
+    ),
+  ),
+);
+}
+
+  return widgets;
+}
+
+// ============================================================
+// REAL PDF BUILDER
+// ============================================================
+
+static Future<Uint8List> buildPdf({
   required OfferDraft offer,
   required Map<int, RoundCalcResult> roundCalcByIndex,
 }) async {
-
-  // ---------------- FAILSAFE ----------------
   final doc = pw.Document();
-
-  // Hvis absolutt ingen data
-  if (offer.rounds.isEmpty) {
-    doc.addPage(
-      pw.Page(
-        build: (context) => pw.Center(
-          child: pw.Text("No data"),
-        ),
-      ),
-    );
-
-    return doc.save();
-  }
 
   // ---------------- FONTS ----------------
   final regular = pw.Font.ttf(
     await rootBundle.load('assets/fonts/calibri.ttf'),
   );
-
   final bold = pw.Font.ttf(
     await rootBundle.load('assets/fonts/calibrib.ttf'),
   );
@@ -152,87 +239,139 @@ static String _busImageForType(BusType type) {
         .asUint8List(),
   );
 
-  // ---------------- SPLIT ROUNDS ----------------
-  const int roundsPerPage = 2;
+  doc.addPage(
+    pw.MultiPage(
+      pageFormat: PdfPageFormat.a4,
+      margin: const pw.EdgeInsets.fromLTRB(0, 0, 0, 40),
 
-  final chunks = <List<int>>[];
+      build: (context) => [
 
-  for (int i = 0; i < offer.rounds.length; i += roundsPerPage) {
-    chunks.add(
-      List.generate(
-        roundsPerPage,
-        (j) => i + j,
-      ).where((e) => e < offer.rounds.length).toList(),
-    );
-  }
+        // ---------- HEADER (KUN ÉN GANG)
+        _buildTopBar(appLogo, regular),
+        pw.SizedBox(height: 20),
+        _buildTopContent(
+          offer,
+          busLayout,
+          busTypeImage,
+          regular,
+        ),
+        pw.SizedBox(height: 30),
+        _buildOfferTitle(bold),
+        pw.SizedBox(height: 15),
 
-  // ---------------- BUILD PAGES ----------------
-  for (int page = 0; page < chunks.length; page++) {
-    final roundIndexes = chunks[page];
+        // ---------- ALLE RUNDER (FLYTENDE)
+        ..._buildTableForIndexes(
+          offer,
+          roundCalcByIndex,
+          List.generate(offer.rounds.length, (i) => i),
+          regular,
+          bold,
+          showGrandTotal: true, // 👈 TOTAL KOMMER HER
+        ),
 
-    final partialCalc = <int, RoundCalcResult>{};
+        // ---------- TERMS + SIGNATURE (RETT ETTER TOTAL)
+        pw.SizedBox(height: 30),
+        _buildTerms(regular, bold),
+        pw.SizedBox(height: 30),
+        _buildSignature(regular),
+      ],
+    ),
+  );
 
-    for (final i in roundIndexes) {
-      if (roundCalcByIndex.containsKey(i)) {
-        partialCalc[i] = roundCalcByIndex[i]!;
-      }
-    }
-
-    doc.addPage(
-      pw.MultiPage(
-        pageFormat: PdfPageFormat.a4,
-        margin: const pw.EdgeInsets.fromLTRB(0, 0, 0, 40),
-        maxPages: 1000,
-
-        build: (context) => [
-
-          // ---------- HEADER (FIRST PAGE)
-          if (page == 0) ...[
-            _buildTopBar(appLogo, regular),
-
-            pw.SizedBox(height: 20),
-
-            _buildTopContent(
-              offer,
-              busLayout,
-              busTypeImage,
-              regular,
-            ),
-
-            pw.SizedBox(height: 30),
-
-            _buildOfferTitle(bold),
-
-            pw.SizedBox(height: 15),
-          ],
-
-          // ---------- TABLE
-          ..._buildTable(
-  offer.copyWithRounds(roundIndexes),
-  partialCalc,
-  regular,
-  bold,
-),
-
-          // ---------- FOOTER (LAST PAGE)
-          if (page == chunks.length - 1) ...[
-            pw.SizedBox(height: 30),
-
-            _buildTerms(regular, bold),
-
-            pw.SizedBox(height: 30),
-
-            _buildSignature(regular),
-          ],
-        ],
-      ),
-    );
-  }
-
-  // ---------------- FINAL RETURN ----------------
   return doc.save();
 }
 
+static List<pw.Widget> _buildSingleRound({
+  required int roundIndex,
+  required OfferRound round,
+  required RoundCalcResult result,
+  required pw.Font regular,
+  required pw.Font bold,
+}) {
+  final widgets = <pw.Widget>[];
+
+  widgets.add(
+    pw.Padding(
+      padding: const pw.EdgeInsets.symmetric(horizontal: 40),
+      child: pw.Text(
+        "Round ${roundIndex + 1}",
+        style: pw.TextStyle(font: bold, fontSize: 12),
+      ),
+    ),
+  );
+
+  widgets.add(pw.SizedBox(height: 8));
+
+  // 👉 HER bruker du eksisterende tabell-logikk
+  widgets.addAll(
+    _buildTable(
+      OfferDraft()..rounds.add(round),
+      {0: result},
+      regular,
+      bold,
+    ),
+  );
+
+  widgets.add(
+    pw.Padding(
+      padding: const pw.EdgeInsets.symmetric(horizontal: 40),
+      child: pw.Align(
+        alignment: pw.Alignment.centerRight,
+        child: pw.Text(
+          "Subtotal: ${_formatNok(result.totalCost)}",
+          style: pw.TextStyle(font: bold, fontSize: 9),
+        ),
+      ),
+    ),
+  );
+
+  widgets.add(pw.SizedBox(height: 25)); // 🔑 FAST SPACING
+
+  return widgets;
+}
+
+static List<pw.Widget> _buildTotalSection({
+  required double grandTotal,
+  required Map<String, double> countryKm,
+  required pw.Font regular,
+  required pw.Font bold,
+}) {
+  if (grandTotal <= 0) return [];
+
+  final vatMap = _calculateForeignVat(
+    basePrice: grandTotal,
+    countryKm: countryKm,
+  );
+
+  final totalIncVat =
+      grandTotal + vatMap.values.fold(0.0, (a, b) => a + b);
+
+  return [
+    pw.Padding(
+      padding: const pw.EdgeInsets.symmetric(horizontal: 40),
+      child: pw.Column(
+        crossAxisAlignment: pw.CrossAxisAlignment.end,
+        children: [
+          pw.Divider(),
+          pw.SizedBox(height: 10),
+          pw.Text(
+            "TOTAL",
+            style: pw.TextStyle(font: bold, fontSize: 12),
+          ),
+          pw.SizedBox(height: 6),
+          _buildVatBox(
+            vatMap,
+            grandTotal,
+            totalIncVat,
+            regular,
+            bold,
+          ),
+          pw.SizedBox(height: 20),
+        ],
+      ),
+    ),
+  ];
+}
   // ============================================================
   // MAIN
   // ============================================================
@@ -422,8 +561,9 @@ static pw.Widget _buildOfferTitle(pw.Font bold) {
   OfferDraft offer,
   Map<int, RoundCalcResult> calc,
   pw.Font regular,
-  pw.Font bold,
-) {
+  pw.Font bold, {
+  int? roundNumberOverride, // 👈 NY
+}) {
   final widgets = <pw.Widget>[];
 
   // ================= TOTAL ACCUMULATORS =================
@@ -457,11 +597,9 @@ static pw.Widget _buildOfferTitle(pw.Font bold) {
     // ---------------- ROUND TITLE
     widgets.add(
       pw.Text(
-        "Round ${i + 1}",
-        style: pw.TextStyle(
-          font: bold,
-          fontSize: 12,
-        ),
+  "Round ${roundNumberOverride ?? (i + 1)}",
+  style: pw.TextStyle(font: bold, fontSize: 12),
+
       ),
     );
 
@@ -615,60 +753,7 @@ for (int r = 0; r < round.entries.length; r++) {
     widgets.add(pw.SizedBox(height: 25));
   }
 
-  // ================= GRAND TOTAL =================
-
-  if (grandTotal > 0) {
-
-    final vatMap = _calculateForeignVat(
-      basePrice: grandTotal,
-      countryKm: allCountryKm,
-    );
-
-    final totalIncVat =
-        grandTotal +
-        vatMap.values.fold(0.0, (a, b) => a + b);
-
-    widgets.add(pw.SizedBox(height: 10));
-
-    // Divider
-    widgets.add(
-      pw.Divider(thickness: 1),
-    );
-
-    widgets.add(pw.SizedBox(height: 10));
-
-    // TOTAL TITLE
-    widgets.add(
-      pw.Align(
-        alignment: pw.Alignment.centerRight,
-        child: pw.Text(
-          "TOTAL",
-          style: pw.TextStyle(
-            font: bold,
-            fontSize: 12,
-          ),
-        ),
-      ),
-    );
-
-    widgets.add(pw.SizedBox(height: 6));
-
-    // TOTAL BOX (EXCL + VAT + INCL)
-    widgets.add(
-      pw.Align(
-        alignment: pw.Alignment.centerRight,
-        child: _buildVatBox(
-          vatMap,
-          grandTotal,
-          totalIncVat,
-          regular,
-          bold,
-        ),
-      ),
-    );
-
-    widgets.add(pw.SizedBox(height: 20));
-  }
+  
 
   // ================= WRAPPER =================
 

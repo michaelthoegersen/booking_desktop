@@ -164,80 +164,100 @@ String _buildExtra() {
   // LOAD ROUTES
   // =================================================
   Future<void> _loadRoute() async {
+  setState(() {
+    _loading = true;
+    _error = null;
+  });
+
+  try {
+    final places = _buildAllPlaces();
+
+    // ❗ Ikke kast – bare gi tom popup
+    if (places.length < 2) {
+      setState(() {
+        _allRoutes = [];
+        _routeKm = [];
+        _routeCountryKm = [];
+        _distanceKm = null;
+        _countryKm = {};
+        _loading = false;
+      });
+      return;
+    }
+
+    final res = await _google.getRouteWithVia(
+      places: places,
+    );
+
+    final routes =
+        List<Map<String, dynamic>>.from(res['routes'] ?? []);
+
+    final List<List<LatLng>> lines = [];
+    final List<double> kms = [];
+    final List<Map<String, double>> countries = [];
+
+    for (final r in routes) {
+      final polyline = r['polyline'];
+      final meters = r['distanceMeters'] as num?;
+
+      if (polyline == null || meters == null) continue;
+
+      final decoded =
+          PolylineDecoder.decode(polyline);
+
+      if (decoded.isEmpty) continue;
+
+      final line = decoded
+          .map((p) => LatLng(p.lat, p.lng))
+          .toList();
+
+      lines.add(line);
+
+      final km = meters / 1000;
+      final country =
+          await _analyzer.kmPerCountry(polyline);
+
+      kms.add(km);
+      countries.add(country);
+    }
+
+    // ❗ Ingen ruter? Helt OK.
+    if (lines.isEmpty) {
+      setState(() {
+        _allRoutes = [];
+        _routeKm = [];
+        _routeCountryKm = [];
+        _distanceKm = null;
+        _countryKm = {};
+        _loading = false;
+      });
+      return;
+    }
+
     setState(() {
-      _loading = true;
-      _error = null;
+      _allRoutes = lines;
+      _routeKm = kms;
+      _routeCountryKm = countries;
+      _activeRouteIndex = 0;
+      _distanceKm = kms.first;
+      _countryKm = countries.first;
+      _loading = false;
     });
 
-    try {
-      final places = _buildAllPlaces();
+  } catch (e) {
+    // ❗ ALDRI blokker popup
+    debugPrint("Route load failed: $e");
 
-      if (places.length < 2) {
-        throw Exception("Invalid route");
-      }
-
-      final res = await _google.getRouteWithVia(
-        places: places,
-      );
-
-      final routes =
-          List<Map<String, dynamic>>.from(res['routes']);
-
-      final List<List<LatLng>> lines = [];
-
-      // ✅ NYTT: temp-lister
-      final List<double> kms = [];
-      final List<Map<String, double>> countries = [];
-
-      for (final r in routes) {
-        final polyline = r['polyline'];
-        final meters = r['distanceMeters'] as num;
-
-        final decoded =
-            PolylineDecoder.decode(polyline);
-
-        final line = decoded
-            .map((p) => LatLng(p.lat, p.lng))
-            .toList();
-
-        if (line.isEmpty) continue;
-
-        lines.add(line);
-
-        final km = meters / 1000;
-        final country =
-            await _analyzer.kmPerCountry(polyline);
-
-        kms.add(km);
-        countries.add(country);
-      }
-
-      if (lines.isEmpty) {
-        throw Exception("No valid routes");
-      }
-
-      setState(() {
-        _allRoutes = lines;
-
-        // ✅ lagre per route
-        _routeKm = kms;
-        _routeCountryKm = countries;
-
-        _activeRouteIndex = 0;
-
-        _distanceKm = kms.first;
-        _countryKm = countries.first;
-
-        _loading = false;
-      });
-
-    } catch (e) {
-      setState(() {
-        _error = e.toString();
-        _loading = false;
-      });
-    }
+    setState(() {
+      _allRoutes = [];
+      _routeKm = [];
+      _routeCountryKm = [];
+      _distanceKm = null;
+      _countryKm = {};
+      _loading = false;
+    });
   }
+}
 
   // =================================================
 // SAVE

@@ -210,10 +210,9 @@ OfferDraft copyWithRounds(List<int> indexes) {
 
 class OfferRound {
   String startLocation = '';
-
   bool trailer = false;
-
   bool pickupEveningFirstDay = false;
+  String? bus; // ⭐ LEGG TIL DENNE
 
   final List<RoundEntry> entries = [];
 
@@ -236,14 +235,17 @@ class OfferRound {
   // ------------------------------------------------------------
 
   Map<String, dynamic> toJson() {
-    return {
-      'startLocation': startLocation,
-      'trailer': trailer,
-      'pickupEveningFirstDay': pickupEveningFirstDay,
-      'totalKm': totalKm,
-      'entries': entries.map((e) => e.toJson()).toList(),
-    };
-  }
+  return {
+    'startLocation': startLocation,
+    'trailer': trailer,
+    'pickupEveningFirstDay': pickupEveningFirstDay,
+    'bus': bus,
+    'totalKm': totalKm,
+
+    // ⭐⭐⭐ DETTE MANGLER NÅ ⭐⭐⭐
+    'entries': entries.map((e) => e.toJson()).toList(),
+  };
+}
 
   static OfferRound fromJson(Map<String, dynamic> json) {
     final r = OfferRound();
@@ -254,6 +256,8 @@ class OfferRound {
 
     r.pickupEveningFirstDay =
         (json['pickupEveningFirstDay'] ?? false) as bool;
+
+    r.bus = json['bus'] as String?;    
 
     r.totalKm = ((json['totalKm'] ?? 0) as num).toDouble();
 

@@ -21,12 +21,16 @@ import '../widgets/new_company_dialog.dart';
 import '../services/pdf_tour_parser.dart';
 import '../widgets/route_popup_dialog.dart';
 import 'package:flutter/foundation.dart';
+import '../services/bus_availability_service.dart';
 
 // ✅ NY: bruker routes db for autocomplete + route lookup
 import '../services/routes_service.dart';
 import '../services/customers_service.dart';
 import '../state/current_offer_store.dart';
 import '../models/round_calc_result.dart';
+import 'package:flutter/foundation.dart';
+import '../platform/pdf_saver.dart';
+// ignore: avoid_web_libraries_in_flutter
 
 class NewOfferPage extends StatefulWidget {
   /// ✅ Hvis du sender inn offerId -> åpner den eksisterende draft
@@ -39,6 +43,48 @@ class NewOfferPage extends StatefulWidget {
 }
 
 class _NewOfferPageState extends State<NewOfferPage> {
+
+  String _safeFolderName(String name) {
+  var s = name.trim();
+  s = s.replaceAll(RegExp(r'[\/\\\:\*\?\"\<\>\|]'), "_");
+  s = s.replaceAll(RegExp(r"\s+"), " ");
+  return s;
+}
+
+  Future<String?> _pickBusSimple() async {
+
+  const buses = [
+    "CSS_1034",
+    "CSS_1023",
+    "CSS_1008",
+    "YCR 682",
+    "ESW 337",
+    "WYN 802",
+    "RLC 29G",
+    "Rental 1 (Hasse)",
+    "Rental 2 (Rickard)",
+  ];
+
+  return showDialog<String>(
+    context: context,
+    builder: (_) => AlertDialog(
+      title: const Text("Select bus"),
+      content: SizedBox(
+        width: 300,
+        child: ListView(
+          shrinkWrap: true,
+          children: buses.map((bus) {
+            return ListTile(
+              leading: const Icon(Icons.directions_bus),
+              title: Text(bus),
+              onTap: () => Navigator.pop(context, bus),
+            );
+          }).toList(),
+        ),
+      ),
+    ),
+  );
+}
 
 
   // ===================================================
@@ -214,44 +260,98 @@ Future<void> _recalcAllRounds() async {
   // BUS PICKER
   // ===================================================
 
-  Future<String?> _pickBus() async {
-    return showDialog<String>(
-      context: context,
-      builder: (ctx) {
-        return AlertDialog(
-          title: const Text("Select bus"),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              _busTile(ctx, "CSS_1034"),
-              _busTile(ctx, "CSS_1023"),
-              _busTile(ctx, "CSS_1008"),
-              _busTile(ctx, "YCR 682"),
-              _busTile(ctx, "ESW 337"),
-              _busTile(ctx, "WYN 802"),
-              _busTile(ctx, "RLC 29G"),
-              _busTile(ctx, "Rental 1 (Hasse)"),
-              _busTile(ctx, "Rental 2 (Rickard)"),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(ctx).pop(),
-              child: const Text("Cancel"),
-            ),
-          ],
-        );
-      },
-    );
+ Future<String?> _pickBus() async {
+  final currentRound = offer.rounds[roundIndex];
+
+  if (currentRound.entries.isEmpty) {
+    debugPrint("📦 No dates yet → simple picker");
+    return _pickBusSimple();
   }
 
-  Widget _busTile(BuildContext ctx, String bus) {
-    return ListTile(
-      leading: const Icon(Icons.directions_bus),
-      title: Text(bus),
-      onTap: () => Navigator.of(ctx).pop(bus),
-    );
-  }
+  final startDate = currentRound.entries.first.date;
+  final endDate = currentRound.entries.last.date;
+
+  final start = startDate.toIso8601String().substring(0, 10);
+  final end = endDate.toIso8601String().substring(0, 10);
+
+  debugPrint("📅 Checking availability from $start → $end");
+
+  // =====================================================
+  // 🔥 HENT BUSSER SOM ER OPPTATT – MEN IKKE DENNE DRAFTEN
+  // =====================================================
+
+  var query = Supabase.instance.client
+      .from('samletdata')
+      .select('kilde,draft_id')
+      .gte('dato', start)
+      .lte('dato', end);
+
+  final busy = await query;
+
+  final busySet = (busy as List)
+      .where((e) {
+        final draft = e['draft_id']?.toString();
+
+        // ⭐ IGNORER DENNE DRAFTEN
+        if (_draftId != null && draft == _draftId) {
+          return false;
+        }
+
+        return true;
+      })
+      .map((e) => e['kilde']?.toString())
+      .whereType<String>()
+      .toSet();
+
+  debugPrint("❌ Busy buses: $busySet");
+
+  // =====================================================
+  // 🔥 HENT ALLE BUSSER
+  // =====================================================
+
+  // =====================================================
+// 🔥 ENTERPRISE BUS SOURCE (same as Calendar)
+// =====================================================
+
+const allBuses = [
+  "CSS_1034",
+  "CSS_1023",
+  "CSS_1008",
+  "YCR 682",
+  "ESW 337",
+  "WYN 802",
+  "RLC 29G",
+  "Rental 1 (Hasse)",
+  "Rental 2 (Rickard)",
+];
+
+  final available =
+      allBuses.where((b) => !busySet.contains(b)).toList();
+
+  debugPrint("✅ Available buses: $available");
+
+  if (!mounted) return null;
+
+  return showDialog<String>(
+    context: context,
+    builder: (dialogContext) => AlertDialog(
+      title: const Text("Select available bus"),
+      content: SizedBox(
+        width: 320,
+        child: ListView(
+          shrinkWrap: true,
+          children: available.map((bus) {
+            return ListTile(
+              leading: const Icon(Icons.directions_bus),
+              title: Text(bus),
+              onTap: () => Navigator.pop(dialogContext, bus),
+            );
+          }).toList(),
+        ),
+      ),
+    ),
+  );
+}
 
 
   // ===================================================
@@ -403,12 +503,20 @@ Future<void> _recalcAllRounds() async {
       offer.email      = fresh.email;
       offer.production = fresh.production;
       offer.status     = fresh.status;
-      offer.bus        = fresh.bus;
+
+      // ⭐ ENTERPRISE: global bus brukes ikke lenger
+      // offer.bus = fresh.bus;   <-- kan beholdes om legacy trengs
+
       offer.busCount   = fresh.busCount;
       offer.busType    = fresh.busType;
 
-      // Rounds
+      // =========================
+      // ROUNDS (FULL SYNC)
+      // =========================
       for (int i = 0; i < offer.rounds.length; i++) {
+
+        if (i >= fresh.rounds.length) break;
+
         final src = fresh.rounds[i];
         final dst = offer.rounds[i];
 
@@ -417,12 +525,17 @@ Future<void> _recalcAllRounds() async {
         dst.pickupEveningFirstDay =
             src.pickupEveningFirstDay;
 
+        // ⭐⭐⭐ DETTE VAR DET SOM MANGLER ⭐⭐⭐
+        dst.bus = src.bus;
+
         dst.entries
           ..clear()
           ..addAll(src.entries);
       }
 
-      // ✅ Sync textfields
+      // =========================
+      // TEXTFIELDS
+      // =========================
       companyCtrl.text = offer.company;
       contactCtrl.text = offer.contact;
       productionCtrl.text = offer.production;
@@ -435,10 +548,11 @@ Future<void> _recalcAllRounds() async {
       _syncRoundControllers();
     });
 
+    // ⭐ VIKTIG — oppdater preview model
     CurrentOfferStore.set(offer);
 
     await _recalcKm();
-    
+
   } finally {
     _loadingDraft = false;
   }
@@ -519,19 +633,14 @@ Future<void> _loadPlaceSuggestions(String query) async {
 // ------------------------------------------------------------
 Future<void> _changeBusManually() async {
   final picked = await _pickBus();
-
   if (picked == null || picked.isEmpty) return;
 
   setState(() {
-    offer.bus = picked;
-    _selectedBus = picked;
+    // ⭐ ENTERPRISE: sett på AKTIV ROUND
+    offer.rounds[roundIndex].bus = picked;
   });
 
-  ScaffoldMessenger.of(context).showSnackBar(
-    SnackBar(
-      content: Text("Bus changed to $picked"),
-    ),
-  );
+  CurrentOfferStore.set(offer); // ⭐ viktig for preview sync
 }
   Future<void> _openMissingRouteDialog({
   String? from,
@@ -937,7 +1046,6 @@ Widget _buildVatBox(
 // Open route preview for first missing leg
 // ------------------------------------------------------------
 Future<void> _openRoutePreview() async {
-
   final round = offer.rounds[roundIndex];
 
   if (round.entries.isEmpty) {
@@ -951,70 +1059,64 @@ Future<void> _openRoutePreview() async {
   String? to;
 
   // ================================
-  // FIND FIRST MISSING LEG
+  // FINN FØRSTE REELLE LEG (IKKE OFF / TRAVEL)
   // ================================
   for (int i = 0; i < round.entries.length; i++) {
-
-    final km = _kmByIndex[i];
-
     final f = i == 0
         ? _norm(round.startLocation)
         : _norm(round.entries[i - 1].location);
 
     final t = _norm(round.entries[i].location);
+    final tLower = t.toLowerCase();
 
+    if (f.isEmpty) continue;
     if (f == t) continue;
-    if (t.toLowerCase() == 'off') continue;
-    if (t.toLowerCase() == 'travel') continue;
+    if (tLower == 'off' || tLower == 'travel') continue;
 
-    if (km == null) {
-      from = f;
-      to = t;
-      break;
-    }
+    from = f;
+    to = t;
+    break;
   }
 
   if (from == null || to == null) {
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
-        content: Text("No missing routes found ✅"),
+        content: Text("No valid route leg found."),
       ),
     );
     return;
   }
 
   // ================================
-  // COLLECT STOPS (FOR VIA)
+  // COLLECT STOPS (VIA)
   // ================================
   final stops = <String>[];
 
   for (final e in round.entries) {
-    final loc = e.location.trim();
-
-    if (loc.isEmpty) continue;
-
+    final loc = _norm(e.location);
     final l = loc.toLowerCase();
 
+    if (loc.isEmpty) continue;
     if (l == 'off' || l == 'travel') continue;
 
     stops.add(loc);
   }
 
   // ================================
-  // OPEN POPUP
+  // ÅPNE POPUP UANSETT KM
   // ================================
   final updated = await showDialog<bool>(
-  context: context,
-  builder: (_) => RoutePopupDialog(
-    start: from!,
-    stops: stops,
-  ),
-);
+    context: context,
+    builder: (_) => RoutePopupDialog(
+      start: from!,
+      stops: stops,
+    ),
+  );
 
-if (updated == true) {
-  _clearAllRouteCache();   // 👈 NY
-  await _recalcKm();       // 👈 TVING RELOAD
-}
+  if (updated == true) {
+    _clearAllRouteCache();
+    await _recalcKm();
+  }
 }
   Future<void> _onAddMissingRoutePressed() async {
 
@@ -1089,7 +1191,7 @@ if (updated == true) {
 // ------------------------------------------------------------
 Future<void> _saveDraft() async {
   // Auto-set Draft hvis tom
-offer.status = _validStatus(offer.status);
+  offer.status = _validStatus(offer.status);
 
   // ----------------------------------------
   // ⛔ Vent hvis draft lastes
@@ -1106,81 +1208,47 @@ offer.status = _validStatus(offer.status);
   try {
 
     // ----------------------------------------
-// ✅ SYNC ALL ROUNDS BEFORE SAVE
-// ----------------------------------------
-for (int i = 0; i < offer.rounds.length; i++) {
-  final r = offer.rounds[i];
-
-  // Aktiv runde → fra input
-  if (i == roundIndex) {
-    r.startLocation = _norm(startLocCtrl.text);
-  }
-
-  // Normalize (safety)
-  r.startLocation = _norm(r.startLocation);
-}
-
+    // ✅ SYNC ALL ROUNDS BEFORE SAVE
     // ----------------------------------------
-    // Pick / reuse bus (MODEL FIRST)
-    // ----------------------------------------
-    String selectedBus;
+    for (int i = 0; i < offer.rounds.length; i++) {
+      final r = offer.rounds[i];
 
-    // 1️⃣ Bruk eksisterende
-    if (offer.bus != null && offer.bus!.isNotEmpty) {
-      selectedBus = offer.bus!;
-    }
-
-    // 2️⃣ Ellers: spør bruker
-    else {
-      final picked = await _pickBus();
-
-      if (picked == null || picked.isEmpty) {
-
-        if (!mounted) return;
-
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Ingen buss valgt")),
-        );
-
-        return;
+      // Aktiv runde → fra input
+      if (i == roundIndex) {
+        r.startLocation = _norm(startLocCtrl.text);
       }
 
-      selectedBus = picked;
+      // Normalize (safety)
+      r.startLocation = _norm(r.startLocation);
     }
 
     // ----------------------------------------
     // ✅ Lagre i MODELL (ÉN GANG)
     // ----------------------------------------
-    // 🔥 SYNC UI → MODEL
     final current = CurrentOfferStore.current.value;
 
-if (current != null) {
+    if (current != null) {
 
-  // 🔥 FULL SYNC FRA STORE
-  offer.company    = current.company;
-  offer.contact    = current.contact;
-  offer.phone      = current.phone;
-  offer.email      = current.email;
-  offer.production = current.production;
-  offer.bus        = current.bus;
-  offer.busCount   = current.busCount;
-  offer.busType    = current.busType;
+      offer.company    = current.company;
+      offer.contact    = current.contact;
+      offer.phone      = current.phone;
+      offer.email      = current.email;
+      offer.production = current.production;
 
-  // ✅ VIKTIG: SYNC ROUNDS (inkl trailer)
-  for (int i = 0; i < offer.rounds.length; i++) {
-    if (i >= current.rounds.length) break;
+      offer.busCount   = current.busCount;
+      offer.busType    = current.busType;
 
-    offer.rounds[i].trailer =
-        current.rounds[i].trailer;
+      // ✅ VIKTIG: SYNC ROUNDS (inkl trailer)
+      for (int i = 0; i < offer.rounds.length; i++) {
+        if (i >= current.rounds.length) break;
 
-    offer.rounds[i].pickupEveningFirstDay =
-        current.rounds[i].pickupEveningFirstDay;
-  }
-}
-    offer.bus = selectedBus;
-    _selectedBus = selectedBus;
+        offer.rounds[i].trailer =
+            current.rounds[i].trailer;
 
-    debugPrint("Saving bus: $selectedBus");
+        offer.rounds[i].pickupEveningFirstDay =
+            current.rounds[i].pickupEveningFirstDay;
+      }
+    }
 
     // ----------------------------------------
     // Save to DB
@@ -1199,46 +1267,47 @@ if (current != null) {
     // ----------------------------------------
     // Reload from DB (SOURCE OF TRUTH)
     // ----------------------------------------
-    
+    final freshOffer =
+        await OfferStorageService.loadDraft(id);
 
-    
-final freshOffer =
-    await OfferStorageService.loadDraft(id);
+    if (freshOffer == null) {
+      throw Exception("Failed to reload draft");
+    }
+
     // 🔥 FULL SYNC BACK TO MAIN MODEL
-offer.company    = freshOffer.company;
-offer.contact    = freshOffer.contact;
-offer.phone      = freshOffer.phone;
-offer.email      = freshOffer.email;
-offer.production = freshOffer.production;
-offer.status     = freshOffer.status;
-offer.bus        = freshOffer.bus;
-offer.busCount   = freshOffer.busCount;
-offer.busType    = freshOffer.busType;
+    offer.company    = freshOffer.company;
+    offer.contact    = freshOffer.contact;
+    offer.phone      = freshOffer.phone;
+    offer.email      = freshOffer.email;
+    offer.production = freshOffer.production;
+    offer.status     = freshOffer.status;
+    offer.busCount   = freshOffer.busCount;
+    offer.busType    = freshOffer.busType;
 
-phoneCtrl.text = offer.phone ?? '';
-emailCtrl.text = offer.email ?? '';
+    // 🔥 GLOBAL BUS ER FJERNET (enterprise multi-bus)
+    // offer.bus = freshOffer.bus;
 
-if (freshOffer != null) {
-  freshOffer.status =
-      _mapCalendarStatus(freshOffer.status);
-}
-debugPrint("Reloaded bus: ${freshOffer.bus}");
+    phoneCtrl.text = offer.phone ?? '';
+    emailCtrl.text = offer.email ?? '';
 
-CurrentOfferStore.set(freshOffer);
-    // ----------------------------------------
-    // Sync back to state (FULL SYNC)
-offer.bus = freshOffer.bus;
-_selectedBus = freshOffer.bus;
-offer.status = _mapCalendarStatus(freshOffer.status); // ✅
+    freshOffer.status =
+        _mapCalendarStatus(freshOffer.status);
+
+    CurrentOfferStore.set(freshOffer);
 
     // ----------------------------------------
-    // Sync calendar
+    // Sync back to state
+    // ----------------------------------------
+    offer.status = freshOffer.status;
+
+    // ----------------------------------------
+    // Sync calendar (PER ROUND BUS)
     // ----------------------------------------
     await CalendarSyncService.syncFromOffer(
-      freshOffer,
-      selectedBus: freshOffer.bus ?? selectedBus,
-      draftId: id,
-    );
+  freshOffer,
+  draftId: id,
+  calcCache: _roundCalcCache,
+);
 
     // ----------------------------------------
     // UI refresh
@@ -1248,13 +1317,26 @@ offer.status = _mapCalendarStatus(freshOffer.status); // ✅
     }
 
     // ----------------------------------------
-    // Feedback
+    // Feedback (vis første buss som finnes)
     // ----------------------------------------
+    String? firstBus;
+
+    for (final r in offer.rounds) {
+      if (r.bus != null && r.bus!.isNotEmpty) {
+        firstBus = r.bus;
+        break;
+      }
+    }
+
     if (!mounted) return;
 
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text("Lagret på ${offer.bus} ✅"),
+        content: Text(
+          firstBus != null
+              ? "Lagret på $firstBus ✅"
+              : "Lagret ✅",
+        ),
       ),
     );
 
@@ -1274,6 +1356,9 @@ offer.status = _mapCalendarStatus(freshOffer.status); // ✅
     );
   }
 }
+
+
+
 // ------------------------------------------------------------
 // ✅ Scan PDF and import tour
 // ------------------------------------------------------------
@@ -1804,7 +1889,26 @@ Future<void> _recalcKm() async {
 
   await _recalcAllRounds();
 }
+Future<void> _validateSelectedBus() async {
+  final round = offer.rounds[roundIndex];
 
+  if (offer.bus == null) return;
+  if (round.entries.isEmpty) return;
+
+  final availability =
+      await BusAvailabilityService.fetchAvailability(
+    start: round.entries.first.date,
+    end: round.entries.last.date,
+  );
+
+  if (availability[offer.bus] == false) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text("Selected bus is no longer available"),
+      ),
+    );
+  }
+}
   // ------------------------------------------------------------
   // Add entry
   // ------------------------------------------------------------
@@ -2289,46 +2393,24 @@ final safeFerryPerLeg = List<String?>.generate(
 }
 
   // ------------------------------------------------------------
-  // ✅ Save PDF (FilePicker)
-  // ------------------------------------------------------------
-  Future<String> _savePdfToFile(Uint8List bytes) async {
-    final production = offer.production.trim().isEmpty
-        ? "UnknownProduction"
-        : offer.production.trim();
-    final safeProduction = _safeFolderName(production);
+// ✅ Save PDF (FilePicker + WEB)
+// ------------------------------------------------------------
+Future<String> _savePdfToFile(Uint8List bytes) async {
+  final production = offer.production.trim().isEmpty
+      ? "UnknownProduction"
+      : offer.production.trim();
 
-    final todayStamp = DateFormat("yyyyMMdd").format(DateTime.now());
-    final defaultFileName = "Offer Nightliner $safeProduction $todayStamp.pdf";
+  final safeProduction = _safeFolderName(production);
 
-    final filePath = await FilePicker.platform.saveFile(
-      dialogTitle: "Save PDF offer",
-      fileName: defaultFileName,
-      type: FileType.custom,
-      allowedExtensions: ["pdf"],
-      lockParentWindow: true,
-    );
+  final todayStamp =
+      DateFormat("yyyyMMdd").format(DateTime.now());
 
-    if (filePath == null) {
-      throw Exception("Save cancelled.");
-    }
+  final defaultFileName =
+      "Offer Nightliner $safeProduction $todayStamp.pdf";
 
-    var finalPath = filePath;
-    if (!finalPath.toLowerCase().endsWith(".pdf")) {
-      finalPath += ".pdf";
-    }
-
-    final file = File(finalPath);
-    await file.writeAsBytes(bytes, flush: true);
-
-    return finalPath;
-  }
-
-  String _safeFolderName(String name) {
-    var s = name.trim();
-    s = s.replaceAll(RegExp(r'[\/\\\:\*\?\"\<\>\|]'), "_");
-    s = s.replaceAll(RegExp(r"\s+"), " ");
-    return s;
-  }
+  // 👇 ERSTATTER hele kIsWeb + FilePicker blokka
+  return await savePdf(bytes, defaultFileName);
+}
 
   String _nok(double v) => "${v.toStringAsFixed(0)},-";
 
@@ -2542,48 +2624,107 @@ return Padding(
                   const SizedBox(height: 10),
 
                   // ---------- OPTIONS ----------
-                  Wrap(
-                    spacing: 18,
-                    runSpacing: 6,
-                    children: [
-                      Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Checkbox(
-                            value: round.pickupEveningFirstDay,
-                            onChanged: (v) async {
-                              setState(() {
-                                round.pickupEveningFirstDay = v ?? false;
-                              });
+Column(
+  crossAxisAlignment: CrossAxisAlignment.start,
+  children: [
 
-                              await _recalcKm();
-                            },
-                          ),
-                          const Text(
-                              "Pickup evening (first day not billable)"),
-                        ],
-                      ),
-                      Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Checkbox(
-  value: round.trailer,
-  onChanged: (v) async {
-    setState(() {
-      round.trailer = v ?? false;
-    });
+    // ===== PICKUP EVENING =====
+    Row(
+      children: [
+        Checkbox(
+          value: round.pickupEveningFirstDay,
+          onChanged: (v) async {
+            setState(() {
+              round.pickupEveningFirstDay = v ?? false;
+            });
 
-    await _recalcAllRounds();
-    
-  },
+            await _recalcKm();
+          },
+        ),
+        const Text("Pickup evening (first day not billable)"),
+      ],
+    ),
+
+    const SizedBox(height: 8),
+
+    // ===== BUS + TRAILER (ENTERPRISE ROW) =====
+    Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: cs.outlineVariant),
+      ),
+      child: Row(
+        children: [
+
+          const Icon(Icons.directions_bus, size: 20),
+
+          const SizedBox(width: 10),
+
+          const Text(
+            "Bus:",
+            style: TextStyle(fontWeight: FontWeight.w600),
+          ),
+
+          const SizedBox(width: 8),
+
+          Expanded(
+  child: Material(
+    color: Colors.transparent,
+    child: InkWell(
+      borderRadius: BorderRadius.circular(8),
+      onTap: () async {
+        debugPrint("🚌 BUS PICKER TAPPED");
+
+        final picked = await _pickBus();
+
+        if (picked == null) return;
+
+        setState(() {
+  offer.rounds[roundIndex].bus = picked;
+});
+
+CurrentOfferStore.set(offer);   // ⭐⭐⭐ DETTE MANGLER ⭐⭐⭐
+      },
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 6),
+        child: Text(
+          offer.rounds[roundIndex].bus ?? "Select bus",
+          style: TextStyle(
+            color: offer.rounds[roundIndex].bus == null
+                ? Colors.grey
+                : Colors.black,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ),
+    ),
+  ),
 ),
-                            
-                        
-                          const Text("Trailer"),
-                        ],
-                      ),
-                    ],
-                  ),
+
+const SizedBox(width: 12),
+
+// ===== TRAILER =====
+Row(
+  children: [
+    Checkbox(
+      value: round.trailer,
+      onChanged: (v) async {
+        setState(() {
+          round.trailer = v ?? false;
+        });
+
+        await _recalcAllRounds();
+      },
+    ),
+    const Text("Trailer"),
+  ],
+),
+        ],
+      ),
+    ),
+  ],
+),
               
 
                   const SizedBox(height: 12),
@@ -2672,6 +2813,7 @@ return Padding(
                   const SizedBox(height: 12),
 
                   // ---------- ROUTES ----------
+// ---------- ROUTES ----------
 Expanded(
   child: Container(
     width: double.infinity,
@@ -2685,31 +2827,29 @@ Expanded(
       children: [
 
         // ---------- HEADER + MAP BUTTON ----------
-Row(
-  children: [
-
-    const Expanded(
-      child: _RoutesTableHeader(),
-    ),
-
-    IconButton(
-  tooltip: "Show route map",
-  icon: const Icon(Icons.map),
-  onPressed: _openRoutePreview,
-),
-],
-),
-
-Divider(
-  height: 14,
-  color: cs.outlineVariant,
-),// ---------- LIST ----------
-        if (round.entries.isEmpty)
-          const Expanded(
-            child: Center(
-              child: Text("No entries yet."),
+        Row(
+          children: [
+            const Expanded(
+              child: _RoutesTableHeader(),
             ),
-          )
+            IconButton(
+              tooltip: "Show route map",
+              icon: const Icon(Icons.map),
+              onPressed: _openRoutePreview,
+            ),
+          ],
+        ),
+
+        Divider(
+          height: 14,
+          color: cs.outlineVariant,
+        ),
+
+        // ---------- LIST ----------
+        if (round.entries.isEmpty)
+  const Center(
+    child: Text("No entries yet."),
+  )
         else
           Expanded(
             child: ListView.separated(
@@ -2762,52 +2902,50 @@ Divider(
           height: 14,
           color: cs.outlineVariant,
         ),
-        
+
         // ---------- SUMMARY ----------
-                          Wrap(
-                            spacing: 14,
-                            runSpacing: 6,
-                            children: [
-                              Text(
-                                "Billable days: ${calc.billableDays}",
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.w900,
-                                  fontSize: 12,
-                                ),
-                              ),
-                              Text(
-                                "Included: ${calc.includedKm.toStringAsFixed(0)} km",
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.w700,
-                                  fontSize: 12,
-                                ),
-                              ),
-                              Text(
-                                "Extra: ${calc.extraKm.toStringAsFixed(0)} km",
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.w700,
-                                  fontSize: 12,
-                                ),
-                              ),
-                              Text(
-                                "Total: ${totalKm.toStringAsFixed(0)} km",
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.w900,
-                                  fontSize: 12,
-                                ),
-                              ),
-                            ],
-                          ),
+        Wrap(
+          spacing: 14,
+          runSpacing: 6,
+          children: [
+            Text(
+              "Billable days: ${calc.billableDays}",
+              style: const TextStyle(
+                fontWeight: FontWeight.w900,
+                fontSize: 12,
+              ),
+            ),
+            Text(
+              "Included: ${calc.includedKm.toStringAsFixed(0)} km",
+              style: const TextStyle(
+                fontWeight: FontWeight.w700,
+                fontSize: 12,
+              ),
+            ),
+            Text(
+              "Extra: ${calc.extraKm.toStringAsFixed(0)} km",
+              style: const TextStyle(
+                fontWeight: FontWeight.w700,
+                fontSize: 12,
+              ),
+            ),
+            Text(
+              "Total: ${totalKm.toStringAsFixed(0)} km",
+              style: const TextStyle(
+                fontWeight: FontWeight.w900,
+                fontSize: 12,
+              ),
+            ),
+          ],
+        ),
 
-                          const SizedBox(height: 10),
-                          // LUKKER ROUTES COLUMN
-], // children
-), // Column
+        const SizedBox(height: 10),
+      ],
+    ),
+  ),
+),
 
-// LUKKER ROUTES CONTAINER
-), // Container
-
-),// LUKKER ROUTES EXPANDED
+const SizedBox(height: 10),
 
 
                           // ---------- COST ----------
@@ -2917,7 +3055,7 @@ Container(
 ], // children (CENTER Column)
 ), // Column (CENTER)
 ), // Container (CENTER)
-), // Expanded (CENTER)// Expanded (CENTER)
+), // Expanded (CENTER)
 
 // ================= RIGHT =================
           
@@ -3390,7 +3528,7 @@ Future<void> _openProductionDialog() async {
       ),
     );
   }
-}
+  }
 
   // --------------------------------------------------
   // CONTACT DIALOG
@@ -3779,38 +3917,56 @@ _BusSettingsCard(
     setState(() {});
   },
 ),
-Row(
-  children: [
 
-    const Text(
-      "Bus:",
-      style: TextStyle(fontWeight: FontWeight.w900),
-    ),
+// ================= BUS PREVIEW (ENTERPRISE) =================
+Builder(
+  builder: (context) {
 
-    const SizedBox(width: 6),
+    // ⭐ FINN FØRSTE BUS FRA ROUNDS
+    String? previewBus;
 
-    Expanded(
-      child: Text(
-        widget.offer.bus ?? "Not selected",
-        style: const TextStyle(fontWeight: FontWeight.w700),
-        overflow: TextOverflow.ellipsis,
-      ),
-    ),
+    for (final r in widget.offer.rounds) {
+      if (r.bus != null && r.bus!.isNotEmpty) {
+        previewBus = r.bus;
+        break;
+      }
+    }
 
-    IconButton(
-      tooltip: "Change bus",
-      icon: const Icon(Icons.directions_bus),
-      onPressed: () {
-        final state =
-            context.findAncestorStateOfType<_NewOfferPageState>();
+    return Row(
+      children: [
 
-        state?._changeBusManually();
-      },
-    ),
-  ],
+        const Text(
+          "Bus:",
+          style: TextStyle(fontWeight: FontWeight.w900),
+        ),
+
+        const SizedBox(width: 6),
+
+        Expanded(
+          child: Text(
+            previewBus ?? "Not selected",
+            style: const TextStyle(fontWeight: FontWeight.w700),
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+
+        IconButton(
+          tooltip: "Change bus",
+          icon: const Icon(Icons.directions_bus),
+          onPressed: () {
+            final state =
+                context.findAncestorStateOfType<_NewOfferPageState>();
+
+            state?._changeBusManually();
+          },
+        ),
+      ],
+    );
+  },
 ),
-                      // ================= BUTTONS =================
-                     Column(
+
+// ================= BUTTONS =================
+Column(
   children: [
 
     // -------- SAVE --------
@@ -3860,7 +4016,7 @@ SizedBox(
       },
     );
   }
-}
+  }
 
 class _RoutesTableHeader extends StatelessWidget {
   const _RoutesTableHeader();

@@ -110,14 +110,22 @@ class TripCalculator {
     final double threshold = settings.dDriveKmThreshold;
     final double hardLimit = threshold * 2;
 
-    final Map<String, List<int>> dayToIndexes = {};
+    // --------------------------------------------------
+// D.DRIVE START INDEX (IGNORE PICKUP EVENING)
+// --------------------------------------------------
 
-    for (int i = 0; i < entryCount; i++) {
-      final d = dates[i];
-      final key = '${d.year}-${d.month}-${d.day}';
-      dayToIndexes.putIfAbsent(key, () => []);
-      dayToIndexes[key]!.add(i);
-    }
+final int startIndex =
+    pickupEveningFirstDay ? 1 : 0;
+
+final Map<String, List<int>> dayToIndexes = {};
+
+for (int i = startIndex; i < entryCount; i++) {
+  final d = dates[i];
+  final key = '${d.year}-${d.month}-${d.day}';
+
+  dayToIndexes.putIfAbsent(key, () => []);
+  dayToIndexes[key]!.add(i);
+}
 
     final Map<String, double> dayKm = {};
     dayToIndexes.forEach((day, idx) {
@@ -160,16 +168,23 @@ class TripCalculator {
     int extraDays = 0;
     int flightTickets = 0;
 
-    for (final c in clusters) {
-      if (c.first != 0) {
-        extraDays++;
-        flightTickets++;
-      }
-      if (c.last != entryCount - 1) {
-        extraDays++;
-        flightTickets++;
-      }
-    }
+    // --------------------------------------------------
+// RESPECT PICKUP EVENING FOR D.DRIVE EDGES
+// --------------------------------------------------
+
+final int endIndex = entryCount - 1;
+
+for (final c in clusters) {
+  if (c.first != startIndex) {
+    extraDays++;
+    flightTickets++;
+  }
+
+  if (c.last != endIndex) {
+    extraDays++;
+    flightTickets++;
+  }
+}
 
     final int totalDDriveDays =
         baseDDriveDays + extraDays;

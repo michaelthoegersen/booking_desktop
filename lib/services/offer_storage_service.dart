@@ -209,16 +209,14 @@ class OfferStorageService {
   return {
     'company': offer.company,
     'contact': offer.contact,
-
-    // ✅ LEGG TIL
     'phone': offer.phone,
     'email': offer.email,
-
     'production': offer.production,
 
     'busCount': offer.busCount,
     'busType': offer.busType.name,
 
+    // ⚠️ global bus beholdes kun for legacy preview
     'bus': offer.bus,
 
     'rounds': offer.rounds.map((r) {
@@ -226,6 +224,10 @@ class OfferStorageService {
         'startLocation': r.startLocation,
         'trailer': r.trailer,
         'pickupEveningFirstDay': r.pickupEveningFirstDay,
+
+        // ⭐⭐⭐ DETTE ER GRUNNEN TIL AT SYNC SKIPPER ⭐⭐⭐
+        'bus': r.bus,
+
         'entries': r.entries.map((e) {
           return {
             'date': e.date.toIso8601String(),
@@ -283,6 +285,8 @@ class OfferStorageService {
 
     draft.rounds[i].pickupEveningFirstDay =
         (r['pickupEveningFirstDay'] ?? false) as bool;
+
+    draft.rounds[i].bus = r['bus'] as String?;
 
     draft.rounds[i].entries.clear();
 

@@ -3,6 +3,7 @@ import 'package:intl/intl.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:go_router/go_router.dart';
 import 'dart:async';
+import 'package:flutter/gestures.dart';
 
 // ============================================================
 // HELPERS
@@ -493,27 +494,23 @@ const SizedBox(width: 8),
 
   Widget buildContent(List<DateTime> days) {
 
-    if (loading) {
-      return const Expanded(
-        child: Center(
-          child: CircularProgressIndicator(),
-        ),
-      );
-    }
-
-    if (error != null) {
-      return Expanded(
-        child: Center(
-          child: Text(
-            error!,
-            style: const TextStyle(color: Colors.red),
-          ),
-        ),
-      );
-    }
-
-    return buildGrid(days);
+  if (loading) {
+    return const Center(
+      child: CircularProgressIndicator(),
+    );
   }
+
+  if (error != null) {
+    return Center(
+      child: Text(
+        error!,
+        style: const TextStyle(color: Colors.red),
+      ),
+    );
+  }
+
+  return buildGrid(days);
+}
     // ============================================================
   // GRID
   // ============================================================
@@ -533,53 +530,68 @@ const SizedBox(width: 8),
 Widget buildGrid(List<DateTime> days) {
   final scrollWidth = dayWidth * days.length;
 
-  return Expanded(
-    child: Row(
-      children: [
+  return Row(
+    children: [
 
-        // =====================================================
-        // LEFT: BUS COLUMN (FIXED)
-        // =====================================================
-        SizedBox(
-          width: busWidth + 16,
+      // =====================================================
+      // LEFT: BUS COLUMN (FIXED)
+      // =====================================================
+      SizedBox(
+        width: busWidth + 16,
+        child: Column(
+          children: [
 
-          child: Column(
-            children: [
+            // Header spacer (same height as date row)
+            const SizedBox(height: 56),
 
-              // Header spacer (same height as date row)
-              const SizedBox(height: 56),
-
-              // Bus list
-              Expanded(
-                child: ListView.builder(
-                  itemCount: buses.length,
-
-                  itemBuilder: (_, i) {
-                    return _buildBusOnlyRow(buses[i]);
-                  },
-                ),
+            // Bus list
+            Expanded(
+              child: ListView.builder(
+                itemCount: buses.length,
+                itemBuilder: (_, i) {
+                  return _buildBusOnlyRow(buses[i]);
+                },
               ),
-            ],
-          ),
+            ),
+          ],
         ),
+      ),
 
-        // =====================================================
-        // RIGHT: SCROLLABLE AREA
-        // =====================================================
-        Expanded(
-          child: ClipRect(
+      // =====================================================
+      // RIGHT: SCROLLABLE AREA
+      // =====================================================
+      Expanded(
+        child: ClipRect(
+          child: Scrollbar(
+            controller: _hScrollCtrl,
+            thumbVisibility: true,
 
-            child: Scrollbar(
-              controller: _hScrollCtrl,
-              thumbVisibility: true,
+            // 🔥 WEB SCROLL FIX START
+            child: Listener(
+              onPointerSignal: (event) {
+
+                // 🌐 Web trackpad scroll → horisontal
+                if (event is PointerScrollEvent) {
+                  final newOffset =
+                      _hScrollCtrl.offset + event.scrollDelta.dy;
+
+                  _hScrollCtrl.jumpTo(
+                    newOffset.clamp(
+                      0,
+                      _hScrollCtrl.position.maxScrollExtent,
+                    ),
+                  );
+                }
+              },
+              // 🔥 WEB SCROLL FIX END
 
               child: SingleChildScrollView(
                 controller: _hScrollCtrl,
                 scrollDirection: Axis.horizontal,
+                physics: const ClampingScrollPhysics(),
 
                 child: SizedBox(
                   width: scrollWidth,
-
                   child: CustomScrollView(
                     slivers: [
 
@@ -588,10 +600,8 @@ Widget buildGrid(List<DateTime> days) {
                       // ===================================
                       SliverPersistentHeader(
                         pinned: true,
-
                         delegate: _CalendarHeaderDelegate(
                           height: 56,
-
                           child: SizedBox(
                             width: scrollWidth,
                             child: buildHeaderRow(days),
@@ -620,8 +630,8 @@ Widget buildGrid(List<DateTime> days) {
             ),
           ),
         ),
-      ],
-    ),
+      ),
+    ],
   );
 }
 // ============================================================

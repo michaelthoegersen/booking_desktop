@@ -26,43 +26,24 @@ class _LoginPageState extends State<LoginPage> {
   }
 
   Future<void> _login() async {
-  setState(() {
-    _loading = true;
-    _error = null;
-  });
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
 
-  try {
-    final res = await _sb.auth.signInWithPassword(
-      email: _emailCtrl.text.trim(),
-      password: _passwordCtrl.text,
-    );
-
-    final session = res.session;
-    final user = res.user;
-
-    debugPrint("LOGIN USER: $user");
-    debugPrint("LOGIN SESSION: $session");
-
-    if (session == null || user == null) {
-      throw "No session after login";
-    }
-
-    if (!mounted) return;
-
-    // 🔥 Viktig: Gå videre til app
-    Navigator.of(context).pushReplacementNamed("/");
-  } on AuthException catch (e) {
-    setState(() => _error = e.message);
-  } catch (e) {
-    debugPrint("LOGIN ERROR: $e");
-
-    setState(() => _error = "Login failed");
-  } finally {
-    if (mounted) {
+    try {
+      await _sb.auth.signInWithPassword(
+        email: _emailCtrl.text.trim(),
+        password: _passwordCtrl.text,
+      );
+    } on AuthException catch (e) {
+      setState(() => _error = e.message);
+    } catch (e) {
+      setState(() => _error = "Login failed");
+    } finally {
       setState(() => _loading = false);
     }
   }
-}
 
   @override
 Widget build(BuildContext context) {

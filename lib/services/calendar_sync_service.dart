@@ -4,6 +4,7 @@ import '../models/offer_draft.dart';
 import '../services/trip_calculator.dart';
 import '../state/settings_store.dart';
 import '../supabase_clients.dart';
+import '../models/round_calc_result.dart';
 
 class CalendarSyncService {
   static SupabaseClient get sb => Supabase.instance.client;
@@ -40,8 +41,8 @@ class CalendarSyncService {
   /// Sync offer → samletdata (kalender)
 static Future<void> syncFromOffer(
   OfferDraft offer, {
-  required String selectedBus,
   required String draftId,
+  required Map<int, RoundCalcResult> calcCache, // ⭐ NY
 }) async {
   try {
     print("📅 SYNC START: ${offer.production}");
@@ -51,10 +52,10 @@ static Future<void> syncFromOffer(
     // 1️⃣ Hent eksisterende rader
     // --------------------------------------------------
     final existing = await sb
-    .from('samletdata')
-    .select('dato, kilde')
-    .eq('draft_id', draftId)
-    .eq('manual_block', false);
+        .from('samletdata')
+        .select('dato, kilde')
+        .eq('draft_id', draftId)
+        .eq('manual_block', false);
 
     final Map<String, String> existingBusByDate = {};
 
@@ -87,105 +88,82 @@ static Future<void> syncFromOffer(
     }
 
     // --------------------------------------------------
-    // 3️⃣ Slett gamle rader
-    // --------------------------------------------------
-    final dbDates = existingBusByDate.keys.toSet();
-
-    final toDelete = dbDates.difference(offerDates);
-
-    if (toDelete.isNotEmpty) {
-      await sb
-          .from('samletdata')
-          .delete()
-          .eq('draft_id', draftId)
-          .inFilter('dato', toDelete.toList());
-
-      print("🗑️ Deleted: $toDelete");
-    }
-
-    // --------------------------------------------------
-// 4️⃣ Bygg nye rader (AGGREGER PER DATO)
+// 3️⃣ ENTERPRISE RESET FOR THIS DRAFT
 // --------------------------------------------------
+await sb
+    .from('samletdata')
+    .delete()
+    .eq('draft_id', draftId)
+    .eq('manual_block', false);
 
-final Map<String, Map<String, dynamic>> rowByDate = {};
+print("♻️ Cleared previous auto rows for draft");
 
-for (final round in offer.rounds) {
-  if (round.entries.isEmpty) continue;
+    // --------------------------------------------------
+    // 4️⃣ Bygg nye rader (ENTERPRISE)
+    // --------------------------------------------------
+    final Map<String, Map<String, dynamic>> rowByDate = {};
 
-  final entries = [...round.entries]
-    ..sort((a, b) => a.date.compareTo(b.date));
+    for (int ri = 0; ri < offer.rounds.length; ri++) {
+      final round = offer.rounds[ri];
 
-  final calc = TripCalculator.calculateRound(
-  settings: SettingsStore.current,
-  dates: entries.map((e) => e.date).toList(),
-  pickupEveningFirstDay: round.pickupEveningFirstDay,
-  trailer: round.trailer,
-  totalKm: 0,
-  legKm: const [],
+      if (round.entries.isEmpty) continue;
 
-  ferries: SettingsStore.current.ferries, // ✅
+      final calc = calcCache[ri];
+      if (calc == null) continue;
 
-  tollPerLeg: const [],
-  extraPerLeg: List.filled(entries.length, ''),
-  hasTravelBefore:
-      List.generate(entries.length, (i) => _hasTravelBefore(entries, i)),
-);
+      final vehicle =
+          "${offer.busType.label}${round.trailer ? ' + trailer' : ''}";
 
-  final vehicle =
-      "${offer.busType.label}${round.trailer ? ' + trailer' : ''}";
+      for (int i = 0; i < round.entries.length; i++) {
+        final e = round.entries[i];
 
-  for (final e in entries) {
-    final dateStr =
-        e.date.toIso8601String().substring(0, 10);
+        final dateStr =
+            e.date.toIso8601String().substring(0, 10);
 
-    final bus =
-        existingBusByDate[dateStr] ?? selectedBus;
+        final bus = round.bus;
+        if (bus == null || bus.isEmpty) {
+  print("⛔ Skip round $ri — no bus selected");
+  continue;
+}
+    
 
-    // Finn / opprett rad
-    final row = rowByDate.putIfAbsent(dateStr, () {
-      return {
-        'draft_id': draftId,
-        'dato': dateStr,
+        final row = rowByDate.putIfAbsent(dateStr, () {
+          return {
+            'draft_id': draftId,
+            'dato': dateStr,
+            'sted': '',
+            'km': calc.legKm.length > i
+                ? calc.legKm[i].toString()
+                : '',
+            'tid': '',
+            'produksjon': offer.production,
+            'kjoretoy': vehicle,
+            'pris': calc.totalCost.toString(), // ⭐ FIX
+            'contact': offer.contact,
+            'status': offer.status,
+            'kilde': bus,
+          };
+        });
 
-        'sted': '',
-        'km': '',
-        'tid': '',
+        final loc = e.location.trim();
 
-        'produksjon': offer.production,
-        'kjoretoy': vehicle,
-
-        'pris': calc.totalCost.toString(),
-
-        'contact': offer.contact,
-
-        'status': offer.status,
-
-        'kilde': bus,
-      };
-    });
-
-    // Append steder
-    final loc = e.location.trim();
-
-    if (loc.isNotEmpty) {
-      if ((row['sted'] as String).isEmpty) {
-        row['sted'] = loc;
-      } else {
-        row['sted'] = '${row['sted']}, $loc';
+        if (loc.isNotEmpty) {
+          if ((row['sted'] as String).isEmpty) {
+            row['sted'] = loc;
+          } else {
+            row['sted'] = '${row['sted']}, $loc';
+          }
+        }
       }
     }
-  }
-}
 
-final rows = rowByDate.values.toList();
+    final rows = rowByDate.values.toList();
 
     // --------------------------------------------------
-    // 5️⃣ UPSERT
+    // 5️⃣ UPSERT (BEHOLDT)
     // --------------------------------------------------
     if (rows.isNotEmpty) {
-      await sb
-          .from('samletdata')
-          .upsert(
+      await sb.from('samletdata').upsert(
             rows,
             onConflict: 'draft_id,dato',
           );
@@ -194,7 +172,6 @@ final rows = rowByDate.values.toList();
     }
 
     print("📅 SYNC DONE");
-
   } catch (e, st) {
     print("❌ CALENDAR SYNC ERROR");
     print(e);
