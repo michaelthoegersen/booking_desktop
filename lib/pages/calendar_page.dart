@@ -208,16 +208,20 @@ class _CalendarPageState extends State<CalendarPage> {
 
   Future<void> loadMonth() async {
 
-    setState(() {
-      loading = true;
-      error = null;
-    });
+  setState(() {
+    loading = true;
+    error = null;
+  });
 
-    final start = DateTime(monthStart.year, monthStart.month, 1);
-    final end = DateTime(monthStart.year, monthStart.month + 1, 0);
+  // ⭐⭐⭐ VIKTIG FIX ⭐⭐⭐
+  final start = DateTime(monthStart.year, monthStart.month, 1)
+      .subtract(const Duration(days: 40));
 
-    await loadRange(start, end);
-  }
+  final end = DateTime(monthStart.year, monthStart.month + 1, 0)
+      .add(const Duration(days: 40));
+
+  await loadRange(start, end);
+}
 
 
   Future<void> loadRange(DateTime start, DateTime end) async {

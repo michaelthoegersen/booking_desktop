@@ -2775,7 +2775,7 @@ Row(
                         OutlinedButton.icon(
                           icon: const Icon(Icons.add_road),
                           label: const Text("Add missing route"),
-                          onPressed: _onAddMissingRoutePressed,
+                          onPressed: _openRoutePreview,
                         ),
 
                         if (_loadingSuggestions)
@@ -2831,11 +2831,6 @@ Expanded(
           children: [
             const Expanded(
               child: _RoutesTableHeader(),
-            ),
-            IconButton(
-              tooltip: "Show route map",
-              icon: const Icon(Icons.map),
-              onPressed: _openRoutePreview,
             ),
           ],
         ),

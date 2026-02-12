@@ -22,6 +22,119 @@ class _SettingsPageState extends State<SettingsPage> {
   late TextEditingController flightTicketCtrl;
   late TextEditingController dropboxCtrl;
 
+  Future<void> _openChangePasswordDialog() async {
+
+  final passCtrl = TextEditingController();
+  final confirmCtrl = TextEditingController();
+
+  await showDialog(
+    context: context,
+    builder: (_) {
+
+      bool loading = false;
+
+      return StatefulBuilder(
+        builder: (context, setLocalState) {
+
+          return AlertDialog(
+            title: const Text("Change password"),
+
+            content: SizedBox(
+              width: 400,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+
+                  TextField(
+                    controller: passCtrl,
+                    obscureText: true,
+                    decoration: const InputDecoration(
+                      labelText: "New password",
+                    ),
+                  ),
+
+                  const SizedBox(height: 10),
+
+                  TextField(
+                    controller: confirmCtrl,
+                    obscureText: true,
+                    decoration: const InputDecoration(
+                      labelText: "Confirm password",
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
+            actions: [
+
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text("Cancel"),
+              ),
+
+              FilledButton(
+                onPressed: loading ? null : () async {
+
+                  final p1 = passCtrl.text.trim();
+                  final p2 = confirmCtrl.text.trim();
+
+                  if (p1.isEmpty || p1 != p2) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text("Passwords do not match"),
+                        backgroundColor: Colors.red,
+                      ),
+                    );
+                    return;
+                  }
+
+                  setLocalState(() => loading = true);
+
+                  try {
+
+                    await Supabase.instance.client.auth.updateUser(
+                      UserAttributes(password: p1),
+                    );
+
+                    if (!mounted) return;
+
+                    Navigator.pop(context);
+
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text("Password updated"),
+                      ),
+                    );
+
+                  } catch (e) {
+
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text("Error: $e"),
+                        backgroundColor: Colors.red,
+                      ),
+                    );
+                  }
+
+                  setLocalState(() => loading = false);
+                },
+                child: loading
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Text("Update"),
+              ),
+            ],
+          );
+        },
+      );
+    },
+  );
+}
+
   // =====================================================
   // INIT
   // =====================================================
@@ -408,6 +521,12 @@ debugPrint("SESSION: $session");
       onPressed: _openAddUserDialog,
       icon: const Icon(Icons.person_add),
       label: const Text("Add user"),
+    ),
+
+    FilledButton.icon(
+      onPressed: _openChangePasswordDialog, // ⭐ NY
+      icon: const Icon(Icons.lock_reset),
+      label: const Text("Change password"),
     ),
 
     FilledButton.icon(
