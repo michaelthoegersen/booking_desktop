@@ -534,9 +534,15 @@ const allBuses = [
         // ⭐⭐⭐ DETTE VAR DET SOM MANGLER ⭐⭐⭐
         dst.bus = src.bus;
 
-        dst.entries
-          ..clear()
-          ..addAll(src.entries);
+        dst.bus = src.bus;
+
+// ⭐⭐⭐ DETTE MANGLER ⭐⭐⭐
+dst.busSlots = List.from(src.busSlots);
+dst.trailerSlots = List.from(src.trailerSlots);
+
+dst.entries
+  ..clear()
+  ..addAll(src.entries);
       }
 
       // =========================
@@ -888,11 +894,11 @@ Future<void> _pickDate() async {
 }
 String _validStatus(String? status) {
   const allowed = [
-  "Draft",
-  "Inquiry",
-  "Confirmed",
-  "Cancelled",
-];
+    "Draft",
+    "Inquiry",
+    "Confirmed",
+    "Invoiced",
+  ];
 
   if (status == null) return "Draft";
   if (allowed.contains(status)) return status;
@@ -925,8 +931,8 @@ String _mapCalendarStatus(String? status) {
     case 'confirmed':
       return 'Confirmed';
 
-    case 'cancelled':
-      return 'Cancelled';
+    case 'invoiced':
+      return 'Invoiced';
 
     default:
       return 'Draft';
@@ -1253,6 +1259,14 @@ Future<void> _saveDraft() async {
 
         offer.rounds[i].pickupEveningFirstDay =
             current.rounds[i].pickupEveningFirstDay;
+            offer.rounds[i].busSlots =
+    List.from(current.rounds[i].busSlots);
+
+offer.rounds[i].trailerSlots =
+    List.from(current.rounds[i].trailerSlots);
+
+offer.rounds[i].bus =
+    current.rounds[i].bus;
       }
     }
 
@@ -2692,10 +2706,14 @@ Column(
       children: List.generate(offer.busCount, (i) {
 
         final bus =
-            offer.rounds[roundIndex].busSlots[i];
+    i < offer.rounds[roundIndex].busSlots.length
+        ? offer.rounds[roundIndex].busSlots[i]
+        : null;
 
-        final trailer =
-            offer.rounds[roundIndex].trailerSlots[i];
+final trailer =
+    i < offer.rounds[roundIndex].trailerSlots.length
+        ? offer.rounds[roundIndex].trailerSlots[i]
+        : false;
 
         return Padding(
           padding: const EdgeInsets.only(bottom: 8),
@@ -3042,8 +3060,8 @@ Container(
     child: Text("✅ Confirmed"),
   ),
   DropdownMenuItem(
-    value: "Cancelled",
-    child: Text("❌ Cancelled"),
+    value: "Invoiced",
+    child: Text("🧾 Invoiced"),
   ),
 ],
 
@@ -4279,11 +4297,46 @@ class _BusSettingsCard extends StatelessWidget {
                   ),
                 )
                 .toList(),
-            onChanged: (v) {
-              if (v == null) return;
-              offer.busCount = v;
-              onChanged();
-            },
+            onChanged: (v) async {
+  if (v == null) return;
+
+  offer.busCount = v;
+
+  for (final r in offer.rounds) {
+
+    // =========================
+    // 🔥 EXPAND when increasing buses
+    // =========================
+    while (r.busSlots.length < v) {
+      r.busSlots.add(null);
+    }
+
+    while (r.trailerSlots.length < v) {
+      r.trailerSlots.add(false);
+    }
+
+    // =========================
+    // 🔥 TRIM when decreasing buses
+    // =========================
+    if (r.busSlots.length > v) {
+      r.busSlots = r.busSlots.take(v).toList();
+    }
+
+    if (r.trailerSlots.length > v) {
+      r.trailerSlots = r.trailerSlots.take(v).toList();
+    }
+  }
+
+  onChanged();
+
+  final state =
+      context.findAncestorStateOfType<_NewOfferPageState>();
+
+  if (state != null) {
+    await state._recalcAllRounds();
+    CurrentOfferStore.set(offer);
+  }
+},
           ),
 
           const SizedBox(height: 12),

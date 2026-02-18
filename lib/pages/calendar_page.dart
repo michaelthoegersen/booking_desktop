@@ -67,12 +67,19 @@ Color statusColor(String? status) {
   switch ((status ?? '').toLowerCase()) {
     case 'manual':
       return Colors.blueGrey.shade400;
+
     case 'draft':
       return Colors.purple.shade300;
+
     case 'inquiry':
       return Colors.orange.shade300;
+
     case 'confirmed':
       return Colors.green.shade400;
+
+    case 'invoiced':   // ⭐ NY
+      return Colors.blue.shade400;
+
     default:
       return Colors.grey.shade300;
   }
@@ -1102,6 +1109,24 @@ result.add(
   }
 }
   }
+
+  class _StatusDot extends StatelessWidget {
+  final Color color;
+
+  const _StatusDot({required this.color});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 10,
+      height: 10,
+      decoration: BoxDecoration(
+        color: color,
+        shape: BoxShape.circle,
+      ),
+    );
+  }
+}
 // ============================================================
 // SEGMENT BODY
 // ============================================================
@@ -1134,55 +1159,143 @@ class BookingSegment extends StatelessWidget {
   // ============================================================
 
   Widget _buildBody(BuildContext context) {
-    return GestureDetector(
-      onTap: () {
-        context.go('/new?offerId=$draftId');
-      },
+  return GestureDetector(
+    behavior: HitTestBehavior.opaque,
 
-      onDoubleTap: () async {
-        final changed = await showDialog<bool>(
-          context: context,
-          builder: (_) => EditCalendarDialog(
-            production: title,
-            bus: bus,
-            from: from,
-            to: to,
-          ),
-        );
+    // =====================================================
+    // ⭐ DOBBELTKLIKK (GAMMEL FUNKSJON TILBAKE)
+    // =====================================================
+    onDoubleTap: () async {
 
-        if (changed == true && context.mounted) {
-          final parent =
-              context.findAncestorStateOfType<_CalendarPageState>();
+  final parent =
+      context.findAncestorStateOfType<_CalendarPageState>();
 
-          if (parent != null) {
-            parent.isMonthView
-                ? parent.loadMonth()
-                : parent.loadWeek();
-          }
-        }
-      },
+  if (parent == null) return;
 
-      child: Container(
-        margin: const EdgeInsets.all(4),
-        padding: const EdgeInsets.symmetric(
-          horizontal: 10,
-          vertical: 6,
+  final changed = await showDialog<bool>(
+    context: context,
+    builder: (_) => EditCalendarDialog(
+      production: title,
+      bus: bus,
+      from: from,
+      to: to,
+    ),
+  );
+
+  if (changed == true) {
+    parent.isMonthView
+        ? parent.loadMonth()
+        : parent.loadWeek();
+  }
+},
+
+    // =====================================================
+    // ⭐ HØYREKLIKK (STATUS MENU – DIN NYE)
+    // =====================================================
+    onSecondaryTapDown: (details) async {
+      final result = await showMenu<String>(
+        context: context,
+        position: RelativeRect.fromLTRB(
+          details.globalPosition.dx,
+          details.globalPosition.dy,
+          details.globalPosition.dx,
+          details.globalPosition.dy,
         ),
-        decoration: BoxDecoration(
-          color: statusColor(status),
-          borderRadius: BorderRadius.circular(10),
-        ),
-        child: Text(
-          title,
-          overflow: TextOverflow.ellipsis,
-          style: const TextStyle(
-            fontWeight: FontWeight.w700,
-            fontSize: 13,
+        items: const [
+
+          PopupMenuItem(
+            value: 'draft',
+            child: Row(
+              children: [
+                _StatusDot(color: Colors.purple),
+                SizedBox(width: 8),
+                Text('Draft'),
+              ],
+            ),
           ),
+
+          PopupMenuItem(
+            value: 'inquiry',
+            child: Row(
+              children: [
+                _StatusDot(color: Colors.orange),
+                SizedBox(width: 8),
+                Text('Inquiry'),
+              ],
+            ),
+          ),
+
+          PopupMenuItem(
+            value: 'confirmed',
+            child: Row(
+              children: [
+                _StatusDot(color: Colors.green),
+                SizedBox(width: 8),
+                Text('Confirmed'),
+              ],
+            ),
+          ),
+
+          PopupMenuItem(
+            value: 'invoiced',
+            child: Row(
+              children: [
+                _StatusDot(color: Colors.blue),
+                SizedBox(width: 8),
+                Text('Invoiced'),
+              ],
+            ),
+          ),
+        ],
+      );
+
+      if (result == null) return;
+
+      final parent =
+          context.findAncestorStateOfType<_CalendarPageState>();
+
+      if (parent == null) return;
+
+      final changed = await showDialog<bool>(
+        context: context,
+        builder: (_) => StatusDatePickerDialog(
+          draftId: draftId,
+          newStatus: result,
+          targetBus: bus,
+        ),
+      );
+
+      if (changed == true) {
+        parent.isMonthView
+            ? parent.loadMonth()
+            : parent.loadWeek();
+      }
+    },
+
+    // =====================================================
+    // UI
+    // =====================================================
+    child: Container(
+      margin: const EdgeInsets.all(4),
+      padding: const EdgeInsets.symmetric(
+        horizontal: 10,
+        vertical: 6,
+      ),
+      decoration: BoxDecoration(
+        color: statusColor(status),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Text(
+        title,
+        overflow: TextOverflow.ellipsis,
+        style: const TextStyle(
+          fontWeight: FontWeight.w700,
+          fontSize: 13,
         ),
       ),
-    );
-  }
+    ),
+  );
+}
 
   // ============================================================
   // BUILD

@@ -23,19 +23,21 @@ final vehicle =
     "${hasTrailer ? " + trailer" : ""}";
 
     switch (offer.status) {
-     case "Inquiry":
-        return cs.secondaryContainer;
+  case "Confirmed":
+    return Colors.green.shade200;
 
-      case "Confirmed":
-        return Colors.green.shade200;
+  case "Inquiry":
+    return Colors.orange.shade200;
 
-      case "Cancelled":
-        return Colors.red.shade200;
+  case "Draft":
+    return Colors.purple.shade200;
 
-      case "Draft":
-      default:
-        return cs.tertiaryContainer;
-    }
+  case "Invoiced":
+    return Colors.blue.shade200;
+
+  default:
+    return Colors.purple.shade200;
+}
   }
 
   // --------------------------------------------------
@@ -43,19 +45,21 @@ final vehicle =
   // --------------------------------------------------
   String _statusLabel() {
     switch (offer.status) {
-      case "Inquiry":
-        return "📤 SENT";
+  case "Confirmed":
+    return "✅ CONFIRMED";
 
-      case "Confirmed":
-        return "✅ CONFIRMED";
+  case "Inquiry":
+    return "🟠 INQUIRY";
 
-      case "Cancelled":
-        return "❌ CANCELLED";
+  case "Draft":
+    return "🟣 DRAFT";
 
-      case "Draft":
-      default:
-        return "📝 DRAFT";
-    }
+  case "Invoiced":
+    return "🔵 INVOICED";
+
+  default:
+    return "🟣 DRAFT";
+}
   }
 
   @override

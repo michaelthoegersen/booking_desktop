@@ -557,10 +557,16 @@ Color _statusColor(String? status) {
   switch ((status ?? '').toLowerCase()) {
     case 'draft':
       return Colors.purple.shade400;
+
     case 'inquiry':
       return Colors.orange.shade400;
+
     case 'confirmed':
       return Colors.green.shade500;
+
+    case 'invoiced': // ✅ NY
+      return Colors.blue.shade400;
+
     default:
       return Colors.grey.shade400;
   }

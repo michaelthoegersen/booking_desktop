@@ -90,12 +90,13 @@ class CalendarSyncService {
 
       // --------------------------------------------------
       // 3️⃣ ENTERPRISE RESET FOR THIS DRAFT
+      // 🔥 FIX: slett også manual_block IS NULL
       // --------------------------------------------------
       await sb
           .from('samletdata')
           .delete()
           .eq('draft_id', draftId)
-          .eq('manual_block', false);
+          .or('manual_block.is.null,manual_block.eq.false');
 
       print("♻️ Cleared previous auto rows for draft");
 
