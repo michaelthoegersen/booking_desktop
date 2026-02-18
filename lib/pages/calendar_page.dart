@@ -8,6 +8,10 @@ import 'package:flutter/gestures.dart';
 // ============================================================
 // HELPERS
 // ============================================================
+DateTime parseUtcDay(String s) {
+  final d = DateTime.parse(s);
+  return DateTime.utc(d.year, d.month, d.day);
+}
 String formatBusName(String raw) {
   return raw.replaceAll("_", " ");
 }
@@ -257,7 +261,8 @@ class _CalendarPageState extends State<CalendarPage> {
 
         if (bus == null || dateStr == null) continue;
 
-        final date = normalize(DateTime.parse(dateStr));
+        final parsed = DateTime.parse(dateStr).toUtc();
+final date = DateTime.utc(parsed.year, parsed.month, parsed.day);
 
         map.putIfAbsent(bus, () => {});
         map[bus]!.putIfAbsent(date, () => []);
@@ -933,7 +938,7 @@ List<Widget> buildSegments(
   final result = <Widget>[];
 
   // =====================================================
-  // 1️⃣ FLAT LISTE
+  // 1️⃣ FLAT LIST
   // =====================================================
 
   final entries = data[bus]?.entries.toList() ?? [];
@@ -954,7 +959,6 @@ List<Widget> buildSegments(
   for (final r in allRows) {
     final draftId = r['draft_id']?.toString() ?? '';
     final roundIndex = r['round_index']?.toString() ?? '0';
-
     final key = "$draftId:$roundIndex";
 
     rounds.putIfAbsent(key, () => []);
@@ -962,32 +966,43 @@ List<Widget> buildSegments(
   }
 
   // =====================================================
-  // 3️⃣ SPLITT PER CONTIGUOUS DATO
+  // 3️⃣ BUILD CHUNKS (DST SAFE)
   // =====================================================
 
   final List<List<Map<String, dynamic>>> chunks = [];
 
   for (final round in rounds.values) {
+
     final sorted = [...round]
-      ..sort((a, b) => a['dato'].compareTo(b['dato']));
+      ..sort((a, b) {
+        final da = parseUtcDay(a['dato']);
+        final db = parseUtcDay(b['dato']);
+        return da.compareTo(db);
+      });
 
     List<Map<String, dynamic>> current = [];
 
-    for (int i = 0; i < sorted.length; i++) {
-      final row = sorted[i];
-      final date = normalize(DateTime.parse(row['dato']));
+    for (final row in sorted) {
+
+      final date = parseUtcDay(row['dato']);
 
       if (current.isEmpty) {
         current.add(row);
         continue;
       }
 
-      final prevDate =
-          normalize(DateTime.parse(current.last['dato']));
+      final prev = parseUtcDay(current.last['dato']);
 
-      final diff = date.difference(prevDate).inDays;
+      // ⭐ DST SAFE CHECK (IKKE difference().inDays!)
+      final expectedNext =
+          DateTime.utc(prev.year, prev.month, prev.day + 1);
 
-      if (diff == 1) {
+      final isNextDay =
+          date.year == expectedNext.year &&
+          date.month == expectedNext.month &&
+          date.day == expectedNext.day;
+
+      if (isNextDay) {
         current.add(row);
       } else {
         chunks.add(current);
@@ -1001,41 +1016,38 @@ List<Widget> buildSegments(
   }
 
   // =====================================================
-  // 4️⃣ SORTER CHUNKS
+  // 4️⃣ SORTER CHUNKS PÅ STARTDATO (DST SAFE)
   // =====================================================
 
   chunks.sort((a, b) {
-    final da = DateTime.parse(a.first['dato']);
-    final db = DateTime.parse(b.first['dato']);
+    final da = parseUtcDay(a.first['dato']);
+    final db = parseUtcDay(b.first['dato']);
     return da.compareTo(db);
   });
 
   // =====================================================
-  // 5️⃣ BYGG UI (FIXET CROSS-MONTH + OVERFLOW)
+  // 5️⃣ BUILD UI
   // =====================================================
 
   int i = 0;
 
   while (i < days.length) {
-    final day = normalize(days[i]);
+
+    final day =
+        DateTime.utc(days[i].year, days[i].month, days[i].day);
 
     List<Map<String, dynamic>>? chunk;
 
-for (final c in chunks) {
+    for (final c in chunks) {
 
-  final start =
-      normalize(DateTime.parse(c.first['dato']));
-  final end =
-      normalize(DateTime.parse(c.last['dato']));
+      final start = parseUtcDay(c.first['dato']);
+      final end   = parseUtcDay(c.last['dato']);
 
-  final isInside =
-      !day.isBefore(start) && !day.isAfter(end);
-
-  if (isInside) {
-    chunk = c;
-    break;
-  }
-}
+      if (!day.isBefore(start) && !day.isAfter(end)) {
+        chunk = c;
+        break;
+      }
+    }
 
     if (chunk == null) {
       result.add(const SizedBox(width: dayWidth));
@@ -1043,44 +1055,46 @@ for (final c in chunks) {
       continue;
     }
 
-    final realDates = chunk
-        .map((e) => normalize(DateTime.parse(e['dato'])))
-        .toList()
-      ..sort();
+    final chunkStart = parseUtcDay(chunk.first['dato']);
+    final chunkEnd   = parseUtcDay(chunk.last['dato']);
 
-    // =====================================================
-    // ✅ RIKTIG CROSS-MONTH LOGIKK
-    // behold ekte datoer – clamp kun bredden
-    // =====================================================
+    final gridStart =
+        DateTime.utc(days.first.year, days.first.month, days.first.day);
+    final gridEnd =
+        DateTime.utc(days.last.year, days.last.month, days.last.day);
+
+    final visibleStart =
+        chunkStart.isBefore(gridStart) ? gridStart : chunkStart;
+
+    final visibleEnd =
+        chunkEnd.isAfter(gridEnd) ? gridEnd : chunkEnd;
 
     final visibleCount =
-        realDates.where((d) => days.contains(d)).length;
+        visibleEnd.difference(visibleStart).inDays + 1;
 
-    if (visibleCount == 0) {
+    if (visibleCount <= 0) {
       i++;
       continue;
     }
 
     final first = chunk.first;
-final isManual = first['manual_block'] == true;
+    final isManual = first['manual_block'] == true;
 
-result.add(
-  BookingSegment(
-    title: isManual
-        ? (first['note'] ?? 'Blocked')
-        : (first['produksjon'] ?? ''),
-    span: visibleCount,
-    bus: bus,
+    result.add(
+      BookingSegment(
+        title: isManual
+            ? (first['note'] ?? 'Blocked')
+            : (first['produksjon'] ?? ''),
+        span: visibleCount,
+        bus: bus,
+        from: chunkStart,
+        to: chunkEnd,
+        status: isManual ? 'manual' : first['status'],
+        width: dayWidth,
+        draftId: first['draft_id'].toString(),
+      ),
+    );
 
-    // ⭐⭐⭐ CRITICAL FIX ⭐⭐⭐
-    from: normalize(DateTime.parse(chunk.first['dato'])),
-    to: normalize(DateTime.parse(chunk.last['dato'])),
-
-    status: isManual ? 'manual' : first['status'],
-    width: dayWidth,
-    draftId: first['draft_id'].toString(),
-  ),
-);
     i += visibleCount;
   }
 
@@ -2018,10 +2032,17 @@ class _StatusDatePickerDialogState
         );
         continue;
       }
-
+print(
+  "CHECK ${fmt(current.to)} -> ${fmt(date)} = "
+  "${date.difference(current.to).inHours}h"
+);
       final isSameBus = bus == current.bus;
-      final isNextDay =
-          date.difference(current.to).inDays == 1;
+      final next = normalize(current.to.add(const Duration(days: 1)));
+
+final isNextDay =
+    date.year == next.year &&
+    date.month == next.month &&
+    date.day == next.day;
 
       if (isSameBus && isNextDay) {
         current.to = date;
