@@ -722,7 +722,7 @@ onAccept: (data) async {
     context: context,
     builder: (_) => StatusDatePickerDialog(
   draftId: data.draftId,
-  newStatus: 'confirmed',
+  newStatus: '',
   targetBus: bus, // 👈 MÅ MED
 ),
   );
@@ -2090,9 +2090,10 @@ final isNextDay =
     await sb
         .from('samletdata')
         .update({
-          'status': widget.newStatus,
-          'kilde': widget.targetBus, // 👈 FLYTT HER
-        })
+  if (widget.newStatus.isNotEmpty)
+    'status': widget.newStatus,
+  'kilde': widget.targetBus,
+})
         .filter('id', 'in', '($ids)');
   }
 
