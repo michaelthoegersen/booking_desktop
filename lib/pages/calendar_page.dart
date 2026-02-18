@@ -2019,7 +2019,7 @@ class _StatusDatePickerDialogState
     _RoundBlock? current;
 
     for (final r in list) {
-      final date = DateTime.parse(r['dato']);
+      final date = parseUtcDay(r['dato']);
       final bus = r['kilde'].toString();
       final id = r['id'].toString();
 
@@ -2037,7 +2037,11 @@ print(
   "${date.difference(current.to).inHours}h"
 );
       final isSameBus = bus == current.bus;
-      final next = normalize(current.to.add(const Duration(days: 1)));
+      final next = DateTime.utc(
+  current.to.year,
+  current.to.month,
+  current.to.day + 1,
+);
 
 final isNextDay =
     date.year == next.year &&

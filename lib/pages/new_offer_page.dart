@@ -433,24 +433,34 @@ const allBuses = [
 
 
   @override
-  void dispose() {
-    companyCtrl.dispose();
-    contactCtrl.dispose();
-    productionCtrl.dispose();
-    startLocCtrl.dispose();
-    locationCtrl.dispose();
-    phoneCtrl.dispose();
-    emailCtrl.dispose();
-
-    _locationFocus.dispose();
-
-    super.dispose();
-  }
+void dispose() {
+ companyCtrl.text = offer.company;
+contactCtrl.text = offer.contact;
+productionCtrl.text = offer.production;
+phoneCtrl.text = offer.phone ?? '';
+emailCtrl.text = offer.email ?? '';
+  super.dispose();
+}
   
 
   // ===================================================
   // HELPERS
   // ===================================================
+  AppSettings _effectiveSettings() {
+  final global = SettingsStore.current;
+  final o = offer.pricingOverride;
+
+  if (o == null) return global;
+
+  return global.copyWith(
+    dayPrice: o.dayPrice,
+    extraKmPrice: o.extraKmPrice,
+    trailerDayPrice: o.trailerDayPrice,
+    trailerKmPrice: o.trailerKmPrice,
+    dDriveDayPrice: o.dDriveDayPrice,
+    flightTicketPrice: o.flightTicketPrice,
+  );
+}
 
   void _clearAllRouteCache() {
   _distanceCache.clear();
@@ -2391,7 +2401,7 @@ final safeFerryPerLeg = List<String?>.generate(
   // ================= RESULT =================
   final result = TripCalculator.calculateRound(
     
-    settings: SettingsStore.current,
+    settings: _effectiveSettings(),
     dates: dates,
     pickupEveningFirstDay: round.pickupEveningFirstDay,
     trailer: round.trailer,
@@ -2526,7 +2536,7 @@ final fallbackFerryPerLeg = List<String?>.generate(
 
 final calc = _roundCalcCache[roundIndex] ??
     TripCalculator.calculateRound(
-      settings: SettingsStore.current,
+      settings: _effectiveSettings(),
       dates: dates,
       pickupEveningFirstDay: round.pickupEveningFirstDay,
       trailer: round.trailer,
@@ -3104,7 +3114,7 @@ Container(
         _buildRoundBreakdown(
           roundIndex,
           calc,
-          SettingsStore.current,
+          _effectiveSettings(),
         ),
         style: const TextStyle(
           fontFamily: "monospace",
@@ -3881,7 +3891,20 @@ _BusSettingsCard(
     setState(() {});
   },
 ),
+_PricingOverrideCard(
+  offer: widget.offer,
+  onChanged: () {
 
+    setState(() {});
+
+    // 🔥 Recalc totals live
+    final state =
+        context.findAncestorStateOfType<_NewOfferPageState>();
+
+    state?._recalcAllRounds();
+    CurrentOfferStore.set(widget.offer);
+  },
+),
 // ================= BUS PREVIEW (ENTERPRISE) =================
 Builder(
   builder: (context) {
@@ -3981,7 +4004,210 @@ SizedBox(
     );
   }
   }
+// ------------------------------------------------------------
+// PRICING OVERRIDE CARD (DRAFT LEVEL)
+// ------------------------------------------------------------
+class _PricingOverrideCard extends StatefulWidget {
+  final OfferDraft offer;
+  final VoidCallback onChanged;
 
+  const _PricingOverrideCard({
+    required this.offer,
+    required this.onChanged,
+  });
+
+  @override
+  State<_PricingOverrideCard> createState() =>
+      _PricingOverrideCardState();
+}
+
+class _PricingOverrideCardState extends State<_PricingOverrideCard> {
+
+  late final TextEditingController _dayCtrl;
+  late final TextEditingController _extraKmCtrl;
+  late final TextEditingController _trailerDayCtrl;
+  late final TextEditingController _trailerKmCtrl;
+  late final TextEditingController _dDriveCtrl;
+  late final TextEditingController _flightCtrl;
+
+  bool get _enabled => widget.offer.pricingOverride != null;
+
+  // --------------------------------------------------
+  // CURRENT VALUES
+  // --------------------------------------------------
+  OfferPricingOverride _current() {
+    final global = SettingsStore.current;
+
+    return widget.offer.pricingOverride ??
+        OfferPricingOverride(
+          dayPrice: global.dayPrice,
+          extraKmPrice: global.extraKmPrice,
+          trailerDayPrice: global.trailerDayPrice,
+          trailerKmPrice: global.trailerKmPrice,
+          dDriveDayPrice: global.dDriveDayPrice,
+          flightTicketPrice: global.flightTicketPrice,
+        );
+  }
+
+  // --------------------------------------------------
+  // INIT
+  // --------------------------------------------------
+  @override
+  void initState() {
+    super.initState();
+
+    final p = _current();
+
+    _dayCtrl = TextEditingController(text: p.dayPrice.toStringAsFixed(0));
+    _extraKmCtrl = TextEditingController(text: p.extraKmPrice.toStringAsFixed(0));
+    _trailerDayCtrl = TextEditingController(text: p.trailerDayPrice.toStringAsFixed(0));
+    _trailerKmCtrl = TextEditingController(text: p.trailerKmPrice.toStringAsFixed(0));
+    _dDriveCtrl = TextEditingController(text: p.dDriveDayPrice.toStringAsFixed(0));
+    _flightCtrl = TextEditingController(text: p.flightTicketPrice.toStringAsFixed(0));
+  }
+
+  @override
+  void dispose() {
+    _dayCtrl.dispose();
+    _extraKmCtrl.dispose();
+    _trailerDayCtrl.dispose();
+    _trailerKmCtrl.dispose();
+    _dDriveCtrl.dispose();
+    _flightCtrl.dispose();
+    super.dispose();
+  }
+
+  // --------------------------------------------------
+  // UPDATE MODEL
+  // --------------------------------------------------
+  void _update(OfferPricingOverride v) {
+    setState(() {
+      widget.offer.pricingOverride = v;
+    });
+    widget.onChanged();
+  }
+
+  // --------------------------------------------------
+  // FIELD BUILDER (STABLE)
+  // --------------------------------------------------
+  Widget _field(
+    String label,
+    TextEditingController ctrl,
+    void Function(double) onChanged,
+  ) {
+    return TextField(
+      controller: ctrl,
+      enabled: _enabled,
+      keyboardType:
+          const TextInputType.numberWithOptions(decimal: true),
+      decoration: InputDecoration(labelText: label),
+      onChanged: (v) {
+        final d = double.tryParse(v.replaceAll(',', '.'));
+        if (d != null) onChanged(d);
+      },
+    );
+  }
+
+  // --------------------------------------------------
+  // BUILD
+  // --------------------------------------------------
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final p = _current();
+
+    return Container(
+      margin: const EdgeInsets.only(top: 12),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: cs.surface,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: cs.outlineVariant),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+
+          const Text(
+            "Pricing (per draft)",
+            style: TextStyle(
+              fontWeight: FontWeight.w900,
+              fontSize: 13,
+            ),
+          ),
+
+          const SizedBox(height: 10),
+
+          // --------------------------------------------------
+          // TOGGLE OVERRIDE
+          // --------------------------------------------------
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text("Override global pricing"),
+            value: _enabled,
+            onChanged: (v) {
+              setState(() {
+
+                widget.offer.pricingOverride =
+                    v ? _current() : null;
+
+                // 🔥 Sync fields visually
+                final np = _current();
+
+                _dayCtrl.text = np.dayPrice.toStringAsFixed(0);
+                _extraKmCtrl.text = np.extraKmPrice.toStringAsFixed(0);
+                _trailerDayCtrl.text = np.trailerDayPrice.toStringAsFixed(0);
+                _trailerKmCtrl.text = np.trailerKmPrice.toStringAsFixed(0);
+                _dDriveCtrl.text = np.dDriveDayPrice.toStringAsFixed(0);
+                _flightCtrl.text = np.flightTicketPrice.toStringAsFixed(0);
+              });
+
+              widget.onChanged();
+            },
+          ),
+
+          const SizedBox(height: 6),
+
+          _field(
+            "Day price",
+            _dayCtrl,
+            (d) => _update(p.copyWith(dayPrice: d)),
+          ),
+
+          _field(
+            "Extra km price",
+            _extraKmCtrl,
+            (d) => _update(p.copyWith(extraKmPrice: d)),
+          ),
+
+          _field(
+            "Trailer day",
+            _trailerDayCtrl,
+            (d) => _update(p.copyWith(trailerDayPrice: d)),
+          ),
+
+          _field(
+            "Trailer km",
+            _trailerKmCtrl,
+            (d) => _update(p.copyWith(trailerKmPrice: d)),
+          ),
+
+          _field(
+            "D.Drive",
+            _dDriveCtrl,
+            (d) => _update(p.copyWith(dDriveDayPrice: d)),
+          ),
+
+          _field(
+            "Flight ticket",
+            _flightCtrl,
+            (d) => _update(p.copyWith(flightTicketPrice: d)),
+          ),
+        ],
+      ),
+    );
+  }
+}
 class _RoutesTableHeader extends StatelessWidget {
   const _RoutesTableHeader();
 
