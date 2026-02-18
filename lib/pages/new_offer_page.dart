@@ -430,17 +430,6 @@ const allBuses = [
       }
     });
   }
-
-
-  @override
-void dispose() {
- companyCtrl.text = offer.company;
-contactCtrl.text = offer.contact;
-productionCtrl.text = offer.production;
-phoneCtrl.text = offer.phone ?? '';
-emailCtrl.text = offer.email ?? '';
-  super.dispose();
-}
   
 
   // ===================================================
@@ -519,7 +508,7 @@ emailCtrl.text = offer.email ?? '';
       offer.email      = fresh.email;
       offer.production = fresh.production;
       offer.status     = fresh.status;
-
+      offer.pricingOverride = fresh.pricingOverride;
       // ⭐ ENTERPRISE: global bus brukes ikke lenger
       // offer.bus = fresh.bus;   <-- kan beholdes om legacy trengs
 
@@ -1259,6 +1248,7 @@ Future<void> _saveDraft() async {
 
       offer.busCount   = current.busCount;
       offer.busType    = current.busType;
+      offer.pricingOverride = current.pricingOverride;
 
       // ✅ VIKTIG: SYNC ROUNDS (inkl trailer)
       for (int i = 0; i < offer.rounds.length; i++) {
@@ -1329,6 +1319,8 @@ offer.rounds[i].bus =
     // Sync back to state
     // ----------------------------------------
     offer.status = freshOffer.status;
+    offer.pricingOverride = freshOffer.pricingOverride;
+    CurrentOfferStore.set(offer);
 
     // ----------------------------------------
     // Sync calendar (PER ROUND BUS)
@@ -2534,20 +2526,11 @@ final fallbackFerryPerLeg = List<String?>.generate(
   },
 );
 
-final calc = _roundCalcCache[roundIndex] ??
-    TripCalculator.calculateRound(
-      settings: _effectiveSettings(),
-      dates: dates,
-      pickupEveningFirstDay: round.pickupEveningFirstDay,
-      trailer: round.trailer,
-      totalKm: fallbackLegKm.fold(0.0, (a, b) => a + b),
-      legKm: fallbackLegKm,
-      ferries: SettingsStore.current.ferries,
-      ferryPerLeg: fallbackFerryPerLeg,
-      tollPerLeg: fallbackToll,
-      extraPerLeg: fallbackExtra,
-      hasTravelBefore: fallbackTravel,
-    );
+final calc = _roundCalcCache[roundIndex];
+
+if (calc == null) {
+  return const SizedBox(); // eller loading placeholder
+}
 // =====================================================
 // ALL ROUNDS TOTAL (RIGHT CARD / VAT / TOTAL)
 // =====================================================
@@ -4030,7 +4013,7 @@ class _PricingOverrideCardState extends State<_PricingOverrideCard> {
   late final TextEditingController _dDriveCtrl;
   late final TextEditingController _flightCtrl;
 
-  bool get _enabled => widget.offer.pricingOverride != null;
+  late bool _localEnabled;
 
   // --------------------------------------------------
   // CURRENT VALUES
@@ -4056,6 +4039,8 @@ class _PricingOverrideCardState extends State<_PricingOverrideCard> {
   void initState() {
     super.initState();
 
+    _localEnabled = widget.offer.pricingOverride != null;
+
     final p = _current();
 
     _dayCtrl = TextEditingController(text: p.dayPrice.toStringAsFixed(0));
@@ -4064,6 +4049,28 @@ class _PricingOverrideCardState extends State<_PricingOverrideCard> {
     _trailerKmCtrl = TextEditingController(text: p.trailerKmPrice.toStringAsFixed(0));
     _dDriveCtrl = TextEditingController(text: p.dDriveDayPrice.toStringAsFixed(0));
     _flightCtrl = TextEditingController(text: p.flightTicketPrice.toStringAsFixed(0));
+  }
+
+  // --------------------------------------------------
+  // 🔥 VIKTIGSTE FIXEN – Sync når draft reloades
+  // --------------------------------------------------
+  @override
+  void didUpdateWidget(covariant _PricingOverrideCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+
+    if (oldWidget.offer.pricingOverride != widget.offer.pricingOverride) {
+
+      _localEnabled = widget.offer.pricingOverride != null;
+
+      final p = _current();
+
+      _dayCtrl.text = p.dayPrice.toStringAsFixed(0);
+      _extraKmCtrl.text = p.extraKmPrice.toStringAsFixed(0);
+      _trailerDayCtrl.text = p.trailerDayPrice.toStringAsFixed(0);
+      _trailerKmCtrl.text = p.trailerKmPrice.toStringAsFixed(0);
+      _dDriveCtrl.text = p.dDriveDayPrice.toStringAsFixed(0);
+      _flightCtrl.text = p.flightTicketPrice.toStringAsFixed(0);
+    }
   }
 
   @override
@@ -4081,14 +4088,13 @@ class _PricingOverrideCardState extends State<_PricingOverrideCard> {
   // UPDATE MODEL
   // --------------------------------------------------
   void _update(OfferPricingOverride v) {
-    setState(() {
-      widget.offer.pricingOverride = v;
-    });
-    widget.onChanged();
-  }
+  widget.offer.pricingOverride = v;
+  CurrentOfferStore.set(widget.offer); // 🔥 MANGLET
+  widget.onChanged();
+}
 
   // --------------------------------------------------
-  // FIELD BUILDER (STABLE)
+  // FIELD
   // --------------------------------------------------
   Widget _field(
     String label,
@@ -4097,7 +4103,7 @@ class _PricingOverrideCardState extends State<_PricingOverrideCard> {
   ) {
     return TextField(
       controller: ctrl,
-      enabled: _enabled,
+      enabled: _localEnabled,
       keyboardType:
           const TextInputType.numberWithOptions(decimal: true),
       decoration: InputDecoration(labelText: label),
@@ -4138,32 +4144,19 @@ class _PricingOverrideCardState extends State<_PricingOverrideCard> {
 
           const SizedBox(height: 10),
 
-          // --------------------------------------------------
-          // TOGGLE OVERRIDE
-          // --------------------------------------------------
           SwitchListTile(
             contentPadding: EdgeInsets.zero,
             title: const Text("Override global pricing"),
-            value: _enabled,
+            value: _localEnabled,
             onChanged: (v) {
-              setState(() {
+  setState(() {
+    _localEnabled = v;
+    widget.offer.pricingOverride = v ? _current() : null;
+  });
 
-                widget.offer.pricingOverride =
-                    v ? _current() : null;
-
-                // 🔥 Sync fields visually
-                final np = _current();
-
-                _dayCtrl.text = np.dayPrice.toStringAsFixed(0);
-                _extraKmCtrl.text = np.extraKmPrice.toStringAsFixed(0);
-                _trailerDayCtrl.text = np.trailerDayPrice.toStringAsFixed(0);
-                _trailerKmCtrl.text = np.trailerKmPrice.toStringAsFixed(0);
-                _dDriveCtrl.text = np.dDriveDayPrice.toStringAsFixed(0);
-                _flightCtrl.text = np.flightTicketPrice.toStringAsFixed(0);
-              });
-
-              widget.onChanged();
-            },
+  CurrentOfferStore.set(widget.offer); // 🔥 DENNE OGSÅ
+  widget.onChanged();
+}
           ),
 
           const SizedBox(height: 6),
@@ -4173,31 +4166,26 @@ class _PricingOverrideCardState extends State<_PricingOverrideCard> {
             _dayCtrl,
             (d) => _update(p.copyWith(dayPrice: d)),
           ),
-
           _field(
             "Extra km price",
             _extraKmCtrl,
             (d) => _update(p.copyWith(extraKmPrice: d)),
           ),
-
           _field(
             "Trailer day",
             _trailerDayCtrl,
             (d) => _update(p.copyWith(trailerDayPrice: d)),
           ),
-
           _field(
             "Trailer km",
             _trailerKmCtrl,
             (d) => _update(p.copyWith(trailerKmPrice: d)),
           ),
-
           _field(
             "D.Drive",
             _dDriveCtrl,
             (d) => _update(p.copyWith(dDriveDayPrice: d)),
           ),
-
           _field(
             "Flight ticket",
             _flightCtrl,

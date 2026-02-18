@@ -42,7 +42,7 @@ class OfferStorageService {
       recentOffersRefresh.value++;
       return id;
     }
-
+    debugPrint(jsonEncode(payload));
     // -----------------------------
     // INSERT
     // -----------------------------
@@ -215,32 +215,28 @@ class OfferStorageService {
 
     'busCount': offer.busCount,
     'busType': offer.busType.name,
-
-    // ⚠️ global bus beholdes kun for legacy preview
     'bus': offer.bus,
 
+    // ⭐⭐⭐ LEGG TIL DENNE LINJA
+    'pricingOverride': offer.pricingOverride?.toJson(),
+
     'rounds': offer.rounds.map((r) {
-  return {
-    'startLocation': r.startLocation,
-    'trailer': r.trailer,
-    'pickupEveningFirstDay': r.pickupEveningFirstDay,
-
-    // ⭐ LEGACY
-    'bus': r.bus,
-
-    // ⭐⭐⭐ ENTERPRISE (DETTE MANGLER)
-    'busSlots': r.busSlots,
-    'trailerSlots': r.trailerSlots,
-
-    'entries': r.entries.map((e) {
       return {
-        'date': e.date.toIso8601String(),
-        'location': e.location,
-        'extra': e.extra,
+        'startLocation': r.startLocation,
+        'trailer': r.trailer,
+        'pickupEveningFirstDay': r.pickupEveningFirstDay,
+        'bus': r.bus,
+        'busSlots': r.busSlots,
+        'trailerSlots': r.trailerSlots,
+        'entries': r.entries.map((e) {
+          return {
+            'date': e.date.toIso8601String(),
+            'location': e.location,
+            'extra': e.extra,
+          };
+        }).toList(),
       };
     }).toList(),
-  };
-}).toList(),
   };
 }
   // ============================================================
@@ -272,6 +268,11 @@ class OfferStorageService {
   ),
 
   bus: data['bus'] as String?,
+   pricingOverride: data['pricingOverride'] != null
+      ? OfferPricingOverride.fromJson(
+          Map<String, dynamic>.from(data['pricingOverride']),
+        )
+      : null,
 );
 
   final rounds = (data['rounds'] as List?) ?? [];
