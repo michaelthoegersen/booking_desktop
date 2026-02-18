@@ -220,23 +220,27 @@ class OfferStorageService {
     'bus': offer.bus,
 
     'rounds': offer.rounds.map((r) {
+  return {
+    'startLocation': r.startLocation,
+    'trailer': r.trailer,
+    'pickupEveningFirstDay': r.pickupEveningFirstDay,
+
+    // ⭐ LEGACY
+    'bus': r.bus,
+
+    // ⭐⭐⭐ ENTERPRISE (DETTE MANGLER)
+    'busSlots': r.busSlots,
+    'trailerSlots': r.trailerSlots,
+
+    'entries': r.entries.map((e) {
       return {
-        'startLocation': r.startLocation,
-        'trailer': r.trailer,
-        'pickupEveningFirstDay': r.pickupEveningFirstDay,
-
-        // ⭐⭐⭐ DETTE ER GRUNNEN TIL AT SYNC SKIPPER ⭐⭐⭐
-        'bus': r.bus,
-
-        'entries': r.entries.map((e) {
-          return {
-            'date': e.date.toIso8601String(),
-            'location': e.location,
-            'extra': e.extra,
-          };
-        }).toList(),
+        'date': e.date.toIso8601String(),
+        'location': e.location,
+        'extra': e.extra,
       };
     }).toList(),
+  };
+}).toList(),
   };
 }
   // ============================================================
@@ -287,6 +291,20 @@ class OfferStorageService {
         (r['pickupEveningFirstDay'] ?? false) as bool;
 
     draft.rounds[i].bus = r['bus'] as String?;
+    if (r['busSlots'] != null) {
+  draft.rounds[i].busSlots =
+      List<String?>.from(r['busSlots']);
+} else {
+  draft.rounds[i].busSlots[0] = draft.rounds[i].bus;
+}
+
+if (r['trailerSlots'] != null) {
+  draft.rounds[i].trailerSlots =
+      List<bool>.from(r['trailerSlots']);
+} else {
+  draft.rounds[i].trailerSlots[0] =
+      draft.rounds[i].trailer;
+}
 
     draft.rounds[i].entries.clear();
 

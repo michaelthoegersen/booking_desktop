@@ -212,7 +212,26 @@ class OfferRound {
   String startLocation = '';
   bool trailer = false;
   bool pickupEveningFirstDay = false;
-  String? bus; // ⭐ LEGG TIL DENNE
+
+  // =========================================================
+  // ⭐ LEGACY BUS (MÅ EKSISTERE – brukes av calendar/PDF)
+  // =========================================================
+  String? bus;
+
+  // =========================================================
+  // 🚌 ENTERPRISE MULTI BUS (NYTT)
+  // =========================================================
+
+  /// Slot 0 = Bus 1
+  /// Slot 1 = Bus 2
+  /// Slot 2 = Bus 3
+  /// Slot 3 = Bus 4
+  List<String?> busSlots = [null, null, null, null];
+
+  /// Trailer per buss
+  List<bool> trailerSlots = [false, false, false, false];
+
+  // =========================================================
 
   final List<RoundEntry> entries = [];
 
@@ -235,17 +254,22 @@ class OfferRound {
   // ------------------------------------------------------------
 
   Map<String, dynamic> toJson() {
-  return {
-    'startLocation': startLocation,
-    'trailer': trailer,
-    'pickupEveningFirstDay': pickupEveningFirstDay,
-    'bus': bus,
-    'totalKm': totalKm,
+    return {
+      'startLocation': startLocation,
+      'trailer': trailer,
+      'pickupEveningFirstDay': pickupEveningFirstDay,
 
-    // ⭐⭐⭐ DETTE MANGLER NÅ ⭐⭐⭐
-    'entries': entries.map((e) => e.toJson()).toList(),
-  };
-}
+      // ⭐ LEGACY
+      'bus': bus,
+
+      // ⭐ ENTERPRISE
+      'busSlots': busSlots,
+      'trailerSlots': trailerSlots,
+
+      'totalKm': totalKm,
+      'entries': entries.map((e) => e.toJson()).toList(),
+    };
+  }
 
   static OfferRound fromJson(Map<String, dynamic> json) {
     final r = OfferRound();
@@ -257,7 +281,27 @@ class OfferRound {
     r.pickupEveningFirstDay =
         (json['pickupEveningFirstDay'] ?? false) as bool;
 
-    r.bus = json['bus'] as String?;    
+    // =====================================================
+    // LEGACY LOAD
+    // =====================================================
+    r.bus = json['bus'] as String?;
+
+    // =====================================================
+    // ENTERPRISE LOAD (BAKOVERKOMPATIBEL)
+    // =====================================================
+
+    if (json['busSlots'] != null) {
+      r.busSlots = List<String?>.from(json['busSlots']);
+    } else {
+      // fallback for gamle drafts
+      r.busSlots[0] = r.bus;
+    }
+
+    if (json['trailerSlots'] != null) {
+      r.trailerSlots = List<bool>.from(json['trailerSlots']);
+    } else {
+      r.trailerSlots[0] = r.trailer;
+    }
 
     r.totalKm = ((json['totalKm'] ?? 0) as num).toDouble();
 
@@ -273,10 +317,6 @@ class OfferRound {
 
     return r;
   }
-  // ------------------------------------------------------------
-// COPY WITH SELECTED ROUNDS (FOR PDF PAGING)
-// ------------------------------------------------------------
-
 }
 
 // ============================================================

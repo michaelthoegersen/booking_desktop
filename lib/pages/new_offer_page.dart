@@ -193,6 +193,12 @@ final Map<String, Map<String, double>> _countryKmCache = {};
       b.writeln("Ferry: ${_nok(r.ferryCost)}");
     }
 
+    // ================= FLIGHTS =================
+if (r.flightCost > 0) {
+  b.writeln("");
+  b.writeln("Flights: ${_nok(r.flightCost)}");
+}
+
     // ================= TOLL =================
 
     if (r.tollCost > 0) {
@@ -2370,6 +2376,7 @@ final safeFerryPerLeg = List<String?>.generate(
 
   // ================= RESULT =================
   final result = TripCalculator.calculateRound(
+    
     settings: SettingsStore.current,
     dates: dates,
     pickupEveningFirstDay: round.pickupEveningFirstDay,
@@ -2382,6 +2389,41 @@ final safeFerryPerLeg = List<String?>.generate(
     extraPerLeg: safeExtra,
     hasTravelBefore: safeTravel,
   );
+  // ⭐ MULTI BUS SUMMARY
+final busCount =
+    offer.rounds[ri].busSlots.whereType<String>().length == 0
+        ? 1
+        : offer.rounds[ri].busSlots.whereType<String>().length;
+
+final scaled = RoundCalcResult(
+  // ---------- NON PRICE ----------
+  billableDays: result.billableDays,
+  includedKm: result.includedKm,
+  extraKm: result.extraKm,
+  dDriveDays: result.dDriveDays,
+  flightTickets: result.flightTickets,
+
+  legKm: result.legKm,
+  tollPerLeg: result.tollPerLeg,
+  extraPerLeg: result.extraPerLeg,
+  hasTravelBefore: result.hasTravelBefore, // ⭐ DENNE VAR SISTE
+
+  // ---------- COSTS (scaled by buses) ----------
+  dayCost: result.dayCost * busCount,
+  extraKmCost: result.extraKmCost * busCount,
+  dDriveCost: result.dDriveCost * busCount,
+
+  trailerDayCost: result.trailerDayCost * busCount,
+  trailerKmCost: result.trailerKmCost * busCount,
+
+  ferryCost: result.ferryCost * busCount,
+  tollCost: result.tollCost * busCount,
+  flightCost: result.flightCost * busCount,
+
+  totalCost: result.totalCost * busCount,
+);
+_roundCalcCache[ri] = scaled;
+return scaled;
 
   debugPrint("📊 CALC ROUND");
   debugPrint("   → Ferry: ${result.ferryCost}");
@@ -2543,99 +2585,97 @@ return Padding(
 
       const SizedBox(width: 14),
 
+      // ================= CENTER =================
+      Expanded(
+        flex: 14,
+        child: Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: cs.surfaceContainerLowest,
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(color: cs.outlineVariant),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
 
-          // ================= CENTER =================
-          Expanded(
-            flex: 14,
-            child: Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: cs.surfaceContainerLowest,
-                borderRadius: BorderRadius.circular(18),
-                border: Border.all(color: cs.outlineVariant),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+              // ---------- HEADER ----------
+              Row(
                 children: [
-
-                  // ---------- HEADER ----------
-                  Row(
-                    children: [
-                      Text(
-                        "Rounds",
-                        style: Theme.of(context)
-                            .textTheme
-                            .titleLarge
-                            ?.copyWith(fontWeight: FontWeight.w900),
+                  Text(
+                    "Rounds",
+                    style: Theme.of(context)
+                        .textTheme
+                        .titleLarge
+                        ?.copyWith(fontWeight: FontWeight.w900),
+                  ),
+                  const Spacer(),
+                  SizedBox(
+                    width: 240,
+                    child: DropdownButtonFormField<int>(
+                      value: roundIndex,
+                      decoration: const InputDecoration(
+                        labelText: "Round",
+                        prefixIcon: Icon(Icons.repeat),
                       ),
-                      const Spacer(),
-                      SizedBox(
-                        width: 240,
-                        child: DropdownButtonFormField<int>(
-                          value: roundIndex,
-                          decoration: const InputDecoration(
-                            labelText: "Round",
-                            prefixIcon: Icon(Icons.repeat),
-                          ),
-                          items: List.generate(
-                            12,
-                            (i) => DropdownMenuItem(
-                              value: i,
-                              child: Text("Round ${i + 1}"),
-                            ),
-                          ),
-                          onChanged: (v) async {
-                            if (v == null) return;
-
-                            setState(() {
-                              offer.rounds[roundIndex].startLocation =
-                                  _norm(startLocCtrl.text);
-
-                              roundIndex = v;
-                              _syncRoundControllers();
-                            });
-
-                            await _recalcKm();
-                          },
+                      items: List.generate(
+                        12,
+                        (i) => DropdownMenuItem(
+                          value: i,
+                          child: Text("Round ${i + 1}"),
                         ),
                       ),
-                    ],
-                  ),
+                      onChanged: (v) async {
+                        if (v == null) return;
 
-                  const SizedBox(height: 10),
+                        setState(() {
+                          offer.rounds[roundIndex].startLocation =
+                              _norm(startLocCtrl.text);
 
-                  // ---------- START LOCATION ----------
-                  TextField(
-                    controller: startLocCtrl,
-                    onChanged: (_) async {
-                      setState(() {
-                        offer.rounds[roundIndex].startLocation =
-                            _norm(startLocCtrl.text);
-                      });
+                          roundIndex = v;
+                          _syncRoundControllers();
+                        });
 
-                      await _recalcKm();
-                    },
-                    decoration: const InputDecoration(
-                      labelText: "Start location (for this round)",
-                      prefixIcon: Icon(Icons.flag),
+                        await _recalcKm();
+                      },
                     ),
                   ),
+                ],
+              ),
 
-                  const SizedBox(height: 10),
+              const SizedBox(height: 10),
 
-                  // ---------- OPTIONS ----------
+              // ---------- START LOCATION ----------
+              TextField(
+                controller: startLocCtrl,
+                onChanged: (_) async {
+                  setState(() {
+                    offer.rounds[roundIndex].startLocation =
+                        _norm(startLocCtrl.text);
+                  });
+
+                  await _recalcKm();
+                },
+                decoration: const InputDecoration(
+                  labelText: "Start location (for this round)",
+                  prefixIcon: Icon(Icons.flag),
+                ),
+              ),
+
+              const SizedBox(height: 10),
+
+              // ---------- OPTIONS ----------
 Column(
   crossAxisAlignment: CrossAxisAlignment.start,
   children: [
 
-    // ===== PICKUP EVENING =====
     Row(
       children: [
         Checkbox(
-          value: round.pickupEveningFirstDay,
+          value: offer.rounds[roundIndex].pickupEveningFirstDay,
           onChanged: (v) async {
             setState(() {
-              round.pickupEveningFirstDay = v ?? false;
+              offer.rounds[roundIndex].pickupEveningFirstDay = v ?? false;
             });
 
             await _recalcKm();
@@ -2647,172 +2687,195 @@ Column(
 
     const SizedBox(height: 8),
 
-    // ===== BUS + TRAILER (ENTERPRISE ROW) =====
-    Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: cs.outlineVariant),
-      ),
-      child: Row(
-        children: [
+    Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: List.generate(offer.busCount, (i) {
 
-          const Icon(Icons.directions_bus, size: 20),
+        final bus =
+            offer.rounds[roundIndex].busSlots[i];
 
-          const SizedBox(width: 10),
+        final trailer =
+            offer.rounds[roundIndex].trailerSlots[i];
 
-          const Text(
-            "Bus:",
-            style: TextStyle(fontWeight: FontWeight.w600),
-          ),
+        return Padding(
+          padding: const EdgeInsets.only(bottom: 8),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: cs.outlineVariant),
+            ),
+            child: Row(
+              children: [
 
-          const SizedBox(width: 8),
+                const Icon(Icons.directions_bus, size: 20),
+                const SizedBox(width: 10),
 
-          Expanded(
-  child: Material(
-    color: Colors.transparent,
-    child: InkWell(
-      borderRadius: BorderRadius.circular(8),
-      onTap: () async {
-        debugPrint("🚌 BUS PICKER TAPPED");
+                Text(
+                  "Bus ${i + 1}:",
+                  style: const TextStyle(fontWeight: FontWeight.w700),
+                ),
 
-        final picked = await _pickBus();
+                const SizedBox(width: 8),
 
-        if (picked == null) return;
+                Expanded(
+                  child: InkWell(
+                    onTap: () async {
 
-        setState(() {
-  offer.rounds[roundIndex].bus = picked;
-});
+  final picked = await _pickBus();
+  if (picked == null) return;
 
-CurrentOfferStore.set(offer);   // ⭐⭐⭐ DETTE MANGLER ⭐⭐⭐
-      },
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 6),
-        child: Text(
-          offer.rounds[roundIndex].bus ?? "Select bus",
-          style: TextStyle(
-            color: offer.rounds[roundIndex].bus == null
-                ? Colors.grey
-                : Colors.black,
-            fontWeight: FontWeight.w600,
-          ),
-        ),
-      ),
-    ),
-  ),
-),
+  setState(() {
 
-const SizedBox(width: 12),
+    offer.rounds[roundIndex]
+        .busSlots[i] = picked;
 
-// ===== TRAILER =====
-Row(
-  children: [
-    Checkbox(
-      value: round.trailer,
-      onChanged: (v) async {
-        setState(() {
-          round.trailer = v ?? false;
-        });
+    offer.rounds[roundIndex].bus =
+        offer.rounds[roundIndex]
+            .busSlots
+            .firstWhere(
+              (b) => b != null,
+              orElse: () => null,
+            );
+  });
 
-        await _recalcAllRounds();
-      },
-    ),
-    const Text("Trailer"),
-  ],
-),
-        ],
-      ),
-    ),
-  ],
-),
-              
+  CurrentOfferStore.set(offer);
 
-                  const SizedBox(height: 12),
-
-                  // ---------- ENTRY INPUT ----------
-                  Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      border: Border.all(color: cs.outlineVariant),
-                      borderRadius: BorderRadius.circular(14),
-                      color: cs.surface,
-                    ),
-                    child: Column(
-                      children: [
-
-                        Row(
-                          children: [
-                            Expanded(
-                              child: OutlinedButton.icon(
-                                icon: const Icon(Icons.calendar_month),
-                                onPressed: _pickDate,
-                                label: Align(
-                                  alignment: Alignment.centerLeft,
-                                  child: Text(
-                                    selectedDate == null
-                                        ? "Pick date"
-                                        : _fmtDate(selectedDate!),
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ],
+  await _recalcAllRounds(); // ⭐ DENNE
+},
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 6),
+                      child: Text(
+                        bus ?? "Select bus",
+                        style: TextStyle(
+                          color: bus == null ? Colors.grey : Colors.black,
+                          fontWeight: FontWeight.w600,
                         ),
-
-                        const SizedBox(height: 10),
-
-                        _LocationAutoComplete(
-                          controller: locationCtrl,
-                          focusNode: _locationFocus, // ✅ NY
-                          suggestions: _locationSuggestions,
-                          onSubmit: _addEntry,
-                          onPasteMulti: _pasteManyLines,
-                          onQueryChanged: _loadPlaceSuggestions,
-),
-
-                        const SizedBox(height: 8),
-
-                        OutlinedButton.icon(
-                          icon: const Icon(Icons.add_road),
-                          label: const Text("Add missing route"),
-                          onPressed: _openRoutePreview,
-                        ),
-
-                        if (_loadingSuggestions)
-                          const Padding(
-                            padding: EdgeInsets.only(top: 8),
-                            child: Align(
-                              alignment: Alignment.centerLeft,
-                              child: Text(
-                                "Searching routes…",
-                                style: TextStyle(
-                                  fontWeight: FontWeight.w800,
-                                  fontSize: 12,
-                                ),
-                              ),
-                            ),
-                          ),
-
-                        if (_kmError != null) ...[
-                          const SizedBox(height: 8),
-                          Align(
-                            alignment: Alignment.centerLeft,
-                            child: Text(
-                              _kmError!,
-                              style: const TextStyle(
-                                fontWeight: FontWeight.w900,
-                                color: Colors.red,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ],
+                      ),
                     ),
                   ),
+                ),
 
-                  const SizedBox(height: 12),
+                const SizedBox(width: 12),
 
-                  // ---------- ROUTES ----------
+                Row(
+                  children: [
+                    Checkbox(
+                      value: trailer,
+                      onChanged: (v) async {
+
+                        setState(() {
+
+                          offer.rounds[roundIndex]
+                              .trailerSlots[i] = v ?? false;
+
+                          offer.rounds[roundIndex].trailer =
+                              offer.rounds[roundIndex]
+                                  .trailerSlots
+                                  .contains(true);
+                        });
+
+                        await _recalcAllRounds();
+                      },
+                    ),
+                    const Text("Trailer"),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        );
+      }),
+    ),
+  ],
+),
+
+const SizedBox(height: 12),
+
+              // ---------- ENTRY INPUT ----------
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  border: Border.all(color: cs.outlineVariant),
+                  borderRadius: BorderRadius.circular(14),
+                  color: cs.surface,
+                ),
+                child: Column(
+                  children: [
+
+                    Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton.icon(
+                            icon: const Icon(Icons.calendar_month),
+                            onPressed: _pickDate,
+                            label: Align(
+                              alignment: Alignment.centerLeft,
+                              child: Text(
+                                selectedDate == null
+                                    ? "Pick date"
+                                    : _fmtDate(selectedDate!),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+
+                    const SizedBox(height: 10),
+
+                    _LocationAutoComplete(
+                      controller: locationCtrl,
+                      focusNode: _locationFocus,
+                      suggestions: _locationSuggestions,
+                      onSubmit: _addEntry,
+                      onPasteMulti: _pasteManyLines,
+                      onQueryChanged: _loadPlaceSuggestions,
+                    ),
+
+                    const SizedBox(height: 8),
+
+                    OutlinedButton.icon(
+                      icon: const Icon(Icons.add_road),
+                      label: const Text("Add missing route"),
+                      onPressed: _openRoutePreview,
+                    ),
+
+                    if (_loadingSuggestions)
+                      const Padding(
+                        padding: EdgeInsets.only(top: 8),
+                        child: Align(
+                          alignment: Alignment.centerLeft,
+                          child: Text(
+                            "Searching routes…",
+                            style: TextStyle(
+                              fontWeight: FontWeight.w800,
+                              fontSize: 12,
+                            ),
+                          ),
+                        ),
+                      ),
+
+                    if (_kmError != null) ...[
+                      const SizedBox(height: 8),
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: Text(
+                          _kmError!,
+                          style: const TextStyle(
+                            fontWeight: FontWeight.w900,
+                            color: Colors.red,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+const SizedBox(height: 12),
+
+
+
 // ---------- ROUTES ----------
 Expanded(
   child: Container(
@@ -2826,34 +2889,24 @@ Expanded(
     child: Column(
       children: [
 
-        // ---------- HEADER + MAP BUTTON ----------
         Row(
-          children: [
-            const Expanded(
-              child: _RoutesTableHeader(),
-            ),
+          children: const [
+            Expanded(child: _RoutesTableHeader()),
           ],
         ),
 
-        Divider(
-          height: 14,
-          color: cs.outlineVariant,
-        ),
+        Divider(height: 14, color: cs.outlineVariant),
 
-        // ---------- LIST ----------
         if (round.entries.isEmpty)
-  const Center(
-    child: Text("No entries yet."),
-  )
+          const Center(child: Text("No entries yet."))
         else
           Expanded(
             child: ListView.separated(
               itemCount: round.entries.length,
-              separatorBuilder: (_, __) => Divider(
-                height: 1,
-                color: cs.outlineVariant,
-              ),
+              separatorBuilder: (_, __) =>
+                  Divider(height: 1, color: cs.outlineVariant),
               itemBuilder: (_, i) {
+
                 final e = round.entries[i];
                 final km = _kmByIndex[i];
 
@@ -2869,9 +2922,8 @@ Expanded(
                 final bool isSpecial =
                     toLower == 'off' || toLower == 'travel';
 
-                final String routeText = isSpecial
-                    ? to
-                    : "${_norm(from)} → $to";
+                final String routeText =
+                    isSpecial ? to : "${_norm(from)} → $to";
 
                 return _RoutesTableRow(
                   date: _fmtDate(e.date),
@@ -2881,11 +2933,8 @@ Expanded(
                   onEdit: () => _editEntry(i),
                   onDelete: () async {
                     setState(() {
-                      offer.rounds[roundIndex]
-                          .entries
-                          .removeAt(i);
+                      offer.rounds[roundIndex].entries.removeAt(i);
                     });
-
                     await _recalcKm();
                   },
                 );
@@ -2893,170 +2942,32 @@ Expanded(
             ),
           ),
 
-        Divider(
-          height: 14,
-          color: cs.outlineVariant,
-        ),
+        Divider(height: 14, color: cs.outlineVariant),
 
-        // ---------- SUMMARY ----------
         Wrap(
           spacing: 14,
           runSpacing: 6,
           children: [
-            Text(
-              "Billable days: ${calc.billableDays}",
-              style: const TextStyle(
-                fontWeight: FontWeight.w900,
-                fontSize: 12,
-              ),
-            ),
-            Text(
-              "Included: ${calc.includedKm.toStringAsFixed(0)} km",
-              style: const TextStyle(
-                fontWeight: FontWeight.w700,
-                fontSize: 12,
-              ),
-            ),
-            Text(
-              "Extra: ${calc.extraKm.toStringAsFixed(0)} km",
-              style: const TextStyle(
-                fontWeight: FontWeight.w700,
-                fontSize: 12,
-              ),
-            ),
-            Text(
-              "Total: ${totalKm.toStringAsFixed(0)} km",
-              style: const TextStyle(
-                fontWeight: FontWeight.w900,
-                fontSize: 12,
-              ),
-            ),
+            Text("Billable days: ${calc.billableDays}",
+                style: const TextStyle(fontWeight: FontWeight.w900)),
+            Text("Included: ${calc.includedKm.toStringAsFixed(0)} km"),
+            Text("Extra: ${calc.extraKm.toStringAsFixed(0)} km"),
+            Text("Total: ${totalKm.toStringAsFixed(0)} km",
+                style: const TextStyle(fontWeight: FontWeight.w900)),
           ],
         ),
 
         const SizedBox(height: 10),
+
       ],
     ),
   ),
 ),
-
-const SizedBox(height: 10),
-
-
-                          // ---------- COST ----------
-Container(
-  width: double.infinity,
-  padding: const EdgeInsets.all(12),
-  decoration: BoxDecoration(
-    borderRadius: BorderRadius.circular(12),
-    border: Border.all(color: cs.outlineVariant),
-    color: cs.surfaceContainerLowest,
-  ),
-  child: Column(
-    crossAxisAlignment: CrossAxisAlignment.start,
-    children: [
-
-      // ================= COST ROWS =================
-      Wrap(
-        spacing: 16,
-        runSpacing: 6,
-        children: [
-
-          Text(
-            "Days: ${_nok(calc.dayCost)}",
-            style: const TextStyle(fontWeight: FontWeight.w900),
+            ], // 👈 CENTER children
           ),
-
-          Text(
-            "Extra km: ${_nok(calc.extraKmCost)}",
-            style: const TextStyle(fontWeight: FontWeight.w900),
-          ),
-
-          if (calc.dDriveDays > 0)
-            Text(
-              "D.Drive (${calc.dDriveDays}): ${_nok(calc.dDriveCost)}",
-              style: const TextStyle(fontWeight: FontWeight.w900),
-            ),
-
-          if (calc.flightTickets > 0)
-            Text(
-              "Flights (${calc.flightTickets}): ${_nok(calc.flightCost)}",
-              style: const TextStyle(fontWeight: FontWeight.w900),
-            ),  
-
-          if (round.trailer)
-            Text(
-              "Trailer: ${_nok(calc.trailerDayCost + calc.trailerKmCost)}",
-              style: const TextStyle(fontWeight: FontWeight.w900),
-            ),
-
-          if (calc.ferryCost > 0)
-            Text(
-              "Ferry: ${_nok(calc.ferryCost)}",
-              style: const TextStyle(fontWeight: FontWeight.w900),
-            ),
-
-          if (calc.tollCost > 0)
-            Text(
-              "Toll: ${_nok(calc.tollCost)}",
-              style: const TextStyle(fontWeight: FontWeight.w900),
-            ),
-        ],
+        ),
       ),
-
-      const SizedBox(height: 10),
-
-      // ================= TOTAL + BREAKDOWN =================
-      Tooltip(
-        message: _buildRoundBreakdown(
-          roundIndex,
-          calc,
-          SettingsStore.current,
-        ),
-
-        waitDuration: const Duration(milliseconds: 300),
-
-        textStyle: const TextStyle(
-          fontFamily: 'monospace',
-          fontSize: 12,
-          height: 1.4,
-          color: Colors.white,
-        ),
-
-        decoration: BoxDecoration(
-          color: Colors.black87,
-          borderRadius: BorderRadius.circular(8),
-        ),
-
-        child: MouseRegion(
-          cursor: SystemMouseCursors.help,
-          child: Align(
-            alignment: Alignment.centerRight,
-            child: Text(
-              "TOTAL: ${_nok(calc.totalCost)}",
-              style: const TextStyle(
-                fontWeight: FontWeight.w900,
-                fontSize: 14,
-                            ),
-            ), // Text
-          ), // Align
-        ), // MouseRegion
-      ), // Tooltip
-
-    ],
-  ), // Column (COST)
-), // Container (COST)
-
-], // children (CENTER Column)
-), // Column (CENTER)
-), // Container (CENTER)
-), // Expanded (CENTER)
-
-// ================= RIGHT =================
-          
-
-  
-
+      
 
           // ================= RIGHT =================
           SizedBox(
@@ -3147,6 +3058,45 @@ Container(
 
       const SizedBox(height: 12),
 
+
+
+Container(
+  width: double.infinity,
+  padding: const EdgeInsets.all(14),
+  decoration: BoxDecoration(
+    color: cs.surface,
+    borderRadius: BorderRadius.circular(12),
+    border: Border.all(color: cs.outlineVariant),
+  ),
+  child: Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+
+      Text(
+        "Round calculation",
+        style: Theme.of(context)
+            .textTheme
+            .titleMedium
+            ?.copyWith(fontWeight: FontWeight.w900),
+      ),
+
+      const SizedBox(height: 10),
+
+      Text(
+        _buildRoundBreakdown(
+          roundIndex,
+          calc,
+          SettingsStore.current,
+        ),
+        style: const TextStyle(
+          fontFamily: "monospace",
+          fontWeight: FontWeight.w700,
+        ),
+      ),
+    ],
+  ),
+),
+
       // ---------- VAT ----------
       Container(
         width: double.infinity,
@@ -3194,6 +3144,7 @@ Container(
     );
   }
 }
+
 
 // =================================================
 // LEFT CARD (WITH CONTACT ADMIN)

@@ -38,145 +38,157 @@ class CalendarSyncService {
   }
 
   /// Sync offer → samletdata (kalender)
-  /// Sync offer → samletdata (kalender)
-static Future<void> syncFromOffer(
-  OfferDraft offer, {
-  required String draftId,
-  required Map<int, RoundCalcResult> calcCache, // ⭐ NY
-}) async {
-  try {
-    print("📅 SYNC START: ${offer.production}");
-    print("📌 STATUS: ${offer.status}");
+  static Future<void> syncFromOffer(
+    OfferDraft offer, {
+    required String draftId,
+    required Map<int, RoundCalcResult> calcCache,
+  }) async {
+    try {
+      print("📅 SYNC START: ${offer.production}");
+      print("📌 STATUS: ${offer.status}");
 
-    // --------------------------------------------------
-    // 1️⃣ Hent eksisterende rader
-    // --------------------------------------------------
-    final existing = await sb
-        .from('samletdata')
-        .select('dato, kilde')
-        .eq('draft_id', draftId)
-        .eq('manual_block', false);
-
-    final Map<String, String> existingBusByDate = {};
-
-    for (final r in existing) {
-      final d = r['dato']?.toString();
-      final b = r['kilde']?.toString();
-
-      if (d != null && b != null && b.isNotEmpty) {
-        existingBusByDate[d] = b;
+      for (int i = 0; i < offer.rounds.length; i++) {
+        print("ROUND $i BUSSLOTS = ${offer.rounds[i].busSlots}");
       }
-    }
 
-    // --------------------------------------------------
-    // 2️⃣ Finn alle datoer i offer
-    // --------------------------------------------------
-    final Set<String> offerDates = {};
+      // --------------------------------------------------
+      // 1️⃣ Hent eksisterende rader
+      // --------------------------------------------------
+      final existing = await sb
+          .from('samletdata')
+          .select('dato, kilde')
+          .eq('draft_id', draftId)
+          .eq('manual_block', false);
 
-    for (final r in offer.rounds) {
-      for (final e in r.entries) {
-        final d =
-            e.date.toIso8601String().substring(0, 10);
+      final Map<String, String> existingBusByDate = {};
 
-        offerDates.add(d);
+      for (final r in existing) {
+        final d = r['dato']?.toString();
+        final b = r['kilde']?.toString();
+
+        if (d != null && b != null && b.isNotEmpty) {
+          existingBusByDate[d] = b;
+        }
       }
-    }
 
-    if (offerDates.isEmpty) {
-      print("⚠️ Ingen datoer → avbryter sync");
-      return;
-    }
+      // --------------------------------------------------
+      // 2️⃣ Finn alle datoer i offer
+      // --------------------------------------------------
+      final Set<String> offerDates = {};
 
-    // --------------------------------------------------
-// 3️⃣ ENTERPRISE RESET FOR THIS DRAFT
-// --------------------------------------------------
-await sb
-    .from('samletdata')
-    .delete()
-    .eq('draft_id', draftId)
-    .eq('manual_block', false);
+      for (final r in offer.rounds) {
+        for (final e in r.entries) {
+          final d = e.date.toIso8601String().substring(0, 10);
+          offerDates.add(d);
+        }
+      }
 
-print("♻️ Cleared previous auto rows for draft");
+      if (offerDates.isEmpty) {
+        print("⚠️ Ingen datoer → avbryter sync");
+        return;
+      }
 
-    // --------------------------------------------------
-    // 4️⃣ Bygg nye rader (ENTERPRISE)
-    // --------------------------------------------------
-    final Map<String, Map<String, dynamic>> rowByDate = {};
+      // --------------------------------------------------
+      // 3️⃣ ENTERPRISE RESET FOR THIS DRAFT
+      // --------------------------------------------------
+      await sb
+          .from('samletdata')
+          .delete()
+          .eq('draft_id', draftId)
+          .eq('manual_block', false);
 
-    for (int ri = 0; ri < offer.rounds.length; ri++) {
-      final round = offer.rounds[ri];
+      print("♻️ Cleared previous auto rows for draft");
 
-      if (round.entries.isEmpty) continue;
+      // --------------------------------------------------
+      // 4️⃣ Bygg nye rader (ENTERPRISE)
+      // --------------------------------------------------
+      final Map<String, Map<String, dynamic>> rowByDate = {};
 
-      final calc = calcCache[ri];
-      if (calc == null) continue;
+      for (int ri = 0; ri < offer.rounds.length; ri++) {
+        final round = offer.rounds[ri];
 
-      final vehicle =
-          "${offer.busType.label}${round.trailer ? ' + trailer' : ''}";
+        if (round.entries.isEmpty) continue;
 
-      for (int i = 0; i < round.entries.length; i++) {
-        final e = round.entries[i];
+        final calc = calcCache[ri];
+        if (calc == null) continue;
 
-        final dateStr =
-            e.date.toIso8601String().substring(0, 10);
+        final vehicle =
+            "${offer.busType.label}${round.trailer ? ' + trailer' : ''}";
 
-        final bus = round.bus;
-        if (bus == null || bus.isEmpty) {
-  print("⛔ Skip round $ri — no bus selected");
-  continue;
-}
-    
+        for (int i = 0; i < round.entries.length; i++) {
+          final e = round.entries[i];
 
-        final row = rowByDate.putIfAbsent(dateStr, () {
-          return {
-            'draft_id': draftId,
-            'dato': dateStr,
-            'sted': '',
-            'km': calc.legKm.length > i
-                ? calc.legKm[i].toString()
-                : '',
-            'tid': '',
-            'produksjon': offer.production,
-            'kjoretoy': vehicle,
-            'pris': calc.totalCost.toString(), // ⭐ FIX
-            'contact': offer.contact,
-            'status': offer.status,
-            'kilde': bus,
-          };
-        });
+          final dateStr =
+              e.date.toIso8601String().substring(0, 10);
 
-        final loc = e.location.trim();
+          // ENTERPRISE MULTI BUS SUPPORT
+          final buses = round.busSlots
+              .whereType<String>()
+              .where((b) => b.isNotEmpty)
+              .toList();
 
-        if (loc.isNotEmpty) {
-          if ((row['sted'] as String).isEmpty) {
-            row['sted'] = loc;
-          } else {
-            row['sted'] = '${row['sted']}, $loc';
+          if (buses.isEmpty) {
+            print("⛔ Skip round $ri — no bus selected");
+            continue;
+          }
+
+          // ⭐⭐⭐ EN RAD PER BUSS ⭐⭐⭐
+          for (final bus in buses) {
+            final key = "$dateStr-$bus";
+
+            final row = rowByDate.putIfAbsent(key, () {
+              return {
+                'draft_id': draftId,
+                'round_index': ri,
+                'round_id': '$draftId-$ri',
+                'dato': dateStr,
+                'sted': '',
+                'km': calc.legKm.length > i
+                    ? calc.legKm[i].toString()
+                    : '',
+                'tid': '',
+                'produksjon': offer.production,
+                'kjoretoy': vehicle,
+                'pris': calc.totalCost.toString(),
+                'contact': offer.contact,
+                'status': offer.status,
+                'kilde': bus,
+              };
+            });
+
+            final loc = e.location.trim();
+
+            if (loc.isNotEmpty) {
+              if ((row['sted'] as String).isEmpty) {
+                row['sted'] = loc;
+              } else {
+                row['sted'] = '${row['sted']}, $loc';
+              }
+            }
           }
         }
       }
+
+      final rows = rowByDate.values.toList();
+
+      // --------------------------------------------------
+      // 5️⃣ UPSERT (BEHOLDT)
+      // --------------------------------------------------
+      if (rows.isNotEmpty) {
+        await sb.from('samletdata').upsert(
+          rows,
+          onConflict: 'draft_id,dato,kilde',
+        );
+
+        print("✅ Upsert: ${rows.length}");
+      }
+
+      print("📅 SYNC DONE");
+    } catch (e, st) {
+      print("❌ CALENDAR SYNC ERROR");
+      print(e);
+      print(st);
+      rethrow;
     }
-
-    final rows = rowByDate.values.toList();
-
-    // --------------------------------------------------
-    // 5️⃣ UPSERT (BEHOLDT)
-    // --------------------------------------------------
-    if (rows.isNotEmpty) {
-      await sb.from('samletdata').upsert(
-            rows,
-            onConflict: 'draft_id,dato',
-          );
-
-      print("✅ Upsert: ${rows.length}");
-    }
-
-    print("📅 SYNC DONE");
-  } catch (e, st) {
-    print("❌ CALENDAR SYNC ERROR");
-    print(e);
-    print(st);
-    rethrow;
   }
-}
 }

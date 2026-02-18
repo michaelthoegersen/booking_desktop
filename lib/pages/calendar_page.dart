@@ -697,50 +697,38 @@ Widget _buildCalendarOnlyRow(
     },
 
     // =====================================================
-    // ✅ VED DROP
-    // =====================================================
-    onAccept: (data) async {
+// ✅ VED DROP
+// =====================================================
+onAccept: (data) async {
 
-      // ============================
-      // 1️⃣ FLYTT BOOKING
-      // ============================
-      await supabase
-          .from('samletdata')
-          .update({'kilde': bus})
-          .eq('produksjon', data.production)
-          .eq('kilde', data.fromBus)
-          .gte('dato', fmtDb(data.from))
-          .lte('dato', fmtDb(data.to));
+  if (!mounted) return;
 
-      if (!mounted) return;
+  // ============================
+  // 1️⃣ VIS DIALOG FØRST
+  // ============================
+  final changed = await showDialog<bool>(
+    context: context,
+    builder: (_) => StatusDatePickerDialog(
+  draftId: data.draftId,
+  newStatus: 'confirmed',
+  targetBus: bus, // 👈 MÅ MED
+),
+  );
 
-      // ============================
-      // 2️⃣ VIS STATUS-DIALOG
-      // ============================
-      final changed = await showDialog<bool>(
-        context: context,
-        builder: (_) => StatusDatePickerDialog(
-          draftId: data.draftId, // 👈 riktig ID
-          newStatus: 'confirmed',
-        ),
-      );
+  if (changed != true) return;
 
-      if (!mounted) return;
-
-      // ============================
-      // 3️⃣ RELOAD
-      // ============================
-      if (changed == true) {
-        await loadRange(
-          isMonthView
-              ? DateTime(monthStart.year, monthStart.month, 1)
-              : weekStart.subtract(const Duration(days: 7)),
-          isMonthView
-              ? DateTime(monthStart.year, monthStart.month + 1, 0)
-              : weekStart.add(const Duration(days: 14)),
-        );
-      }
-    },
+  // ============================
+  // 3️⃣ RELOAD
+  // ============================
+  await loadRange(
+    isMonthView
+        ? DateTime(monthStart.year, monthStart.month, 1)
+        : weekStart.subtract(const Duration(days: 7)),
+    isMonthView
+        ? DateTime(monthStart.year, monthStart.month + 1, 0)
+        : weekStart.add(const Duration(days: 14)),
+  );
+},
 
     // =====================================================
     // 🎨 UI
@@ -937,125 +925,171 @@ List<Widget> buildSegments(
 ) {
   final result = <Widget>[];
 
+  // =====================================================
+  // 1️⃣ FLAT LISTE
+  // =====================================================
+
+  final entries = data[bus]?.entries.toList() ?? [];
+  final allRows = <Map<String, dynamic>>[];
+
+  for (final e in entries) {
+    for (final r in e.value) {
+      allRows.add(r);
+    }
+  }
+
+  // =====================================================
+  // 2️⃣ GROUP PER ROUND
+  // =====================================================
+
+  final Map<String, List<Map<String, dynamic>>> rounds = {};
+
+  for (final r in allRows) {
+    final draftId = r['draft_id']?.toString() ?? '';
+    final roundIndex = r['round_index']?.toString() ?? '0';
+
+    final key = "$draftId:$roundIndex";
+
+    rounds.putIfAbsent(key, () => []);
+    rounds[key]!.add(r);
+  }
+
+  // =====================================================
+  // 3️⃣ SPLITT PER CONTIGUOUS DATO
+  // =====================================================
+
+  final List<List<Map<String, dynamic>>> chunks = [];
+
+  for (final round in rounds.values) {
+    final sorted = [...round]
+      ..sort((a, b) => a['dato'].compareTo(b['dato']));
+
+    List<Map<String, dynamic>> current = [];
+
+    for (int i = 0; i < sorted.length; i++) {
+      final row = sorted[i];
+      final date = normalize(DateTime.parse(row['dato']));
+
+      if (current.isEmpty) {
+        current.add(row);
+        continue;
+      }
+
+      final prevDate =
+          normalize(DateTime.parse(current.last['dato']));
+
+      final diff = date.difference(prevDate).inDays;
+
+      if (diff == 1) {
+        current.add(row);
+      } else {
+        chunks.add(current);
+        current = [row];
+      }
+    }
+
+    if (current.isNotEmpty) {
+      chunks.add(current);
+    }
+  }
+
+  // =====================================================
+  // 4️⃣ SORTER CHUNKS
+  // =====================================================
+
+  chunks.sort((a, b) {
+    final da = DateTime.parse(a.first['dato']);
+    final db = DateTime.parse(b.first['dato']);
+    return da.compareTo(db);
+  });
+
+  // =====================================================
+  // 5️⃣ BYGG UI (FIXET CROSS-MONTH + OVERFLOW)
+  // =====================================================
+
   int i = 0;
 
   while (i < days.length) {
     final day = normalize(days[i]);
 
-    final items = data[bus]?[day] ?? [];
+    List<Map<String, dynamic>>? chunk;
 
-    if (items.isEmpty) {
-      result.add(
-        SizedBox(width: dayWidth),
-      );
+for (final c in chunks) {
+
+  final start =
+      normalize(DateTime.parse(c.first['dato']));
+  final end =
+      normalize(DateTime.parse(c.last['dato']));
+
+  final isInside =
+      !day.isBefore(start) && !day.isAfter(end);
+
+  if (isInside) {
+    chunk = c;
+    break;
+  }
+}
+
+    if (chunk == null) {
+      result.add(const SizedBox(width: dayWidth));
       i++;
       continue;
     }
 
-    final isManual = items.first['manual_block'] == true;
+    final realDates = chunk
+        .map((e) => normalize(DateTime.parse(e['dato'])))
+        .toList()
+      ..sort();
 
-final String title = isManual
-    ? (items.first['note'] ?? 'Blocked')
-    : (items.first['produksjon'] ?? '');
+    // =====================================================
+    // ✅ RIKTIG CROSS-MONTH LOGIKK
+    // behold ekte datoer – clamp kun bredden
+    // =====================================================
 
-if (title.isEmpty) {
-  result.add(
-    SizedBox(width: dayWidth),
-  );
-  i++;
-  continue;
-}
+    final visibleCount =
+        realDates.where((d) => days.contains(d)).length;
 
-final String groupKey = isManual
-    ? 'M:$title'
-    : 'P:$title';
-    // =====================================
-    // FIND FULL RANGE IN DATA (BACK + FORTH)
-    // =====================================
-
-    DateTime start = day;
-    DateTime end = day;
-
-    // Backwards
-    DateTime prev = start.subtract(const Duration(days: 1));
-
-    while (true) {
-      final prevItems = data[bus]?[prev];
-
-if (prevItems == null || prevItems.isEmpty) break;
-
-final prevKey =
-    prevItems.first['manual_block'] == true
-        ? 'M:${prevItems.first['note'] ?? ''}'
-        : 'P:${prevItems.first['produksjon'] ?? ''}';
-
-if (prevKey != groupKey) break;
-
-      start = prev;
-      prev = prev.subtract(const Duration(days: 1));
+    if (visibleCount == 0) {
+      i++;
+      continue;
     }
 
-    // Forwards
-    DateTime next = end.add(const Duration(days: 1));
+    final first = chunk.first;
+final isManual = first['manual_block'] == true;
 
-    while (true) {
-      final nextItems = data[bus]?[next];
+result.add(
+  BookingSegment(
+    title: isManual
+        ? (first['note'] ?? 'Blocked')
+        : (first['produksjon'] ?? ''),
+    span: visibleCount,
+    bus: bus,
 
-if (nextItems == null || nextItems.isEmpty) break;
+    // ⭐⭐⭐ CRITICAL FIX ⭐⭐⭐
+    from: normalize(DateTime.parse(chunk.first['dato'])),
+    to: normalize(DateTime.parse(chunk.last['dato'])),
 
-final nextKey =
-    nextItems.first['manual_block'] == true
-        ? 'M:${nextItems.first['note'] ?? ''}'
-        : 'P:${nextItems.first['produksjon'] ?? ''}';
-
-if (nextKey != groupKey) break;
-
-      end = next;
-      next = next.add(const Duration(days: 1));
-    }
-
-    // =====================================
-    // CALCULATE ONLY VISIBLE SPAN
-    // =====================================
-
-    int span = 0;
-
-    DateTime cursor = start;
-
-    while (!cursor.isAfter(end)) {
-      if (days.any((d) => normalize(d) == cursor)) {
-        span++;
-      }
-
-      cursor = cursor.add(const Duration(days: 1));
-    }
-
-    // =====================================
-    // ADD SEGMENT
-    // =====================================
-
-    result.add(
-        BookingSegment(
-  title: isManual
-    ? (items.first['note'] ?? 'Blocked')
-    : (items.first['produksjon'] ?? ''),
-  span: span,
-  bus: bus,
-  from: start,
-  to: end,
-  status: isManual ? 'manual' : items.first['status'],
-  width: dayWidth,
-
-  draftId: items.first['draft_id'].toString(), // ✅ RIKTIG
-),
-    );
-
-    i += span;
+    status: isManual ? 'manual' : first['status'],
+    width: dayWidth,
+    draftId: first['draft_id'].toString(),
+  ),
+);
+    i += visibleCount;
   }
 
   return result;
 }
-Future<void> _openManualBlockDialog() async {
+  // ============================================================
+  // UPDATE STATUS
+  // ============================================================
+
+  
+  // ============================================================
+  // STATUS MENU
+  // ============================================================
+
+  
+  Future<void> _openManualBlockDialog() async {
   final changed = await showDialog<bool>(
     context: context,
     builder: (_) => _ManualBlockDialog(
@@ -1067,28 +1101,9 @@ Future<void> _openManualBlockDialog() async {
     isMonthView ? loadMonth() : loadWeek();
   }
 }
-  } // <-- SLUTT på _CalendarPageState
-
-
+  }
 // ============================================================
-// ROUND BLOCK (STATUS DIALOG)
-// ============================================================
-
-class _RoundBlock {
-  final String bus;
-  DateTime from;
-  DateTime to;
-  final List<String> ids;
-
-  _RoundBlock({
-    required this.bus,
-    required this.from,
-    required this.to,
-    required this.ids,
-  });
-}
-// ============================================================
-// BOOKING SEGMENT
+// SEGMENT BODY
 // ============================================================
 
 class BookingSegment extends StatelessWidget {
@@ -1103,275 +1118,104 @@ class BookingSegment extends StatelessWidget {
   final String draftId;
 
   const BookingSegment({
-  super.key,
-  required this.title,
-  required this.span,
-  required this.bus,
-  required this.from,
-  required this.to,
-  this.status,
-  required this.width,
-
-  required this.draftId, // 👈 NY
-});
-
-
+    super.key,
+    required this.title,
+    required this.span,
+    required this.bus,
+    required this.from,
+    required this.to,
+    this.status,
+    required this.width,
+    required this.draftId,
+  });
 
   // ============================================================
-  // UPDATE STATUS
+  // BODY (CLICK + DOUBLE CLICK)
   // ============================================================
 
-  Future<void> _updateStatus(
-  BuildContext context,
-  String newStatus,
-) async {
+  Widget _buildBody(BuildContext context) {
+    return GestureDetector(
+      onTap: () {
+        context.go('/new?offerId=$draftId');
+      },
 
-  final changed = await showDialog<bool>(
-    context: context,
-
-    builder: (_) => StatusDatePickerDialog(
-  draftId: draftId, // 👈 HER
-  newStatus: newStatus,
-),
-  );
-
-  if (changed != true) return;
-
-  if (!context.mounted) return;
-
-  final parent =
-      context.findAncestorStateOfType<_CalendarPageState>();
-
-  if (parent == null) return;
-
-  if (parent.isMonthView) {
-    await parent.loadMonth();
-  } else {
-    await parent.loadWeek();
-  }
-}
-
-
-
-  // ============================================================
-  // STATUS MENU
-  // ============================================================
-
-  Future<void> _showStatusMenu(
-    BuildContext context,
-    TapDownDetails details,
-  ) async {
-
-    final overlay =
-        Overlay.of(context).context.findRenderObject() as RenderBox;
-
-
-    final position = RelativeRect.fromRect(
-      Rect.fromLTWH(
-        details.globalPosition.dx,
-        details.globalPosition.dy,
-        1,
-        1,
-      ),
-      Offset.zero & overlay.size,
-    );
-
-
-    final selected = await showMenu<String>(
-
-      context: context,
-      position: position,
-
-      items: const [
-
-        PopupMenuItem(
-          value: 'draft',
-          child: Text("Draft"),
-        ),
-
-        PopupMenuItem(
-          value: 'inquiry',
-          child: Text("Inquiry"),
-        ),
-
-        PopupMenuItem(
-          value: 'confirmed',
-          child: Text("Confirmed"),
-        ),
-      ],
-    );
-
-
-    if (selected != null) {
-      await _updateStatus(context, selected);
-    }
-  }
-// ============================================================
-// SEGMENT BODY
-// ============================================================
-
-Widget _buildBody(BuildContext context) {
-  return GestureDetector(
-    behavior: HitTestBehavior.opaque,
-
-    // ✅ KLIKK → ÅPNE OFFER
-    onTap: () {
-      if (!context.mounted) return;
-
-      context.go('/new?offerId=$draftId');
-    },
-
-    // ✅ DOBBELKLIKK → EDIT KALENDER
-    onDoubleTap: () async {
-  final parent =
-      context.findAncestorStateOfType<_CalendarPageState>();
-
-  if (parent == null) return;
-
-  // ✅ MANUAL BLOCK → EDIT BLOCK
-  if (status == 'manual') {
-    final changed = await showDialog<bool>(
-      context: context,
-      builder: (_) => _ManualBlockDialog(
-        buses: parent.buses,
-
-        initialBus: bus,
-        initialFrom: from,
-        initialTo: to,
-        initialNote: title,
-      ),
-    );
-
-    if (changed == true && context.mounted) {
-      parent.isMonthView
-          ? parent.loadMonth()
-          : parent.loadWeek();
-    }
-
-    return;
-  }
-
-  // ✅ NORMAL BOOKING → OLD EDIT
-  final changed = await showDialog<bool>(
-    context: context,
-    builder: (_) => EditCalendarDialog(
-      production: title,
-      bus: bus,
-      from: from,
-      to: to,
-    ),
-  );
-
-  if (changed == true && context.mounted) {
-    parent.isMonthView
-        ? parent.loadMonth()
-        : parent.loadWeek();
-  }
-},
-
-    // ✅ HØYREKLIKK → STATUS
-    onSecondaryTapDown: (d) {
-      _showStatusMenu(context, d);
-    },
-
-    child: Container(
-      margin: const EdgeInsets.all(4),
-      padding: const EdgeInsets.symmetric(
-        horizontal: 10,
-        vertical: 6,
-      ),
-
-      decoration: BoxDecoration(
-        color: statusColor(status),
-        borderRadius: BorderRadius.circular(10),
-
-        boxShadow: const [
-          BoxShadow(
-            color: Color(0x22000000),
-            blurRadius: 4,
-            offset: Offset(0, 2),
+      onDoubleTap: () async {
+        final changed = await showDialog<bool>(
+          context: context,
+          builder: (_) => EditCalendarDialog(
+            production: title,
+            bus: bus,
+            from: from,
+            to: to,
           ),
-        ],
-      ),
+        );
 
-      child: Text(
-        title,
-        overflow: TextOverflow.ellipsis,
-        style: const TextStyle(
-          fontWeight: FontWeight.w700,
-          fontSize: 13,
+        if (changed == true && context.mounted) {
+          final parent =
+              context.findAncestorStateOfType<_CalendarPageState>();
+
+          if (parent != null) {
+            parent.isMonthView
+                ? parent.loadMonth()
+                : parent.loadWeek();
+          }
+        }
+      },
+
+      child: Container(
+        margin: const EdgeInsets.all(4),
+        padding: const EdgeInsets.symmetric(
+          horizontal: 10,
+          vertical: 6,
+        ),
+        decoration: BoxDecoration(
+          color: statusColor(status),
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Text(
+          title,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(
+            fontWeight: FontWeight.w700,
+            fontSize: 13,
+          ),
         ),
       ),
-    ),
-  );
-}
-// ============================================================
-// BUILD (DRAGGABLE + EXPANDED)
-// ============================================================
+    );
+  }
 
-@override
-Widget build(BuildContext context) {
-  return Expanded(
-    flex: span,
+  // ============================================================
+  // BUILD
+  // ============================================================
 
-    child: Draggable<DragBookingData>(
-      data: DragBookingData(
-  production: title,
-  fromBus: bus,
-  from: from,
-  to: to,
-  draftId: draftId, // 👈 HER
-),
-
-      affinity: Axis.vertical,
-
-      // =========================
-      // Preview while dragging
-      // =========================
-      feedback: Material(
-        color: Colors.transparent,
-
-        child: Container(
-          width: width * span,
-          padding: const EdgeInsets.all(6),
-
-          decoration: BoxDecoration(
-            color: statusColor(status).withOpacity(0.9),
-            borderRadius: BorderRadius.circular(6),
-
-            boxShadow: const [
-              BoxShadow(
-                color: Colors.black26,
-                blurRadius: 6,
-              ),
-            ],
-          ),
-
-          child: Text(
-            title,
-            style: const TextStyle(
-              fontWeight: FontWeight.bold,
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: width * span,
+      child: Draggable<DragBookingData>(
+        data: DragBookingData(
+          production: title,
+          fromBus: bus,
+          from: from,
+          to: to,
+          draftId: draftId,
+        ),
+        feedback: Material(
+          color: Colors.transparent,
+          child: Container(
+            width: width * span,
+            padding: const EdgeInsets.all(6),
+            decoration: BoxDecoration(
+              color: statusColor(status).withOpacity(0.9),
+              borderRadius: BorderRadius.circular(6),
             ),
+            child: Text(title),
           ),
         ),
-      ),
-
-      // =========================
-      // Placeholder
-      // =========================
-      childWhenDragging: Opacity(
-        opacity: 0.3,
         child: _buildBody(context),
       ),
-
-      // =========================
-      // Normal
-      // =========================
-      child: _buildBody(context),
-    ),
-  );
-}
-
+    );
+  }
 }
 // ============================================================
 // BUS CELL
@@ -1967,15 +1811,36 @@ class _CalendarHeaderDelegate extends SliverPersistentHeaderDelegate {
         child != oldDelegate.child;
   }
 }
+// ============================================================
+// ROUND BLOCK (STATUS DIALOG)
+// ============================================================
+
+class _RoundBlock {
+  final String bus;
+  DateTime from;
+  DateTime to;
+  final List<String> ids;
+
+  _RoundBlock({
+    required this.bus,
+    required this.from,
+    required this.to,
+    required this.ids,
+  });
+}
   class StatusDatePickerDialog extends StatefulWidget {
 
   final String draftId;
   final String newStatus;
 
+  // 👇 NY: hvilken buss vi droppet på
+  final String targetBus;
+
   const StatusDatePickerDialog({
     super.key,
     required this.draftId,
     required this.newStatus,
+    required this.targetBus,
   });
 
   @override
@@ -2079,7 +1944,9 @@ class _StatusDatePickerDialogState
   // ============================================================
 
   Future<void> _apply() async {
+
   for (final b in blocks) {
+
     final key = b.hashCode.toString();
 
     if (selected[key] != true) continue;
@@ -2088,7 +1955,10 @@ class _StatusDatePickerDialogState
 
     await sb
         .from('samletdata')
-        .update({'status': widget.newStatus})
+        .update({
+          'status': widget.newStatus,
+          'kilde': widget.targetBus, // 👈 FLYTT HER
+        })
         .filter('id', 'in', '($ids)');
   }
 
@@ -2121,7 +1991,7 @@ class _StatusDatePickerDialogState
                     value: selected[key] ?? false,
 
                     title: Text(
-                      "${fmt(b.from)} – ${fmt(b.to)} (${b.bus})",
+                      "${fmt(b.from)} – ${fmt(b.to)} (${widget.targetBus})",
                     ),
 
                     onChanged: (v) {

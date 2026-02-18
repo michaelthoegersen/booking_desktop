@@ -4,9 +4,13 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../widgets/new_company_dialog.dart';
+import 'package:pdf/widgets.dart' as pw;
+import 'package:printing/printing.dart';
+import '../services/pdf_export_service.dart';
 
 class CustomersPage extends StatefulWidget {
   const CustomersPage({super.key});
+
 
   @override
   State<CustomersPage> createState() => _CustomersPageState();
@@ -18,6 +22,113 @@ class _CustomersPageState extends State<CustomersPage> {
   final TextEditingController _searchCtrl = TextEditingController();
 
   Timer? _debounce;
+Future<Map<String, dynamic>> _loadAllForPdf() async {
+
+  final companies = await _client
+      .from('companies')
+      .select()
+      .order('name');
+
+  final contacts = await _client
+      .from('contacts')
+      .select();
+
+  final productions = await _client
+      .from('productions')
+      .select();
+
+  return {
+    "companies": List<Map<String,dynamic>>.from(companies),
+    "contacts": List<Map<String,dynamic>>.from(contacts),
+    "productions": List<Map<String,dynamic>>.from(productions),
+  };
+}
+  Future<void> _exportPdf() async {
+  final pdf = pw.Document();
+
+  // Hent ALT direkte fra Supabase (ikke bare valgt company)
+  final companies = await _client
+      .from('companies')
+      .select()
+      .order('name');
+
+  final contacts = await _client.from('contacts').select();
+  final productions = await _client.from('productions').select();
+
+  pdf.addPage(
+    pw.MultiPage(
+      build: (context) {
+        return companies.map<pw.Widget>((c) {
+
+          final cid = c['id'];
+
+          final companyContacts = contacts
+              .where((x) => x['company_id'] == cid)
+              .toList();
+
+          final companyProductions = productions
+              .where((x) => x['company_id'] == cid)
+              .toList();
+
+          return pw.Container(
+            margin: const pw.EdgeInsets.only(bottom: 20),
+            child: pw.Column(
+              crossAxisAlignment: pw.CrossAxisAlignment.start,
+              children: [
+
+                // COMPANY NAME
+                pw.Text(
+                  c['name'] ?? '',
+                  style: pw.TextStyle(
+                    fontSize: 18,
+                    fontWeight: pw.FontWeight.bold,
+                  ),
+                ),
+
+                pw.SizedBox(height: 6),
+
+                // CONTACTS
+                if (companyContacts.isNotEmpty) ...[
+                  pw.Text(
+                    "Contacts",
+                    style: pw.TextStyle(
+                      fontWeight: pw.FontWeight.bold,
+                    ),
+                  ),
+
+                  ...companyContacts.map((co) {
+                    return pw.Text(
+                      "${co['name'] ?? ''}   ${co['phone'] ?? ''}   ${co['email'] ?? ''}",
+                    );
+                  }),
+                  pw.SizedBox(height: 6),
+                ],
+
+                // PRODUCTIONS
+                if (companyProductions.isNotEmpty) ...[
+                  pw.Text(
+                    "Productions",
+                    style: pw.TextStyle(
+                      fontWeight: pw.FontWeight.bold,
+                    ),
+                  ),
+
+                  ...companyProductions.map((p) {
+                    return pw.Text(p['name'] ?? '');
+                  }),
+                ],
+              ],
+            ),
+          );
+        }).toList();
+      },
+    ),
+  );
+
+  await Printing.layoutPdf(
+    onLayout: (format) async => pdf.save(),
+  );
+}
 
   // DATA
   List<Map<String, dynamic>> _companies = [];
@@ -425,18 +536,35 @@ class _CustomersPageState extends State<CustomersPage> {
     return Padding(
       padding: const EdgeInsets.all(12),
       child: Row(
-        children: [
-          const Text(
-            "Companies",
-            style: TextStyle(fontSize: 18, fontWeight: FontWeight.w900),
-          ),
-          const Spacer(),
-          IconButton(
-            onPressed: _createCompany,
-            icon: const Icon(Icons.add),
-          ),
-        ],
-      ),
+  children: [
+    const Text(
+      "Companies",
+      style: TextStyle(fontSize: 18, fontWeight: FontWeight.w900),
+    ),
+    const Spacer(),
+
+    IconButton(
+  icon: const Icon(Icons.picture_as_pdf),
+  onPressed: () async {
+
+  debugPrint("PDF CLICKED");
+
+  final data = await _loadAllForPdf();
+
+  await PdfExportService.exportCustomers(
+  companies: List<Map<String,dynamic>>.from(data["companies"]),
+  contacts: List<Map<String,dynamic>>.from(data["contacts"]),
+  productions: List<Map<String,dynamic>>.from(data["productions"]),
+);
+}
+),
+
+    IconButton(
+      onPressed: _createCompany,
+      icon: const Icon(Icons.add),
+    ),
+  ],
+),
     );
   }
 

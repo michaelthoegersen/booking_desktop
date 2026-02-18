@@ -36,6 +36,9 @@ dependencies:
 
   syncfusion_flutter_pdf: ^24.1.41
 
+  open_filex: ^4.3.2
+  path_provider: ^2.1.2
+
 
 # =============================================================
 # DEV DEPENDENCIES
@@ -102,3 +105,5 @@ flutter:
     # Fonts
     - assets/fonts/Calibri.ttf
     - assets/fonts/Calibrib.ttf
+    - assets/fonts/Roboto-Regular.ttf
+    - assets/fonts/Roboto-Bold.ttf
