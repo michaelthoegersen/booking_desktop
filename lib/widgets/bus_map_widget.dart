@@ -1,10 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
-import 'package:flutter_map_marker_cluster/flutter_map_marker_cluster.dart';
 import 'package:latlong2/latlong.dart';
-import '../pages/dashboard_page.dart';
 import '../models/bus_position.dart';
-import '../data/city_coords.dart'; // eller riktig sti
+import '../data/city_coords.dart';
 
 class BusMapWidget extends StatefulWidget {
   final Map<String, BusPosition> busLocations;
@@ -24,96 +22,128 @@ class _BusMapWidgetState extends State<BusMapWidget> {
   final MapController _mapController = MapController();
 
   // ------------------------------------------------------------
-  // NORMALIZE STRING
+  // HELPERS
   // ------------------------------------------------------------
 
-  String _normalize(String s) {
-    return s.trim().toLowerCase();
+  String _normalize(String s) => s.trim().toLowerCase();
+
+  /// Label shown under the bus icon on the map.
+  /// Only strips "CSS_" for the three CSS buses; all others get their full name.
+  String _busLabel(String bus) {
+    const cssBuses = {'CSS_1034', 'CSS_1023', 'CSS_1008'};
+    if (cssBuses.contains(bus)) {
+      return bus.replaceFirst('CSS_', '');
+    }
+    return bus;
   }
+
   // ------------------------------------------------------------
-  // BUILD MARKERS
+  // BUILD MARKERS  (no clustering — buses side by side when co-located)
   // ------------------------------------------------------------
 
   List<Marker> _buildMarkers() {
-    final List<Marker> markers = [];
+    // 1. Resolve raw position for every bus
+    final Map<String, LatLng> rawPos = {};
 
     widget.busLocations.forEach((bus, position) {
+      LatLng? pos;
 
-  LatLng? pos;
+      if (position.livePos != null) {
+        pos = position.livePos;
+      }
 
-  // 1️⃣ Live-posisjon først
-  if (position.livePos != null) {
-    pos = position.livePos;
-  }
+      if (pos == null && position.place != null) {
+        final key = _normalize(position.place!);
+        pos = cityCoords[key];
+        if (pos == null) {
+          debugPrint("❌ City not found: ${position.place} ($key)");
+        }
+      }
 
-  // 2️⃣ Ellers bruk by
-  if (pos == null && position.place != null) {
+      pos ??= cityCoords[_normalize('Oslo')];
 
-    final key = _normalize(position.place!);
+      if (pos == null) {
+        debugPrint("🔥 NO POSITION AT ALL FOR $bus");
+        return;
+      }
 
-    pos = cityCoords[key];
+      rawPos[bus] = pos;
+    });
 
-    if (pos == null) {
-      debugPrint("❌ City not found: ${position.place} ($key)");
-    }
-  }
+    // 2. Group buses that share the exact same LatLng
+    final Map<String, List<String>> groups = {};
+    rawPos.forEach((bus, pos) {
+      final key = '${pos.latitude},${pos.longitude}';
+      groups.putIfAbsent(key, () => []).add(bus);
+    });
 
-  // 3️⃣ Hard fallback
-  pos ??= cityCoords[_normalize('Oslo')];
+    // 3. Spread co-located buses horizontally (≈ 0.10° lng ≈ 6 km apart)
+    const double spreadLng = 0.10;
+    final Map<String, LatLng> finalPos = {};
 
-  if (pos == null) {
-    debugPrint("🔥 NO POSITION AT ALL FOR $bus");
-    return;
-  }
+    groups.forEach((_, buses) {
+      final base = rawPos[buses.first]!;
+      for (int i = 0; i < buses.length; i++) {
+        final offset = (i - (buses.length - 1) / 2.0) * spreadLng;
+        finalPos[buses[i]] = LatLng(base.latitude, base.longitude + offset);
+      }
+    });
 
-  markers.add(
-    Marker(
-      point: pos,
-      width: 60,
-      height: 70,
+    // 4. Build one Marker per bus
+    final List<Marker> markers = [];
 
-      child: Tooltip(
-        message: '$bus\n${position.place ?? "On route"}',
+    finalPos.forEach((bus, pos) {
+      final label = _busLabel(bus);
+      final position = widget.busLocations[bus]!;
 
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
+      markers.add(
+        Marker(
+          point: pos,
+          width: 90,   // wide enough for labels like "YCR 682"
+          height: 72,
 
-            Image.asset(
-              'assets/pdf/buses/DDBuskart.png',
-              width: 42,
-              height: 42,
-              fit: BoxFit.contain,
-            ),
+          child: Tooltip(
+            message: '$bus\n${position.place ?? "On route"}',
 
-            const SizedBox(height: 3),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
 
-            Container(
-              padding: const EdgeInsets.symmetric(
-                horizontal: 5,
-                vertical: 2,
-              ),
-
-              decoration: BoxDecoration(
-                color: Colors.black87,
-                borderRadius: BorderRadius.circular(7),
-              ),
-
-              child: Text(
-                bus.replaceAll(RegExp(r'[^0-9]'), ''),
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 10,
-                  fontWeight: FontWeight.bold,
+                Image.asset(
+                  'assets/pdf/buses/DDBuskart.png',
+                  width: 42,
+                  height: 42,
+                  fit: BoxFit.contain,
                 ),
-              ),
+
+                const SizedBox(height: 3),
+
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 5,
+                    vertical: 2,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.black87,
+                    borderRadius: BorderRadius.circular(7),
+                  ),
+                  child: Text(
+                    label,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 10,
+                      fontWeight: FontWeight.bold,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.visible,
+                  ),
+                ),
+              ],
             ),
-          ],
+          ),
         ),
-      ),
-    ),
-  );
-});
+      );
+    });
 
     return markers;
   }
@@ -123,20 +153,20 @@ class _BusMapWidgetState extends State<BusMapWidget> {
   // ------------------------------------------------------------
 
   void _autoZoom(List<Marker> markers) {
-  if (markers.isEmpty) return;
+    if (markers.isEmpty) return;
 
-  final bounds = LatLngBounds.fromPoints(
-    markers.map((m) => m.point).toList(),
-  );
+    final bounds = LatLngBounds.fromPoints(
+      markers.map((m) => m.point).toList(),
+    );
 
-  _mapController.fitBounds(
-    bounds,
-    options: const FitBoundsOptions(
-      padding: EdgeInsets.all(80), // 👈 mer luft
-      maxZoom: 6.5,                // 👈 aldri for tett
-    ),
-  );
-}
+    _mapController.fitBounds(
+      bounds,
+      options: const FitBoundsOptions(
+        padding: EdgeInsets.all(80),
+        maxZoom: 6.5,
+      ),
+    );
+  }
 
   // ------------------------------------------------------------
   // UI
@@ -173,36 +203,11 @@ class _BusMapWidgetState extends State<BusMapWidget> {
             TileLayer(
               urlTemplate:
                   'https://api.maptiler.com/maps/streets/256/{z}/{x}/{y}.png?key=qLneWyVuo1A6hcUjh3iS',
-
               userAgentPackageName: 'com.tourflow.app',
             ),
 
-            MarkerClusterLayerWidget(
-              options: MarkerClusterLayerOptions(
-                maxClusterRadius: 45,
-                size: const Size(40, 40),
-
-                markers: markers,
-
-                builder: (context, cluster) {
-                  return Container(
-                    decoration: const BoxDecoration(
-                      color: Colors.blue,
-                      shape: BoxShape.circle,
-                    ),
-                    child: Center(
-                      child: Text(
-                        cluster.length.toString(),
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ),
-                  );
-                },
-              ),
-            ),
+            // No clustering — each bus always gets its own marker
+            MarkerLayer(markers: markers),
           ],
         ),
       ),
