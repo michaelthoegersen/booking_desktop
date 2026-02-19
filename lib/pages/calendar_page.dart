@@ -1858,16 +1858,17 @@ Future<void> load() async {
                                 ),
                               ),
 
-                              // ── City / venue for this day ──
+                              // ── City (sted) for this day ──
                               Builder(builder: (context) {
-                                final id = rows[activeIndex]['id'].toString();
-                                final venue =
-                                    venueCtrls[id]?.text.trim() ?? '';
-                                if (venue.isEmpty) return const SizedBox.shrink();
+                                final sted =
+                                    (rows[activeIndex]['sted'] as String?)
+                                            ?.trim() ??
+                                        '';
+                                if (sted.isEmpty) return const SizedBox.shrink();
                                 return Padding(
                                   padding: const EdgeInsets.only(top: 2),
                                   child: Text(
-                                    venue,
+                                    sted,
                                     style: TextStyle(
                                       fontSize: 13,
                                       color: Colors.grey.shade600,
