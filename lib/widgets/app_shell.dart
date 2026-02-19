@@ -315,6 +315,12 @@ Padding(
               route: "/customers",
             ),
 
+            const _NavItem(
+              icon: Icons.receipt_long_rounded,
+              label: "Invoices",
+              route: "/invoices",
+            ),
+
             const Spacer(),
 
             const _NavItem(

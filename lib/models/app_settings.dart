@@ -19,6 +19,9 @@ class AppSettings {
   /// ✅ NEW: Ferry definitions (used by TripCalculator)
   final List<FerryDefinition> ferries;
 
+  /// Bank account number for invoices (e.g. "9710.05.12345")
+  final String bankAccount;
+
   const AppSettings({
     required this.dayPrice,
     required this.extraKmPrice,
@@ -30,6 +33,7 @@ class AppSettings {
     this.includedKmPerDay = 300,
     this.dDriveKmThreshold = 600,
     this.dropboxRootPath = '',
+    this.bankAccount = '',
 
     /// ✅ NEW
     this.ferries = const [],
@@ -45,6 +49,7 @@ class AppSettings {
     double? includedKmPerDay,
     double? dDriveKmThreshold,
     String? dropboxRootPath,
+    String? bankAccount,
 
     /// ✅ NEW
     List<FerryDefinition>? ferries,
@@ -59,6 +64,7 @@ class AppSettings {
       includedKmPerDay: includedKmPerDay ?? this.includedKmPerDay,
       dDriveKmThreshold: dDriveKmThreshold ?? this.dDriveKmThreshold,
       dropboxRootPath: dropboxRootPath ?? this.dropboxRootPath,
+      bankAccount: bankAccount ?? this.bankAccount,
 
       /// ✅ NEW
       ferries: ferries ?? this.ferries,

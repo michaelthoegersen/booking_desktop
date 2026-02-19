@@ -21,6 +21,7 @@ class _SettingsPageState extends State<SettingsPage> {
   late TextEditingController dDriveDayCtrl;
   late TextEditingController flightTicketCtrl;
   late TextEditingController dropboxCtrl;
+  late TextEditingController bankAccountCtrl;
 
   Future<void> _openChangePasswordDialog() async {
 
@@ -159,6 +160,7 @@ class _SettingsPageState extends State<SettingsPage> {
         TextEditingController(text: s.flightTicketPrice.toStringAsFixed(0));
 
     dropboxCtrl = TextEditingController(text: s.dropboxRootPath);
+    bankAccountCtrl = TextEditingController(text: s.bankAccount);
   }
 
   @override
@@ -170,6 +172,7 @@ class _SettingsPageState extends State<SettingsPage> {
     dDriveDayCtrl.dispose();
     flightTicketCtrl.dispose();
     dropboxCtrl.dispose();
+    bankAccountCtrl.dispose();
 
     super.dispose();
   }
@@ -352,6 +355,7 @@ debugPrint("SESSION: $session");
       flightTicketPrice:
           _parseDouble(flightTicketCtrl.text, current.flightTicketPrice),
       dropboxRootPath: dropboxCtrl.text.trim(),
+      bankAccount: bankAccountCtrl.text.trim(),
     );
 
     await SettingsStore.save();
@@ -451,6 +455,34 @@ debugPrint("SESSION: $session");
                   label: const Text("Choose"),
                 )
               ],
+            ),
+
+            const SizedBox(height: 18),
+            Divider(color: cs.outlineVariant),
+            const SizedBox(height: 18),
+
+            // ---------------- BANK ACCOUNT ----------------
+
+            Text(
+              "Invoice",
+              style: Theme.of(context)
+                  .textTheme
+                  .titleMedium
+                  ?.copyWith(fontWeight: FontWeight.w900),
+            ),
+
+            const SizedBox(height: 10),
+
+            SizedBox(
+              width: 360,
+              child: TextField(
+                controller: bankAccountCtrl,
+                decoration: const InputDecoration(
+                  labelText: "Bank account number",
+                  hintText: "e.g. 9710.05.12345",
+                  prefixIcon: Icon(Icons.account_balance),
+                ),
+              ),
             ),
 
             const SizedBox(height: 18),

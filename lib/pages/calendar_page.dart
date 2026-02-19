@@ -5,6 +5,9 @@ import 'package:go_router/go_router.dart';
 import 'dart:async';
 import 'package:flutter/gestures.dart';
 
+import '../services/offer_storage_service.dart';
+import '../services/notification_service.dart';
+
 // ============================================================
 // HELPERS
 // ============================================================
@@ -721,10 +724,11 @@ onAccept: (data) async {
   final changed = await showDialog<bool>(
     context: context,
     builder: (_) => StatusDatePickerDialog(
-  draftId: data.draftId,
-  newStatus: '',
-  targetBus: bus, // 👈 MÅ MED
-),
+      draftId: data.draftId,
+      newStatus: '',
+      targetBus: bus,
+      fromBus: data.fromBus,
+    ),
   );
 
   if (changed != true) return;
@@ -1467,7 +1471,43 @@ class _EditCalendarDialogState extends State<EditCalendarDialog> {
   int activeIndex = 0;
 
 
+Future<void> copyToBus(String targetBus) async {
 
+  for (final r in rows) {
+
+    final sourceId = r['id'].toString();
+    final date = fmtDb(DateTime.parse(r['dato']));
+
+    final target = await supabase
+        .from('samletdata')
+        .select('id')
+        .eq('produksjon', widget.production) // ⭐ FIX
+        .eq('kilde', targetBus)
+        .eq('dato', date)
+        .maybeSingle();
+
+    if (target == null) {
+      print("❌ NO TARGET ROW $targetBus $date");
+      continue;
+    }
+
+    final targetId = target['id'].toString();
+
+    print("✅ COPY $date → $targetBus");
+
+    await supabase
+        .from('samletdata')
+        .update({
+          'd_drive': dDriveCtrls[sourceId]?.text.trim() ?? '',
+          'getin': itinCtrls[sourceId]?.text.trim() ?? '',
+          'tid': timeCtrls[sourceId]?.text.trim() ?? '',
+          'venue': venueCtrls[sourceId]?.text.trim() ?? '',
+          'adresse': addrCtrls[sourceId]?.text.trim() ?? '',
+          'kommentarer': commentCtrls[sourceId]?.text.trim() ?? '',
+        })
+        .eq('id', targetId);
+  }
+}
   // ============================================================
   // INIT
   // ============================================================
@@ -1581,22 +1621,17 @@ Future<void> load() async {
     }
 
     // =====================================================
-    // 1️⃣ HENT GAMMEL SJÅFØR (ÉN RAD)
+    // 1️⃣ GAMMEL SJÅFØR — fra allerede lastede rader
     // =====================================================
 
-    final prev = await supabase
-        .from('samletdata')
-        .select('sjafor')
-        .eq('draft_id', draftId)
-        .limit(1)
-        .maybeSingle();
-
-    final oldSjafor = (prev?['sjafor'] as String?)?.trim();
+    final oldSjafor = (rows.first['sjafor'] as String?)?.trim();
     final newSjafor = sjaforCtrl.text.trim();
 
     // =====================================================
-    // 2️⃣ OPPDATER FELLES FELT (ÉN GANG PER JOBB)
+    // 2️⃣ OPPDATER FELLES FELT — kun denne hendelsen
     // =====================================================
+
+    final rowIds = rows.map((r) => r['id'].toString()).toList();
 
     await supabase
         .from('samletdata')
@@ -1604,7 +1639,7 @@ Future<void> load() async {
           'sjafor': newSjafor,
           'status': statusCtrl.text.trim(),
         })
-        .eq('draft_id', draftId);
+        .inFilter('id', rowIds);
 
     // =====================================================
     // 3️⃣ OPPDATER PER-DAG FELTER (UENDRET LOGIKK)
@@ -1627,21 +1662,21 @@ Future<void> load() async {
     }
 
     // =====================================================
-    // 4️⃣ SEND PUSH – KUN FØRSTE GANG SJÅFØR SETTES
+    // 4️⃣ SEND PUSH – VED TILDELING OG ENDRING AV SJÅFØR
     // =====================================================
 
-    final shouldSendPush =
-        (oldSjafor == null || oldSjafor.isEmpty) &&
-        newSjafor.isNotEmpty;
+    final driverChanged =
+        newSjafor.isNotEmpty && newSjafor != (oldSjafor ?? '');
 
-    if (shouldSendPush) {
-      await supabase.functions.invoke(
-        'send-push',
-        body: {
-          'driver_name': newSjafor,
-          'production': widget.production,
-          'draft_id': draftId,
-        },
+    if (driverChanged) {
+      final isFirstAssignment = oldSjafor == null || oldSjafor.isEmpty;
+      await NotificationService.sendToDriver(
+        driverName: newSjafor,
+        title: 'Booking: ${widget.production}',
+        body: isFirstAssignment
+            ? 'You have been assigned as driver for this tour.'
+            : 'Your driver assignment has been updated.',
+        draftId: draftId,
       );
     }
 
@@ -1804,26 +1839,59 @@ Future<void> load() async {
 
       actions: [
 
-        TextButton(
-          onPressed: saving
-              ? null
-              : () => Navigator.pop(context),
-          child: const Text("Cancel"),
+  OutlinedButton.icon(
+    icon: const Icon(Icons.copy),
+    label: const Text("Copy to"),
+    onPressed: () async {
+
+      final buses = [
+        "CSS_1034",
+        "CSS_1023",
+        "CSS_1008",
+        "YCR 682",
+        "ESW 337",
+        "WYN 802",
+        "RLC 29G",
+        "Rental 1 (Hasse)",
+        "Rental 2 (Rickard)",
+      ];
+
+      final target = await showDialog<String>(
+        context: context,
+        builder: (_) => SimpleDialog(
+          title: const Text("Copy to bus"),
+          children: buses
+              .where((b) => b != widget.bus) // ikke samme buss
+              .map((b) => SimpleDialogOption(
+                    onPressed: () => Navigator.pop(context, b),
+                    child: Text(b),
+                  ))
+              .toList(),
         ),
+      );
 
+      if (target == null) return;
 
-        FilledButton(
-          onPressed: saving ? null : save,
+      await copyToBus(target);
+    },
+  ),
 
-          child: saving
-              ? const SizedBox(
-                  width: 20,
-                  height: 20,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                )
-              : const Text("Save"),
-        ),
-      ],
+  TextButton(
+    onPressed: saving ? null : () => Navigator.pop(context),
+    child: const Text("Cancel"),
+  ),
+
+  FilledButton(
+    onPressed: saving ? null : save,
+    child: saving
+        ? const SizedBox(
+            width: 20,
+            height: 20,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          )
+        : const Text("Save"),
+  ),
+]
     );
   }
 
@@ -1947,27 +2015,29 @@ class _RoundBlock {
   DateTime from;
   DateTime to;
   final List<String> ids;
+  final Set<int> roundIndices;
 
   _RoundBlock({
     required this.bus,
     required this.from,
     required this.to,
     required this.ids,
-  });
+    Set<int>? roundIndices,
+  }) : roundIndices = roundIndices ?? {};
 }
   class StatusDatePickerDialog extends StatefulWidget {
 
   final String draftId;
   final String newStatus;
-
-  // 👇 NY: hvilken buss vi droppet på
   final String targetBus;
+  final String fromBus;
 
   const StatusDatePickerDialog({
     super.key,
     required this.draftId,
     required this.newStatus,
     required this.targetBus,
+    this.fromBus = '',
   });
 
   @override
@@ -1998,7 +2068,7 @@ class _StatusDatePickerDialogState
   Future<void> _load() async {
     final res = await sb
         .from('samletdata')
-        .select('id, dato, status, kilde')
+        .select('id, dato, status, kilde, round_index')
         .eq('draft_id', widget.draftId)
         .order('dato');
 
@@ -2022,6 +2092,7 @@ class _StatusDatePickerDialogState
       final date = parseUtcDay(r['dato']);
       final bus = r['kilde'].toString();
       final id = r['id'].toString();
+      final roundIndex = (r['round_index'] as int?) ?? 0;
 
       if (current == null) {
         current = _RoundBlock(
@@ -2029,28 +2100,27 @@ class _StatusDatePickerDialogState
           from: date,
           to: date,
           ids: [id],
+          roundIndices: {roundIndex},
         );
         continue;
       }
-print(
-  "CHECK ${fmt(current.to)} -> ${fmt(date)} = "
-  "${date.difference(current.to).inHours}h"
-);
+
       final isSameBus = bus == current.bus;
       final next = DateTime.utc(
-  current.to.year,
-  current.to.month,
-  current.to.day + 1,
-);
+        current.to.year,
+        current.to.month,
+        current.to.day + 1,
+      );
 
-final isNextDay =
-    date.year == next.year &&
-    date.month == next.month &&
-    date.day == next.day;
+      final isNextDay =
+          date.year == next.year &&
+          date.month == next.month &&
+          date.day == next.day;
 
       if (isSameBus && isNextDay) {
         current.to = date;
         current.ids.add(id);
+        current.roundIndices.add(roundIndex);
       } else {
         blocks.add(current);
 
@@ -2059,6 +2129,7 @@ final isNextDay =
           from: date,
           to: date,
           ids: [id],
+          roundIndices: {roundIndex},
         );
       }
     }
@@ -2082,29 +2153,58 @@ final isNextDay =
   // ============================================================
 
   Future<void> _apply() async {
+    // 1. Update samletdata rows
+    for (final b in blocks) {
+      final key = b.hashCode.toString();
+      if (selected[key] != true) continue;
 
-  for (final b in blocks) {
+      final ids = b.ids.join(',');
+      await sb
+          .from('samletdata')
+          .update({
+            if (widget.newStatus.isNotEmpty) 'status': widget.newStatus,
+            'kilde': widget.targetBus,
+          })
+          .filter('id', 'in', '($ids)');
+    }
 
-    final key = b.hashCode.toString();
+    // 2. Also update the offer draft so the bus change persists
+    if (widget.fromBus.isNotEmpty) {
+      final Set<int> affectedRounds = {};
+      for (final b in blocks) {
+        if (selected[b.hashCode.toString()] == true) {
+          affectedRounds.addAll(b.roundIndices);
+        }
+      }
 
-    if (selected[key] != true) continue;
+      if (affectedRounds.isNotEmpty) {
+        try {
+          final draft = await OfferStorageService.loadDraft(widget.draftId);
+          for (final roundIndex in affectedRounds) {
+            if (roundIndex >= draft.rounds.length) continue;
+            final round = draft.rounds[roundIndex];
+            for (int i = 0; i < round.busSlots.length; i++) {
+              if (round.busSlots[i] == widget.fromBus) {
+                round.busSlots[i] = widget.targetBus;
+              }
+            }
+            if (round.bus == widget.fromBus) {
+              round.bus = widget.targetBus;
+            }
+          }
+          await OfferStorageService.saveDraft(
+            id: widget.draftId,
+            offer: draft,
+          );
+        } catch (e) {
+          debugPrint('Failed to update draft bus assignment: $e');
+        }
+      }
+    }
 
-    final ids = b.ids.join(',');
-
-    await sb
-        .from('samletdata')
-        .update({
-  if (widget.newStatus.isNotEmpty)
-    'status': widget.newStatus,
-  'kilde': widget.targetBus,
-})
-        .filter('id', 'in', '($ids)');
+    if (!mounted) return;
+    Navigator.pop(context, true);
   }
-
-  if (!mounted) return;
-
-  Navigator.pop(context, true);
-}
 
   // ============================================================
   // UI

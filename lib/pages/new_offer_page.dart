@@ -22,6 +22,8 @@ import '../services/pdf_tour_parser.dart';
 import '../widgets/route_popup_dialog.dart';
 import 'package:flutter/foundation.dart';
 import '../services/bus_availability_service.dart';
+import '../services/invoice_service.dart';
+import '../services/invoice_pdf_service.dart';
 
 // ✅ NY: bruker routes db for autocomplete + route lookup
 import '../services/routes_service.dart';
@@ -1734,6 +1736,8 @@ Future<void> _recalcKm() async {
       _kmError = null;
     });
 
+    // Fyll cache med tomme resultater slik at build() alltid har data
+    await _recalcAllRounds();
     return;
   }
 
@@ -2472,6 +2476,207 @@ Future<String> _savePdfToFile(Uint8List bytes) async {
 
   String _nok(double v) => "${v.toStringAsFixed(0)},-";
 
+// ------------------------------------------------------------
+// ✅ Open Create Invoice Dialog
+// ------------------------------------------------------------
+Future<void> _openCreateInvoiceDialog() async {
+  // 1. Generate auto invoice number
+  String invoiceNumber;
+  try {
+    invoiceNumber = await InvoiceService.generateInvoiceNumber();
+  } catch (e) {
+    invoiceNumber = "${DateTime.now().year}-001";
+  }
+
+  // 2. Defaults
+  final now = DateTime.now();
+  DateTime invoiceDate = now;
+  DateTime dueDate = now.add(const Duration(days: 14));
+
+  final invoiceNumberCtrl =
+      TextEditingController(text: invoiceNumber);
+  final bankAccountCtrl = TextEditingController(
+      text: SettingsStore.current.bankAccount);
+  final paymentRefCtrl = TextEditingController(
+      text: invoiceNumber.replaceAll('-', ''));
+
+  if (!mounted) return;
+
+  final confirmed = await showDialog<bool>(
+    context: context,
+    builder: (ctx) {
+      return StatefulBuilder(
+        builder: (ctx, setLocal) {
+          return AlertDialog(
+            title: const Text("Create invoice"),
+            content: SizedBox(
+              width: 440,
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Invoice number
+                    TextField(
+                      controller: invoiceNumberCtrl,
+                      decoration: const InputDecoration(
+                        labelText: "Invoice number",
+                        hintText: "2025-001",
+                      ),
+                    ),
+
+                    const SizedBox(height: 12),
+
+                    // Invoice date
+                    ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: const Text("Invoice date"),
+                      subtitle: Text(
+                        DateFormat("dd.MM.yyyy").format(invoiceDate),
+                      ),
+                      trailing: const Icon(Icons.calendar_today),
+                      onTap: () async {
+                        final picked = await showDatePicker(
+                          context: ctx,
+                          initialDate: invoiceDate,
+                          firstDate: DateTime(2020),
+                          lastDate: DateTime(2099),
+                        );
+                        if (picked != null) {
+                          setLocal(() => invoiceDate = picked);
+                        }
+                      },
+                    ),
+
+                    // Due date
+                    ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: const Text("Due date"),
+                      subtitle: Text(
+                        DateFormat("dd.MM.yyyy").format(dueDate),
+                      ),
+                      trailing: const Icon(Icons.calendar_today),
+                      onTap: () async {
+                        final picked = await showDatePicker(
+                          context: ctx,
+                          initialDate: dueDate,
+                          firstDate: DateTime(2020),
+                          lastDate: DateTime(2099),
+                        );
+                        if (picked != null) {
+                          setLocal(() => dueDate = picked);
+                        }
+                      },
+                    ),
+
+                    const SizedBox(height: 12),
+
+                    // Bank account
+                    TextField(
+                      controller: bankAccountCtrl,
+                      decoration: const InputDecoration(
+                        labelText: "Bank account",
+                        hintText: "9710.05.12345",
+                      ),
+                    ),
+
+                    const SizedBox(height: 12),
+
+                    // Payment reference
+                    TextField(
+                      controller: paymentRefCtrl,
+                      decoration: const InputDecoration(
+                        labelText: "Reference",
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text("Cancel"),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(ctx, true),
+                child: const Text("Create"),
+              ),
+            ],
+          );
+        },
+      );
+    },
+  );
+
+  if (confirmed != true) return;
+
+  // 3. Calculate totals
+  // Ensure all rounds are calculated
+  for (int i = 0; i < offer.rounds.length; i++) {
+    if (!_roundCalcCache.containsKey(i)) {
+      _roundCalcCache[i] = await _calcRound(i);
+    }
+  }
+
+  double grandTotal = 0;
+  for (final res in _roundCalcCache.values) {
+    grandTotal += res.totalCost;
+  }
+
+  final countryKm = _collectAllCountryKm();
+  final vatBreakdown = _calculateForeignVat(
+    basePrice: grandTotal,
+    countryKm: countryKm,
+  );
+  final totalInclVat =
+      grandTotal + vatBreakdown.values.fold(0.0, (a, b) => a + b);
+
+  try {
+    // 4. Save to Supabase
+    final invoice = await InvoiceService.createFromOffer(
+      offer: offer,
+      roundCalc: _roundCalcCache,
+      invoiceNumber: invoiceNumberCtrl.text.trim(),
+      invoiceDate: invoiceDate,
+      dueDate: dueDate,
+      bankAccount: bankAccountCtrl.text.trim(),
+      paymentRef: paymentRefCtrl.text.trim(),
+      totalExclVat: grandTotal,
+      vatBreakdown: vatBreakdown,
+      totalInclVat: totalInclVat,
+      countryKm: countryKm,
+      offerId: _draftId,
+    );
+
+    // 5. Generate and download PDF
+    final bytes = await InvoicePdfService.generatePdf(invoice);
+    final safe = _safeFolderName(
+      offer.production.trim().isEmpty ? "invoice" : offer.production.trim(),
+    );
+    await savePdf(bytes, "Faktura ${invoice.invoiceNumber} $safe.pdf");
+
+    if (!mounted) return;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          "Faktura ${invoice.invoiceNumber} opprettet og lagret",
+        ),
+      ),
+    );
+  } catch (e, st) {
+    debugPrint("INVOICE CREATE ERROR: $e\n$st");
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text("Feil ved opprettelse av faktura: $e"),
+        backgroundColor: Colors.red,
+      ),
+    );
+  }
+}
+
     // ------------------------------------------------------------
   // UI
   // ------------------------------------------------------------
@@ -2529,7 +2734,7 @@ final fallbackFerryPerLeg = List<String?>.generate(
 final calc = _roundCalcCache[roundIndex];
 
 if (calc == null) {
-  return const SizedBox(); // eller loading placeholder
+  return const Center(child: CircularProgressIndicator());
 }
 // =====================================================
 // ALL ROUNDS TOTAL (RIGHT CARD / VAT / TOTAL)
@@ -2586,6 +2791,7 @@ return Padding(
           onExport: _exportPdf,
           onSave: _saveDraft,
           onScanPdf: _scanPdf,
+          onCreateInvoice: _openCreateInvoiceDialog,
           draftId: _draftId,
         ),
       ),
@@ -3166,6 +3372,7 @@ class _LeftOfferCard extends StatefulWidget {
   final Future<void> Function() onExport;
   final Future<void> Function() onSave;
   final Future<void> Function() onScanPdf;
+  final Future<void> Function() onCreateInvoice;
   final String? draftId;
 
   const _LeftOfferCard({
@@ -3173,7 +3380,8 @@ class _LeftOfferCard extends StatefulWidget {
   required this.offer,
   required this.onExport,
   required this.onSave,
-  required this.onScanPdf, // ✅ NY
+  required this.onScanPdf,
+  required this.onCreateInvoice,
   required this.draftId,
 });
 
@@ -3970,6 +4178,18 @@ SizedBox(
         onPressed: widget.onExport,
         icon: const Icon(Icons.download),
         label: const Text("Export PDF"),
+      ),
+    ),
+
+    const SizedBox(height: 8),
+
+    // -------- OPPRETT FAKTURA --------
+    SizedBox(
+      width: double.infinity,
+      child: OutlinedButton.icon(
+        onPressed: widget.onCreateInvoice,
+        icon: const Icon(Icons.receipt_long),
+        label: const Text("Create invoice"),
       ),
     ),
   ],

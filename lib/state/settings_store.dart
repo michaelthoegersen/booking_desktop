@@ -20,6 +20,7 @@ class SettingsStore {
     flightTicketPrice: 2500,
     dDriveKmThreshold: 600,
     dropboxRootPath: '',
+    bankAccount: '',
     ferries: [],
   );
 
@@ -36,6 +37,7 @@ class SettingsStore {
   static const _kFlightTicketPrice = "flightTicketPrice";
   static const _kDDriveKmThreshold = "dDriveKmThreshold";
   static const _kDropboxRootPath = "dropboxRootPath";
+  static const _kBankAccount = "bankAccount";
 
   // ===================================================
   // LOAD FROM SHARED PREFS
@@ -61,6 +63,8 @@ class SettingsStore {
           prefs.getDouble(_kDDriveKmThreshold) ?? current.dDriveKmThreshold,
       dropboxRootPath:
           prefs.getString(_kDropboxRootPath) ?? current.dropboxRootPath,
+      bankAccount:
+          prefs.getString(_kBankAccount) ?? current.bankAccount,
       ferries: current.ferries,
     );
   }
@@ -81,6 +85,7 @@ class SettingsStore {
     await prefs.setDouble(_kFlightTicketPrice, current.flightTicketPrice);
     await prefs.setDouble(_kDDriveKmThreshold, current.dDriveKmThreshold);
     await prefs.setString(_kDropboxRootPath, current.dropboxRootPath);
+    await prefs.setString(_kBankAccount, current.bankAccount);
   }
 
   // ===================================================
