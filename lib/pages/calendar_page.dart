@@ -1858,6 +1858,26 @@ Future<void> load() async {
                                 ),
                               ),
 
+                              // ── City / venue for this day ──
+                              Builder(builder: (context) {
+                                final id = rows[activeIndex]['id'].toString();
+                                final venue =
+                                    venueCtrls[id]?.text.trim() ?? '';
+                                if (venue.isEmpty) return const SizedBox.shrink();
+                                return Padding(
+                                  padding: const EdgeInsets.only(top: 2),
+                                  child: Text(
+                                    venue,
+                                    style: TextStyle(
+                                      fontSize: 13,
+                                      color: Colors.grey.shade600,
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                    textAlign: TextAlign.center,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                );
+                              }),
 
                               Text(
                                 "Day ${activeIndex + 1} of ${rows.length}",
