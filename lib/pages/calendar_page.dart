@@ -137,6 +137,9 @@ class CalendarPage extends StatefulWidget {
 class _CalendarPageState extends State<CalendarPage> {
 
   final ScrollController _hScrollCtrl = ScrollController();
+  final ScrollController _leftVScrollCtrl = ScrollController();
+  final ScrollController _rightVScrollCtrl = ScrollController();
+  bool _vScrollSyncing = false;
 
   final supabase = Supabase.instance.client;
 
@@ -182,6 +185,10 @@ class _CalendarPageState extends State<CalendarPage> {
     isMonthView = true;
     loadMonth();
 
+    // ✅ Synk vertikal scroll mellom buss-kolonne og kalender-kolonne
+    _leftVScrollCtrl.addListener(_syncLeftToRight);
+    _rightVScrollCtrl.addListener(_syncRightToLeft);
+
     // ✅ Lytt på auth-endringer
     _authSub = supabase.auth.onAuthStateChange.listen((data) {
 
@@ -195,10 +202,32 @@ class _CalendarPageState extends State<CalendarPage> {
     });
   }
 
+  void _syncLeftToRight() {
+    if (_vScrollSyncing) return;
+    _vScrollSyncing = true;
+    if (_rightVScrollCtrl.hasClients) {
+      _rightVScrollCtrl.jumpTo(_leftVScrollCtrl.offset);
+    }
+    _vScrollSyncing = false;
+  }
+
+  void _syncRightToLeft() {
+    if (_vScrollSyncing) return;
+    _vScrollSyncing = true;
+    if (_leftVScrollCtrl.hasClients) {
+      _leftVScrollCtrl.jumpTo(_rightVScrollCtrl.offset);
+    }
+    _vScrollSyncing = false;
+  }
+
   @override
   void dispose() {
     _authSub.cancel();
     _hScrollCtrl.dispose();
+    _leftVScrollCtrl.removeListener(_syncLeftToRight);
+    _rightVScrollCtrl.removeListener(_syncRightToLeft);
+    _leftVScrollCtrl.dispose();
+    _rightVScrollCtrl.dispose();
     super.dispose();
   }
 
@@ -566,6 +595,7 @@ Widget buildGrid(List<DateTime> days) {
             // Bus list
             Expanded(
               child: ListView.builder(
+                controller: _leftVScrollCtrl,
                 itemCount: buses.length,
                 itemBuilder: (_, i) {
                   return _buildBusOnlyRow(buses[i]);
@@ -612,6 +642,7 @@ Widget buildGrid(List<DateTime> days) {
                 child: SizedBox(
                   width: scrollWidth,
                   child: CustomScrollView(
+                    controller: _rightVScrollCtrl,
                     slivers: [
 
                       // ===================================
@@ -659,16 +690,16 @@ Widget buildGrid(List<DateTime> days) {
 
 Widget _buildBusOnlyRow(String bus) {
 
-  return Container(
+  return SizedBox(
     height: 72,
 
-    alignment: Alignment.centerLeft,
+    child: Align(
+      alignment: Alignment.centerLeft,
 
-    margin: const EdgeInsets.symmetric(vertical: 2),
-
-    child: BusCell(
-      bus,
-      busTypes: busTypes,
+      child: BusCell(
+        bus,
+        busTypes: busTypes,
+      ),
     ),
   );
 }
@@ -1453,10 +1484,13 @@ class _EditCalendarDialogState extends State<EditCalendarDialog> {
   final sjaforCtrl = TextEditingController();
   final statusCtrl = TextEditingController();
 
+  final contactNameCtrl = TextEditingController();
+  final contactEmailCtrl = TextEditingController();
+  final contactPhoneCtrl = TextEditingController();
+
 
   final Map<String, TextEditingController> dDriveCtrls = {};
   final Map<String, TextEditingController> itinCtrls = {};
-  final Map<String, TextEditingController> timeCtrls = {};
   final Map<String, TextEditingController> venueCtrls = {};
   final Map<String, TextEditingController> addrCtrls = {};
   final Map<String, TextEditingController> commentCtrls = {};
@@ -1500,10 +1534,12 @@ Future<void> copyToBus(String targetBus) async {
         .update({
           'd_drive': dDriveCtrls[sourceId]?.text.trim() ?? '',
           'getin': itinCtrls[sourceId]?.text.trim() ?? '',
-          'tid': timeCtrls[sourceId]?.text.trim() ?? '',
           'venue': venueCtrls[sourceId]?.text.trim() ?? '',
           'adresse': addrCtrls[sourceId]?.text.trim() ?? '',
           'kommentarer': commentCtrls[sourceId]?.text.trim() ?? '',
+          'contact_name': contactNameCtrl.text.trim(),
+          'contact_email': contactEmailCtrl.text.trim(),
+          'contact_phone': contactPhoneCtrl.text.trim(),
         })
         .eq('id', targetId);
   }
@@ -1557,6 +1593,9 @@ Future<void> load() async {
 
   sjaforCtrl.text = list.first['sjafor'] ?? '';
   statusCtrl.text = list.first['status'] ?? '';
+  contactNameCtrl.text = list.first['contact_name'] ?? '';
+  contactEmailCtrl.text = list.first['contact_email'] ?? '';
+  contactPhoneCtrl.text = list.first['contact_phone'] ?? '';
 
 
   rows.clear(); // 👈 sikkerhet
@@ -1573,9 +1612,6 @@ Future<void> load() async {
 
     itinCtrls[id] =
         TextEditingController(text: r['getin'] ?? '');
-
-    timeCtrls[id] =
-        TextEditingController(text: r['tid'] ?? '');
 
     venueCtrls[id] =
         TextEditingController(text: r['venue'] ?? '');
@@ -1638,6 +1674,9 @@ Future<void> load() async {
         .update({
           'sjafor': newSjafor,
           'status': statusCtrl.text.trim(),
+          'contact_name': contactNameCtrl.text.trim(),
+          'contact_email': contactEmailCtrl.text.trim(),
+          'contact_phone': contactPhoneCtrl.text.trim(),
         })
         .inFilter('id', rowIds);
 
@@ -1653,7 +1692,6 @@ Future<void> load() async {
           .update({
             'd_drive': dDriveCtrls[id]?.text.trim() ?? '',
             'getin': itinCtrls[id]?.text.trim() ?? '',
-            'tid': timeCtrls[id]?.text.trim() ?? '',
             'venue': venueCtrls[id]?.text.trim() ?? '',
             'adresse': addrCtrls[id]?.text.trim() ?? '',
             'kommentarer': commentCtrls[id]?.text.trim() ?? '',
@@ -1709,13 +1747,15 @@ Future<void> load() async {
 
     sjaforCtrl.dispose();
     statusCtrl.dispose();
+    contactNameCtrl.dispose();
+    contactEmailCtrl.dispose();
+    contactPhoneCtrl.dispose();
 
 
     for (final m in [
 
       dDriveCtrls,
       itinCtrls,
-      timeCtrls,
       venueCtrls,
       addrCtrls,
       commentCtrls,
@@ -1759,10 +1799,31 @@ Future<void> load() async {
 
                   children: [
 
-                    _field("Sjåfør", sjaforCtrl),
+                    _field("Driver", sjaforCtrl),
                     _field("Status", statusCtrl),
 
                     const SizedBox(height: 16),
+                    const Divider(),
+                    const SizedBox(height: 8),
+
+                    // ── Contact person ──────────────────────
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        "Contact person",
+                        style: TextStyle(
+                          fontWeight: FontWeight.w600,
+                          fontSize: 13,
+                          color: Colors.grey.shade600,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    _field("Name", contactNameCtrl),
+                    _field("Email", contactEmailCtrl),
+                    _field("Phone", contactPhoneCtrl),
+
+                    const SizedBox(height: 8),
                     const Divider(),
 
 
@@ -1827,10 +1888,9 @@ Future<void> load() async {
 
                     _dayField("D.Drive", dDriveCtrls),
                     _multiDayField("Itinerary", itinCtrls),
-                    _dayField("Tid", timeCtrls),
                     _dayField("Venue", venueCtrls),
-                    _dayField("Adresse", addrCtrls),
-                    _multiDayField("Kommentar", commentCtrls),
+                    _dayField("Address", addrCtrls),
+                    _multiDayField("Comment", commentCtrls),
                   ],
                 ),
               ),
