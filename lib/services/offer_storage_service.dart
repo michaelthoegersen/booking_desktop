@@ -17,6 +17,7 @@ class OfferStorageService {
   static Future<String> saveDraft({
     String? id,
     required OfferDraft offer,
+    double? totalExclVat,
   }) async {
     final payload = _offerToDbPayload(offer);
 
@@ -35,6 +36,7 @@ class OfferStorageService {
     if (id != null && id.isNotEmpty) {
       await sb.from('offers').update({
         ...payload,
+        if (totalExclVat != null) 'total_excl_vat': totalExclVat,
         'updated_at': DateTime.now().toIso8601String(),
         'updated_by': userId,
       }).eq('id', id);
@@ -48,6 +50,7 @@ class OfferStorageService {
     // -----------------------------
     final res = await sb.from('offers').insert({
       ...payload,
+      if (totalExclVat != null) 'total_excl_vat': totalExclVat,
 
       // Audit
       'created_by': userId,
@@ -220,6 +223,8 @@ class OfferStorageService {
     // ⭐⭐⭐ LEGG TIL DENNE LINJA
     'pricingOverride': offer.pricingOverride?.toJson(),
 
+    'totalOverride': offer.totalOverride,
+
     'rounds': offer.rounds.map((r) {
       return {
         'startLocation': r.startLocation,
@@ -331,6 +336,8 @@ if (r['trailerSlots'] != null) {
   if (draft.bus == null && data['bus'] != null) {
     draft.bus = data['bus'] as String?;
   }
+
+  draft.totalOverride = (data['totalOverride'] as num?)?.toDouble();
 
   return draft;
 }

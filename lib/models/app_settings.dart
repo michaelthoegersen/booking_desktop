@@ -22,6 +22,12 @@ class AppSettings {
   /// Bank account number for invoices (e.g. "9710.05.12345")
   final String bankAccount;
 
+  /// Microsoft Graph API credentials for sending invoice emails
+  final String graphTenantId;
+  final String graphClientId;
+  final String graphClientSecret;
+  final String graphSenderEmail;
+
   const AppSettings({
     required this.dayPrice,
     required this.extraKmPrice,
@@ -34,6 +40,10 @@ class AppSettings {
     this.dDriveKmThreshold = 600,
     this.dropboxRootPath = '',
     this.bankAccount = '',
+    this.graphTenantId = '',
+    this.graphClientId = '',
+    this.graphClientSecret = '',
+    this.graphSenderEmail = '',
 
     /// ✅ NEW
     this.ferries = const [],
@@ -50,6 +60,10 @@ class AppSettings {
     double? dDriveKmThreshold,
     String? dropboxRootPath,
     String? bankAccount,
+    String? graphTenantId,
+    String? graphClientId,
+    String? graphClientSecret,
+    String? graphSenderEmail,
 
     /// ✅ NEW
     List<FerryDefinition>? ferries,
@@ -65,6 +79,10 @@ class AppSettings {
       dDriveKmThreshold: dDriveKmThreshold ?? this.dDriveKmThreshold,
       dropboxRootPath: dropboxRootPath ?? this.dropboxRootPath,
       bankAccount: bankAccount ?? this.bankAccount,
+      graphTenantId: graphTenantId ?? this.graphTenantId,
+      graphClientId: graphClientId ?? this.graphClientId,
+      graphClientSecret: graphClientSecret ?? this.graphClientSecret,
+      graphSenderEmail: graphSenderEmail ?? this.graphSenderEmail,
 
       /// ✅ NEW
       ferries: ferries ?? this.ferries,

@@ -101,6 +101,11 @@ class _NewOfferPageState extends State<NewOfferPage> {
 
   final Map<int, RoundCalcResult> _roundCalcCache = {};
 
+  // Total price override (double-tap to edit)
+  double? _totalOverride;
+  bool _editingTotal = false;
+  final TextEditingController _overrideCtrl = TextEditingController();
+
   List<bool> _travelBefore = [];
 // ✅ MANGLER DISSE
   List<String> _locationSuggestions = [];
@@ -434,6 +439,12 @@ const allBuses = [
   }
   
 
+  @override
+  void dispose() {
+    _overrideCtrl.dispose();
+    super.dispose();
+  }
+
   // ===================================================
   // HELPERS
   // ===================================================
@@ -557,6 +568,7 @@ dst.entries
 
       _draftId = id;
       roundIndex = 0;
+      _totalOverride = fresh.totalOverride;
 
       _syncRoundControllers();
     });
@@ -992,20 +1004,30 @@ Map<String, double> _calculateForeignVat({
 // --------------------------------------------
 Widget _buildVatBox(
   Map<String, double> vatMap,
-  double excl,
+  double excl,  // always the calculated value
   double incl,
 ) {
+  final vatTotal = vatMap.values.fold(0.0, (a, b) => a + b);
+  final displayedExcl = _totalOverride ?? excl;
+  final displayedIncl = displayedExcl + vatTotal;
+  final hasOverride = _totalOverride != null;
+
+  Widget totalExclWidget = _buildEditableTotal(
+    label: "Total excl VAT",
+    calculatedValue: excl,
+    displayedValue: displayedExcl,
+    hasOverride: hasOverride,
+    vatTotal: vatTotal,
+  );
+
   if (vatMap.isEmpty) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.end,
       children: [
-        Text(
-          "Total excl VAT: ${_nok(excl)}",
-          style: const TextStyle(fontWeight: FontWeight.w900),
-        ),
+        totalExclWidget,
         const SizedBox(height: 4),
         Text(
-          "Total incl VAT: ${_nok(incl)}",
+          "Total incl VAT: ${_nok(displayedIncl)}",
           style: const TextStyle(fontWeight: FontWeight.w900),
         ),
       ],
@@ -1024,7 +1046,6 @@ Widget _buildVatBox(
 
       ...vatMap.entries.map((e) {
         final rate = (_vatRates[e.key] ?? 0) * 100;
-
         return Text(
           "${e.key} (${rate.toStringAsFixed(1)}%): ${_nok(e.value)}",
           style: const TextStyle(fontWeight: FontWeight.w700),
@@ -1034,24 +1055,106 @@ Widget _buildVatBox(
       const SizedBox(height: 6),
 
       Text(
-        "Total VAT: ${_nok(vatMap.values.fold(0, (a, b) => a + b))}",
+        "Total VAT: ${_nok(vatTotal)}",
         style: const TextStyle(fontWeight: FontWeight.w900),
       ),
 
       const Divider(),
 
-      Text(
-        "Total excl VAT: ${_nok(excl)}",
-        style: const TextStyle(fontWeight: FontWeight.w900),
-      ),
+      totalExclWidget,
 
       const SizedBox(height: 4),
 
       Text(
-        "Total incl VAT: ${_nok(incl)}",
+        "Total incl VAT: ${_nok(displayedIncl)}",
         style: const TextStyle(fontWeight: FontWeight.w900),
       ),
     ],
+  );
+}
+
+Widget _buildEditableTotal({
+  required String label,
+  required double calculatedValue,
+  required double displayedValue,
+  required bool hasOverride,
+  required double vatTotal,
+}) {
+  if (_editingTotal) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text("$label: ", style: const TextStyle(fontWeight: FontWeight.w900)),
+        SizedBox(
+          width: 120,
+          height: 32,
+          child: TextField(
+            controller: _overrideCtrl,
+            autofocus: true,
+            textAlign: TextAlign.right,
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 14),
+            decoration: const InputDecoration(
+              contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              isDense: true,
+            ),
+            onSubmitted: (val) {
+              final trimmed = val.trim().replaceAll(',', '.');
+              final parsed = double.tryParse(trimmed);
+              setState(() {
+                _totalOverride = parsed; // null if empty → reverts
+                _editingTotal = false;
+              });
+            },
+            onTapOutside: (_) {
+              final trimmed = _overrideCtrl.text.trim().replaceAll(',', '.');
+              final parsed = double.tryParse(trimmed);
+              setState(() {
+                _totalOverride = parsed;
+                _editingTotal = false;
+              });
+            },
+          ),
+        ),
+      ],
+    );
+  }
+
+  return GestureDetector(
+    onDoubleTap: () {
+      _overrideCtrl.text = hasOverride
+          ? displayedValue.toStringAsFixed(0)
+          : calculatedValue.toStringAsFixed(0);
+      setState(() => _editingTotal = true);
+    },
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.end,
+      children: [
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              "$label: ${_nok(displayedValue)}",
+              style: const TextStyle(fontWeight: FontWeight.w900),
+            ),
+            const SizedBox(width: 4),
+            const Tooltip(
+              message: "Double-click to override",
+              child: Icon(Icons.edit, size: 13, color: Colors.grey),
+            ),
+          ],
+        ),
+        if (hasOverride)
+          Text(
+            "Calculated: ${_nok(calculatedValue)}",
+            style: const TextStyle(
+              fontSize: 11,
+              color: Colors.grey,
+              fontStyle: FontStyle.italic,
+            ),
+          ),
+      ],
+    ),
   );
 }
 
@@ -1275,9 +1378,20 @@ offer.rounds[i].bus =
     // ----------------------------------------
     // Save to DB
     // ----------------------------------------
+    offer.totalOverride = _totalOverride;
+
+    // Compute total excl. VAT to persist (override takes priority)
+    double calcTotal = 0;
+    for (int i = 0; i < offer.rounds.length; i++) {
+      final r = _roundCalcCache[i];
+      if (r != null) calcTotal += r.totalCost;
+    }
+    final totalExclVat = _totalOverride ?? (calcTotal > 0 ? calcTotal : null);
+
     final id = await OfferStorageService.saveDraft(
       id: _draftId,
       offer: offer,
+      totalExclVat: totalExclVat,
     );
 
     if (id == null || id.isEmpty) {

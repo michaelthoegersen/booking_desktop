@@ -38,6 +38,10 @@ class SettingsStore {
   static const _kDDriveKmThreshold = "dDriveKmThreshold";
   static const _kDropboxRootPath = "dropboxRootPath";
   static const _kBankAccount = "bankAccount";
+  static const _kGraphTenantId = "graphTenantId";
+  static const _kGraphClientId = "graphClientId";
+  static const _kGraphClientSecret = "graphClientSecret";
+  static const _kGraphSenderEmail = "graphSenderEmail";
 
   // ===================================================
   // LOAD FROM SHARED PREFS
@@ -65,6 +69,14 @@ class SettingsStore {
           prefs.getString(_kDropboxRootPath) ?? current.dropboxRootPath,
       bankAccount:
           prefs.getString(_kBankAccount) ?? current.bankAccount,
+      graphTenantId:
+          prefs.getString(_kGraphTenantId) ?? current.graphTenantId,
+      graphClientId:
+          prefs.getString(_kGraphClientId) ?? current.graphClientId,
+      graphClientSecret:
+          prefs.getString(_kGraphClientSecret) ?? current.graphClientSecret,
+      graphSenderEmail:
+          prefs.getString(_kGraphSenderEmail) ?? current.graphSenderEmail,
       ferries: current.ferries,
     );
   }
@@ -86,6 +98,10 @@ class SettingsStore {
     await prefs.setDouble(_kDDriveKmThreshold, current.dDriveKmThreshold);
     await prefs.setString(_kDropboxRootPath, current.dropboxRootPath);
     await prefs.setString(_kBankAccount, current.bankAccount);
+    await prefs.setString(_kGraphTenantId, current.graphTenantId);
+    await prefs.setString(_kGraphClientId, current.graphClientId);
+    await prefs.setString(_kGraphClientSecret, current.graphClientSecret);
+    await prefs.setString(_kGraphSenderEmail, current.graphSenderEmail);
   }
 
   // ===================================================

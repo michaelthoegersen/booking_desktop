@@ -22,6 +22,10 @@ class _SettingsPageState extends State<SettingsPage> {
   late TextEditingController flightTicketCtrl;
   late TextEditingController dropboxCtrl;
   late TextEditingController bankAccountCtrl;
+  late TextEditingController graphTenantIdCtrl;
+  late TextEditingController graphClientIdCtrl;
+  late TextEditingController graphClientSecretCtrl;
+  late TextEditingController graphSenderEmailCtrl;
 
   Future<void> _openChangePasswordDialog() async {
 
@@ -161,6 +165,10 @@ class _SettingsPageState extends State<SettingsPage> {
 
     dropboxCtrl = TextEditingController(text: s.dropboxRootPath);
     bankAccountCtrl = TextEditingController(text: s.bankAccount);
+    graphTenantIdCtrl = TextEditingController(text: s.graphTenantId);
+    graphClientIdCtrl = TextEditingController(text: s.graphClientId);
+    graphClientSecretCtrl = TextEditingController(text: s.graphClientSecret);
+    graphSenderEmailCtrl = TextEditingController(text: s.graphSenderEmail);
   }
 
   @override
@@ -173,6 +181,10 @@ class _SettingsPageState extends State<SettingsPage> {
     flightTicketCtrl.dispose();
     dropboxCtrl.dispose();
     bankAccountCtrl.dispose();
+    graphTenantIdCtrl.dispose();
+    graphClientIdCtrl.dispose();
+    graphClientSecretCtrl.dispose();
+    graphSenderEmailCtrl.dispose();
 
     super.dispose();
   }
@@ -356,6 +368,10 @@ debugPrint("SESSION: $session");
           _parseDouble(flightTicketCtrl.text, current.flightTicketPrice),
       dropboxRootPath: dropboxCtrl.text.trim(),
       bankAccount: bankAccountCtrl.text.trim(),
+      graphTenantId: graphTenantIdCtrl.text.trim(),
+      graphClientId: graphClientIdCtrl.text.trim(),
+      graphClientSecret: graphClientSecretCtrl.text.trim(),
+      graphSenderEmail: graphSenderEmailCtrl.text.trim(),
     );
 
     await SettingsStore.save();
@@ -483,6 +499,80 @@ debugPrint("SESSION: $session");
                   prefixIcon: Icon(Icons.account_balance),
                 ),
               ),
+            ),
+
+            const SizedBox(height: 18),
+            Divider(color: cs.outlineVariant),
+            const SizedBox(height: 18),
+
+            // ---------------- GRAPH API ----------------
+
+            Text(
+              "Email (Microsoft Graph API)",
+              style: Theme.of(context)
+                  .textTheme
+                  .titleMedium
+                  ?.copyWith(fontWeight: FontWeight.w900),
+            ),
+
+            const SizedBox(height: 4),
+
+            Text(
+              "Azure AD app registration with Mail.Send application permission. Register at portal.azure.com.",
+              style: Theme.of(context)
+                  .textTheme
+                  .bodySmall
+                  ?.copyWith(color: cs.onSurfaceVariant),
+            ),
+
+            const SizedBox(height: 10),
+
+            Wrap(
+              spacing: 12,
+              runSpacing: 12,
+              children: [
+                SizedBox(
+                  width: 320,
+                  child: TextField(
+                    controller: graphTenantIdCtrl,
+                    decoration: const InputDecoration(
+                      labelText: "Tenant ID",
+                      prefixIcon: Icon(Icons.corporate_fare),
+                    ),
+                  ),
+                ),
+                SizedBox(
+                  width: 320,
+                  child: TextField(
+                    controller: graphClientIdCtrl,
+                    decoration: const InputDecoration(
+                      labelText: "Client ID",
+                      prefixIcon: Icon(Icons.fingerprint),
+                    ),
+                  ),
+                ),
+                SizedBox(
+                  width: 320,
+                  child: TextField(
+                    controller: graphClientSecretCtrl,
+                    obscureText: true,
+                    decoration: const InputDecoration(
+                      labelText: "Client secret",
+                      prefixIcon: Icon(Icons.lock),
+                    ),
+                  ),
+                ),
+                SizedBox(
+                  width: 320,
+                  child: TextField(
+                    controller: graphSenderEmailCtrl,
+                    decoration: const InputDecoration(
+                      labelText: "Sender email address",
+                      prefixIcon: Icon(Icons.email),
+                    ),
+                  ),
+                ),
+              ],
             ),
 
             const SizedBox(height: 18),

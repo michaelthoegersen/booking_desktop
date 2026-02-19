@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../widgets/new_company_dialog.dart';
+import '../widgets/production_dialog.dart';
+import '../widgets/send_invoice_dialog.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 import '../services/pdf_export_service.dart';
@@ -271,22 +273,20 @@ Future<Map<String, dynamic>> _loadAllForPdf() async {
   Future<void> _editCompany() async {
     if (_selectedCompany == null) return;
 
-    final ctrl =
-        TextEditingController(text: _selectedCompany!['name']);
-
-    final name = await _showTextDialog(
-      title: "Edit company",
-      label: "Company name",
-      controller: ctrl,
+    final saved = await showDialog<bool>(
+      context: context,
+      builder: (_) => EditCompanyDialog(company: _selectedCompany!),
     );
 
-    if (name == null || name.isEmpty) return;
+    if (saved != true) return;
 
-    await _client
+    final updated = await _client
         .from('companies')
-        .update({'name': name})
-        .eq('id', _selectedCompany!['id']);
+        .select()
+        .eq('id', _selectedCompany!['id'])
+        .single();
 
+    setState(() => _selectedCompany = updated);
     await _loadCompanies();
   }
 
@@ -384,41 +384,42 @@ Future<Map<String, dynamic>> _loadAllForPdf() async {
   Future<void> _createProduction() async {
     if (_selectedCompany == null) return;
 
-    final ctrl = TextEditingController();
-
-    final name = await _showTextDialog(
-      title: "New production",
-      label: "Production name",
-      controller: ctrl,
+    final saved = await showDialog<bool>(
+      context: context,
+      builder: (_) => ProductionDialog(companyId: _selectedCompany!['id']),
     );
 
-    if (name == null || name.isEmpty) return;
-
-    await _client.from('productions').insert({
-      'company_id': _selectedCompany!['id'],
-      'name': name,
-    });
-
+    if (saved != true) return;
     _loadDetails(_selectedCompany!['id']);
   }
 
   Future<void> _editProduction(Map<String, dynamic> p) async {
-    final ctrl = TextEditingController(text: p['name']);
-
-    final name = await _showTextDialog(
-      title: "Edit production",
-      label: "Production name",
-      controller: ctrl,
+    final saved = await showDialog<bool>(
+      context: context,
+      builder: (_) => ProductionDialog(
+        companyId: _selectedCompany!['id'],
+        existing: p,
+      ),
     );
 
-    if (name == null || name.isEmpty) return;
-
-    await _client
-        .from('productions')
-        .update({'name': name})
-        .eq('id', p['id']);
-
+    if (saved != true) return;
     _loadDetails(_selectedCompany!['id']);
+  }
+
+  // ==================================================
+  // SEND INVOICE DETAILS
+  // ==================================================
+  Future<void> _sendInvoiceDetails({
+    required Map<String, dynamic> company,
+    Map<String, dynamic>? production,
+  }) async {
+    await showDialog<bool>(
+      context: context,
+      builder: (_) => SendInvoiceDialog(
+        company: company,
+        production: production,
+      ),
+    );
   }
 
   // ==================================================
@@ -634,37 +635,131 @@ Future<Map<String, dynamic>> _loadAllForPdf() async {
   }
 
   Widget _buildCompanyInfo() {
+    final c = _selectedCompany!;
+    final cs = Theme.of(context).colorScheme;
+
+    // Build address string
+    String _addressLine() {
+      final parts = <String>[];
+      if ((c['address'] ?? '').isNotEmpty) parts.add(c['address']);
+      final city = [
+        if ((c['postal_code'] ?? '').isNotEmpty) c['postal_code'],
+        if ((c['city'] ?? '').isNotEmpty) c['city'],
+      ].join(' ');
+      if (city.isNotEmpty) parts.add(city);
+      if ((c['country'] ?? '').isNotEmpty) parts.add(c['country']);
+      return parts.join(', ');
+    }
+
+    String _invoiceAddressLine() {
+      final parts = <String>[];
+      if ((c['invoice_address'] ?? '').isNotEmpty) parts.add(c['invoice_address']);
+      final city = [
+        if ((c['invoice_postal_code'] ?? '').isNotEmpty) c['invoice_postal_code'],
+        if ((c['invoice_city'] ?? '').isNotEmpty) c['invoice_city'],
+      ].join(' ');
+      if (city.isNotEmpty) parts.add(city);
+      if ((c['invoice_country'] ?? '').isNotEmpty) parts.add(c['invoice_country']);
+      return parts.join(', ');
+    }
+
+    final hasSeparateInvoice = c['separate_invoice_recipient'] == true;
+
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-  color: Theme.of(context).colorScheme.surface,
-  borderRadius: BorderRadius.circular(12),
-  border: Border.all(
-    color: Theme.of(context).dividerColor,
-  ),
-),
-      child: Row(
+        color: cs.surface,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Theme.of(context).dividerColor),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Expanded(
-            child: Text(
-              _selectedCompany!['name'],
-              style: const TextStyle(
-                fontSize: 26,
-                fontWeight: FontWeight.bold,
+          // Name row + actions
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  c['name'] ?? '',
+                  style: const TextStyle(
+                    fontSize: 26,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+              IconButton(
+                onPressed: () => _sendInvoiceDetails(company: c),
+                icon: const Icon(Icons.send),
+                tooltip: "Send invoice details",
+              ),
+              IconButton(
+                onPressed: _editCompany,
+                icon: const Icon(Icons.edit),
+              ),
+              IconButton(
+                onPressed: _deleteCompany,
+                icon: const Icon(Icons.delete),
+                color: Colors.red,
+              ),
+            ],
+          ),
+
+          // Org nr
+          if ((c['org_nr'] ?? '').isNotEmpty) ...[
+            const SizedBox(height: 4),
+            Text(
+              "Org.nr: ${c['org_nr']}",
+              style: TextStyle(color: cs.onSurfaceVariant),
+            ),
+          ],
+
+          // Address
+          if (_addressLine().isNotEmpty) ...[
+            const SizedBox(height: 2),
+            Text(
+              _addressLine(),
+              style: TextStyle(color: cs.onSurfaceVariant),
+            ),
+          ],
+
+          // Separate invoice recipient block
+          if (hasSeparateInvoice) ...[
+            const SizedBox(height: 12),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: cs.secondaryContainer.withOpacity(0.4),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: cs.secondary.withOpacity(0.3)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    "Invoice recipient",
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      color: cs.secondary,
+                      fontSize: 12,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  if ((c['invoice_name'] ?? '').isNotEmpty)
+                    Text(
+                      c['invoice_name'],
+                      style: const TextStyle(fontWeight: FontWeight.w600),
+                    ),
+                  if ((c['invoice_org_nr'] ?? '').isNotEmpty)
+                    Text("Org.nr: ${c['invoice_org_nr']}"),
+                  if (_invoiceAddressLine().isNotEmpty)
+                    Text(_invoiceAddressLine()),
+                  if ((c['invoice_email'] ?? '').isNotEmpty)
+                    Text("E-post: ${c['invoice_email']}"),
+                ],
               ),
             ),
-          ),
-
-          IconButton(
-            onPressed: _editCompany,
-            icon: const Icon(Icons.edit),
-          ),
-
-          IconButton(
-            onPressed: _deleteCompany,
-            icon: const Icon(Icons.delete),
-            color: Colors.red,
-          ),
+          ],
         ],
       ),
     );
@@ -694,21 +789,102 @@ Future<Map<String, dynamic>> _loadAllForPdf() async {
   }
 
   Widget _buildProductions() {
+    final cs = Theme.of(context).colorScheme;
+
     return _sectionCard(
       title: "Productions",
       onAdd: _createProduction,
       children: _productions.isEmpty
           ? [const Text("No productions")]
           : _productions.map((p) {
-              return ListTile(
-                leading: const CircleAvatar(
-                  child: Icon(Icons.movie),
-                ),
-                title: Text(p['name'] ?? ''),
-                trailing: IconButton(
-                  icon: const Icon(Icons.edit),
-                  onPressed: () => _editProduction(p),
-                ),
+              final hasSeparateInvoice =
+                  p['separate_invoice_recipient'] == true;
+
+              Widget? invoiceSubtitle;
+              if (hasSeparateInvoice) {
+                final parts = <String>[];
+                if ((p['invoice_name'] ?? '').isNotEmpty)
+                  parts.add(p['invoice_name']);
+                if ((p['invoice_org_nr'] ?? '').isNotEmpty)
+                  parts.add("Org.nr: ${p['invoice_org_nr']}");
+
+                final addrParts = <String>[];
+                if ((p['invoice_address'] ?? '').isNotEmpty)
+                  addrParts.add(p['invoice_address']);
+                final city = [
+                  if ((p['invoice_postal_code'] ?? '').isNotEmpty)
+                    p['invoice_postal_code'],
+                  if ((p['invoice_city'] ?? '').isNotEmpty) p['invoice_city'],
+                ].join(' ');
+                if (city.isNotEmpty) addrParts.add(city);
+                if ((p['invoice_country'] ?? '').isNotEmpty)
+                  addrParts.add(p['invoice_country']);
+                if (addrParts.isNotEmpty) parts.add(addrParts.join(', '));
+                if ((p['invoice_email'] ?? '').isNotEmpty)
+                  parts.add(p['invoice_email']);
+
+                invoiceSubtitle = Container(
+                  margin: const EdgeInsets.only(top: 4, left: 56),
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 10, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: cs.secondaryContainer.withOpacity(0.4),
+                    borderRadius: BorderRadius.circular(6),
+                    border:
+                        Border.all(color: cs.secondary.withOpacity(0.3)),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        "Invoice recipient",
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold,
+                          color: cs.secondary,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        parts.join(' · '),
+                        style: const TextStyle(fontSize: 13),
+                      ),
+                    ],
+                  ),
+                );
+              }
+
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  ListTile(
+                    leading: const CircleAvatar(
+                      child: Icon(Icons.movie),
+                    ),
+                    title: Text(p['name'] ?? ''),
+                    trailing: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        IconButton(
+                          icon: const Icon(Icons.send),
+                          tooltip: "Send invoice details",
+                          onPressed: () => _sendInvoiceDetails(
+                            company: _selectedCompany!,
+                            production: p,
+                          ),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.edit),
+                          onPressed: () => _editProduction(p),
+                        ),
+                      ],
+                    ),
+                  ),
+                  if (invoiceSubtitle != null) ...[
+                    invoiceSubtitle,
+                    const SizedBox(height: 8),
+                  ],
+                ],
               );
             }).toList(),
     );
