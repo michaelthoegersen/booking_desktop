@@ -321,6 +321,12 @@ Padding(
               route: "/invoices",
             ),
 
+            const _NavItem(
+              icon: Icons.report_problem_rounded,
+              label: "Issues",
+              route: "/issues",
+            ),
+
             const Spacer(),
 
             const _NavItem(
