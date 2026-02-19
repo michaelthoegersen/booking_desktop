@@ -27,6 +27,13 @@ class _BusMapWidgetState extends State<BusMapWidget> {
 
   String _normalize(String s) => s.trim().toLowerCase();
 
+  /// When a place string contains multiple comma-separated cities
+  /// (e.g. "Oslo, Lillestrøm"), use only the last one for the map lookup.
+  String _cityKey(String place) {
+    final parts = place.split(',');
+    return _normalize(parts.last);
+  }
+
   /// Label shown under the bus icon on the map.
   /// Only strips "CSS_" for the three CSS buses; all others get their full name.
   String _busLabel(String bus) {
@@ -53,7 +60,7 @@ class _BusMapWidgetState extends State<BusMapWidget> {
       }
 
       if (pos == null && position.place != null) {
-        final key = _normalize(position.place!);
+        final key = _cityKey(position.place!);
         pos = cityCoords[key];
         if (pos == null) {
           debugPrint("❌ City not found: ${position.place} ($key)");
