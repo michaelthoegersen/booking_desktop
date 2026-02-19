@@ -83,8 +83,6 @@ flutter:
   uses-material-design: true
 
   assets:
-    - .env
-
     # PDF logos
     - assets/pdf/logos/CSSLogo.png
     - assets/pdf/logos/Starcoachlogo.png
