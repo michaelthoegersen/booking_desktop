@@ -1294,8 +1294,10 @@ Map<String, double> _calculateForeignVat({
 Widget _buildVatBox(
   Map<String, double> vatMap,
   double excl,  // always the calculated value
-  double incl,
-) {
+  double incl, {
+  String Function(double)? fmt,
+}) {
+  final f = fmt ?? _nok;
   final vatTotal = vatMap.values.fold(0.0, (a, b) => a + b);
   final displayedExcl = _totalOverride ?? excl;
   final displayedIncl = displayedExcl + vatTotal;
@@ -1307,6 +1309,7 @@ Widget _buildVatBox(
     displayedValue: displayedExcl,
     hasOverride: hasOverride,
     vatTotal: vatTotal,
+    fmt: f,
   );
 
   if (vatMap.isEmpty) {
@@ -1316,7 +1319,7 @@ Widget _buildVatBox(
         totalExclWidget,
         const SizedBox(height: 4),
         Text(
-          "Total incl VAT: ${_nok(displayedIncl)}",
+          "Total incl VAT: ${f(displayedIncl)}",
           style: const TextStyle(fontWeight: FontWeight.w900),
         ),
       ],
@@ -1336,7 +1339,7 @@ Widget _buildVatBox(
       ...vatMap.entries.map((e) {
         final rate = (_vatRates[e.key] ?? 0) * 100;
         return Text(
-          "${e.key} (${rate.toStringAsFixed(1)}%): ${_nok(e.value)}",
+          "${e.key} (${rate.toStringAsFixed(1)}%): ${f(e.value)}",
           style: const TextStyle(fontWeight: FontWeight.w700),
         );
       }),
@@ -1344,7 +1347,7 @@ Widget _buildVatBox(
       const SizedBox(height: 6),
 
       Text(
-        "Total VAT: ${_nok(vatTotal)}",
+        "Total VAT: ${f(vatTotal)}",
         style: const TextStyle(fontWeight: FontWeight.w900),
       ),
 
@@ -1355,7 +1358,7 @@ Widget _buildVatBox(
       const SizedBox(height: 4),
 
       Text(
-        "Total incl VAT: ${_nok(displayedIncl)}",
+        "Total incl VAT: ${f(displayedIncl)}",
         style: const TextStyle(fontWeight: FontWeight.w900),
       ),
     ],
@@ -1368,7 +1371,9 @@ Widget _buildEditableTotal({
   required double displayedValue,
   required bool hasOverride,
   required double vatTotal,
+  String Function(double)? fmt,
 }) {
+  final f = fmt ?? _nok;
   if (_editingTotal) {
     return Row(
       mainAxisSize: MainAxisSize.min,
@@ -1423,7 +1428,7 @@ Widget _buildEditableTotal({
           mainAxisSize: MainAxisSize.min,
           children: [
             Text(
-              "$label: ${_nok(displayedValue)}",
+              "$label: ${f(displayedValue)}",
               style: const TextStyle(fontWeight: FontWeight.w900),
             ),
             const SizedBox(width: 4),
@@ -1435,7 +1440,7 @@ Widget _buildEditableTotal({
         ),
         if (hasOverride)
           Text(
-            "Calculated: ${_nok(calculatedValue)}",
+            "Calculated: ${f(calculatedValue)}",
             style: const TextStyle(
               fontSize: 11,
               color: Colors.grey,
@@ -2921,6 +2926,14 @@ final safeNoDDrive = List<bool>.generate(
     );
     _sweCalcCache[ri] = scaledSweResult;
 
+    // Ferry and toll from the shared data (same source as Norwegian path)
+    final roundFerryCost =
+        ferryByIndex.values.fold<double>(0, (a, b) => a + b) *
+            effectiveBusCount;
+    final roundTollCost =
+        tollByIndex.values.fold<double>(0, (a, b) => a + b) *
+            effectiveBusCount;
+
     // Create minimal RoundCalcResult for UI compatibility (km stats etc.)
     final minimal = RoundCalcResult(
       billableDays: round.billableDays,
@@ -2938,10 +2951,10 @@ final safeNoDDrive = List<bool>.generate(
       dDriveCost: 0,
       trailerDayCost: 0,
       trailerKmCost: 0,
-      ferryCost: 0,
-      tollCost: 0,
+      ferryCost: roundFerryCost,
+      tollCost: roundTollCost,
       flightCost: 0,
-      totalCost: scaledTotal,
+      totalCost: scaledTotal + roundFerryCost + roundTollCost,
     );
     _roundCalcCache[ri] = minimal;
     return minimal;
@@ -3100,6 +3113,10 @@ Future<String> _savePdfToFile(Uint8List bytes) async {
           .join(', ');
       final busLabel = buses.isNotEmpty ? buses : 'No bus';
 
+      final norR = _roundCalcCache[ri];
+      final ferry = norR?.ferryCost ?? 0.0;
+      final toll = norR?.tollCost ?? 0.0;
+
       b.writeln("ROUND ${ri + 1}  ($busLabel)");
       b.writeln("----------------------------");
       b.writeln("  Vehicle/day: ${_sek(r.vehicleDagpris)}");
@@ -3117,9 +3134,13 @@ Future<String> _savePdfToFile(Uint8List bytes) async {
         }
       }
 
-      b.writeln("  Round total: ${_sek(r.totalCost)}");
+      b.writeln("  Swedish subtotal: ${_sek(r.totalCost)}");
+      if (ferry > 0) b.writeln("  Ferry:           ${_sek(ferry)}");
+      if (toll > 0) b.writeln("  Toll:            ${_sek(toll)}");
+      final roundTotal = r.totalCost + ferry + toll;
+      b.writeln("  Round total: ${_sek(roundTotal)}");
       b.writeln();
-      grandTotal += r.totalCost;
+      grandTotal += roundTotal;
     }
 
     b.writeln("============================");
@@ -3397,9 +3418,15 @@ double allRoundsToll = 0;
 
 if (offer.pricingModel == 'svensk') {
   for (int i = 0; i < offer.rounds.length; i++) {
-    final r = _sweCalcCache[i];
-    if (r != null && offer.rounds[i].entries.isNotEmpty) {
-      allRoundsTotal += r.totalCost;
+    final sweR = _sweCalcCache[i];
+    final norR = _roundCalcCache[i];
+    if (sweR != null && offer.rounds[i].entries.isNotEmpty) {
+      allRoundsTotal += sweR.totalCost; // Swedish base (SEK)
+      if (norR != null) {
+        allRoundsTotal += norR.ferryCost + norR.tollCost;
+        allRoundsFerry += norR.ferryCost;
+        allRoundsToll += norR.tollCost;
+      }
     }
   }
 } else {
@@ -4094,7 +4121,7 @@ Container(
   ),
 ),
 
-      if (offer.pricingModel == 'norsk') ...[
+      ...[
         const SizedBox(height: 10),
 
         // ---------- VAT ----------
@@ -4126,6 +4153,7 @@ Container(
                 foreignVatMap,
                 totalExVat,
                 totalIncVat,
+                fmt: offer.pricingModel == 'svensk' ? _sek : _nok,
               ),
             ],
           ),
