@@ -3313,10 +3313,27 @@ Expanded(
                 final String routeText =
                     isSpecial ? to : "${_norm(from)} → $to";
 
+                // ---------- EXTRA text (D.Drive / Ferry / Bridge)
+                final bool travelBefore = _hasTravelBefore(round.entries, i);
+                final bool hasDDrive = km != null &&
+                    (travelBefore ? km >= 1200 : km >= 600);
+                final String rawExtra = _extraByIndex[i] ?? '';
+                final extraParts = <String>[];
+                if (hasDDrive) extraParts.add('D.Drive');
+                for (final p in rawExtra
+                    .split(RegExp(r'[,/]'))
+                    .map((s) => s.trim())
+                    .where((s) => s.isNotEmpty)) {
+                  if (p.toLowerCase().contains('ferry')) extraParts.add('Ferry');
+                  if (p.toLowerCase().contains('bridge')) extraParts.add('Bridge');
+                }
+                final String extraText = extraParts.join(' / ');
+
                 return _RoutesTableRow(
                   date: _fmtDate(e.date),
                   route: routeText,
                   km: km,
+                  extra: extraText,
                   countryKm: _countryKmByIndex[i] ?? {},
                   onEdit: () => _editEntry(i),
                   onDelete: () async {
@@ -3359,7 +3376,7 @@ Expanded(
 
           // ================= RIGHT =================
           SizedBox(
-            width: 430,
+            width: 360,
             child: Container(
               padding: const EdgeInsets.all(18),
               decoration: BoxDecoration(
@@ -4599,29 +4616,14 @@ class _RoutesTableHeader extends StatelessWidget {
 
     return Row(
       children: const [
-        SizedBox(
-          width: 105,
-          child: Text("Date", style: headerStyle),
-        ),
+        SizedBox(width: 105, child: Text("Date", style: headerStyle)),
         SizedBox(width: 12),
-
-        Expanded(
-          child: Text("Route", style: headerStyle),
-        ),
-
+        SizedBox(width: 200, child: Text("Route", style: headerStyle)),
         SizedBox(width: 12),
-
-        SizedBox(
-          width: 70,
-          child: Text(
-            "KM",
-            style: headerStyle,
-            textAlign: TextAlign.right,
-          ),
-        ),
-
-        SizedBox(width: 10),
-
+        SizedBox(width: 60, child: Text("KM", style: headerStyle)),
+        SizedBox(width: 12),
+        SizedBox(width: 160, child: Text("Extra", style: headerStyle)),
+        Spacer(),
         SizedBox(width: 66),
       ],
     );
@@ -4631,6 +4633,7 @@ class _RoutesTableRow extends StatelessWidget {
   final String date;
   final String route;
   final double? km;
+  final String extra;
   final Map<String, double> countryKm;
 
   final VoidCallback onEdit;
@@ -4640,6 +4643,7 @@ class _RoutesTableRow extends StatelessWidget {
     required this.date,
     required this.route,
     required this.km,
+    required this.extra,
     required this.countryKm,
     required this.onEdit,
     required this.onDelete,
@@ -4675,66 +4679,72 @@ class _RoutesTableRow extends StatelessWidget {
       child: Row(
         children: [
 
-          // ---------- DATE (fast prosent)
-          Flexible(
-            flex: 22,
-            fit: FlexFit.tight,
+          // DATE (fixed)
+          SizedBox(
+            width: 105,
             child: Text(
               date,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
-                fontWeight: FontWeight.w800,
-                fontSize: 14,
-              ),
+              style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14),
             ),
           ),
 
-          // ---------- ROUTE (størst felt)
-          Flexible(
-            flex: 45,
-            fit: FlexFit.tight,
+          const SizedBox(width: 12),
+
+          // ROUTE (fixed)
+          SizedBox(
+            width: 200,
             child: Text(
               route,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
-                fontWeight: FontWeight.w700,
-                fontSize: 14,
-              ),
+              style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14),
             ),
           ),
 
-          // ---------- KM
-          Flexible(
-            flex: 12,
-            fit: FlexFit.tight,
-            child: Tooltip(
-              message: tooltipText.isEmpty
-                  ? "No country breakdown"
-                  : tooltipText,
-              child: Align(
-                alignment: Alignment.centerRight,
-                child: Text(
-                  km == null ? "?" : km!.toStringAsFixed(0),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontWeight: FontWeight.w800,
-                    fontSize: 14,
-                    color: km == null
-                        ? cs.error
-                        : cs.onSurface,
-                  ),
+          const SizedBox(width: 12),
+
+          // KM (fixed)
+          Tooltip(
+            message: tooltipText.isEmpty ? "No country breakdown" : tooltipText,
+            child: SizedBox(
+              width: 60,
+              child: Text(
+                km == null ? "?" : km!.toStringAsFixed(0),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontWeight: FontWeight.w800,
+                  fontSize: 14,
+                  color: km == null ? cs.error : cs.onSurface,
                 ),
               ),
             ),
           ),
 
-          // ---------- BUTTONS
-          Flexible(
-            flex: 15,
-            fit: FlexFit.tight,
+          const SizedBox(width: 12),
+
+          // EXTRA (fixed)
+          SizedBox(
+            width: 160,
+            child: Text(
+              extra,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 13,
+                color: extra.isEmpty ? cs.onSurfaceVariant : cs.onSurface,
+              ),
+            ),
+          ),
+
+          // Flexible gap — pushes buttons to the right
+          const Spacer(),
+
+          // BUTTONS
+          SizedBox(
+            width: 66,
             child: Row(
               mainAxisAlignment: MainAxisAlignment.end,
               children: [
@@ -4743,10 +4753,7 @@ class _RoutesTableRow extends StatelessWidget {
                   onPressed: onEdit,
                   icon: const Icon(Icons.edit, size: 18),
                   padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(
-                    minWidth: 28,
-                    minHeight: 28,
-                  ),
+                  constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
                 ),
 
                 const SizedBox(width: 4),
@@ -4755,10 +4762,7 @@ class _RoutesTableRow extends StatelessWidget {
                   onPressed: onDelete,
                   icon: const Icon(Icons.delete_outline, size: 18),
                   padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(
-                    minWidth: 28,
-                    minHeight: 28,
-                  ),
+                  constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
                 ),
               ],
             ),

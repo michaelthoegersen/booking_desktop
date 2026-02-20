@@ -227,59 +227,51 @@ Widget build(BuildContext context) {
                   borderRadius: BorderRadius.circular(14),
                   border: Border.all(color: cs.outlineVariant),
                 ),
-                child: Column(
-                  children: List.generate(12, (i) {
-
+                child: Builder(builder: (context) {
+                  final usedRounds = <int>[];
+                  for (int i = 0; i < offer.rounds.length; i++) {
                     final r = offer.rounds[i];
+                    if (r.entries.isNotEmpty || r.startLocation.trim().isNotEmpty) {
+                      usedRounds.add(i);
+                    }
+                  }
 
-                    final has =
-                        r.entries.isNotEmpty ||
-                        r.startLocation.trim().isNotEmpty;
-
-                    final title = "Round ${i + 1}";
-
-                    final busText =
-    r.bus?.isNotEmpty == true
-        ? r.bus!
-        : (offer.bus ?? "No bus");
-
-final subtitle = has
-    ? "$busText • ${r.entries.length} date(s)"
-    : "—";
-
-                    return Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 6),
-                      child: Row(
-                        children: [
-
-                          SizedBox(
-                            width: 90,
-                            child: Text(
-                              title,
-                              style: TextStyle(
-                                fontWeight: FontWeight.w900,
-                                color: has
-                                    ? cs.onSurface
-                                    : cs.onSurfaceVariant,
-                              ),
-                            ),
-                          ),
-
-                          Expanded(
-                            child: Text(
-                              subtitle,
-                              style: TextStyle(
-                                color: has
-                                    ? cs.onSurface
-                                    : cs.onSurfaceVariant,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
+                  if (usedRounds.isEmpty) {
+                    return Text(
+                      'No rounds yet',
+                      style: TextStyle(color: cs.onSurfaceVariant),
                     );
-                  }),
-                ),
+                  }
+
+                  return Column(
+                    children: usedRounds.map((i) {
+                      final r = offer.rounds[i];
+                      final title = "Round ${i + 1}";
+                      final busText = r.bus?.isNotEmpty == true
+                          ? r.bus!
+                          : (offer.bus ?? "No bus");
+                      final subtitle = "$busText • ${r.entries.length} date(s)";
+
+                      return Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 6),
+                        child: Row(
+                          children: [
+                            SizedBox(
+                              width: 90,
+                              child: Text(
+                                title,
+                                style: const TextStyle(fontWeight: FontWeight.w900),
+                              ),
+                            ),
+                            Expanded(
+                              child: Text(subtitle),
+                            ),
+                          ],
+                        ),
+                      );
+                    }).toList(),
+                  );
+                }),
               ),
 
               const SizedBox(height: 10),
