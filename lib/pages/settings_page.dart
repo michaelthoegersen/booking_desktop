@@ -570,17 +570,17 @@ debugPrint("SESSION: $session");
         tilePadding: EdgeInsets.zero,
         childrenPadding: EdgeInsets.zero,
         title: Text(
-          "Svensk prismodell (per etappe)",
+          "Swedish pricing model (per leg)",
           style: Theme.of(context)
               .textTheme
               .titleMedium
               ?.copyWith(fontWeight: FontWeight.w900),
         ),
         subtitle: Text(
-          "Fordon ${swe.fordonDagpris.toStringAsFixed(0)} + "
-          "Chaufför ${swe.chaufforDagpris.toStringAsFixed(0)} + "
-          "${swe.milpris.toStringAsFixed(1)} SEK/mil  •  "
-          "DD ${swe.ddDagpris.toStringAsFixed(0)} vid >${swe.ddKmGrans.toStringAsFixed(0)} km",
+          "Vehicle ${swe.fordonDagpris.toStringAsFixed(0)} + "
+          "Driver ${swe.chaufforDagpris.toStringAsFixed(0)} + "
+          "${swe.milpris.toStringAsFixed(0)} SEK/10km  •  "
+          "DD ${swe.ddDagpris.toStringAsFixed(0)} when >${swe.ddKmGrans.toStringAsFixed(0)} km",
           style: Theme.of(context)
               .textTheme
               .bodySmall
@@ -589,88 +589,88 @@ debugPrint("SESSION: $session");
         children: [
           const SizedBox(height: 8),
 
-          // --- CHAUFFÖR ---
-          Text("Chaufför",
+          // --- DRIVER ---
+          Text("Driver",
               style: Theme.of(context)
                   .textTheme
                   .labelLarge
                   ?.copyWith(color: cs.primary, fontWeight: FontWeight.w700)),
           const SizedBox(height: 8),
           Wrap(spacing: 12, runSpacing: 12, children: [
-            _sweField("Timlön", sweTimlonCtrl, "SEK/h"),
-            _sweField("Timmar/dag", sweTimmarCtrl, "h"),
-            _sweField("ArbG-avg", sweArbGAvgCtrl, "%"),
-            _sweField("Traktamente", sweTraktamenteCtrl, "SEK/dag"),
-            _sweField("Marginal", sweChaufforMarginalCtrl, "%"),
+            _sweField("Hourly rate", sweTimlonCtrl, "SEK/h"),
+            _sweField("Hours/day", sweTimmarCtrl, "h"),
+            _sweField("Employer tax", sweArbGAvgCtrl, "%"),
+            _sweField("Allowance", sweTraktamenteCtrl, "SEK/day"),
+            _sweField("Margin", sweChaufforMarginalCtrl, "%"),
           ]),
           const SizedBox(height: 16),
 
-          // --- FORDON ---
-          Text("Fordon",
+          // --- VEHICLE ---
+          Text("Vehicle",
               style: Theme.of(context)
                   .textTheme
                   .labelLarge
                   ?.copyWith(color: cs.primary, fontWeight: FontWeight.w700)),
           const SizedBox(height: 8),
           Wrap(spacing: 12, runSpacing: 12, children: [
-            _sweField("Köppris", sweKopPrisCtrl, "SEK", width: 220),
-            _sweField("Avskrivning", sweAvskrivningArCtrl, "år"),
-            _sweField("Ränta", sweRantaCtrl, "%/år"),
-            _sweField("Försäkring", sweForsakringCtrl, "SEK/år", width: 220),
-            _sweField("Skatt", sweSkattCtrl, "SEK/år", width: 220),
-            _sweField("Parkering", sweParkeringCtrl, "SEK/år", width: 220),
-            _sweField("Kördagar", sweKordagarCtrl, "dagar/år"),
-            _sweField("Marginal", sweFordonMarginalCtrl, "%"),
+            _sweField("Purchase price", sweKopPrisCtrl, "SEK", width: 220),
+            _sweField("Depreciation", sweAvskrivningArCtrl, "years"),
+            _sweField("Interest", sweRantaCtrl, "%/year"),
+            _sweField("Insurance", sweForsakringCtrl, "SEK/year", width: 220),
+            _sweField("Tax", sweSkattCtrl, "SEK/year", width: 220),
+            _sweField("Parking", sweParkeringCtrl, "SEK/year", width: 220),
+            _sweField("Driving days", sweKordagarCtrl, "days/year"),
+            _sweField("Margin", sweFordonMarginalCtrl, "%"),
           ]),
           const SizedBox(height: 16),
 
-          // --- MILPRIS ---
-          Text("Milpris (rörlig kostnad per 10 km)",
+          // --- KM PRICE ---
+          Text("Km price (variable, per 10 km)",
               style: Theme.of(context)
                   .textTheme
                   .labelLarge
                   ?.copyWith(color: cs.primary, fontWeight: FontWeight.w700)),
           const SizedBox(height: 8),
           Wrap(spacing: 12, runSpacing: 12, children: [
-            _sweField("Dieselpris", sweDieselprisCtrl, "SEK/l"),
-            _sweField("Förbrukning", sweDieselforbrukningCtrl, "l/mil"),
-            _sweField("Däck", sweDackCtrl, "SEK/mil"),
-            _sweField("Olja", sweOljaCtrl, "SEK/mil"),
-            _sweField("Verkstad", sweVerkstadCtrl, "SEK/mil"),
-            _sweField("Övrigt", sweOvrigtCtrl, "SEK/mil"),
-            _sweField("Marginal", sweKmMarginalCtrl, "%"),
+            _sweField("Diesel price", sweDieselprisCtrl, "SEK/l"),
+            _sweField("Consumption", sweDieselforbrukningCtrl, "l/10km"),
+            _sweField("Tires", sweDackCtrl, "SEK/10km"),
+            _sweField("Oil", sweOljaCtrl, "SEK/10km"),
+            _sweField("Workshop", sweVerkstadCtrl, "SEK/10km"),
+            _sweField("Other", sweOvrigtCtrl, "SEK/10km"),
+            _sweField("Margin", sweKmMarginalCtrl, "%"),
           ]),
           const SizedBox(height: 16),
 
           // --- DD ---
-          Text("Dubbel chaufför (DD)",
+          Text("Double driver (DD)",
               style: Theme.of(context)
                   .textTheme
                   .labelLarge
                   ?.copyWith(color: cs.primary, fontWeight: FontWeight.w700)),
           const SizedBox(height: 8),
           Wrap(spacing: 12, runSpacing: 12, children: [
-            _sweField("Timlön", sweDdTimlonCtrl, "SEK/h"),
-            _sweField("Timmar/dag", sweDdTimmarCtrl, "h"),
-            _sweField("ArbG-avg", sweDdArbGAvgCtrl, "%"),
-            _sweField("Traktamente", sweDdTraktamenteCtrl, "SEK"),
-            _sweField("Resor", sweDdResorCtrl, "SEK"),
-            _sweField("Hotell", sweDdHotellCtrl, "SEK"),
-            _sweField("Marginal", sweDdMarginalCtrl, "%"),
-            _sweField("Km-gräns", sweDdKmGransCtrl, "km"),
+            _sweField("Hourly rate", sweDdTimlonCtrl, "SEK/h"),
+            _sweField("Hours/day", sweDdTimmarCtrl, "h"),
+            _sweField("Employer tax", sweDdArbGAvgCtrl, "%"),
+            _sweField("Allowance", sweDdTraktamenteCtrl, "SEK"),
+            _sweField("Travel", sweDdResorCtrl, "SEK"),
+            _sweField("Hotel", sweDdHotellCtrl, "SEK"),
+            _sweField("Margin", sweDdMarginalCtrl, "%"),
+            _sweField("Km threshold", sweDdKmGransCtrl, "km"),
           ]),
           const SizedBox(height: 16),
 
-          // --- ÖVRIGT ---
-          Text("Övrigt",
+          // --- OTHER ---
+          Text("Other",
               style: Theme.of(context)
                   .textTheme
                   .labelLarge
                   ?.copyWith(color: cs.primary, fontWeight: FontWeight.w700)),
           const SizedBox(height: 8),
           Wrap(spacing: 12, runSpacing: 12, children: [
-            _sweField("Trailerhyra", sweTrailerCtrl, "SEK/dag", width: 220),
-            _sweField("Utlandstraktamente", sweUtlandstraktCtrl, "SEK/enhet", width: 260),
+            _sweField("Trailer hire", sweTrailerCtrl, "SEK/day", width: 220),
+            _sweField("International allowance", sweUtlandstraktCtrl, "SEK/unit", width: 260),
           ]),
 
           const SizedBox(height: 16),

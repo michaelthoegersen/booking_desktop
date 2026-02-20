@@ -3040,10 +3040,10 @@ Future<String> _savePdfToFile(Uint8List bytes) async {
     final b = StringBuffer();
     b.writeln("SWEDISH ROUND CALCULATION");
     b.writeln("----------------------------");
-    b.writeln("Fordon/dag:   ${_sek(r.vehicleDagpris)}");
-    b.writeln("Chauffor/dag: ${_sek(r.chaufforDagpris)}");
-    if (r.ddDagpris > 0) b.writeln("DD/dag:       ${_sek(r.ddDagpris)}");
-    b.writeln("Milpris:      ${r.milpris.toStringAsFixed(2)} SEK/mil");
+    b.writeln("Vehicle/day:  ${_sek(r.vehicleDagpris)}");
+    b.writeln("Driver/day:   ${_sek(r.chaufforDagpris)}");
+    if (r.ddDagpris > 0) b.writeln("DD/day:       ${_sek(r.ddDagpris)}");
+    b.writeln("Km price:     ${r.milpris.toStringAsFixed(0)} SEK/10km");
     b.writeln();
 
     final round = offer.rounds[ri];
@@ -3053,17 +3053,17 @@ Future<String> _savePdfToFile(Uint8List bytes) async {
 
       final date = _fmtDate(round.entries[i].date);
       b.writeln("$date  (${r.legKm[i].toStringAsFixed(0)} km)");
-      b.writeln("  Fordon:    ${_sek(r.legVehicleCost[i])}");
-      b.writeln("  KM-kost:   ${_sek(r.legKmCost[i])}");
-      b.writeln("  Chauffor:  ${_sek(r.legDriverCost[i])}");
+      b.writeln("  Vehicle:       ${_sek(r.legVehicleCost[i])}");
+      b.writeln("  Km cost:       ${_sek(r.legKmCost[i])}");
+      b.writeln("  Driver:        ${_sek(r.legDriverCost[i])}");
       if (r.legDdCost[i] > 0)
-        b.writeln("  DD:        ${_sek(r.legDdCost[i])}");
+        b.writeln("  DD:            ${_sek(r.legDdCost[i])}");
       if (r.legExtraCost[i] > 0)
-        b.writeln("  Extra:     ${_sek(r.legExtraCost[i])}");
+        b.writeln("  Extra:         ${_sek(r.legExtraCost[i])}");
       if (r.legTrailerCost[i] > 0)
-        b.writeln("  Trailer:   ${_sek(r.legTrailerCost[i])}");
+        b.writeln("  Trailer:       ${_sek(r.legTrailerCost[i])}");
       if (r.legInternationalCost[i] > 0)
-        b.writeln("  Utlandskt: ${_sek(r.legInternationalCost[i])}");
+        b.writeln("  International: ${_sek(r.legInternationalCost[i])}");
       b.writeln("  Leg total: ${_sek(r.legTotal[i])}");
       b.writeln();
     }
@@ -3102,8 +3102,8 @@ Future<String> _savePdfToFile(Uint8List bytes) async {
 
       b.writeln("ROUND ${ri + 1}  ($busLabel)");
       b.writeln("----------------------------");
-      b.writeln("  Fordon/dag: ${_sek(r.vehicleDagpris)}");
-      b.writeln("  Milpris:    ${r.milpris.toStringAsFixed(2)} SEK/mil");
+      b.writeln("  Vehicle/day: ${_sek(r.vehicleDagpris)}");
+      b.writeln("  Km price:    ${r.milpris.toStringAsFixed(0)} SEK/10km");
 
       for (int i = 0; i < r.legKm.length; i++) {
         if (r.legKm[i] > 0) {
@@ -3995,8 +3995,8 @@ Container(
       const SizedBox(height: 6),
       SegmentedButton<String>(
         segments: const [
-          ButtonSegment(value: 'norsk', label: Text("🇳🇴 Norsk")),
-          ButtonSegment(value: 'svensk', label: Text("🇸🇪 Svensk")),
+          ButtonSegment(value: 'norsk', label: Text("🇳🇴 Norwegian")),
+          ButtonSegment(value: 'svensk', label: Text("🇸🇪 Swedish")),
         ],
         selected: {offer.pricingModel},
         onSelectionChanged: (selected) async {

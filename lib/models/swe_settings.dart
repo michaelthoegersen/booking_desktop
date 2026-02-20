@@ -1,8 +1,5 @@
 /// Swedish per-leg pricing model — all parameters editable in Settings.
 /// Computed getters mirror the Excel "Background data" formulas exactly.
-///
-/// Note: Swedish characters (å/ö/ä) replaced with ASCII equivalents in
-/// Dart identifiers. Labels in the UI retain the Swedish spelling.
 class SweSettings {
   // ===================================================
   // CHAUFFÖR  (driver)
@@ -70,12 +67,12 @@ class SweSettings {
     this.kordagarPerAr = 200,
     this.fordonMarginal = 0.20,
 
-    this.dieselprisPerLiter = 18,
+    this.dieselprisPerLiter = 20,
     this.dieselforbrukningPerMil = 3.3,
-    this.dackKostnadPerMil = 5,
+    this.dackKostnadPerMil = 10,
     this.oljaKostnadPerMil = 5,
-    this.verkstadKostnadPerMil = 10,
-    this.ovrigtKostnadPerMil = 0,
+    this.verkstadKostnadPerMil = 15,
+    this.ovrigtKostnadPerMil = 5,
     this.kmMarginal = 0.30,
 
     this.ddTimlon = 250,
@@ -103,23 +100,27 @@ class SweSettings {
   }
 
   /// Vehicle cost per day (SEK), including fixed annual costs and margin.
+  /// Rounded UP to nearest 100 SEK (matches Excel).
   double get fordonDagpris {
     final avskrivning = kopPris / avskrivningAr;
     final ranta = kopPris * rantaPerAr;
     final fixKostnader =
         avskrivning + ranta + forsakringPerAr + skattPerAr + parkeringPerAr;
     final perDag = fixKostnader / kordagarPerAr;
-    return perDag / (1 - fordonMarginal);
+    final raw = perDag / (1 - fordonMarginal);
+    return (raw / 100).ceil() * 100.0;
   }
 
   /// Variable km price per mil (10 km) (SEK), including margin.
+  /// Rounded UP to nearest 1 SEK (matches Excel).
   double get milpris {
     final bransle = dieselprisPerLiter * dieselforbrukningPerMil;
     final ovrigt = dackKostnadPerMil +
         oljaKostnadPerMil +
         verkstadKostnadPerMil +
         ovrigtKostnadPerMil;
-    return (bransle + ovrigt) / (1 - kmMarginal);
+    final raw = (bransle + ovrigt) / (1 - kmMarginal);
+    return raw.ceilToDouble();
   }
 
   /// Variable km price per km (SEK).
