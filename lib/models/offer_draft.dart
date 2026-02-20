@@ -111,6 +111,10 @@ class OfferDraft {
   String? bus;
 OfferPricingOverride? pricingOverride;
   double? totalOverride;
+
+  /// Pricing model: 'norsk' (Norwegian day-based) or 'svensk' (Swedish per-leg)
+  String pricingModel;
+
   final List<OfferRound> rounds;
 
   OfferDraft({
@@ -126,6 +130,7 @@ OfferPricingOverride? pricingOverride;
     this.bus,
     this.pricingOverride,
     this.totalOverride,
+    this.pricingModel = 'norsk',
   }) : rounds = List.generate(12, (_) => OfferRound());
 
   // ------------------------------------------------------------
@@ -187,6 +192,9 @@ OfferPricingOverride? pricingOverride;
     // ⭐⭐⭐ NYTT (pricing override)
     'pricingOverride': pricingOverride?.toJson(),
 
+    // Pricing model ('norsk' / 'svensk')
+    'pricingModel': pricingModel,
+
     'rounds': rounds.map((r) => r.toJson()).toList(),
   };
 }
@@ -220,6 +228,9 @@ OfferPricingOverride? pricingOverride;
             Map<String, dynamic>.from(json['pricingOverride']),
           )
         : null,
+
+    // Pricing model (backwards compatible — default 'norsk')
+    pricingModel: (json['pricingModel'] as String?) ?? 'norsk',
   );
 
   final rawRounds = (json['rounds'] as List?) ?? [];
@@ -260,6 +271,7 @@ OfferDraft copyWithRounds(List<int> indexes) {
     busCount: this.busCount,
     busType: this.busType,
     bus: this.bus,
+    pricingModel: this.pricingModel,
   );
 
   // Clear default rounds

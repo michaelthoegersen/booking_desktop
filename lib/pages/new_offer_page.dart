@@ -31,8 +31,11 @@ import '../services/routes_service.dart';
 import '../services/customers_service.dart';
 import '../state/current_offer_store.dart';
 import '../models/round_calc_result.dart';
+import '../models/swe_calc_result.dart';
+import '../services/swe_calculator.dart';
 import 'package:flutter/foundation.dart';
 import '../platform/pdf_saver.dart';
+import '../utils/bus_utils.dart';
 // ignore: avoid_web_libraries_in_flutter
 
 class NewOfferPage extends StatefulWidget {
@@ -76,13 +79,30 @@ class _NewOfferPageState extends State<NewOfferPage> {
         width: 300,
         child: ListView(
           shrinkWrap: true,
-          children: buses.map((bus) {
-            return ListTile(
-              leading: const Icon(Icons.directions_bus),
-              title: Text(bus),
-              onTap: () => Navigator.pop(context, bus),
-            );
-          }).toList(),
+          children: [
+            ...buses.map((bus) {
+              return ListTile(
+                leading: const Icon(Icons.directions_bus),
+                title: Text(fmtBus(bus)),
+                onTap: () => Navigator.pop(context, bus),
+              );
+            }),
+            const Divider(),
+            ListTile(
+              leading: const Icon(
+                Icons.hourglass_top_outlined,
+                color: Colors.orange,
+              ),
+              title: const Text(
+                "Waiting list",
+                style: TextStyle(
+                  color: Colors.orange,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              onTap: () => Navigator.pop(context, "WAITING_LIST"),
+            ),
+          ],
         ),
       ),
     ),
@@ -96,6 +116,9 @@ class _NewOfferPageState extends State<NewOfferPage> {
 
   int roundIndex = 0;
 
+  bool _calcExpanded  = false;
+  bool _totalExpanded = false;
+
   /// Tracks the DB status before the current save — used to detect the
   /// transition to 'Confirmed' so the ferry email fires exactly once.
   String? _savedStatus;
@@ -105,6 +128,7 @@ class _NewOfferPageState extends State<NewOfferPage> {
   final FocusNode _locationFocus = FocusNode();
 
   final Map<int, RoundCalcResult> _roundCalcCache = {};
+  final Map<int, SweCalcResult> _sweCalcCache = {};
 
   // Total price override (double-tap to edit)
   double? _totalOverride;
@@ -129,9 +153,11 @@ Map<int, double> _ferryByIndex = {};
 Map<int, double> _tollByIndex = {};
 Map<int, String> _extraByIndex = {};
 Map<int, Map<String, double>> _countryKmByIndex = {};
+Map<int, bool> _noDDriveByIndex = {};
 
 // Global caches (per route)
 final Map<String, double?> _distanceCache = {};
+final Map<String, bool> _noDDriveCache = {};
 final Map<String, double> _ferryCache = {};
 final Map<String, double> _tollCache = {};
 final Map<String, String> _extraCache = {};
@@ -254,11 +280,117 @@ if (r.flightCost > 0) {
 
     return b.toString();
   }
+
+  // ===================================================
+  // TOTAL BREAKDOWN (all rounds)
+  // ===================================================
+
+  String _buildTotalBreakdown(AppSettings s) {
+    final usedEntries = _roundCalcCache.entries
+        .where((e) => offer.rounds[e.key].entries.isNotEmpty)
+        .toList()
+      ..sort((a, b) => a.key.compareTo(b.key));
+
+    if (usedEntries.isEmpty) return "No rounds calculated yet.";
+
+    final b = StringBuffer();
+
+    double totalDayCost      = 0;
+    double totalExtraKmCost  = 0;
+    double totalDDriveCost   = 0;
+    double totalTrailerCost  = 0;
+    double totalFerryCost    = 0;
+    double totalFlightCost   = 0;
+    double totalTollCost     = 0;
+    double grandTotal        = 0;
+
+    for (final entry in usedEntries) {
+      final ri    = entry.key;
+      final r     = entry.value;
+      final round = offer.rounds[ri];
+
+      final buses = round.busSlots
+          .whereType<String>()
+          .where((x) => x.isNotEmpty)
+          .map(fmtBus)
+          .join(', ');
+      final busLabel = buses.isNotEmpty ? buses : 'No bus';
+
+      b.writeln("ROUND ${ri + 1}  ($busLabel)");
+      b.writeln("----------------------------");
+
+      b.writeln(
+        "  Days:     ${r.billableDays} × ${_nok(s.dayPrice)}"
+        " = ${_nok(r.dayCost)}",
+      );
+
+      b.writeln(
+        "  KM:       ${(r.includedKm + r.extraKm).toStringAsFixed(0)} km"
+        "  (incl ${r.includedKm.toStringAsFixed(0)} km)",
+      );
+
+      if (r.extraKm > 0) {
+        b.writeln(
+          "  Extra km: ${r.extraKm.toStringAsFixed(0)} × ${_nok(s.extraKmPrice)}"
+          " = ${_nok(r.extraKmCost)}",
+        );
+      }
+
+      if (r.dDriveDays > 0) {
+        b.writeln(
+          "  D.Drive:  ${r.dDriveDays} × ${_nok(s.dDriveDayPrice)}"
+          " = ${_nok(r.dDriveCost)}",
+        );
+      }
+
+      final trailerTotal = r.trailerDayCost + r.trailerKmCost;
+      if (trailerTotal > 0) b.writeln("  Trailer:  ${_nok(trailerTotal)}");
+      if (r.ferryCost   > 0) b.writeln("  Ferry:    ${_nok(r.ferryCost)}");
+      if (r.flightCost  > 0) b.writeln("  Flights:  ${_nok(r.flightCost)}");
+      if (r.tollCost    > 0) b.writeln("  Toll:     ${_nok(r.tollCost)}");
+
+      b.writeln("  Round total: ${_nok(r.totalCost)}");
+      b.writeln();
+
+      totalDayCost     += r.dayCost;
+      totalExtraKmCost += r.extraKmCost;
+      totalDDriveCost  += r.dDriveCost;
+      totalTrailerCost += trailerTotal;
+      totalFerryCost   += r.ferryCost;
+      totalFlightCost  += r.flightCost;
+      totalTollCost    += r.tollCost;
+      grandTotal       += r.totalCost;
+    }
+
+    b.writeln("============================");
+    b.writeln("SUBTOTALS");
+    b.writeln("----------------------------");
+    if (totalDayCost     > 0) b.writeln("  Days:     ${_nok(totalDayCost)}");
+    if (totalExtraKmCost > 0) b.writeln("  Extra km: ${_nok(totalExtraKmCost)}");
+    if (totalDDriveCost  > 0) b.writeln("  D.Drive:  ${_nok(totalDDriveCost)}");
+    if (totalTrailerCost > 0) b.writeln("  Trailer:  ${_nok(totalTrailerCost)}");
+    if (totalFerryCost   > 0) b.writeln("  Ferry:    ${_nok(totalFerryCost)}");
+    if (totalFlightCost  > 0) b.writeln("  Flights:  ${_nok(totalFlightCost)}");
+    if (totalTollCost    > 0) b.writeln("  Toll:     ${_nok(totalTollCost)}");
+    b.writeln("----------------------------");
+
+    if (_totalOverride != null) {
+      b.writeln("  Calculated: ${_nok(grandTotal)}");
+      b.writeln("  Override:   ${_nok(_totalOverride!)}");
+      b.writeln("GRAND TOTAL: ${_nok(_totalOverride!)}");
+    } else {
+      b.writeln("GRAND TOTAL: ${_nok(grandTotal)}");
+    }
+
+    return b.toString();
+  }
+
 // ---------------------------------------------------
 // Recalculate all rounds (for PDF + totals)
 // ---------------------------------------------------
 Future<void> _recalcAllRounds() async {
   final Map<int, RoundCalcResult> newCache = {};
+  _sweCalcCache.clear();
 
   for (int i = 0; i < offer.rounds.length; i++) {
     final res = await _calcRound(i);
@@ -350,6 +482,8 @@ const allBuses = [
 
   if (!mounted) return null;
 
+  final busyList = allBuses.where((b) => busySet.contains(b)).toList();
+
   return showDialog<String>(
     context: context,
     builder: (dialogContext) => AlertDialog(
@@ -358,13 +492,60 @@ const allBuses = [
         width: 320,
         child: ListView(
           shrinkWrap: true,
-          children: available.map((bus) {
-            return ListTile(
-              leading: const Icon(Icons.directions_bus),
-              title: Text(bus),
-              onTap: () => Navigator.pop(dialogContext, bus),
-            );
-          }).toList(),
+          children: [
+            // Available buses
+            ...available.map((bus) {
+              return ListTile(
+                leading: const Icon(Icons.directions_bus),
+                title: Text(fmtBus(bus)),
+                onTap: () => Navigator.pop(dialogContext, bus),
+              );
+            }),
+            // Busy buses (greyed out, unselectable)
+            if (busyList.isNotEmpty) ...[
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+                child: Text(
+                  "Busy",
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                    color: Colors.grey.shade500,
+                    letterSpacing: 0.8,
+                  ),
+                ),
+              ),
+              ...busyList.map((bus) {
+                return ListTile(
+                  enabled: false,
+                  leading: Icon(
+                    Icons.directions_bus,
+                    color: Colors.grey.shade400,
+                  ),
+                  title: Text(
+                    fmtBus(bus),
+                    style: TextStyle(color: Colors.grey.shade400),
+                  ),
+                );
+              }),
+            ],
+            const Divider(),
+            // Waiting list option
+            ListTile(
+              leading: const Icon(
+                Icons.hourglass_top_outlined,
+                color: Colors.orange,
+              ),
+              title: const Text(
+                "Waiting list",
+                style: TextStyle(
+                  color: Colors.orange,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              onTap: () => Navigator.pop(dialogContext, "WAITING_LIST"),
+            ),
+          ],
         ),
       ),
     ),
@@ -501,8 +682,53 @@ const allBuses = [
 
     locationCtrl.text = '';
   }
-  
 
+  // ===================================================
+  // DELETE ROUND (shifts rounds below up by one)
+  // ===================================================
+  Future<void> _deleteRound(int index) async {
+    setState(() {
+      // Shift every round from index+1 onward one position down.
+      for (int i = index; i < offer.rounds.length - 1; i++) {
+        final src = offer.rounds[i + 1];
+        final dst = offer.rounds[i];
+
+        dst.startLocation = src.startLocation;
+        dst.trailer = src.trailer;
+        dst.pickupEveningFirstDay = src.pickupEveningFirstDay;
+        dst.bus = src.bus;
+        dst.busSlots = List<String?>.from(src.busSlots);
+        dst.trailerSlots = List<bool>.from(src.trailerSlots);
+        dst.ferryPerLeg = List<String?>.from(src.ferryPerLeg);
+        dst.entries
+          ..clear()
+          ..addAll(src.entries.map((e) => RoundEntry(
+                date: e.date,
+                location: e.location,
+                extra: e.extra,
+              )));
+      }
+
+      // Clear the last round.
+      final last = offer.rounds.last;
+      last.startLocation = '';
+      last.trailer = false;
+      last.pickupEveningFirstDay = false;
+      last.bus = null;
+      last.busSlots = [null, null, null, null];
+      last.trailerSlots = [false, false, false, false];
+      last.ferryPerLeg = [];
+      last.entries.clear();
+
+      // If the active round was at or beyond the deleted index, move it back.
+      if (roundIndex >= index && roundIndex > 0) {
+        roundIndex = roundIndex - 1;
+      }
+      _syncRoundControllers();
+    });
+
+    await _recalcKm();
+  }
 
   // ===================================================
   // DRAFT LOADING
@@ -588,6 +814,63 @@ dst.entries
     _loadingDraft = false;
   }
 }
+// ------------------------------------------------------------
+// ✅ WAITING LIST — sync after save
+//    Reads all busSlots with "WAITING_LIST" and writes to DB
+// ------------------------------------------------------------
+Future<void> _syncWaitingListAfterSave() async {
+  if (_draftId == null) return;
+  try {
+    // Clear all existing entries for this draft
+    await sb.from('waiting_list').delete().eq('draft_id', _draftId!);
+
+    // Re-create for every WAITING_LIST slot
+    final rows = <Map<String, dynamic>>[];
+
+    for (int ri = 0; ri < offer.rounds.length; ri++) {
+      final round = offer.rounds[ri];
+      for (int si = 0; si < round.busSlots.length; si++) {
+        if (round.busSlots[si] != "WAITING_LIST") continue;
+
+        DateTime? dateFrom;
+        DateTime? dateTo;
+        if (round.entries.isNotEmpty) {
+          final dates = round.entries.map((e) => e.date);
+          dateFrom = dates.reduce((a, b) => a.isBefore(b) ? a : b);
+          dateTo = dates.reduce((a, b) => a.isAfter(b) ? a : b);
+        }
+
+        rows.add({
+          'draft_id': _draftId,
+          'round_index': ri,
+          'slot_index': si,
+          'production': offer.production.trim().isEmpty
+              ? 'Unnamed'
+              : offer.production.trim(),
+          'company': offer.company.trim().isEmpty
+              ? null
+              : offer.company.trim(),
+          'contact': offer.contact.trim().isEmpty
+              ? null
+              : offer.contact.trim(),
+          'date_from': dateFrom != null
+              ? dateFrom.toIso8601String().substring(0, 10)
+              : null,
+          'date_to': dateTo != null
+              ? dateTo.toIso8601String().substring(0, 10)
+              : null,
+        });
+      }
+    }
+
+    if (rows.isNotEmpty) {
+      await sb.from('waiting_list').insert(rows);
+    }
+  } catch (e) {
+    debugPrint('Waiting list sync error: $e');
+  }
+}
+
 // ------------------------------------------------------------
 // ✅ Load bus from samletdata for this draft
 // ------------------------------------------------------------
@@ -838,12 +1121,12 @@ bool _hasTravelBefore(List<RoundEntry> entries, int index) {
   while (i >= 0) {
     final loc = _norm(entries[i].location).toLowerCase();
 
-    if (loc == 'travel' || loc == 'off') {
-      return true;
+    if (loc == 'travel') {
+      return true;   // only Travel triggers the 1200km threshold
     }
 
     if (loc.isNotEmpty) {
-      return false;
+      return false;  // Off or any real city stops the search → normal 600km threshold
     }
 
     i--;
@@ -1466,6 +1749,8 @@ offer.rounds[i].bus =
   calcCache: _roundCalcCache,
 );
 
+    await _syncWaitingListAfterSave();
+
     // ----------------------------------------
     // UI refresh
     // ----------------------------------------
@@ -1764,6 +2049,7 @@ Future<void> _scanPdf() async {
     _extraByIndex[index]     = _extraCache[key] ?? '';
     _ferryNameByIndex[index]= _ferryNameCache[key] ?? '';
     _countryKmByIndex[index]= _countryKmCache[key] ?? {};
+    _noDDriveByIndex[index] = _noDDriveCache[key] ?? false;
 
     return _distanceCache[key];
   }
@@ -1812,6 +2098,8 @@ Future<void> _scanPdf() async {
     final extra =
         (res['extra'] as String?)?.trim() ?? '';
 
+    final noDDrive = (res['no_ddrive'] as bool?) ?? false;
+
     // ===================================================
     // COUNTRY KM BREAKDOWN
     // ===================================================
@@ -1843,6 +2131,7 @@ Future<void> _scanPdf() async {
     _extraCache[key]      = extra;
     _ferryNameCache[key] = ferryName;
     _countryKmCache[key] = countryKm;
+    _noDDriveCache[key]  = noDDrive;
 
     // ===================================================
     // PER-INDEX WRITE (UI + CALC)
@@ -1900,6 +2189,7 @@ Future<void> _recalcKm() async {
       _extraByIndex = {};
       _ferryNameByIndex = {};
       _countryKmByIndex = {};
+      _noDDriveByIndex = {};
       _travelBefore = [];
       _kmError = null;
     });
@@ -1923,6 +2213,7 @@ Future<void> _recalcKm() async {
   final Map<int, String> extraByIndex = {};
   final Map<int, String> ferryNameByIndex = {};
   final Map<int, Map<String, double>> countryKmByIndex = {};
+  final Map<int, bool> noDDriveByIndex = {};
 
   final List<bool> travelBefore =
       List<bool>.filled(entries.length, false);
@@ -2009,6 +2300,7 @@ Future<void> _recalcKm() async {
     final country = Map<String, double>.from(
       _countryKmCache[key] ?? {},
     );
+    final noDDrive = _noDDriveCache[key] ?? false;
 
     // ===================================================
     // MERGE TRAVEL BLOCK
@@ -2020,6 +2312,7 @@ Future<void> _recalcKm() async {
       extraByIndex[pendingTravelIndex] = extra;
       ferryNameByIndex[pendingTravelIndex] = ferryName;
       countryKmByIndex[pendingTravelIndex] = country;
+      noDDriveByIndex[pendingTravelIndex] = noDDrive;
 
       // null ut dagens leg
       kmByIndex[i] = 0;
@@ -2028,6 +2321,7 @@ Future<void> _recalcKm() async {
       extraByIndex[i] = '';
       ferryNameByIndex[i] = '';
       countryKmByIndex[i] = {};
+      noDDriveByIndex[i] = false;
 
       travelBefore[pendingTravelIndex] = true;
       travelBefore[i] = true;
@@ -2046,6 +2340,7 @@ Future<void> _recalcKm() async {
     extraByIndex[i] = extra;
     ferryNameByIndex[i] = ferryName;
     countryKmByIndex[i] = country;
+    noDDriveByIndex[i] = noDDrive;
 
     travelBefore[i] = inTravelBlock;
     inTravelBlock = false;
@@ -2073,6 +2368,7 @@ Future<void> _recalcKm() async {
     _extraByIndex = extraByIndex;
     _ferryNameByIndex = ferryNameByIndex;
     _countryKmByIndex = countryKmByIndex;
+    _noDDriveByIndex = noDDriveByIndex;
     _travelBefore = travelBefore;
 
     _loadingKm = false;
@@ -2380,6 +2676,8 @@ Future<RoundCalcResult> _calcRound(int ri) async {
       .toList();
 
   if (dates.isEmpty) {
+    // Clear swe cache entry for empty rounds
+    _sweCalcCache.remove(ri);
 
     final empty = TripCalculator.calculateRound(
       settings: SettingsStore.current,
@@ -2562,8 +2860,92 @@ final safeFerryPerLeg = List<String?>.generate(
   },
 );
 
+final safeNoDDrive = List<bool>.generate(
+  len,
+  (i) => _noDDriveByIndex[i] ?? false,
+);
+
   // Store ferry-per-leg on the round model so it can be used at save time
   offer.rounds[ri].ferryPerLeg = safeFerryPerLeg;
+
+  // ================= SWEDISH MODEL =================
+  if (offer.pricingModel == 'svensk') {
+    final swe = SettingsStore.current.sweSettings;
+
+    // Determine international allowances per leg from country km data
+    final utlTrkt = List<int>.generate(len, (i) {
+      final cKm = _countryKmByIndex[i];
+      if (cKm == null || cKm.isEmpty) return 0;
+      final hasIntl = cKm.entries.any(
+        (e) => e.key.toUpperCase() != 'SE' && e.value > 0,
+      );
+      return hasIntl ? 1 : 0;
+    });
+
+    final sweResult = SweCalculator.calculateRound(
+      settings: swe,
+      legKm: safeLegKm,
+      trailer: round.trailer,
+      utlTraktPerLeg: utlTrkt,
+    );
+
+    final busCount = offer.rounds[ri].busSlots
+            .whereType<String>()
+            .where((x) => x.isNotEmpty)
+            .length;
+    final effectiveBusCount = busCount == 0 ? 1 : busCount;
+
+    // Scale per-leg totals and round grand total up to nearest 1000 SEK
+    final scaledLegTotal = sweResult.legTotal
+        .map((v) => v * effectiveBusCount)
+        .toList();
+    final rawScaled = sweResult.totalCost * effectiveBusCount;
+    final scaledTotal =
+        (rawScaled / 1000).ceil() * 1000.0;
+
+    final scaledSweResult = SweCalcResult(
+      legKm: sweResult.legKm,
+      legVehicleCost: sweResult.legVehicleCost,
+      legKmCost: sweResult.legKmCost,
+      legDriverCost: sweResult.legDriverCost,
+      legDdCost: sweResult.legDdCost,
+      legExtraCost: sweResult.legExtraCost,
+      legTrailerCost: sweResult.legTrailerCost,
+      legInternationalCost: sweResult.legInternationalCost,
+      legTotal: scaledLegTotal,
+      totalCost: scaledTotal,
+      vehicleDagpris: sweResult.vehicleDagpris,
+      chaufforDagpris: sweResult.chaufforDagpris,
+      ddDagpris: sweResult.ddDagpris,
+      milpris: sweResult.milpris,
+    );
+    _sweCalcCache[ri] = scaledSweResult;
+
+    // Create minimal RoundCalcResult for UI compatibility (km stats etc.)
+    final minimal = RoundCalcResult(
+      billableDays: round.billableDays,
+      includedKm: 0,
+      extraKm: 0,
+      dDriveDays: 0,
+      flightTickets: 0,
+      legKm: safeLegKm,
+      tollPerLeg: safeToll,
+      extraPerLeg: safeExtra,
+      hasTravelBefore: safeTravel,
+      noDDrivePerLeg: safeNoDDrive,
+      dayCost: 0,
+      extraKmCost: 0,
+      dDriveCost: 0,
+      trailerDayCost: 0,
+      trailerKmCost: 0,
+      ferryCost: 0,
+      tollCost: 0,
+      flightCost: 0,
+      totalCost: scaledTotal,
+    );
+    _roundCalcCache[ri] = minimal;
+    return minimal;
+  }
 
   // ================= RESULT =================
   final result = TripCalculator.calculateRound(
@@ -2579,6 +2961,7 @@ final safeFerryPerLeg = List<String?>.generate(
     tollPerLeg: safeToll,
     extraPerLeg: safeExtra,
     hasTravelBefore: safeTravel,
+    noDDrivePerLeg: safeNoDDrive,
   );
   // ⭐ MULTI BUS SUMMARY
 final busCount =
@@ -2597,7 +2980,8 @@ final scaled = RoundCalcResult(
   legKm: result.legKm,
   tollPerLeg: result.tollPerLeg,
   extraPerLeg: result.extraPerLeg,
-  hasTravelBefore: result.hasTravelBefore, // ⭐ DENNE VAR SISTE
+  hasTravelBefore: result.hasTravelBefore,
+  noDDrivePerLeg: result.noDDrivePerLeg,
 
   // ---------- COSTS (scaled by buses) ----------
   dayCost: result.dayCost * busCount,
@@ -2646,6 +3030,102 @@ Future<String> _savePdfToFile(Uint8List bytes) async {
 }
 
   String _nok(double v) => "${v.toStringAsFixed(0)},-";
+  String _sek(double v) => "${v.toStringAsFixed(0)} SEK";
+
+  // ===================================================
+  // SWEDISH ROUND BREAKDOWN
+  // ===================================================
+
+  String _buildSweRoundBreakdown(int ri, SweCalcResult r) {
+    final b = StringBuffer();
+    b.writeln("SWEDISH ROUND CALCULATION");
+    b.writeln("----------------------------");
+    b.writeln("Fordon/dag:   ${_sek(r.vehicleDagpris)}");
+    b.writeln("Chauffor/dag: ${_sek(r.chaufforDagpris)}");
+    if (r.ddDagpris > 0) b.writeln("DD/dag:       ${_sek(r.ddDagpris)}");
+    b.writeln("Milpris:      ${r.milpris.toStringAsFixed(2)} SEK/mil");
+    b.writeln();
+
+    final round = offer.rounds[ri];
+    for (int i = 0; i < r.legKm.length; i++) {
+      if (r.legKm[i] <= 0) continue;
+      if (i >= round.entries.length) continue;
+
+      final date = _fmtDate(round.entries[i].date);
+      b.writeln("$date  (${r.legKm[i].toStringAsFixed(0)} km)");
+      b.writeln("  Fordon:    ${_sek(r.legVehicleCost[i])}");
+      b.writeln("  KM-kost:   ${_sek(r.legKmCost[i])}");
+      b.writeln("  Chauffor:  ${_sek(r.legDriverCost[i])}");
+      if (r.legDdCost[i] > 0)
+        b.writeln("  DD:        ${_sek(r.legDdCost[i])}");
+      if (r.legExtraCost[i] > 0)
+        b.writeln("  Extra:     ${_sek(r.legExtraCost[i])}");
+      if (r.legTrailerCost[i] > 0)
+        b.writeln("  Trailer:   ${_sek(r.legTrailerCost[i])}");
+      if (r.legInternationalCost[i] > 0)
+        b.writeln("  Utlandskt: ${_sek(r.legInternationalCost[i])}");
+      b.writeln("  Leg total: ${_sek(r.legTotal[i])}");
+      b.writeln();
+    }
+
+    b.writeln("----------------------------");
+    b.writeln("TOTAL: ${_sek(r.totalCost)}");
+    return b.toString();
+  }
+
+  // ===================================================
+  // SWEDISH TOTAL BREAKDOWN (all rounds)
+  // ===================================================
+
+  String _buildSweTotalBreakdown() {
+    final usedEntries = _sweCalcCache.entries
+        .where((e) => offer.rounds[e.key].entries.isNotEmpty)
+        .toList()
+      ..sort((a, b) => a.key.compareTo(b.key));
+
+    if (usedEntries.isEmpty) return "No rounds calculated yet.";
+
+    final b = StringBuffer();
+    double grandTotal = 0;
+
+    for (final entry in usedEntries) {
+      final ri = entry.key;
+      final r = entry.value;
+      final round = offer.rounds[ri];
+
+      final buses = round.busSlots
+          .whereType<String>()
+          .where((x) => x.isNotEmpty)
+          .map(fmtBus)
+          .join(', ');
+      final busLabel = buses.isNotEmpty ? buses : 'No bus';
+
+      b.writeln("ROUND ${ri + 1}  ($busLabel)");
+      b.writeln("----------------------------");
+      b.writeln("  Fordon/dag: ${_sek(r.vehicleDagpris)}");
+      b.writeln("  Milpris:    ${r.milpris.toStringAsFixed(2)} SEK/mil");
+
+      for (int i = 0; i < r.legKm.length; i++) {
+        if (r.legKm[i] > 0) {
+          final date = i < round.entries.length
+              ? _fmtDate(round.entries[i].date)
+              : "Leg ${i + 1}";
+          b.writeln(
+            "  $date: ${r.legKm[i].toStringAsFixed(0)} km"
+            " → ${_sek(r.legTotal[i])}",
+          );
+        }
+      }
+
+      b.writeln("  Round total: ${_sek(r.totalCost)}");
+      b.writeln();
+      grandTotal += r.totalCost;
+    }
+
+    b.writeln("============================");
+    b.writeln("GRAND TOTAL: ${_sek(grandTotal)}");
+    return b.toString();
+  }
 
 // ------------------------------------------------------------
 // ✅ Open Create Invoice Dialog
@@ -2915,13 +3395,21 @@ double allRoundsTotal = 0;
 double allRoundsFerry = 0;
 double allRoundsToll = 0;
 
-for (int i = 0; i < offer.rounds.length; i++) {
-  final r = _roundCalcCache[i];
-
-  if (r != null) {
-    allRoundsTotal += r.totalCost;
-    allRoundsFerry += r.ferryCost;
-    allRoundsToll += r.tollCost;
+if (offer.pricingModel == 'svensk') {
+  for (int i = 0; i < offer.rounds.length; i++) {
+    final r = _sweCalcCache[i];
+    if (r != null && offer.rounds[i].entries.isNotEmpty) {
+      allRoundsTotal += r.totalCost;
+    }
+  }
+} else {
+  for (int i = 0; i < offer.rounds.length; i++) {
+    final r = _roundCalcCache[i];
+    if (r != null) {
+      allRoundsTotal += r.totalCost;
+      allRoundsFerry += r.ferryCost;
+      allRoundsToll += r.tollCost;
+    }
   }
 }
 
@@ -3096,7 +3584,15 @@ final trailer =
             child: Row(
               children: [
 
-                const Icon(Icons.directions_bus, size: 20),
+                Icon(
+                  bus == "WAITING_LIST"
+                      ? Icons.hourglass_top_outlined
+                      : Icons.directions_bus,
+                  size: 20,
+                  color: bus == "WAITING_LIST"
+                      ? Colors.orange.shade600
+                      : null,
+                ),
                 const SizedBox(width: 10),
 
                 Text(
@@ -3122,7 +3618,7 @@ final trailer =
         offer.rounds[roundIndex]
             .busSlots
             .firstWhere(
-              (b) => b != null,
+              (b) => b != null && b != "WAITING_LIST",
               orElse: () => null,
             );
   });
@@ -3134,9 +3630,13 @@ final trailer =
                     child: Padding(
                       padding: const EdgeInsets.symmetric(vertical: 6),
                       child: Text(
-                        bus ?? "Select bus",
+                        bus == "WAITING_LIST"
+                            ? "Waiting list"
+                            : (bus != null ? fmtBus(bus) : "Select bus"),
                         style: TextStyle(
-                          color: bus == null ? Colors.grey : Colors.black,
+                          color: bus == "WAITING_LIST"
+                              ? Colors.orange.shade700
+                              : (bus == null ? Colors.grey : Colors.black),
                           fontWeight: FontWeight.w600,
                         ),
                       ),
@@ -3175,6 +3675,7 @@ final trailer =
         );
       }),
     ),
+
   ],
 ),
 
@@ -3315,9 +3816,31 @@ Expanded(
 
                 // ---------- EXTRA text (D.Drive / Ferry / Bridge)
                 final bool travelBefore = _hasTravelBefore(round.entries, i);
+                final bool isTravel = toLower == 'travel';
                 final bool hasDDrive = km != null &&
+                    (_noDDriveByIndex[i] != true) &&
                     (travelBefore ? km >= 1200 : km >= 600);
-                final String rawExtra = _extraByIndex[i] ?? '';
+
+                // Ferry/Bridge: show on Travel row, suppress on city row after Travel.
+                String rawExtra;
+                if (isTravel) {
+                  // For Travel row: try own extra first, else look ahead to next real city.
+                  rawExtra = _extraByIndex[i] ?? '';
+                  if (rawExtra.isEmpty) {
+                    for (int j = i + 1; j < round.entries.length; j++) {
+                      final jLoc =
+                          _norm(round.entries[j].location).toLowerCase();
+                      if (jLoc.isEmpty || jLoc == 'travel') continue;
+                      if (jLoc != 'off') rawExtra = _extraByIndex[j] ?? '';
+                      break;
+                    }
+                  }
+                } else if (travelBefore) {
+                  rawExtra = ''; // Ferry/Bridge already shown on Travel row above.
+                } else {
+                  rawExtra = _extraByIndex[i] ?? '';
+                }
+
                 final extraParts = <String>[];
                 if (hasDDrive) extraParts.add('D.Drive');
                 for (final p in rawExtra
@@ -3395,6 +3918,7 @@ Expanded(
   builder: (_, current, __) {
     return OfferPreview(
       offer: current ?? offer,
+      onDeleteRound: _deleteRound,
     );
   },
 ),
@@ -3463,78 +3987,150 @@ Container(
 
       const SizedBox(height: 12),
 
+      // ================= PRICING MODEL TOGGLE =================
+      const Text(
+        "Pricing model",
+        style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
+      ),
+      const SizedBox(height: 6),
+      SegmentedButton<String>(
+        segments: const [
+          ButtonSegment(value: 'norsk', label: Text("🇳🇴 Norsk")),
+          ButtonSegment(value: 'svensk', label: Text("🇸🇪 Svensk")),
+        ],
+        selected: {offer.pricingModel},
+        onSelectionChanged: (selected) async {
+          setState(() {
+            offer.pricingModel = selected.first;
+            _sweCalcCache.clear();
+            _roundCalcCache.clear();
+          });
+          await _recalcAllRounds();
+        },
+      ),
 
+      const SizedBox(height: 12),
 
 Container(
-  width: double.infinity,
-  padding: const EdgeInsets.all(14),
   decoration: BoxDecoration(
     color: cs.surface,
     borderRadius: BorderRadius.circular(12),
     border: Border.all(color: cs.outlineVariant),
   ),
-  child: Column(
-    crossAxisAlignment: CrossAxisAlignment.start,
-    children: [
-
-      Text(
+  child: Theme(
+    data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+    child: ExpansionTile(
+      initiallyExpanded: false,
+      onExpansionChanged: (v) => setState(() => _calcExpanded = v),
+      tilePadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 2),
+      childrenPadding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
+      title: Text(
         "Round calculation",
         style: Theme.of(context)
             .textTheme
             .titleMedium
             ?.copyWith(fontWeight: FontWeight.w900),
       ),
-
-      const SizedBox(height: 10),
-
-      Text(
-        _buildRoundBreakdown(
-          roundIndex,
-          calc,
-          _effectiveSettings(),
+      children: [
+        Align(
+          alignment: Alignment.centerLeft,
+          child: Text(
+            offer.pricingModel == 'svensk'
+                ? (_sweCalcCache[roundIndex] != null
+                    ? _buildSweRoundBreakdown(
+                        roundIndex, _sweCalcCache[roundIndex]!)
+                    : "Calculating...")
+                : _buildRoundBreakdown(
+                    roundIndex, calc, _effectiveSettings()),
+            style: const TextStyle(
+              fontFamily: "monospace",
+              fontWeight: FontWeight.w700,
+            ),
+          ),
         ),
-        style: const TextStyle(
-          fontFamily: "monospace",
-          fontWeight: FontWeight.w700,
-        ),
-      ),
-    ],
+      ],
+    ),
   ),
 ),
 
-      // ---------- VAT ----------
-      Container(
-        width: double.infinity,
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(
-          color: cs.surface,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(
-            color: cs.outlineVariant,
+      // ---------- TOTAL CALCULATION ----------
+      const SizedBox(height: 10),
+
+Container(
+  decoration: BoxDecoration(
+    color: cs.surface,
+    borderRadius: BorderRadius.circular(12),
+    border: Border.all(color: cs.outlineVariant),
+  ),
+  child: Theme(
+    data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+    child: ExpansionTile(
+      initiallyExpanded: false,
+      onExpansionChanged: (v) => setState(() => _totalExpanded = v),
+      tilePadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 2),
+      childrenPadding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
+      title: Text(
+        "Total calculation",
+        style: Theme.of(context)
+            .textTheme
+            .titleMedium
+            ?.copyWith(fontWeight: FontWeight.w900),
+      ),
+      children: [
+        Align(
+          alignment: Alignment.centerLeft,
+          child: Text(
+            offer.pricingModel == 'svensk'
+                ? _buildSweTotalBreakdown()
+                : _buildTotalBreakdown(_effectiveSettings()),
+            style: const TextStyle(
+              fontFamily: "monospace",
+              fontWeight: FontWeight.w700,
+            ),
           ),
         ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.end,
-          children: [
+      ],
+    ),
+  ),
+),
 
-            const Text(
-              "VAT summary",
-              style: TextStyle(
-                fontWeight: FontWeight.w900,
-                fontSize: 14,
+      if (offer.pricingModel == 'norsk') ...[
+        const SizedBox(height: 10),
+
+        // ---------- VAT ----------
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: cs.surface,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: cs.outlineVariant,
+            ),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+
+              const Text(
+                "VAT summary",
+                style: TextStyle(
+                  fontWeight: FontWeight.w900,
+                  fontSize: 14,
+                ),
               ),
-            ),
 
-            const SizedBox(height: 10),
+              const SizedBox(height: 10),
 
-            _buildVatBox(
-              foreignVatMap,
-              totalExVat,
-              totalIncVat,
-            ),
-          ],
+              _buildVatBox(
+                foreignVatMap,
+                totalExVat,
+                totalIncVat,
+              ),
+            ],
+          ),
         ),
-      ),
+      ],
     ],
   ),
 ),
@@ -4532,74 +5128,49 @@ class _PricingOverrideCardState extends State<_PricingOverrideCard> {
 
     return Container(
       margin: const EdgeInsets.only(top: 12),
-      padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: cs.surface,
         borderRadius: BorderRadius.circular(14),
         border: Border.all(color: cs.outlineVariant),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-
-          const Text(
+      child: Theme(
+        data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+        child: ExpansionTile(
+          initiallyExpanded: false,
+          tilePadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+          childrenPadding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+          title: const Text(
             "Pricing (per draft)",
             style: TextStyle(
               fontWeight: FontWeight.w900,
               fontSize: 13,
             ),
           ),
+          children: [
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text("Override global pricing"),
+              value: _localEnabled,
+              onChanged: (v) {
+                setState(() {
+                  _localEnabled = v;
+                  widget.offer.pricingOverride = v ? _current() : null;
+                });
+                CurrentOfferStore.set(widget.offer);
+                widget.onChanged();
+              },
+            ),
 
-          const SizedBox(height: 10),
+            const SizedBox(height: 6),
 
-          SwitchListTile(
-            contentPadding: EdgeInsets.zero,
-            title: const Text("Override global pricing"),
-            value: _localEnabled,
-            onChanged: (v) {
-  setState(() {
-    _localEnabled = v;
-    widget.offer.pricingOverride = v ? _current() : null;
-  });
-
-  CurrentOfferStore.set(widget.offer); // 🔥 DENNE OGSÅ
-  widget.onChanged();
-}
-          ),
-
-          const SizedBox(height: 6),
-
-          _field(
-            "Day price",
-            _dayCtrl,
-            (d) => _update(p.copyWith(dayPrice: d)),
-          ),
-          _field(
-            "Extra km price",
-            _extraKmCtrl,
-            (d) => _update(p.copyWith(extraKmPrice: d)),
-          ),
-          _field(
-            "Trailer day",
-            _trailerDayCtrl,
-            (d) => _update(p.copyWith(trailerDayPrice: d)),
-          ),
-          _field(
-            "Trailer km",
-            _trailerKmCtrl,
-            (d) => _update(p.copyWith(trailerKmPrice: d)),
-          ),
-          _field(
-            "D.Drive",
-            _dDriveCtrl,
-            (d) => _update(p.copyWith(dDriveDayPrice: d)),
-          ),
-          _field(
-            "Flight ticket",
-            _flightCtrl,
-            (d) => _update(p.copyWith(flightTicketPrice: d)),
-          ),
-        ],
+            _field("Day price",      _dayCtrl,       (d) => _update(p.copyWith(dayPrice: d))),
+            _field("Extra km price", _extraKmCtrl,   (d) => _update(p.copyWith(extraKmPrice: d))),
+            _field("Trailer day",    _trailerDayCtrl,(d) => _update(p.copyWith(trailerDayPrice: d))),
+            _field("Trailer km",     _trailerKmCtrl, (d) => _update(p.copyWith(trailerKmPrice: d))),
+            _field("D.Drive",        _dDriveCtrl,    (d) => _update(p.copyWith(dDriveDayPrice: d))),
+            _field("Flight ticket",  _flightCtrl,    (d) => _update(p.copyWith(flightTicketPrice: d))),
+          ],
+        ),
       ),
     );
   }
