@@ -7,6 +7,7 @@ import 'package:flutter/gestures.dart';
 
 import '../services/offer_storage_service.dart';
 import '../services/notification_service.dart';
+import '../services/email_service.dart';
 
 // ============================================================
 // HELPERS
@@ -1253,7 +1254,7 @@ class BookingSegment extends StatelessWidget {
         items: const [
 
           PopupMenuItem(
-            value: 'draft',
+            value: 'Draft',
             child: Row(
               children: [
                 _StatusDot(color: Colors.purple),
@@ -1264,7 +1265,7 @@ class BookingSegment extends StatelessWidget {
           ),
 
           PopupMenuItem(
-            value: 'inquiry',
+            value: 'Inquiry',
             child: Row(
               children: [
                 _StatusDot(color: Colors.orange),
@@ -1275,7 +1276,7 @@ class BookingSegment extends StatelessWidget {
           ),
 
           PopupMenuItem(
-            value: 'confirmed',
+            value: 'Confirmed',
             child: Row(
               children: [
                 _StatusDot(color: Colors.green),
@@ -1286,7 +1287,7 @@ class BookingSegment extends StatelessWidget {
           ),
 
           PopupMenuItem(
-            value: 'invoiced',
+            value: 'Invoiced',
             child: Row(
               children: [
                 _StatusDot(color: Colors.blue),
@@ -1667,13 +1668,16 @@ Future<void> load() async {
     // 2️⃣ OPPDATER FELLES FELT — kun denne hendelsen
     // =====================================================
 
+    final oldStatus = (rows.first['status'] as String? ?? '').trim();
+    final newStatus = statusCtrl.text.trim();
+
     final rowIds = rows.map((r) => r['id'].toString()).toList();
 
     await supabase
         .from('samletdata')
         .update({
           'sjafor': newSjafor,
-          'status': statusCtrl.text.trim(),
+          'status': newStatus,
           'contact_name': contactNameCtrl.text.trim(),
           'contact_email': contactEmailCtrl.text.trim(),
           'contact_phone': contactPhoneCtrl.text.trim(),
@@ -1697,6 +1701,34 @@ Future<void> load() async {
             'kommentarer': commentCtrls[id]?.text.trim() ?? '',
           })
           .eq('id', id);
+    }
+
+    // =====================================================
+    // 3.5️⃣ FERRY BOOKING EMAIL — ved overgang til Confirmed
+    // =====================================================
+
+    if (oldStatus != 'Confirmed' && newStatus == 'Confirmed') {
+      try {
+        final draft = await OfferStorageService.loadDraft(draftId);
+        debugPrint('FERRY EMAIL (calendar edit): '
+            'ferryPerLeg=${draft.rounds.map((r) => r.ferryPerLeg).toList()}');
+        await EmailService.sendFerryBookingEmail(offer: draft);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Ferry booking email sent ✅')),
+          );
+        }
+      } catch (e) {
+        debugPrint('Ferry email error: $e');
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Ferry email failed: $e'),
+              backgroundColor: Colors.orange,
+            ),
+          );
+        }
+      }
     }
 
     // =====================================================
@@ -2249,7 +2281,17 @@ class _StatusDatePickerDialogState
           .filter('id', 'in', '($ids)');
     }
 
-    // 2. Also update the offer draft so the bus change persists
+    // 2. Ferry booking email — fires when setting to Confirmed
+    if (widget.newStatus == 'Confirmed') {
+      try {
+        final draft = await OfferStorageService.loadDraft(widget.draftId);
+        await EmailService.sendFerryBookingEmail(offer: draft);
+      } catch (e) {
+        debugPrint('Ferry email error: $e');
+      }
+    }
+
+    // 3. Also update the offer draft so the bus change persists
     if (widget.fromBus.isNotEmpty) {
       final Set<int> affectedRounds = {};
       for (final b in blocks) {

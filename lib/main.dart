@@ -16,6 +16,7 @@ import 'pages/calendar_page.dart';
 import 'pages/google_test_page.dart';
 import 'pages/invoices_page.dart';
 import 'pages/issues_page.dart';
+import 'pages/economy_page.dart';
 
 import 'state/settings_store.dart';
 import 'ui/css_theme.dart';
@@ -229,6 +230,12 @@ class BookingApp extends StatelessWidget {
             GoRoute(
               path: "/issues",
               builder: (context, state) => const IssuesPage(),
+            ),
+
+            // ---------------- ECONOMY ----------------
+            GoRoute(
+              path: "/economy",
+              builder: (context, state) => const EconomyPage(),
             ),
 
             // ---------------- GOOGLE TEST ----------------

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
@@ -239,8 +241,58 @@ class _TopBarState extends State<_TopBar> {
 // ------------------------------------------------------------
 // SIDE NAV
 // ------------------------------------------------------------
-class _SideNav extends StatelessWidget {
+class _SideNav extends StatefulWidget {
   const _SideNav();
+
+  @override
+  State<_SideNav> createState() => _SideNavState();
+}
+
+class _SideNavState extends State<_SideNav> {
+  final _supabase = Supabase.instance.client;
+  int _unseenCount = 0;
+  RealtimeChannel? _channel;
+  Timer? _pollTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadUnseenCount();
+    _subscribeRealtime();
+    // Poll every 15 seconds as fallback if realtime doesn't fire
+    _pollTimer = Timer.periodic(const Duration(seconds: 15), (_) => _loadUnseenCount());
+  }
+
+  @override
+  void dispose() {
+    _channel?.unsubscribe();
+    _pollTimer?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _loadUnseenCount() async {
+    try {
+      final res = await _supabase
+          .from('issues')
+          .select('id')
+          .or('seen_by_admin.is.null,seen_by_admin.eq.false');
+      if (mounted) setState(() => _unseenCount = res.length);
+    } catch (e) {
+      debugPrint('Badge count error: $e');
+    }
+  }
+
+  void _subscribeRealtime() {
+    _channel = _supabase
+        .channel('issues-badge')
+        .onPostgresChanges(
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: 'issues',
+          callback: (_) => _loadUnseenCount(),
+        )
+        .subscribe();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -256,31 +308,25 @@ class _SideNav extends StatelessWidget {
         padding: const EdgeInsets.all(16),
         child: Column(
           children: [
-            // --------------------------------------------------
-// --------------------------------------------------
-// LOGO (REN + STØRRE)
-// --------------------------------------------------
-Padding(
-  padding: const EdgeInsets.only(bottom: 20, top: 10),
-  child: Center(
-    child: Image.asset(
-      "assets/pdf/logos/TourFlowLogo.png",
-
-      height: 150, // 👈 større logo
-      fit: BoxFit.contain,
-
-      errorBuilder: (context, error, stack) {
-        return const Text(
-          "TourFlow",
-          style: TextStyle(
-            fontWeight: FontWeight.bold,
-            fontSize: 24,
-          ),
-        );
-      },
-    ),
-  ),
-),
+            Padding(
+              padding: const EdgeInsets.only(bottom: 20, top: 10),
+              child: Center(
+                child: Image.asset(
+                  "assets/pdf/logos/TourFlowLogo.png",
+                  height: 150,
+                  fit: BoxFit.contain,
+                  errorBuilder: (context, error, stack) {
+                    return const Text(
+                      "TourFlow",
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 24,
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ),
 
             // --------------------------------------------------
             // NAV ITEMS
@@ -322,9 +368,16 @@ Padding(
             ),
 
             const _NavItem(
+              icon: Icons.bar_chart_rounded,
+              label: "Economy",
+              route: "/economy",
+            ),
+
+            _NavItem(
               icon: Icons.report_problem_rounded,
               label: "Issues",
               route: "/issues",
+              badge: _unseenCount,
             ),
 
             const Spacer(),
@@ -348,11 +401,13 @@ class _NavItem extends StatelessWidget {
   final IconData icon;
   final String label;
   final String route;
+  final int badge;
 
   const _NavItem({
     required this.icon,
     required this.label,
     required this.route,
+    this.badge = 0,
   });
 
   @override
@@ -391,13 +446,32 @@ class _NavItem extends StatelessWidget {
 
             const SizedBox(width: 10),
 
-            Text(
-              label,
-              style: TextStyle(
-                fontWeight: FontWeight.w900,
-                color: selected ? Colors.white : Colors.black87,
+            Expanded(
+              child: Text(
+                label,
+                style: TextStyle(
+                  fontWeight: FontWeight.w900,
+                  color: selected ? Colors.white : Colors.black87,
+                ),
               ),
             ),
+
+            if (badge > 0)
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                decoration: BoxDecoration(
+                  color: selected ? Colors.white : Colors.red,
+                  borderRadius: BorderRadius.circular(999),
+                ),
+                child: Text(
+                  badge > 99 ? '99+' : '$badge',
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w800,
+                    color: selected ? Colors.red : Colors.white,
+                  ),
+                ),
+              ),
           ],
         ),
       ),

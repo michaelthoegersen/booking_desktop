@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
 
+import '../models/offer_draft.dart';
 import '../state/settings_store.dart';
 import '../widgets/send_invoice_dialog.dart' show OfferSummary;
 
@@ -225,4 +226,90 @@ class EmailService {
 
   static String? _v(String? s) =>
       (s == null || s.trim().isEmpty) ? null : s.trim();
+
+  // --------------------------------------------------
+  // FERRY BOOKING EMAIL
+  // --------------------------------------------------
+
+  static bool _isExcludedFerry(String name) {
+    final lower = name.toLowerCase().replaceAll('ö', 'o').replaceAll('ø', 'o');
+    return lower.contains('resundsbroen');
+  }
+
+  static Future<void> sendFerryBookingEmail({
+    required OfferDraft offer,
+  }) async {
+    const to = 'mail@michaelthoegersen.com';
+    const subject = 'Ferry booking request';
+
+    // Collect all ferry legs across all rounds, grouped by date.
+    // Ferry names may be combined strings like "Öresundsbroen & Rødby - Puttgarden"
+    // so we split on "&" and filter each part individually.
+    final Map<DateTime, List<String>> ferryByDate = {};
+
+    // Collect all buses and trailer status across all rounds
+    final Set<String> allBuses = {};
+    bool anyTrailer = false;
+
+    for (final r in offer.rounds) {
+      for (final b in r.busSlots) {
+        if (b != null && b.isNotEmpty) allBuses.add(b);
+      }
+      if (r.trailerSlots.any((t) => t)) anyTrailer = true;
+
+      for (int li = 0; li < r.ferryPerLeg.length; li++) {
+        final raw = r.ferryPerLeg[li];
+        if (raw == null || raw.trim().isEmpty) continue;
+        if (li >= r.entries.length) continue;
+
+        final date = DateTime.utc(
+          r.entries[li].date.year,
+          r.entries[li].date.month,
+          r.entries[li].date.day,
+        );
+
+        // Split combined ferry strings and filter excluded ferries
+        final parts = raw.split('&').map((s) => s.trim()).where((s) => s.isNotEmpty && !_isExcludedFerry(s)).toList();
+        for (final part in parts) {
+          ferryByDate.putIfAbsent(date, () => []).add(part);
+        }
+      }
+    }
+
+    if (ferryByDate.isEmpty) return;
+
+    final sortedDates = ferryByDate.keys.toList()..sort();
+
+    final buf = StringBuffer();
+    buf.writeln('Hi,');
+    buf.writeln();
+    buf.writeln('Hope you are doing well. Could you please help me with booking these ferries?');
+    buf.writeln();
+    buf.writeln('Production: ${offer.production.trim().isEmpty ? '(no production)' : offer.production.trim()}');
+    if (allBuses.isNotEmpty) {
+      buf.writeln('Bus: ${allBuses.join(', ')}');
+    }
+    buf.writeln('Trailer: ${anyTrailer ? 'Yes' : 'No'}');
+    // Vehicle type (kjoretoy)
+    var kjoretoy = offer.busType.label;
+    if (anyTrailer) kjoretoy += ' + trailer';
+    if (offer.busCount > 1) kjoretoy = '${offer.busCount}x $kjoretoy';
+    buf.writeln('Layout: $kjoretoy');
+    buf.writeln();
+
+    for (final date in sortedDates) {
+      final ferries = ferryByDate[date]!;
+      buf.writeln(_dateFmt.format(date));
+      for (final ferry in ferries) {
+        buf.writeln(ferry);
+      }
+      buf.writeln();
+    }
+
+    buf.writeln();
+    buf.writeln('Best Regards');
+    buf.writeln('Michael Thøgersen');
+
+    await sendEmail(to: to, subject: subject, body: buf.toString());
+  }
 }

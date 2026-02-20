@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../services/notification_service.dart';
+import '../ui/css_theme.dart';
 
 class IssuesPage extends StatefulWidget {
   const IssuesPage({super.key});
@@ -15,29 +16,80 @@ class _IssuesPageState extends State<IssuesPage> {
 
   List<Map<String, dynamic>> _issues = [];
   bool _loading = true;
-  String _filterStatus = 'all'; // all | open | in_progress | resolved
+  String _filterStatus = 'all';
   bool _filterCritical = false;
 
   Map<String, dynamic>? _selected;
+  RealtimeChannel? _channel;
 
   @override
   void initState() {
     super.initState();
     _load();
+    _subscribeRealtime();
+    _markAllSeen();
   }
 
-  // ── data ──────────────────────────────────────────────────
+  @override
+  void dispose() {
+    _channel?.unsubscribe();
+    super.dispose();
+  }
+
+  Future<void> _markAllSeen() async {
+    try {
+      await _supabase
+          .from('issues')
+          .update({'seen_by_admin': true})
+          .or('seen_by_admin.is.null,seen_by_admin.eq.false');
+    } catch (_) {}
+  }
+
+  void _subscribeRealtime() {
+    _channel = _supabase
+        .channel('issues-changes')
+        .onPostgresChanges(
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: 'issues',
+          callback: (payload) => _load(),
+        )
+        .subscribe();
+  }
 
   Future<void> _load() async {
     setState(() => _loading = true);
     try {
-      var q = _supabase
+      final data = await _supabase
           .from('issues')
-          .select('*, profiles(name)')
+          .select('*')
           .order('created_at', ascending: false);
 
-      final data = await q;
-      setState(() => _issues = List<Map<String, dynamic>>.from(data));
+      final issues = List<Map<String, dynamic>>.from(data);
+
+      final userIds = issues
+          .map((i) => i['user_id'] as String?)
+          .whereType<String>()
+          .toSet()
+          .toList();
+
+      Map<String, String> nameMap = {};
+      if (userIds.isNotEmpty) {
+        final profiles = await _supabase
+            .from('profiles')
+            .select('id, name')
+            .inFilter('id', userIds);
+        for (final p in profiles) {
+          nameMap[p['id'] as String] = (p['name'] ?? '') as String;
+        }
+      }
+
+      for (final issue in issues) {
+        final uid = issue['user_id'] as String?;
+        issue['_driver_name'] = uid != null ? (nameMap[uid] ?? '') : '';
+      }
+
+      setState(() => _issues = issues);
     } catch (e) {
       debugPrint('Load issues error: $e');
     } finally {
@@ -54,8 +106,6 @@ class _IssuesPageState extends State<IssuesPage> {
     }).toList();
   }
 
-  // ── helpers ───────────────────────────────────────────────
-
   Color _statusColor(String? status) {
     switch (status) {
       case 'in_progress':
@@ -70,22 +120,22 @@ class _IssuesPageState extends State<IssuesPage> {
   String _statusLabel(String? status) {
     switch (status) {
       case 'in_progress':
-        return 'Under behandling';
+        return 'In Progress';
       case 'resolved':
-        return 'Løst';
+        return 'Resolved';
       default:
-        return 'Åpen';
+        return 'Open';
     }
   }
 
   String _categoryLabel(String? cat) {
     const map = {
-      'motor': 'Motor',
-      'brakes': 'Bremser',
-      'tires': 'Dekk',
-      'electric': 'Elektrisk',
-      'interior': 'Interiør',
-      'other': 'Annet',
+      'motor': 'Engine',
+      'brakes': 'Brakes',
+      'tires': 'Tires',
+      'electric': 'Electrical',
+      'interior': 'Interior',
+      'other': 'Other',
     };
     return map[cat] ?? (cat ?? '');
   }
@@ -101,92 +151,118 @@ class _IssuesPageState extends State<IssuesPage> {
   }
 
   String _driverName(Map<String, dynamic> issue) {
-    final profile = issue['profiles'];
-    if (profile is Map) return (profile['name'] ?? '').toString();
-    return '';
+    return (issue['_driver_name'] ?? '').toString();
   }
-
-  // ── build ─────────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      children: [
-        // ── left: list ──
-        SizedBox(
-          width: 380,
-          child: Column(
-            children: [
-              _buildFilterBar(),
-              Expanded(child: _buildList()),
-            ],
+    final cs = Theme.of(context).colorScheme;
+
+    return Padding(
+      padding: const EdgeInsets.all(18),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // ── Left: list panel ──
+          SizedBox(
+            width: 360,
+            child: Container(
+              decoration: BoxDecoration(
+                color: cs.surfaceContainerLowest,
+                borderRadius: BorderRadius.circular(18),
+                border: Border.all(color: cs.outlineVariant),
+              ),
+              child: Column(
+                children: [
+                  _buildFilterBar(cs),
+                  Expanded(child: _buildList(cs)),
+                ],
+              ),
+            ),
           ),
-        ),
 
-        const VerticalDivider(width: 1),
+          const SizedBox(width: 14),
 
-        // ── right: detail ──
-        Expanded(
-          child: _selected == null
-              ? const Center(
-                  child: Text(
-                    'Velg en rapport for å se detaljer',
-                    style: TextStyle(color: Colors.black45),
+          // ── Right: detail panel ──
+          Expanded(
+            child: _selected == null
+                ? const SizedBox.shrink()
+                : Container(
+                    decoration: BoxDecoration(
+                      color: cs.surfaceContainerLowest,
+                      borderRadius: BorderRadius.circular(18),
+                      border: Border.all(color: cs.outlineVariant),
+                    ),
+                    child: _IssueDetail(
+                      key: ValueKey(_selected!['id']),
+                      issue: _selected!,
+                      statusLabel: _statusLabel,
+                      categoryLabel: _categoryLabel,
+                      statusColor: _statusColor,
+                      driverName: _driverName(_selected!),
+                      fmtDate: _fmtDate,
+                      onSaved: (updated) {
+                        final idx = _issues
+                            .indexWhere((i) => i['id'] == updated['id']);
+                        if (idx != -1) {
+                          setState(() {
+                            _issues[idx] = updated;
+                            _selected = updated;
+                          });
+                        }
+                      },
+                      onDeleted: () {
+                        setState(() {
+                          _issues.removeWhere(
+                              (i) => i['id'] == _selected!['id']);
+                          _selected = null;
+                        });
+                      },
+                    ),
                   ),
-                )
-              : _IssueDetail(
-                  key: ValueKey(_selected!['id']),
-                  issue: _selected!,
-                  statusLabel: _statusLabel,
-                  categoryLabel: _categoryLabel,
-                  driverName: _driverName(_selected!),
-                  fmtDate: _fmtDate,
-                  onSaved: (updated) {
-                    final idx =
-                        _issues.indexWhere((i) => i['id'] == updated['id']);
-                    if (idx != -1) {
-                      setState(() {
-                        _issues[idx] = updated;
-                        _selected = updated;
-                      });
-                    }
-                  },
-                ),
-        ),
-      ],
+          ),
+        ],
+      ),
     );
   }
 
-  Widget _buildFilterBar() {
+  Widget _buildFilterBar(ColorScheme cs) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-      decoration: const BoxDecoration(
-        border: Border(bottom: BorderSide(color: Color(0xFFE0E0E0))),
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
+      decoration: BoxDecoration(
+        border: Border(
+            bottom: BorderSide(color: cs.outlineVariant)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              const Text('Feilrapporter',
-                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+              Text(
+                'Issue Reports',
+                style: Theme.of(context)
+                    .textTheme
+                    .titleMedium
+                    ?.copyWith(fontWeight: FontWeight.w900),
+              ),
               const Spacer(),
               IconButton(
-                tooltip: 'Oppdater',
-                icon: const Icon(Icons.refresh),
+                tooltip: 'Refresh',
+                icon: const Icon(Icons.refresh, size: 20),
                 onPressed: _load,
               ),
             ],
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 10),
           Wrap(
             spacing: 6,
+            runSpacing: 6,
             children: [
               for (final (key, label) in [
-                ('all', 'Alle'),
-                ('open', 'Åpne'),
-                ('in_progress', 'Pågående'),
-                ('resolved', 'Løste'),
+                ('all', 'All'),
+                ('open', 'Open'),
+                ('in_progress', 'In Progress'),
+                ('resolved', 'Resolved'),
               ])
                 ChoiceChip(
                   label: Text(label),
@@ -195,22 +271,29 @@ class _IssuesPageState extends State<IssuesPage> {
                     _filterStatus = key;
                     _selected = null;
                   }),
-                  selectedColor: Colors.black,
+                  selectedColor: CssTheme.header,
+                  backgroundColor: cs.surfaceContainerLowest,
+                  side: BorderSide(color: cs.outlineVariant),
                   labelStyle: TextStyle(
-                    color: _filterStatus == key ? Colors.white : Colors.black87,
-                    fontWeight: FontWeight.w600,
                     fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                    color: _filterStatus == key
+                        ? Colors.white
+                        : CssTheme.text,
                   ),
                 ),
               FilterChip(
-                label: const Text('Kritisk'),
+                label: const Text('Critical'),
                 selected: _filterCritical,
                 selectedColor: Colors.red.shade100,
+                backgroundColor: cs.surfaceContainerLowest,
+                side: BorderSide(color: cs.outlineVariant),
                 checkmarkColor: Colors.red,
                 labelStyle: TextStyle(
-                  color: _filterCritical ? Colors.red : Colors.black87,
-                  fontWeight: FontWeight.w600,
                   fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                  color:
+                      _filterCritical ? Colors.red : CssTheme.text,
                 ),
                 onSelected: (v) => setState(() {
                   _filterCritical = v;
@@ -224,7 +307,7 @@ class _IssuesPageState extends State<IssuesPage> {
     );
   }
 
-  Widget _buildList() {
+  Widget _buildList(ColorScheme cs) {
     if (_loading) {
       return const Center(child: CircularProgressIndicator());
     }
@@ -233,86 +316,95 @@ class _IssuesPageState extends State<IssuesPage> {
 
     if (items.isEmpty) {
       return const Center(
-        child: Text('Ingen rapporter', style: TextStyle(color: Colors.black45)),
+        child: Text('No reports',
+            style: TextStyle(color: CssTheme.textMuted)),
       );
     }
 
     return ListView.separated(
+      padding: const EdgeInsets.symmetric(vertical: 8),
       itemCount: items.length,
       separatorBuilder: (_, __) =>
-          const Divider(height: 1, indent: 16, endIndent: 16),
+          Divider(height: 1, color: cs.outlineVariant),
       itemBuilder: (context, i) {
         final issue = items[i];
         final isSelected = _selected?['id'] == issue['id'];
         final critical = issue['critical'] == true;
         final status = issue['status'] ?? 'open';
 
-        return ListTile(
-          selected: isSelected,
-          selectedTileColor: Colors.black.withOpacity(0.06),
+        return InkWell(
           onTap: () => setState(() => _selected = issue),
-          contentPadding:
-              const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-          title: Row(
-            children: [
-              Expanded(
-                child: Text(
-                  _categoryLabel(issue['category']),
-                  style: const TextStyle(
-                      fontWeight: FontWeight.w700, fontSize: 14),
-                ),
-              ),
-              if (critical)
-                Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                  margin: const EdgeInsets.only(right: 6),
-                  decoration: BoxDecoration(
-                    color: Colors.red.shade50,
-                    borderRadius: BorderRadius.circular(6),
-                    border: Border.all(color: Colors.red.shade200),
-                  ),
-                  child: Text('Kritisk',
-                      style: TextStyle(
+          child: Container(
+            padding: const EdgeInsets.symmetric(
+                horizontal: 16, vertical: 12),
+            color: isSelected
+                ? Colors.black.withOpacity(0.06)
+                : Colors.transparent,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        _categoryLabel(issue['category']),
+                        style: const TextStyle(
+                            fontWeight: FontWeight.w800,
+                            fontSize: 14),
+                      ),
+                    ),
+                    if (critical)
+                      Container(
+                        margin: const EdgeInsets.only(right: 6),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 7, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: Colors.red.shade50,
+                          borderRadius: BorderRadius.circular(6),
+                          border: Border.all(
+                              color: Colors.red.shade200),
+                        ),
+                        child: Text('Critical',
+                            style: TextStyle(
+                                fontSize: 10,
+                                fontWeight: FontWeight.w700,
+                                color: Colors.red.shade700)),
+                      ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: _statusColor(status)
+                            .withOpacity(0.15),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Text(
+                        _statusLabel(status),
+                        style: TextStyle(
                           fontSize: 10,
                           fontWeight: FontWeight.w700,
-                          color: Colors.red.shade700)),
+                          color: _statusColor(status),
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
-              Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                decoration: BoxDecoration(
-                  color: _statusColor(status).withOpacity(0.15),
-                  borderRadius: BorderRadius.circular(6),
+                const SizedBox(height: 4),
+                Text(
+                  (issue['description'] ?? '').toString(),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                      fontSize: 12, color: CssTheme.textMuted),
                 ),
-                child: Text(
-                  _statusLabel(status),
-                  style: TextStyle(
-                    fontSize: 10,
-                    fontWeight: FontWeight.w700,
-                    color: _statusColor(status),
-                  ),
+                const SizedBox(height: 4),
+                Text(
+                  '${_driverName(issue)}  ·  ${_fmtDate(issue['created_at'])}',
+                  style: const TextStyle(
+                      fontSize: 11, color: CssTheme.textMuted),
                 ),
-              ),
-            ],
-          ),
-          subtitle: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const SizedBox(height: 4),
-              Text(
-                (issue['description'] ?? '').toString(),
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontSize: 12),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                '${_driverName(issue)}  ·  ${_fmtDate(issue['created_at'])}',
-                style:
-                    const TextStyle(fontSize: 11, color: Colors.black45),
-              ),
-            ],
+              ],
+            ),
           ),
         );
       },
@@ -320,24 +412,28 @@ class _IssuesPageState extends State<IssuesPage> {
   }
 }
 
-// ── Detail panel ──────────────────────────────────────────────────────────────
+// ── Detail panel ───────────────────────────────────────────────────────────────
 
 class _IssueDetail extends StatefulWidget {
   final Map<String, dynamic> issue;
   final String Function(String?) statusLabel;
   final String Function(String?) categoryLabel;
+  final Color Function(String?) statusColor;
   final String driverName;
   final String Function(String?) fmtDate;
   final void Function(Map<String, dynamic>) onSaved;
+  final VoidCallback onDeleted;
 
   const _IssueDetail({
     super.key,
     required this.issue,
     required this.statusLabel,
     required this.categoryLabel,
+    required this.statusColor,
     required this.driverName,
     required this.fmtDate,
     required this.onSaved,
+    required this.onDeleted,
   });
 
   @override
@@ -349,6 +445,7 @@ class _IssueDetailState extends State<_IssueDetail> {
   late String _status;
   late final TextEditingController _noteCtrl;
   bool _saving = false;
+  bool _deleting = false;
 
   @override
   void initState() {
@@ -364,6 +461,47 @@ class _IssueDetailState extends State<_IssueDetail> {
     super.dispose();
   }
 
+  Future<void> _delete() async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete report'),
+        content: const Text(
+            'Are you sure you want to delete this report? This cannot be undone.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: FilledButton.styleFrom(
+                backgroundColor: Colors.red),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (confirm != true) return;
+
+    setState(() => _deleting = true);
+    try {
+      await _supabase
+          .from('issues')
+          .delete()
+          .eq('id', widget.issue['id']);
+      widget.onDeleted();
+    } catch (e) {
+      debugPrint('Delete issue error: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('Error: $e')));
+      }
+    } finally {
+      if (mounted) setState(() => _deleting = false);
+    }
+  }
+
   Future<void> _save() async {
     setState(() => _saving = true);
     try {
@@ -377,16 +515,15 @@ class _IssueDetailState extends State<_IssueDetail> {
           .update(updated)
           .eq('id', widget.issue['id']);
 
-      // Notify driver if status changed
       if (_status != (widget.issue['status'] ?? 'open')) {
         final userId = widget.issue['user_id'] as String?;
         if (userId != null) {
           final label = _status == 'resolved'
-              ? 'Feilrapport løst'
-              : 'Feilrapport oppdatert';
+              ? 'Issue resolved'
+              : 'Issue updated';
           final body = _noteCtrl.text.trim().isNotEmpty
               ? _noteCtrl.text.trim()
-              : 'Status er endret til: ${widget.statusLabel(_status)}';
+              : 'Status changed to: ${widget.statusLabel(_status)}';
 
           await NotificationService.sendToUserId(
             userId: userId,
@@ -402,216 +539,246 @@ class _IssueDetailState extends State<_IssueDetail> {
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Lagret')),
+          const SnackBar(content: Text('Saved')),
         );
       }
     } catch (e) {
       debugPrint('Save issue error: $e');
       if (mounted) {
         ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('Feil: $e')));
+            .showSnackBar(SnackBar(content: Text('Error: $e')));
       }
     } finally {
       if (mounted) setState(() => _saving = false);
     }
   }
 
-  Color _statusColor(String? status) {
-    switch (status) {
-      case 'in_progress':
-        return const Color(0xFF3498DB);
-      case 'resolved':
-        return const Color(0xFF2ECC71);
-      default:
-        return const Color(0xFFF5A623);
-    }
-  }
+  Color _statusColor(String? status) => widget.statusColor(status);
 
   @override
   Widget build(BuildContext context) {
     final issue = widget.issue;
     final critical = issue['critical'] == true;
     final imageUrl = issue['image_url'] as String?;
+    final cs = Theme.of(context).colorScheme;
 
     return SingleChildScrollView(
-      padding: const EdgeInsets.all(28),
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 680),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
+      padding: const EdgeInsets.all(24),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
 
-            // ── header ──
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        widget.categoryLabel(issue['category']),
-                        style: const TextStyle(
-                            fontSize: 22, fontWeight: FontWeight.w800),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        '${widget.driverName}  ·  ${widget.fmtDate(issue['created_at'])}',
-                        style: const TextStyle(
-                            color: Colors.black45, fontSize: 13),
-                      ),
-                    ],
-                  ),
-                ),
-                if (critical)
-                  Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                    decoration: BoxDecoration(
-                      color: Colors.red.shade50,
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: Colors.red.shade200),
+          // ── Header ──
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      widget.categoryLabel(issue['category']),
+                      style: Theme.of(context)
+                          .textTheme
+                          .titleLarge
+                          ?.copyWith(fontSize: 22),
                     ),
-                    child: Text('Kritisk',
-                        style: TextStyle(
-                            fontWeight: FontWeight.w700,
-                            color: Colors.red.shade700)),
-                  ),
-              ],
-            ),
-
-            const SizedBox(height: 24),
-
-            // ── description ──
-            _Section(
-              label: 'Beskrivelse',
-              child: Text(
-                (issue['description'] ?? '').toString(),
-                style: const TextStyle(fontSize: 14, height: 1.5),
-              ),
-            ),
-
-            // ── image ──
-            if (imageUrl != null && imageUrl.isNotEmpty) ...[
-              const SizedBox(height: 20),
-              _Section(
-                label: 'Bilde',
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(10),
-                  child: Image.network(
-                    imageUrl,
-                    width: double.infinity,
-                    fit: BoxFit.cover,
-                    errorBuilder: (_, __, ___) =>
-                        const Text('Kunne ikke laste bilde'),
-                  ),
+                    const SizedBox(height: 4),
+                    Text(
+                      '${widget.driverName}  ·  ${widget.fmtDate(issue['created_at'])}',
+                      style: const TextStyle(
+                          color: CssTheme.textMuted, fontSize: 13),
+                    ),
+                  ],
                 ),
               ),
+              if (critical)
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 12, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: Colors.red.shade50,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.red.shade200),
+                  ),
+                  child: Text('Critical',
+                      style: TextStyle(
+                          fontWeight: FontWeight.w700,
+                          color: Colors.red.shade700)),
+                ),
             ],
+          ),
 
+          const SizedBox(height: 20),
+          Divider(color: cs.outlineVariant),
+          const SizedBox(height: 20),
+
+          // ── Description ──
+          _Label('Description'),
+          const SizedBox(height: 8),
+          Text(
+            (issue['description'] ?? '').toString(),
+            style: const TextStyle(fontSize: 14, height: 1.6),
+          ),
+
+          // ── Image ──
+          if (imageUrl != null && imageUrl.isNotEmpty) ...[
             const SizedBox(height: 20),
-
-            // ── status ──
-            _Section(
-              label: 'Status',
-              child: SegmentedButton<String>(
-                segments: const [
-                  ButtonSegment(value: 'open', label: Text('Åpen')),
-                  ButtonSegment(
-                      value: 'in_progress', label: Text('Under behandling')),
-                  ButtonSegment(value: 'resolved', label: Text('Løst')),
-                ],
-                selected: {_status},
-                onSelectionChanged: (v) =>
-                    setState(() => _status = v.first),
-                style: ButtonStyle(
-                  backgroundColor: WidgetStateProperty.resolveWith((states) {
-                    if (states.contains(WidgetState.selected)) {
-                      return _statusColor(_status);
-                    }
-                    return null;
-                  }),
-                  foregroundColor: WidgetStateProperty.resolveWith((states) {
-                    if (states.contains(WidgetState.selected)) {
-                      return Colors.white;
-                    }
-                    return null;
-                  }),
-                ),
-              ),
-            ),
-
-            const SizedBox(height: 20),
-
-            // ── resolution note ──
-            _Section(
-              label: 'Notat til sjåfør (vises i appen)',
-              child: TextField(
-                controller: _noteCtrl,
-                maxLines: 4,
-                decoration: const InputDecoration(
-                  hintText: 'Beskriv hva som ble gjort eller hva som skjer...',
-                  border: OutlineInputBorder(),
-                  filled: true,
-                  fillColor: Color(0xFFF5F5F5),
-                ),
-              ),
-            ),
-
-            const SizedBox(height: 28),
-
-            // ── save button ──
-            SizedBox(
-              width: double.infinity,
-              height: 48,
-              child: FilledButton.icon(
-                onPressed: _saving ? null : _save,
-                style: FilledButton.styleFrom(
-                  backgroundColor: Colors.black,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10),
+            _Label('Photo'),
+            const SizedBox(height: 8),
+            GestureDetector(
+              onTap: () {
+                showDialog(
+                  context: context,
+                  builder: (_) => Dialog(
+                    backgroundColor: Colors.transparent,
+                    insetPadding: const EdgeInsets.all(32),
+                    child: GestureDetector(
+                      onTap: () => Navigator.of(context).pop(),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(12),
+                        child: Image.network(
+                          imageUrl,
+                          fit: BoxFit.contain,
+                        ),
+                      ),
+                    ),
                   ),
+                );
+              },
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(10),
+                child: Image.network(
+                  imageUrl,
+                  width: 96,
+                  height: 96,
+                  fit: BoxFit.cover,
+                  errorBuilder: (_, __, ___) =>
+                      const Text('Could not load image',
+                          style:
+                              TextStyle(color: CssTheme.textMuted)),
                 ),
-                icon: _saving
-                    ? const SizedBox(
-                        width: 18,
-                        height: 18,
-                        child: CircularProgressIndicator(
-                            strokeWidth: 2, color: Colors.white),
-                      )
-                    : const Icon(Icons.save),
-                label: Text(_saving ? 'Lagrer...' : 'Lagre og varsle sjåfør'),
               ),
             ),
           ],
-        ),
+
+          const SizedBox(height: 20),
+
+          // ── Status ──
+          _Label('Status'),
+          const SizedBox(height: 8),
+          SegmentedButton<String>(
+            segments: const [
+              ButtonSegment(value: 'open', label: Text('Open')),
+              ButtonSegment(
+                  value: 'in_progress', label: Text('In Progress')),
+              ButtonSegment(
+                  value: 'resolved', label: Text('Resolved')),
+            ],
+            selected: {_status},
+            onSelectionChanged: (v) =>
+                setState(() => _status = v.first),
+            style: ButtonStyle(
+              backgroundColor:
+                  WidgetStateProperty.resolveWith((states) {
+                if (states.contains(WidgetState.selected)) {
+                  return _statusColor(_status);
+                }
+                return null;
+              }),
+              foregroundColor:
+                  WidgetStateProperty.resolveWith((states) {
+                if (states.contains(WidgetState.selected)) {
+                  return Colors.white;
+                }
+                return null;
+              }),
+            ),
+          ),
+
+          const SizedBox(height: 20),
+
+          // ── Note ──
+          _Label('Note to driver (shown in app)'),
+          const SizedBox(height: 8),
+          TextField(
+            controller: _noteCtrl,
+            maxLines: 4,
+            decoration: const InputDecoration(
+              hintText:
+                  'Describe what was done or what is happening...',
+            ),
+          ),
+
+          const SizedBox(height: 24),
+
+          // ── Buttons ──
+          Row(
+            children: [
+              Expanded(
+                child: SizedBox(
+                  height: 48,
+                  child: FilledButton.icon(
+                    onPressed: _saving ? null : _save,
+                    icon: _saving
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Colors.white),
+                          )
+                        : const Icon(Icons.save),
+                    label: Text(_saving
+                        ? 'Saving...'
+                        : 'Save and notify driver'),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              SizedBox(
+                width: 120,
+                height: 48,
+                child: OutlinedButton.icon(
+                  onPressed: _deleting ? null : _delete,
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: Colors.red,
+                    side: const BorderSide(color: Colors.red),
+                  ),
+                  icon: _deleting
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Colors.red),
+                        )
+                      : const Icon(Icons.delete_outline),
+                  label: const Text('Delete'),
+                ),
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }
 }
 
-// ── helpers ───────────────────────────────────────────────────────────────────
-
-class _Section extends StatelessWidget {
-  final String label;
-  final Widget child;
-
-  const _Section({required this.label, required this.child});
+class _Label extends StatelessWidget {
+  final String text;
+  const _Label(this.text);
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(label,
-            style: const TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.w700,
-                color: Colors.black45,
-                letterSpacing: 0.5)),
-        const SizedBox(height: 8),
-        child,
-      ],
+    return Text(
+      text.toUpperCase(),
+      style: const TextStyle(
+        fontSize: 11,
+        fontWeight: FontWeight.w700,
+        color: CssTheme.textMuted,
+        letterSpacing: 0.8,
+      ),
     );
   }
 }

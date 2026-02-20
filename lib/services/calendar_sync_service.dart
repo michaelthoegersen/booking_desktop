@@ -103,6 +103,18 @@ class CalendarSyncService {
       // --------------------------------------------------
       // 4️⃣ Bygg nye rader (ENTERPRISE)
       // --------------------------------------------------
+
+      // If there's a totalOverride on the offer, distribute it
+      // proportionally across rounds (based on calculated share).
+      final totalOverride = offer.totalOverride;
+      double? _calcTotalSum;
+      if (totalOverride != null) {
+        _calcTotalSum = 0;
+        for (final calc in calcCache.values) {
+          _calcTotalSum = _calcTotalSum! + calc.totalCost;
+        }
+      }
+
       final Map<String, Map<String, dynamic>> rowByDate = {};
 
       for (int ri = 0; ri < offer.rounds.length; ri++) {
@@ -112,6 +124,20 @@ class CalendarSyncService {
 
         final calc = calcCache[ri];
         if (calc == null) continue;
+
+        // Use override price if set, distributed proportionally
+        final double roundPris;
+        if (totalOverride != null) {
+          final sum = _calcTotalSum!;
+          if (sum > 0) {
+            roundPris = totalOverride * (calc.totalCost / sum);
+          } else {
+            // All rounds have 0 cost — put entire override on first active round
+            roundPris = (ri == calcCache.keys.first) ? totalOverride : 0;
+          }
+        } else {
+          roundPris = calc.totalCost;
+        }
 
         final vehicle =
             "${offer.busType.label}${round.trailer ? ' + trailer' : ''}";
@@ -150,7 +176,7 @@ class CalendarSyncService {
                 'tid': '',
                 'produksjon': offer.production,
                 'kjoretoy': vehicle,
-                'pris': calc.totalCost.toString(),
+                'pris': roundPris.toString(),
                 'contact': offer.contact,
                 'status': offer.status,
                 'kilde': bus,

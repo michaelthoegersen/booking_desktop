@@ -110,6 +110,7 @@ class OfferDraft {
   /// ✅ Saved bus
   String? bus;
 OfferPricingOverride? pricingOverride;
+  double? totalOverride;
   final List<OfferRound> rounds;
 
   OfferDraft({
@@ -124,6 +125,7 @@ OfferPricingOverride? pricingOverride;
     this.busType = BusType.sleeper12,
     this.bus,
     this.pricingOverride,
+    this.totalOverride,
   }) : rounds = List.generate(12, (_) => OfferRound());
 
   // ------------------------------------------------------------
@@ -301,6 +303,9 @@ class OfferRound {
   /// Trailer per buss
   List<bool> trailerSlots = [false, false, false, false];
 
+  /// Ferry name per leg (index matches entries). Populated at calc time.
+  List<String?> ferryPerLeg = [];
+
   // =========================================================
 
   final List<RoundEntry> entries = [];
@@ -337,6 +342,7 @@ class OfferRound {
       'trailerSlots': trailerSlots,
 
       'totalKm': totalKm,
+      'ferryPerLeg': ferryPerLeg,
       'entries': entries.map((e) => e.toJson()).toList(),
     };
   }
@@ -374,6 +380,10 @@ class OfferRound {
     }
 
     r.totalKm = ((json['totalKm'] ?? 0) as num).toDouble();
+
+    if (json['ferryPerLeg'] != null) {
+      r.ferryPerLeg = List<String?>.from(json['ferryPerLeg']);
+    }
 
     final rawEntries = (json['entries'] as List?) ?? [];
 

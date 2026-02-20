@@ -233,6 +233,7 @@ class OfferStorageService {
         'bus': r.bus,
         'busSlots': r.busSlots,
         'trailerSlots': r.trailerSlots,
+        'ferryPerLeg': r.ferryPerLeg,
         'entries': r.entries.map((e) {
           return {
             'date': e.date.toIso8601String(),
@@ -310,6 +311,11 @@ if (r['trailerSlots'] != null) {
 } else {
   draft.rounds[i].trailerSlots[0] =
       draft.rounds[i].trailer;
+}
+
+if (r['ferryPerLeg'] != null) {
+  draft.rounds[i].ferryPerLeg =
+      List<String?>.from(r['ferryPerLeg']);
 }
 
     draft.rounds[i].entries.clear();

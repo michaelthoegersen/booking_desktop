@@ -24,6 +24,7 @@ import 'package:flutter/foundation.dart';
 import '../services/bus_availability_service.dart';
 import '../services/invoice_service.dart';
 import '../services/invoice_pdf_service.dart';
+import '../services/email_service.dart';
 
 // ✅ NY: bruker routes db for autocomplete + route lookup
 import '../services/routes_service.dart';
@@ -94,6 +95,10 @@ class _NewOfferPageState extends State<NewOfferPage> {
   // ===================================================
 
   int roundIndex = 0;
+
+  /// Tracks the DB status before the current save — used to detect the
+  /// transition to 'Confirmed' so the ferry email fires exactly once.
+  String? _savedStatus;
 
   bool _busLoaded = false;
 
@@ -521,6 +526,7 @@ const allBuses = [
       offer.email      = fresh.email;
       offer.production = fresh.production;
       offer.status     = fresh.status;
+      _savedStatus     = fresh.status;
       offer.pricingOverride = fresh.pricingOverride;
       // ⭐ ENTERPRISE: global bus brukes ikke lenger
       // offer.bus = fresh.bus;   <-- kan beholdes om legacy trengs
@@ -1378,6 +1384,9 @@ offer.rounds[i].bus =
     // ----------------------------------------
     // Save to DB
     // ----------------------------------------
+    // Capture pre-save status to detect Confirmed transition
+    final statusBeforeSave = _savedStatus;
+
     offer.totalOverride = _totalOverride;
 
     // Compute total excl. VAT to persist (override takes priority)
@@ -1417,6 +1426,7 @@ offer.rounds[i].bus =
     offer.email      = freshOffer.email;
     offer.production = freshOffer.production;
     offer.status     = freshOffer.status;
+    _savedStatus     = freshOffer.status;
     offer.busCount   = freshOffer.busCount;
     offer.busType    = freshOffer.busType;
 
@@ -1425,6 +1435,15 @@ offer.rounds[i].bus =
 
     phoneCtrl.text = offer.phone ?? '';
     emailCtrl.text = offer.email ?? '';
+
+    // ----------------------------------------
+    // Ferry booking email (fires once on Confirmed)
+    // ----------------------------------------
+    if (statusBeforeSave != 'Confirmed' &&
+        freshOffer.status == 'Confirmed') {
+      // Use in-memory offer: ferryPerLeg is populated by _calcRound
+      _maybeSendFerryEmail(offer);
+    }
 
     freshOffer.status =
         _mapCalendarStatus(freshOffer.status);
@@ -1495,6 +1514,41 @@ offer.rounds[i].bus =
   }
 }
 
+// ------------------------------------------------------------
+// Ferry booking email — fires once when status → Confirmed
+// ------------------------------------------------------------
+void _maybeSendFerryEmail(OfferDraft confirmed) {
+  // Collect all ferry legs across all rounds
+  bool hasFerries = false;
+  for (final r in confirmed.rounds) {
+    if (r.ferryPerLeg.any((f) => f != null && f.isNotEmpty)) {
+      hasFerries = true;
+      break;
+    }
+  }
+
+  debugPrint('FERRY EMAIL: hasFerries=$hasFerries, '
+      'rounds=${confirmed.rounds.length}, '
+      'ferryPerLeg=${confirmed.rounds.map((r) => r.ferryPerLeg).toList()}');
+
+  if (!hasFerries) return;
+
+  EmailService.sendFerryBookingEmail(offer: confirmed).then((_) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Ferry booking email sent ✅')),
+    );
+  }).catchError((e) {
+    debugPrint('Ferry email error: $e');
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Ferry email failed: $e'),
+        backgroundColor: Colors.orange,
+      ),
+    );
+  });
+}
 
 
 // ------------------------------------------------------------
@@ -2508,9 +2562,12 @@ final safeFerryPerLeg = List<String?>.generate(
   },
 );
 
+  // Store ferry-per-leg on the round model so it can be used at save time
+  offer.rounds[ri].ferryPerLeg = safeFerryPerLeg;
+
   // ================= RESULT =================
   final result = TripCalculator.calculateRound(
-    
+
     settings: _effectiveSettings(),
     dates: dates,
     pickupEveningFirstDay: round.pickupEveningFirstDay,
