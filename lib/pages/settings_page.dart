@@ -3,6 +3,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../models/swe_settings.dart';
 import '../state/settings_store.dart';
 import '../pages/routes_admin_page.dart';
 
@@ -26,6 +27,42 @@ class _SettingsPageState extends State<SettingsPage> {
   late TextEditingController graphClientIdCtrl;
   late TextEditingController graphClientSecretCtrl;
   late TextEditingController graphSenderEmailCtrl;
+
+  // --- Swedish pricing model ---
+  late TextEditingController sweTimlonCtrl;
+  late TextEditingController sweTimmarCtrl;
+  late TextEditingController sweArbGAvgCtrl;
+  late TextEditingController sweTraktamenteCtrl;
+  late TextEditingController sweChaufforMarginalCtrl;
+
+  late TextEditingController sweKopPrisCtrl;
+  late TextEditingController sweAvskrivningArCtrl;
+  late TextEditingController sweRantaCtrl;
+  late TextEditingController sweForsakringCtrl;
+  late TextEditingController sweSkattCtrl;
+  late TextEditingController sweParkeringCtrl;
+  late TextEditingController sweKordagarCtrl;
+  late TextEditingController sweFordonMarginalCtrl;
+
+  late TextEditingController sweDieselprisCtrl;
+  late TextEditingController sweDieselforbrukningCtrl;
+  late TextEditingController sweDackCtrl;
+  late TextEditingController sweOljaCtrl;
+  late TextEditingController sweVerkstadCtrl;
+  late TextEditingController sweOvrigtCtrl;
+  late TextEditingController sweKmMarginalCtrl;
+
+  late TextEditingController sweDdTimlonCtrl;
+  late TextEditingController sweDdTimmarCtrl;
+  late TextEditingController sweDdArbGAvgCtrl;
+  late TextEditingController sweDdTraktamenteCtrl;
+  late TextEditingController sweDdResorCtrl;
+  late TextEditingController sweDdHotellCtrl;
+  late TextEditingController sweDdMarginalCtrl;
+  late TextEditingController sweDdKmGransCtrl;
+
+  late TextEditingController sweTrailerCtrl;
+  late TextEditingController sweUtlandstraktCtrl;
 
   Future<void> _openChangePasswordDialog() async {
 
@@ -169,6 +206,42 @@ class _SettingsPageState extends State<SettingsPage> {
     graphClientIdCtrl = TextEditingController(text: s.graphClientId);
     graphClientSecretCtrl = TextEditingController(text: s.graphClientSecret);
     graphSenderEmailCtrl = TextEditingController(text: s.graphSenderEmail);
+
+    final swe = s.sweSettings;
+    sweTimlonCtrl = TextEditingController(text: swe.timlon.toStringAsFixed(0));
+    sweTimmarCtrl = TextEditingController(text: swe.timmarPerDag.toStringAsFixed(0));
+    sweArbGAvgCtrl = TextEditingController(text: (swe.arbGAvg * 100).toStringAsFixed(2));
+    sweTraktamenteCtrl = TextEditingController(text: swe.traktamente.toStringAsFixed(0));
+    sweChaufforMarginalCtrl = TextEditingController(text: (swe.chaufforMarginal * 100).toStringAsFixed(0));
+
+    sweKopPrisCtrl = TextEditingController(text: swe.kopPris.toStringAsFixed(0));
+    sweAvskrivningArCtrl = TextEditingController(text: swe.avskrivningAr.toStringAsFixed(0));
+    sweRantaCtrl = TextEditingController(text: (swe.rantaPerAr * 100).toStringAsFixed(1));
+    sweForsakringCtrl = TextEditingController(text: swe.forsakringPerAr.toStringAsFixed(0));
+    sweSkattCtrl = TextEditingController(text: swe.skattPerAr.toStringAsFixed(0));
+    sweParkeringCtrl = TextEditingController(text: swe.parkeringPerAr.toStringAsFixed(0));
+    sweKordagarCtrl = TextEditingController(text: swe.kordagarPerAr.toStringAsFixed(0));
+    sweFordonMarginalCtrl = TextEditingController(text: (swe.fordonMarginal * 100).toStringAsFixed(0));
+
+    sweDieselprisCtrl = TextEditingController(text: swe.dieselprisPerLiter.toStringAsFixed(2));
+    sweDieselforbrukningCtrl = TextEditingController(text: swe.dieselforbrukningPerMil.toStringAsFixed(2));
+    sweDackCtrl = TextEditingController(text: swe.dackKostnadPerMil.toStringAsFixed(2));
+    sweOljaCtrl = TextEditingController(text: swe.oljaKostnadPerMil.toStringAsFixed(2));
+    sweVerkstadCtrl = TextEditingController(text: swe.verkstadKostnadPerMil.toStringAsFixed(2));
+    sweOvrigtCtrl = TextEditingController(text: swe.ovrigtKostnadPerMil.toStringAsFixed(2));
+    sweKmMarginalCtrl = TextEditingController(text: (swe.kmMarginal * 100).toStringAsFixed(0));
+
+    sweDdTimlonCtrl = TextEditingController(text: swe.ddTimlon.toStringAsFixed(0));
+    sweDdTimmarCtrl = TextEditingController(text: swe.ddTimmarPerDag.toStringAsFixed(0));
+    sweDdArbGAvgCtrl = TextEditingController(text: (swe.ddArbGAvg * 100).toStringAsFixed(2));
+    sweDdTraktamenteCtrl = TextEditingController(text: swe.ddTraktamente.toStringAsFixed(0));
+    sweDdResorCtrl = TextEditingController(text: swe.ddResor.toStringAsFixed(0));
+    sweDdHotellCtrl = TextEditingController(text: swe.ddHotell.toStringAsFixed(0));
+    sweDdMarginalCtrl = TextEditingController(text: (swe.ddMarginal * 100).toStringAsFixed(0));
+    sweDdKmGransCtrl = TextEditingController(text: swe.ddKmGrans.toStringAsFixed(0));
+
+    sweTrailerCtrl = TextEditingController(text: swe.trailerhyraPerDygn.toStringAsFixed(0));
+    sweUtlandstraktCtrl = TextEditingController(text: swe.utlandstraktamente.toStringAsFixed(0));
   }
 
   @override
@@ -185,6 +258,37 @@ class _SettingsPageState extends State<SettingsPage> {
     graphClientIdCtrl.dispose();
     graphClientSecretCtrl.dispose();
     graphSenderEmailCtrl.dispose();
+
+    sweTimlonCtrl.dispose();
+    sweTimmarCtrl.dispose();
+    sweArbGAvgCtrl.dispose();
+    sweTraktamenteCtrl.dispose();
+    sweChaufforMarginalCtrl.dispose();
+    sweKopPrisCtrl.dispose();
+    sweAvskrivningArCtrl.dispose();
+    sweRantaCtrl.dispose();
+    sweForsakringCtrl.dispose();
+    sweSkattCtrl.dispose();
+    sweParkeringCtrl.dispose();
+    sweKordagarCtrl.dispose();
+    sweFordonMarginalCtrl.dispose();
+    sweDieselprisCtrl.dispose();
+    sweDieselforbrukningCtrl.dispose();
+    sweDackCtrl.dispose();
+    sweOljaCtrl.dispose();
+    sweVerkstadCtrl.dispose();
+    sweOvrigtCtrl.dispose();
+    sweKmMarginalCtrl.dispose();
+    sweDdTimlonCtrl.dispose();
+    sweDdTimmarCtrl.dispose();
+    sweDdArbGAvgCtrl.dispose();
+    sweDdTraktamenteCtrl.dispose();
+    sweDdResorCtrl.dispose();
+    sweDdHotellCtrl.dispose();
+    sweDdMarginalCtrl.dispose();
+    sweDdKmGransCtrl.dispose();
+    sweTrailerCtrl.dispose();
+    sweUtlandstraktCtrl.dispose();
 
     super.dispose();
   }
@@ -372,6 +476,38 @@ debugPrint("SESSION: $session");
       graphClientId: graphClientIdCtrl.text.trim(),
       graphClientSecret: graphClientSecretCtrl.text.trim(),
       graphSenderEmail: graphSenderEmailCtrl.text.trim(),
+      sweSettings: SweSettings(
+        timlon: _parseDouble(sweTimlonCtrl.text, current.sweSettings.timlon),
+        timmarPerDag: _parseDouble(sweTimmarCtrl.text, current.sweSettings.timmarPerDag),
+        arbGAvg: _parseDouble(sweArbGAvgCtrl.text, current.sweSettings.arbGAvg * 100) / 100,
+        traktamente: _parseDouble(sweTraktamenteCtrl.text, current.sweSettings.traktamente),
+        chaufforMarginal: _parseDouble(sweChaufforMarginalCtrl.text, current.sweSettings.chaufforMarginal * 100) / 100,
+        kopPris: _parseDouble(sweKopPrisCtrl.text, current.sweSettings.kopPris),
+        avskrivningAr: _parseDouble(sweAvskrivningArCtrl.text, current.sweSettings.avskrivningAr),
+        rantaPerAr: _parseDouble(sweRantaCtrl.text, current.sweSettings.rantaPerAr * 100) / 100,
+        forsakringPerAr: _parseDouble(sweForsakringCtrl.text, current.sweSettings.forsakringPerAr),
+        skattPerAr: _parseDouble(sweSkattCtrl.text, current.sweSettings.skattPerAr),
+        parkeringPerAr: _parseDouble(sweParkeringCtrl.text, current.sweSettings.parkeringPerAr),
+        kordagarPerAr: _parseDouble(sweKordagarCtrl.text, current.sweSettings.kordagarPerAr),
+        fordonMarginal: _parseDouble(sweFordonMarginalCtrl.text, current.sweSettings.fordonMarginal * 100) / 100,
+        dieselprisPerLiter: _parseDouble(sweDieselprisCtrl.text, current.sweSettings.dieselprisPerLiter),
+        dieselforbrukningPerMil: _parseDouble(sweDieselforbrukningCtrl.text, current.sweSettings.dieselforbrukningPerMil),
+        dackKostnadPerMil: _parseDouble(sweDackCtrl.text, current.sweSettings.dackKostnadPerMil),
+        oljaKostnadPerMil: _parseDouble(sweOljaCtrl.text, current.sweSettings.oljaKostnadPerMil),
+        verkstadKostnadPerMil: _parseDouble(sweVerkstadCtrl.text, current.sweSettings.verkstadKostnadPerMil),
+        ovrigtKostnadPerMil: _parseDouble(sweOvrigtCtrl.text, current.sweSettings.ovrigtKostnadPerMil),
+        kmMarginal: _parseDouble(sweKmMarginalCtrl.text, current.sweSettings.kmMarginal * 100) / 100,
+        ddTimlon: _parseDouble(sweDdTimlonCtrl.text, current.sweSettings.ddTimlon),
+        ddTimmarPerDag: _parseDouble(sweDdTimmarCtrl.text, current.sweSettings.ddTimmarPerDag),
+        ddArbGAvg: _parseDouble(sweDdArbGAvgCtrl.text, current.sweSettings.ddArbGAvg * 100) / 100,
+        ddTraktamente: _parseDouble(sweDdTraktamenteCtrl.text, current.sweSettings.ddTraktamente),
+        ddResor: _parseDouble(sweDdResorCtrl.text, current.sweSettings.ddResor),
+        ddHotell: _parseDouble(sweDdHotellCtrl.text, current.sweSettings.ddHotell),
+        ddMarginal: _parseDouble(sweDdMarginalCtrl.text, current.sweSettings.ddMarginal * 100) / 100,
+        ddKmGrans: _parseDouble(sweDdKmGransCtrl.text, current.sweSettings.ddKmGrans),
+        trailerhyraPerDygn: _parseDouble(sweTrailerCtrl.text, current.sweSettings.trailerhyraPerDygn),
+        utlandstraktamente: _parseDouble(sweUtlandstraktCtrl.text, current.sweSettings.utlandstraktamente),
+      ),
     );
 
     await SettingsStore.save();
@@ -404,6 +540,145 @@ debugPrint("SESSION: $session");
     );
   }
 
+  Widget _sweField(String label, TextEditingController ctrl, String suffix,
+      {double width = 200}) {
+    return SizedBox(
+      width: width,
+      child: TextField(
+        controller: ctrl,
+        keyboardType: const TextInputType.numberWithOptions(decimal: true),
+        decoration: InputDecoration(
+          labelText: label,
+          suffixText: suffix,
+          isDense: true,
+        ),
+      ),
+    );
+  }
+
+  // =====================================================
+  // SWEDISH SETTINGS SECTION
+  // =====================================================
+
+  Widget _buildSweSection(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final swe = SettingsStore.current.sweSettings;
+
+    return Theme(
+      data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+      child: ExpansionTile(
+        tilePadding: EdgeInsets.zero,
+        childrenPadding: EdgeInsets.zero,
+        title: Text(
+          "Svensk prismodell (per etappe)",
+          style: Theme.of(context)
+              .textTheme
+              .titleMedium
+              ?.copyWith(fontWeight: FontWeight.w900),
+        ),
+        subtitle: Text(
+          "Fordon ${swe.fordonDagpris.toStringAsFixed(0)} + "
+          "Chaufför ${swe.chaufforDagpris.toStringAsFixed(0)} + "
+          "${swe.milpris.toStringAsFixed(1)} SEK/mil  •  "
+          "DD ${swe.ddDagpris.toStringAsFixed(0)} vid >${swe.ddKmGrans.toStringAsFixed(0)} km",
+          style: Theme.of(context)
+              .textTheme
+              .bodySmall
+              ?.copyWith(color: cs.onSurfaceVariant),
+        ),
+        children: [
+          const SizedBox(height: 8),
+
+          // --- CHAUFFÖR ---
+          Text("Chaufför",
+              style: Theme.of(context)
+                  .textTheme
+                  .labelLarge
+                  ?.copyWith(color: cs.primary, fontWeight: FontWeight.w700)),
+          const SizedBox(height: 8),
+          Wrap(spacing: 12, runSpacing: 12, children: [
+            _sweField("Timlön", sweTimlonCtrl, "SEK/h"),
+            _sweField("Timmar/dag", sweTimmarCtrl, "h"),
+            _sweField("ArbG-avg", sweArbGAvgCtrl, "%"),
+            _sweField("Traktamente", sweTraktamenteCtrl, "SEK/dag"),
+            _sweField("Marginal", sweChaufforMarginalCtrl, "%"),
+          ]),
+          const SizedBox(height: 16),
+
+          // --- FORDON ---
+          Text("Fordon",
+              style: Theme.of(context)
+                  .textTheme
+                  .labelLarge
+                  ?.copyWith(color: cs.primary, fontWeight: FontWeight.w700)),
+          const SizedBox(height: 8),
+          Wrap(spacing: 12, runSpacing: 12, children: [
+            _sweField("Köppris", sweKopPrisCtrl, "SEK", width: 220),
+            _sweField("Avskrivning", sweAvskrivningArCtrl, "år"),
+            _sweField("Ränta", sweRantaCtrl, "%/år"),
+            _sweField("Försäkring", sweForsakringCtrl, "SEK/år", width: 220),
+            _sweField("Skatt", sweSkattCtrl, "SEK/år", width: 220),
+            _sweField("Parkering", sweParkeringCtrl, "SEK/år", width: 220),
+            _sweField("Kördagar", sweKordagarCtrl, "dagar/år"),
+            _sweField("Marginal", sweFordonMarginalCtrl, "%"),
+          ]),
+          const SizedBox(height: 16),
+
+          // --- MILPRIS ---
+          Text("Milpris (rörlig kostnad per 10 km)",
+              style: Theme.of(context)
+                  .textTheme
+                  .labelLarge
+                  ?.copyWith(color: cs.primary, fontWeight: FontWeight.w700)),
+          const SizedBox(height: 8),
+          Wrap(spacing: 12, runSpacing: 12, children: [
+            _sweField("Dieselpris", sweDieselprisCtrl, "SEK/l"),
+            _sweField("Förbrukning", sweDieselforbrukningCtrl, "l/mil"),
+            _sweField("Däck", sweDackCtrl, "SEK/mil"),
+            _sweField("Olja", sweOljaCtrl, "SEK/mil"),
+            _sweField("Verkstad", sweVerkstadCtrl, "SEK/mil"),
+            _sweField("Övrigt", sweOvrigtCtrl, "SEK/mil"),
+            _sweField("Marginal", sweKmMarginalCtrl, "%"),
+          ]),
+          const SizedBox(height: 16),
+
+          // --- DD ---
+          Text("Dubbel chaufför (DD)",
+              style: Theme.of(context)
+                  .textTheme
+                  .labelLarge
+                  ?.copyWith(color: cs.primary, fontWeight: FontWeight.w700)),
+          const SizedBox(height: 8),
+          Wrap(spacing: 12, runSpacing: 12, children: [
+            _sweField("Timlön", sweDdTimlonCtrl, "SEK/h"),
+            _sweField("Timmar/dag", sweDdTimmarCtrl, "h"),
+            _sweField("ArbG-avg", sweDdArbGAvgCtrl, "%"),
+            _sweField("Traktamente", sweDdTraktamenteCtrl, "SEK"),
+            _sweField("Resor", sweDdResorCtrl, "SEK"),
+            _sweField("Hotell", sweDdHotellCtrl, "SEK"),
+            _sweField("Marginal", sweDdMarginalCtrl, "%"),
+            _sweField("Km-gräns", sweDdKmGransCtrl, "km"),
+          ]),
+          const SizedBox(height: 16),
+
+          // --- ÖVRIGT ---
+          Text("Övrigt",
+              style: Theme.of(context)
+                  .textTheme
+                  .labelLarge
+                  ?.copyWith(color: cs.primary, fontWeight: FontWeight.w700)),
+          const SizedBox(height: 8),
+          Wrap(spacing: 12, runSpacing: 12, children: [
+            _sweField("Trailerhyra", sweTrailerCtrl, "SEK/dag", width: 220),
+            _sweField("Utlandstraktamente", sweUtlandstraktCtrl, "SEK/enhet", width: 260),
+          ]),
+
+          const SizedBox(height: 16),
+        ],
+      ),
+    );
+  }
+
   // =====================================================
   // UI
   // =====================================================
@@ -421,7 +696,8 @@ debugPrint("SESSION: $session");
           borderRadius: BorderRadius.circular(18),
           border: Border.all(color: cs.outlineVariant),
         ),
-        child: Column(
+        child: SingleChildScrollView(
+          child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
 
@@ -579,7 +855,25 @@ debugPrint("SESSION: $session");
             Divider(color: cs.outlineVariant),
             const SizedBox(height: 18),
 
-            // ---------------- PRICES ----------------
+            // ---------------- SWEDISH PRICING MODEL ----------------
+
+            _buildSweSection(context),
+
+            const SizedBox(height: 18),
+            Divider(color: cs.outlineVariant),
+            const SizedBox(height: 18),
+
+            // ---------------- PRICES (Norwegian model) ----------------
+
+            Text(
+              "Norsk prismodell",
+              style: Theme.of(context)
+                  .textTheme
+                  .titleMedium
+                  ?.copyWith(fontWeight: FontWeight.w900),
+            ),
+
+            const SizedBox(height: 10),
 
             Wrap(
               spacing: 12,
@@ -618,7 +912,7 @@ debugPrint("SESSION: $session");
               ],
             ),
 
-            const Spacer(),
+            const SizedBox(height: 18),
 
             // ---------------- BUTTONS ----------------
 
@@ -646,7 +940,7 @@ debugPrint("SESSION: $session");
     ),
 
     FilledButton.icon(
-      onPressed: _openChangePasswordDialog, // ⭐ NY
+      onPressed: _openChangePasswordDialog,
       icon: const Icon(Icons.lock_reset),
       label: const Text("Change password"),
     ),
@@ -660,6 +954,7 @@ debugPrint("SESSION: $session");
 ),
           ],
         ),
+        ),   // SingleChildScrollView
       ),
     );
   }

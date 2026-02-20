@@ -1,4 +1,5 @@
 import 'ferry_definition.dart';
+import 'swe_settings.dart';
 
 class AppSettings {
   final double dayPrice;
@@ -28,6 +29,9 @@ class AppSettings {
   final String graphClientSecret;
   final String graphSenderEmail;
 
+  /// Swedish per-leg pricing model parameters
+  final SweSettings sweSettings;
+
   const AppSettings({
     required this.dayPrice,
     required this.extraKmPrice,
@@ -47,6 +51,7 @@ class AppSettings {
 
     /// ✅ NEW
     this.ferries = const [],
+    this.sweSettings = const SweSettings(),
   });
 
   AppSettings copyWith({
@@ -67,6 +72,7 @@ class AppSettings {
 
     /// ✅ NEW
     List<FerryDefinition>? ferries,
+    SweSettings? sweSettings,
   }) {
     return AppSettings(
       dayPrice: dayPrice ?? this.dayPrice,
@@ -86,6 +92,7 @@ class AppSettings {
 
       /// ✅ NEW
       ferries: ferries ?? this.ferries,
+      sweSettings: sweSettings ?? this.sweSettings,
     );
   }
 }
