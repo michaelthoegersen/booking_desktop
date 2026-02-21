@@ -533,6 +533,173 @@ const allBuses = [
 
 
   // ===================================================
+  // GLOBAL BUS PICKER (availability across all rounds)
+  // ===================================================
+
+  Future<String?> _pickBusGlobal(int slotIndex) async {
+    // Collect union date range from all active rounds
+    DateTime? earliest;
+    DateTime? latest;
+
+    for (final r in offer.rounds) {
+      if (r.entries.isEmpty) continue;
+      final sorted = [...r.entries]..sort((a, b) => a.date.compareTo(b.date));
+      final s = sorted.first.date;
+      final e = sorted.last.date;
+      if (earliest == null || s.isBefore(earliest)) earliest = s;
+      if (latest == null || e.isAfter(latest)) latest = e;
+    }
+
+    // No dates yet — fall back to simple picker
+    if (earliest == null || latest == null) {
+      return _pickBusSimple();
+    }
+
+    final start = earliest.toIso8601String().substring(0, 10);
+    final end = latest.toIso8601String().substring(0, 10);
+
+    // Query busy buses across the full period
+    final busy = await Supabase.instance.client
+        .from('samletdata')
+        .select('kilde,draft_id')
+        .gte('dato', start)
+        .lte('dato', end);
+
+    final busySet = (busy as List)
+        .where((e) {
+          final draft = e['draft_id']?.toString();
+          if (_draftId != null && draft == _draftId) return false;
+          return true;
+        })
+        .map((e) => e['kilde']?.toString())
+        .whereType<String>()
+        .toSet();
+
+    if (!mounted) return null;
+
+    const allBuses = [
+      "CSS_1034",
+      "CSS_1023",
+      "CSS_1008",
+      "YCR 682",
+      "ESW 337",
+      "WYN 802",
+      "RLC 29G",
+      "Rental 1 (Hasse)",
+      "Rental 2 (Rickard)",
+    ];
+
+    final available = allBuses.where((b) => !busySet.contains(b)).toList();
+    final busyList = allBuses.where((b) => busySet.contains(b)).toList();
+
+    // Suggest: first available bus not already used in another global slot
+    final usedGlobal = {
+      for (int j = 0; j < offer.globalBusSlots.length; j++)
+        if (j != slotIndex && offer.globalBusSlots[j] != null)
+          offer.globalBusSlots[j]!,
+    };
+
+    final suggested =
+        available.where((b) => !usedGlobal.contains(b)).firstOrNull;
+
+    return showDialog<String>(
+      context: context,
+      builder: (dialogCtx) {
+        final cs = Theme.of(dialogCtx).colorScheme;
+        return AlertDialog(
+          title: Text("Bus ${slotIndex + 1} — all rounds"),
+          content: SizedBox(
+            width: 320,
+            child: ListView(
+              shrinkWrap: true,
+              children: [
+                ...available.map((bus) {
+                  final isSuggested = bus == suggested;
+                  return ListTile(
+                    leading: Icon(
+                      Icons.directions_bus,
+                      color: isSuggested ? cs.primary : null,
+                    ),
+                    title: Row(
+                      children: [
+                        Text(fmtBus(bus)),
+                        if (isSuggested) ...[
+                          const SizedBox(width: 8),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 6,
+                              vertical: 2,
+                            ),
+                            decoration: BoxDecoration(
+                              color: cs.primaryContainer,
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: Text(
+                              "Suggested",
+                              style: TextStyle(
+                                fontSize: 10,
+                                fontWeight: FontWeight.w700,
+                                color: cs.onPrimaryContainer,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                    onTap: () => Navigator.pop(dialogCtx, bus),
+                  );
+                }),
+                if (busyList.isNotEmpty) ...[
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+                    child: Text(
+                      "Busy",
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                        color: Colors.grey.shade500,
+                        letterSpacing: 0.8,
+                      ),
+                    ),
+                  ),
+                  ...busyList.map(
+                    (bus) => ListTile(
+                      enabled: false,
+                      leading: Icon(
+                        Icons.directions_bus,
+                        color: Colors.grey.shade400,
+                      ),
+                      title: Text(
+                        fmtBus(bus),
+                        style: TextStyle(color: Colors.grey.shade400),
+                      ),
+                    ),
+                  ),
+                ],
+                const Divider(),
+                ListTile(
+                  leading: const Icon(
+                    Icons.hourglass_top_outlined,
+                    color: Colors.orange,
+                  ),
+                  title: const Text(
+                    "Waiting list",
+                    style: TextStyle(
+                      color: Colors.orange,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  onTap: () => Navigator.pop(dialogCtx, "WAITING_LIST"),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  // ===================================================
   // DEFAULT OFFER
   // ===================================================
 
@@ -5605,7 +5772,7 @@ class _BusSettingsCard extends StatelessWidget {
                     context.findAncestorStateOfType<_NewOfferPageState>();
                 if (state == null) return;
 
-                final picked = await state._pickBusSimple();
+                final picked = await state._pickBusGlobal(i);
                 if (picked == null) return;
 
                 final oldGlobal = i < offer.globalBusSlots.length
