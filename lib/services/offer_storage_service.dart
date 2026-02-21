@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -10,6 +11,10 @@ class OfferStorageService {
   /// 🔔 Dashboard / Edit page kan lytte på denne
   static final ValueNotifier<int> recentOffersRefresh =
       ValueNotifier<int>(0);
+
+  /// 🔔 Emits draft ID whenever any draft is saved — used for cross-tab refresh
+  static final _savedController = StreamController<String>.broadcast();
+  static Stream<String> get draftSaved => _savedController.stream;
 
   // ============================================================
   // SAVE (INSERT / UPDATE)
@@ -42,6 +47,7 @@ class OfferStorageService {
       }).eq('id', id);
 
       recentOffersRefresh.value++;
+      _savedController.add(id);
       return id;
     }
     debugPrint(jsonEncode(payload));
@@ -61,6 +67,7 @@ class OfferStorageService {
     }).select('id').single();
 
     recentOffersRefresh.value++;
+    _savedController.add(res['id'] as String);
 
     return res['id'] as String;
   }
@@ -219,6 +226,7 @@ class OfferStorageService {
     'busCount': offer.busCount,
     'busType': offer.busType.name,
     'bus': offer.bus,
+    'globalBusSlots': offer.globalBusSlots,
 
     // ⭐⭐⭐ LEGG TIL DENNE LINJA
     'pricingOverride': offer.pricingOverride?.toJson(),
@@ -336,6 +344,10 @@ if (r['ferryPerLeg'] != null) {
 
     draft.rounds[i].entries
         .sort((a, b) => a.date.compareTo(b.date));
+  }
+
+  if (data['globalBusSlots'] != null) {
+    draft.globalBusSlots = List<String?>.from(data['globalBusSlots']);
   }
 
   // ✅ BACKUP: hvis bare ligger i JSON

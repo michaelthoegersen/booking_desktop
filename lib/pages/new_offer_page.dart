@@ -28,11 +28,13 @@ import '../services/email_service.dart';
 
 // ✅ NY: bruker routes db for autocomplete + route lookup
 import '../services/routes_service.dart';
+import '../services/km_se_updater.dart';
 import '../services/customers_service.dart';
 import '../state/current_offer_store.dart';
 import '../models/round_calc_result.dart';
 import '../models/swe_calc_result.dart';
 import '../services/swe_calculator.dart';
+import '../services/ferry_resolver.dart';
 import 'package:flutter/foundation.dart';
 import '../platform/pdf_saver.dart';
 import '../utils/bus_utils.dart';
@@ -73,7 +75,7 @@ class _NewOfferPageState extends State<NewOfferPage> {
 
   return showDialog<String>(
     context: context,
-    builder: (_) => AlertDialog(
+    builder: (dialogCtx) => AlertDialog(
       title: const Text("Select bus"),
       content: SizedBox(
         width: 300,
@@ -84,7 +86,7 @@ class _NewOfferPageState extends State<NewOfferPage> {
               return ListTile(
                 leading: const Icon(Icons.directions_bus),
                 title: Text(fmtBus(bus)),
-                onTap: () => Navigator.pop(context, bus),
+                onTap: () => Navigator.pop(dialogCtx, bus),
               );
             }),
             const Divider(),
@@ -100,7 +102,7 @@ class _NewOfferPageState extends State<NewOfferPage> {
                   fontWeight: FontWeight.w600,
                 ),
               ),
-              onTap: () => Navigator.pop(context, "WAITING_LIST"),
+              onTap: () => Navigator.pop(dialogCtx, "WAITING_LIST"),
             ),
           ],
         ),
@@ -154,6 +156,9 @@ Map<int, double> _tollByIndex = {};
 Map<int, String> _extraByIndex = {};
 Map<int, Map<String, double>> _countryKmByIndex = {};
 Map<int, bool> _noDDriveByIndex = {};
+/// true when km_se was NULL in DB (not yet computed by KmSeUpdater).
+/// Distinct from km_se = 0 (confirmed non-Swedish route).
+Map<int, bool> _kmSeNullByIndex = {};
 
 // Global caches (per route)
 final Map<String, double?> _distanceCache = {};
@@ -164,6 +169,8 @@ final Map<String, String> _extraCache = {};
 final Map<String, String> _ferryNameCache = {};
 Map<int, String> _ferryNameByIndex = {};
 final Map<String, Map<String, double>> _countryKmCache = {};
+/// Cached per-route: was km_se NULL in DB at last fetch?
+final Map<String, bool> _kmSeNullCache = {};
   // ===================================================
   // ROUND BREAKDOWN
   // ===================================================
@@ -241,35 +248,7 @@ if (r.flightCost > 0) {
 
     if (r.tollCost > 0) {
       b.writeln("");
-      b.writeln("Toll:");
-
-      final round = offer.rounds[roundIndex];
-
-      final int maxLegs = [
-        round.entries.length,
-        r.tollPerLeg.length,
-      ].reduce((a, b) => a < b ? a : b);
-
-      for (int i = 0; i < maxLegs; i++) {
-        final toll = r.tollPerLeg[i];
-
-        if (toll <= 0) continue;
-
-        final date = _fmtDate(round.entries[i].date);
-
-        final from = i == 0
-            ? _norm(round.startLocation)
-            : _norm(round.entries[i - 1].location);
-
-        final to = _norm(round.entries[i].location);
-
-        b.writeln(
-          "  $date  $from → $to: ${_nok(toll)}",
-        );
-      }
-
-      b.writeln("  ----------------");
-      b.writeln("  Total: ${_nok(r.tollCost)}");
+      b.writeln("Toll:  ${_nok(r.tollCost)}");
     }
 
     // ================= TOTAL =================
@@ -585,6 +564,10 @@ const allBuses = [
 
   bool _loadingDraft = false;
 
+  /// True while this page is mid-save so we ignore our own draftSaved event
+  bool _selfSaving = false;
+  StreamSubscription<String>? _draftSavesSub;
+
   String? _selectedBus;
 
 
@@ -613,6 +596,13 @@ const allBuses = [
 
     _syncRoundControllers();
 
+    // Reload when another tab saves this same draft (e.g. calendar assigns a bus)
+    _draftSavesSub = OfferStorageService.draftSaved.listen((savedId) {
+      if (!_selfSaving && mounted && savedId == _draftId) {
+        _loadDraft(savedId);
+      }
+    });
+
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       final id = widget.offerId?.trim();
 
@@ -627,6 +617,7 @@ const allBuses = [
 
   @override
   void dispose() {
+    _draftSavesSub?.cancel();
     _overrideCtrl.dispose();
     super.dispose();
   }
@@ -942,20 +933,6 @@ Future<void> _loadPlaceSuggestions(String query) async {
   // ------------------------------------------------------------
   // Small helpers
   // ------------------------------------------------------------
-// ------------------------------------------------------------
-// MANUAL BUS CHANGE
-// ------------------------------------------------------------
-Future<void> _changeBusManually() async {
-  final picked = await _pickBus();
-  if (picked == null || picked.isEmpty) return;
-
-  setState(() {
-    // ⭐ ENTERPRISE: sett på AKTIV ROUND
-    offer.rounds[roundIndex].bus = picked;
-  });
-
-  CurrentOfferStore.set(offer); // ⭐ viktig for preview sync
-}
   Future<void> _openMissingRouteDialog({
   String? from,
   String? to,
@@ -964,8 +941,7 @@ Future<void> _changeBusManually() async {
   final fromCtrl = TextEditingController(text: from ?? '');
   final toCtrl = TextEditingController(text: to ?? '');
   final kmCtrl = TextEditingController();
-  final tollCtrl = TextEditingController();
-  final extraCtrl = TextEditingController(); // ✅ NY // ✅ NY
+  final extraCtrl = TextEditingController();
 
   await showDialog(
     context: context,
@@ -1008,14 +984,6 @@ Future<void> _changeBusManually() async {
 
       const SizedBox(height: 10),
 
-      // ✅ NY: TOLL
-      TextField(
-        controller: tollCtrl,
-        keyboardType: TextInputType.number,
-        decoration: const InputDecoration(
-          labelText: "Toll (Nightliner)",
-        ),
-      ),
       // ✅ NY: EXTRA
 TextField(
   controller: extraCtrl,
@@ -1041,8 +1009,6 @@ TextField(
               final to = _norm(toCtrl.text);
               final km =
                   double.tryParse(kmCtrl.text.replaceAll(',', '.'));
-              final toll =
-                  double.tryParse(tollCtrl.text.replaceAll(',', '.')) ?? 0.0;
               final extra = extraCtrl.text.trim();    
 
               if (from.isEmpty || to.isEmpty || km == null) {
@@ -1057,13 +1023,14 @@ TextField(
               try {
 
                 // ---------------- SAVE TO DB ----------------
-                await sb.from('routes_all').insert({
+                final inserted = await sb.from('routes_all').insert({
   'from_place': from,
   'to_place': to,
   'distance_total_km': km,
-  'toll_nightliner': toll,              
   'extra': extra,
-});
+}).select('id').single();
+
+final newId = inserted['id'] as String;
 
 // 🔥 CLEAR CACHE
 final key = _cacheKey(from, to);
@@ -1086,6 +1053,15 @@ Navigator.pop(ctx);
                     content: Text("Route saved ✅"),
                   ),
                 );
+
+                // ---------------- KM SE (background) ----------------
+                KmSeUpdater.computeAndSaveOne(
+                  id: newId,
+                  from: from,
+                  to: to,
+                ).then((sweKm) {
+                  if (sweKm != null && mounted) _recalcKm();
+                });
 
               } catch (e) {
 
@@ -1278,7 +1254,9 @@ Map<String, double> _calculateForeignVat({
     if (rate <= 0 || km <= 0) return;
 
     final share = km / totalKm;
-    final vat = basePrice * share * rate;
+    // Excel formula: (price/[100+rate])*rate = price * rate/(1+rate)
+    // Treats basePrice as gross (VAT-inclusive); extracts the VAT component.
+    final vat = basePrice * share * rate / (1 + rate);
 
     if (vat > 0) {
       result[country] = vat;
@@ -1615,6 +1593,7 @@ Future<void> _saveDraft() async {
     return;
   }
 
+  _selfSaving = true;
   try {
 
     // ----------------------------------------
@@ -1801,6 +1780,8 @@ offer.rounds[i].bus =
         backgroundColor: Colors.red,
       ),
     );
+  } finally {
+    _selfSaving = false;
   }
 }
 
@@ -2055,6 +2036,7 @@ Future<void> _scanPdf() async {
     _ferryNameByIndex[index]= _ferryNameCache[key] ?? '';
     _countryKmByIndex[index]= _countryKmCache[key] ?? {};
     _noDDriveByIndex[index] = _noDDriveCache[key] ?? false;
+    _kmSeNullByIndex[index] = _kmSeNullCache[key] ?? false;
 
     return _distanceCache[key];
   }
@@ -2097,18 +2079,26 @@ Future<void> _scanPdf() async {
     final ferryName =
         (res['ferry_name'] as String?)?.trim() ?? '';
 
-    final toll =
-        (res['toll_nightliner'] as num?)?.toDouble() ?? 0.0;
+    // toll_nightliner is no longer used — toll is computed as km * rate
+    const double toll = 0.0;
 
     final extra =
         (res['extra'] as String?)?.trim() ?? '';
 
     final noDDrive = (res['no_ddrive'] as bool?) ?? false;
 
+    // Track whether km_se was NULL (not yet computed by KmSeUpdater).
+    // km_se = NULL  →  unknown (not computed yet)
+    // km_se = 0     →  computed, confirmed non-Swedish route
+    // km_se > 0     →  computed, X km are in Sweden
+    final bool kmSeIsNull = res['km_se'] == null;
+
     // ===================================================
     // COUNTRY KM BREAKDOWN
     // ===================================================
     final Map<String, double> countryKm = {
+      if ((res['km_se'] as num?) != null && (res['km_se'] as num) > 0)
+        'SE': (res['km_se'] as num).toDouble(),
       if ((res['km_dk'] as num?) != null && (res['km_dk'] as num) > 0)
         'DK': (res['km_dk'] as num).toDouble(),
       if ((res['km_de'] as num?) != null && (res['km_de'] as num) > 0)
@@ -2137,6 +2127,7 @@ Future<void> _scanPdf() async {
     _ferryNameCache[key] = ferryName;
     _countryKmCache[key] = countryKm;
     _noDDriveCache[key]  = noDDrive;
+    _kmSeNullCache[key]  = kmSeIsNull;
 
     // ===================================================
     // PER-INDEX WRITE (UI + CALC)
@@ -2146,6 +2137,7 @@ Future<void> _scanPdf() async {
     _extraByIndex[index]      = extra;
     _ferryNameByIndex[index] = ferryName;
     _countryKmByIndex[index] = countryKm;
+    _kmSeNullByIndex[index]  = kmSeIsNull;
 
     debugPrint(
       "[ROUTE] $fromN → $toN | km=$km ferry='$ferryName' price=$ferryPrice",
@@ -2219,6 +2211,7 @@ Future<void> _recalcKm() async {
   final Map<int, String> ferryNameByIndex = {};
   final Map<int, Map<String, double>> countryKmByIndex = {};
   final Map<int, bool> noDDriveByIndex = {};
+  final Map<int, bool> kmSeNullByIndex = {};
 
   final List<bool> travelBefore =
       List<bool>.filled(entries.length, false);
@@ -2247,6 +2240,7 @@ Future<void> _recalcKm() async {
       extraByIndex[i] = '';
       ferryNameByIndex[i] = '';
       countryKmByIndex[i] = {};
+      kmSeNullByIndex[i] = false;
 
       pendingTravelIndex = null;
       inTravelBlock = false;
@@ -2262,6 +2256,7 @@ Future<void> _recalcKm() async {
       extraByIndex[i] = '';
       ferryNameByIndex[i] = '';
       countryKmByIndex[i] = {};
+      kmSeNullByIndex[i] = false;
 
       if (pendingTravelIndex == null) {
         pendingTravelIndex = i; // første Travel i blokken
@@ -2279,6 +2274,7 @@ Future<void> _recalcKm() async {
       extraByIndex[i] = '';
       ferryNameByIndex[i] = '';
       countryKmByIndex[i] = {};
+      kmSeNullByIndex[i] = false;
 
       pendingTravelIndex = null;
       inTravelBlock = false;
@@ -2306,6 +2302,7 @@ Future<void> _recalcKm() async {
       _countryKmCache[key] ?? {},
     );
     final noDDrive = _noDDriveCache[key] ?? false;
+    final kmSeNull = _kmSeNullCache[key] ?? false;
 
     // ===================================================
     // MERGE TRAVEL BLOCK
@@ -2318,6 +2315,7 @@ Future<void> _recalcKm() async {
       ferryNameByIndex[pendingTravelIndex] = ferryName;
       countryKmByIndex[pendingTravelIndex] = country;
       noDDriveByIndex[pendingTravelIndex] = noDDrive;
+      kmSeNullByIndex[pendingTravelIndex] = kmSeNull;
 
       // null ut dagens leg
       kmByIndex[i] = 0;
@@ -2327,6 +2325,7 @@ Future<void> _recalcKm() async {
       ferryNameByIndex[i] = '';
       countryKmByIndex[i] = {};
       noDDriveByIndex[i] = false;
+      kmSeNullByIndex[i] = false;
 
       travelBefore[pendingTravelIndex] = true;
       travelBefore[i] = true;
@@ -2346,6 +2345,7 @@ Future<void> _recalcKm() async {
     ferryNameByIndex[i] = ferryName;
     countryKmByIndex[i] = country;
     noDDriveByIndex[i] = noDDrive;
+    kmSeNullByIndex[i] = kmSeNull;
 
     travelBefore[i] = inTravelBlock;
     inTravelBlock = false;
@@ -2374,6 +2374,7 @@ Future<void> _recalcKm() async {
     _ferryNameByIndex = ferryNameByIndex;
     _countryKmByIndex = countryKmByIndex;
     _noDDriveByIndex = noDDriveByIndex;
+    _kmSeNullByIndex = kmSeNullByIndex;
     _travelBefore = travelBefore;
 
     _loadingKm = false;
@@ -2734,6 +2735,7 @@ Future<RoundCalcResult> _calcRound(int ri) async {
       kmByIndex[i] = 0;
       ferryByIndex[i] = 0;
       tollByIndex[i] = 0;
+      _countryKmByIndex[i] = {};
       pendingTravelIndex = null;
       seenTravel = false;
       travelBefore[i] = false;
@@ -2746,6 +2748,7 @@ Future<RoundCalcResult> _calcRound(int ri) async {
       ferryByIndex[i] = 0;
       tollByIndex[i] = 0;
       extraByIndex[i] = '';
+      _countryKmByIndex[i] = {};
 
       if (pendingTravelIndex == null) {
         pendingTravelIndex = i;
@@ -2760,6 +2763,7 @@ Future<RoundCalcResult> _calcRound(int ri) async {
       kmByIndex[i] = 0;
       ferryByIndex[i] = 0;
       tollByIndex[i] = 0;
+      _countryKmByIndex[i] = {};
       pendingTravelIndex = null;
       seenTravel = false;
       continue;
@@ -2796,9 +2800,16 @@ Future<RoundCalcResult> _calcRound(int ri) async {
       _ferryNameByIndex[pendingTravelIndex] =
           _ferryNameCache[key] ?? ''; // 🔧 ENDRET (kun her brukes ferry_name)
 
+      // Move country km to the travel index (mirror _recalcKm behaviour)
+      _countryKmByIndex[pendingTravelIndex] =
+          Map<String, double>.from(_countryKmByIndex[i] ?? {});
+      _kmSeNullByIndex[pendingTravelIndex] = _kmSeNullCache[key] ?? false;
+
       kmByIndex[i] = 0;
       ferryByIndex[i] = 0;
       tollByIndex[i] = 0;
+      _countryKmByIndex[i] = {};
+      _kmSeNullByIndex[i] = false;
 
       travelBefore[pendingTravelIndex] = true;
       travelBefore[i] = true;
@@ -2813,6 +2824,7 @@ Future<RoundCalcResult> _calcRound(int ri) async {
     ferryByIndex[i] = ferry;
     tollByIndex[i] = toll;
     extraByIndex[i] = extra;
+    _kmSeNullByIndex[i] = _kmSeNullCache[key] ?? false;
 
     // 🔧 ENDRET: ferry_name lagres også på normale legs
     _ferryNameByIndex[i] = _ferryNameCache[key] ?? '';
@@ -2874,6 +2886,28 @@ final safeNoDDrive = List<bool>.generate(
   offer.rounds[ri].ferryPerLeg = safeFerryPerLeg;
 
   // ================= SWEDISH MODEL =================
+
+  // Swedish km are toll-free — subtract from the km base used for toll.
+  //
+  // If km_se is NULL (not yet computed by KmSeUpdater), we distinguish:
+  //   - km_se = NULL  →  _kmSeNullByIndex[i] == true  → unknown, treat as Swedish
+  //   - km_se = 0     →  _kmSeNullByIndex[i] == false → confirmed non-Swedish
+  //   - km_se > 0     →  _kmSeNullByIndex[i] == false → confirmed partial/full Swedish
+  final totalSweKm = List.generate(len, (i) {
+    final seKm = _countryKmByIndex[i]?['SE'];
+    if (seKm != null && seKm > 0) return seKm;           // km_se set and > 0
+    if (_kmSeNullByIndex[i] == true) {
+      // km_se not yet computed — conservatively treat entire leg as Swedish
+      // (toll-free) to avoid incorrectly charging toll on Swedish routes.
+      // Run the KmSeUpdater to populate correct values.
+      return kmByIndex[i] ?? 0.0;
+    }
+    return 0.0;                                           // km_se = 0 confirmed
+  }).fold<double>(0.0, (a, b) => a + b);
+  final tollableKm = (totalKm - totalSweKm).clamp(0.0, double.infinity);
+
+  debugPrint('🇸🇪 Round $ri: totalKm=${totalKm.toStringAsFixed(1)} sweKm=${totalSweKm.toStringAsFixed(1)} tollableKm=${tollableKm.toStringAsFixed(1)} (nullLegs=${List.generate(len, (i) => _kmSeNullByIndex[i] == true ? 1 : 0).fold(0, (a, b) => a + b)})');
+
   if (offer.pricingModel == 'svensk') {
     final swe = SettingsStore.current.sweSettings;
 
@@ -2926,13 +2960,16 @@ final safeNoDDrive = List<bool>.generate(
     );
     _sweCalcCache[ri] = scaledSweResult;
 
-    // Ferry and toll from the shared data (same source as Norwegian path)
+    // Ferry: use FerryResolver (same as Norwegian) — consistent trailer pricing
     final roundFerryCost =
-        ferryByIndex.values.fold<double>(0, (a, b) => a + b) *
-            effectiveBusCount;
-    final roundTollCost =
-        tollByIndex.values.fold<double>(0, (a, b) => a + b) *
-            effectiveBusCount;
+        FerryResolver.resolveTotalFerryCost(
+          ferries: SettingsStore.current.ferries,
+          trailer: round.trailer,
+          ferryPerLeg: safeFerryPerLeg,
+        ) * effectiveBusCount;
+
+    // Toll: exclude Swedish km (toll-free in Sweden)
+    final roundTollCost = tollableKm * SettingsStore.current.tollKmRate * effectiveBusCount;
 
     // Create minimal RoundCalcResult for UI compatibility (km stats etc.)
     final minimal = RoundCalcResult(
@@ -2968,6 +3005,7 @@ final safeNoDDrive = List<bool>.generate(
     pickupEveningFirstDay: round.pickupEveningFirstDay,
     trailer: round.trailer,
     totalKm: totalKm,
+    tollableKm: tollableKm, // excludes Swedish km (toll-free)
     legKm: safeLegKm,
     ferries: SettingsStore.current.ferries,
     ferryPerLeg: safeFerryPerLeg, // 🔥 nå korrekt
@@ -3454,11 +3492,13 @@ final foreignVatMap = _calculateForeignVat(
   countryKm: countryKm,
 );
 
-final totalExVat = allRoundsTotal;
-
-final totalIncVat =
-    totalExVat +
+// allRoundsTotal is the gross (VAT-inclusive) price.
+// VAT is extracted from it (not added on top).
+// "incl VAT" = the gross price; "excl VAT" = gross − extracted VAT.
+final _vatTotalForDisplay =
     foreignVatMap.values.fold(0.0, (a, b) => a + b);
+final totalIncVat = allRoundsTotal;                        // gross price
+final totalExVat  = allRoundsTotal - _vatTotalForDisplay;  // net of foreign VAT
 
 
           // ============ LEFT ============
@@ -4908,53 +4948,6 @@ _PricingOverrideCard(
     CurrentOfferStore.set(widget.offer);
   },
 ),
-// ================= BUS PREVIEW (ENTERPRISE) =================
-Builder(
-  builder: (context) {
-
-    // ⭐ FINN FØRSTE BUS FRA ROUNDS
-    String? previewBus;
-
-    for (final r in widget.offer.rounds) {
-      if (r.bus != null && r.bus!.isNotEmpty) {
-        previewBus = r.bus;
-        break;
-      }
-    }
-
-    return Row(
-      children: [
-
-        const Text(
-          "Bus:",
-          style: TextStyle(fontWeight: FontWeight.w900),
-        ),
-
-        const SizedBox(width: 6),
-
-        Expanded(
-          child: Text(
-            previewBus ?? "Not selected",
-            style: const TextStyle(fontWeight: FontWeight.w700),
-            overflow: TextOverflow.ellipsis,
-          ),
-        ),
-
-        IconButton(
-          tooltip: "Change bus",
-          icon: const Icon(Icons.directions_bus),
-          onPressed: () {
-            final state =
-                context.findAncestorStateOfType<_NewOfferPageState>();
-
-            state?._changeBusManually();
-          },
-        ),
-      ],
-    );
-  },
-),
-
 // ================= BUTTONS =================
 Column(
   children: [
@@ -5535,6 +5528,12 @@ class _BusSettingsCard extends StatelessWidget {
     }
   }
 
+  // Expand / trim globalBusSlots to match new busCount
+  while (offer.globalBusSlots.length < v) offer.globalBusSlots.add(null);
+  if (offer.globalBusSlots.length > v) {
+    offer.globalBusSlots = offer.globalBusSlots.take(v).toList();
+  }
+
   onChanged();
 
   final state =
@@ -5581,6 +5580,101 @@ class _BusSettingsCard extends StatelessWidget {
               onChanged();
             },
           ),
+
+          const Divider(height: 24),
+
+          const Text(
+            "Global allocation",
+            style: TextStyle(
+              fontWeight: FontWeight.w900,
+              fontSize: 13,
+            ),
+          ),
+
+          const SizedBox(height: 8),
+
+          ...List.generate(offer.busCount, (i) {
+            final globalBus = i < offer.globalBusSlots.length
+                ? offer.globalBusSlots[i]
+                : null;
+
+            return InkWell(
+              borderRadius: BorderRadius.circular(10),
+              onTap: () async {
+                final state =
+                    context.findAncestorStateOfType<_NewOfferPageState>();
+                if (state == null) return;
+
+                final picked = await state._pickBusSimple();
+                if (picked == null) return;
+
+                final oldGlobal = i < offer.globalBusSlots.length
+                    ? offer.globalBusSlots[i]
+                    : null;
+
+                while (offer.globalBusSlots.length <= i) {
+                  offer.globalBusSlots.add(null);
+                }
+                offer.globalBusSlots[i] = picked;
+
+                // Propagate to rounds — preserve per-round overrides
+                for (final r in offer.rounds) {
+                  while (r.busSlots.length <= i) r.busSlots.add(null);
+                  final cur = r.busSlots[i];
+                  if (cur == null || cur == oldGlobal) {
+                    r.busSlots[i] = picked;
+                    r.bus = r.busSlots.firstWhere(
+                      (b) => b != null && b != 'WAITING_LIST',
+                      orElse: () => null,
+                    );
+                  }
+                }
+
+                if (!state.mounted) return;
+                await state._recalcAllRounds();
+                if (!state.mounted) return;
+                CurrentOfferStore.set(offer);
+              },
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                  vertical: 8,
+                  horizontal: 4,
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.directions_bus,
+                      size: 18,
+                      color: globalBus == null ? Colors.grey : null,
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      "Bus ${i + 1}:",
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        globalBus != null ? fmtBus(globalBus) : "Not set",
+                        style: TextStyle(
+                          color: globalBus == null ? Colors.grey : null,
+                          fontWeight: FontWeight.w600,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    const Icon(
+                      Icons.chevron_right,
+                      size: 16,
+                      color: Colors.grey,
+                    ),
+                  ],
+                ),
+              ),
+            );
+          }),
         ],
       ),
     );

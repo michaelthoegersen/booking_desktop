@@ -117,6 +117,10 @@ OfferPricingOverride? pricingOverride;
 
   final List<OfferRound> rounds;
 
+  /// Global bus selection per slot — sets default for all rounds.
+  /// Rounds with a different specific bus set are not overwritten.
+  List<String?> globalBusSlots;
+
   OfferDraft({
     this.userId,
     this.company = '',
@@ -131,7 +135,8 @@ OfferPricingOverride? pricingOverride;
     this.pricingOverride,
     this.totalOverride,
     this.pricingModel = 'norsk',
-  }) : rounds = List.generate(12, (_) => OfferRound());
+  })  : rounds = List.generate(12, (_) => OfferRound()),
+        globalBusSlots = List.generate(4, (_) => null);
 
   // ------------------------------------------------------------
   // STATUS SAFETY
@@ -195,6 +200,7 @@ OfferPricingOverride? pricingOverride;
     // Pricing model ('norsk' / 'svensk')
     'pricingModel': pricingModel,
 
+    'globalBusSlots': globalBusSlots,
     'rounds': rounds.map((r) => r.toJson()).toList(),
   };
 }
@@ -243,6 +249,11 @@ OfferPricingOverride? pricingOverride;
     draft.rounds[i] = OfferRound.fromJson(
       Map<String, dynamic>.from(rawRounds[i]),
     );
+  }
+
+  final rawGlobal = json['globalBusSlots'];
+  if (rawGlobal != null) {
+    draft.globalBusSlots = List<String?>.from(rawGlobal);
   }
 
   return draft;
