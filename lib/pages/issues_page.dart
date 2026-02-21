@@ -18,6 +18,7 @@ class _IssuesPageState extends State<IssuesPage> {
   bool _loading = true;
   String _filterStatus = 'all';
   bool _filterCritical = false;
+  bool _showArchive = false;
 
   Map<String, dynamic>? _selected;
   RealtimeChannel? _channel;
@@ -60,10 +61,15 @@ class _IssuesPageState extends State<IssuesPage> {
   Future<void> _load() async {
     setState(() => _loading = true);
     try {
-      final data = await _supabase
-          .from('issues')
-          .select('*')
-          .order('created_at', ascending: false);
+      var query = _supabase.from('issues').select('*');
+
+      if (_showArchive) {
+        query = query.eq('archived', true);
+      } else {
+        query = query.or('archived.is.null,archived.eq.false');
+      }
+
+      final data = await query.order('created_at', ascending: false);
 
       final issues = List<Map<String, dynamic>>.from(data);
 
@@ -89,7 +95,14 @@ class _IssuesPageState extends State<IssuesPage> {
         issue['_driver_name'] = uid != null ? (nameMap[uid] ?? '') : '';
       }
 
-      setState(() => _issues = issues);
+      setState(() {
+        _issues = issues;
+        // Deselect if selected item no longer in list
+        if (_selected != null &&
+            !issues.any((i) => i['id'] == _selected!['id'])) {
+          _selected = null;
+        }
+      });
     } catch (e) {
       debugPrint('Load issues error: $e');
     } finally {
@@ -98,6 +111,7 @@ class _IssuesPageState extends State<IssuesPage> {
   }
 
   List<Map<String, dynamic>> get _filtered {
+    if (_showArchive) return _issues;
     return _issues.where((issue) {
       final statusMatch = _filterStatus == 'all' ||
           (issue['status'] ?? 'open') == _filterStatus;
@@ -196,6 +210,7 @@ class _IssuesPageState extends State<IssuesPage> {
                     child: _IssueDetail(
                       key: ValueKey(_selected!['id']),
                       issue: _selected!,
+                      isArchive: _showArchive,
                       statusLabel: _statusLabel,
                       categoryLabel: _categoryLabel,
                       statusColor: _statusColor,
@@ -210,6 +225,13 @@ class _IssuesPageState extends State<IssuesPage> {
                             _selected = updated;
                           });
                         }
+                      },
+                      onArchived: () {
+                        setState(() {
+                          _issues.removeWhere(
+                              (i) => i['id'] == _selected!['id']);
+                          _selected = null;
+                        });
                       },
                       onDeleted: () {
                         setState(() {
@@ -239,13 +261,38 @@ class _IssuesPageState extends State<IssuesPage> {
           Row(
             children: [
               Text(
-                'Issue Reports',
+                _showArchive ? 'Archive' : 'Issue Reports',
                 style: Theme.of(context)
                     .textTheme
                     .titleMedium
                     ?.copyWith(fontWeight: FontWeight.w900),
               ),
               const Spacer(),
+              // Archive toggle
+              Tooltip(
+                message: _showArchive
+                    ? 'Back to active reports'
+                    : 'View archive',
+                child: IconButton(
+                  icon: Icon(
+                    _showArchive
+                        ? Icons.inbox_outlined
+                        : Icons.archive_outlined,
+                    size: 20,
+                    color: _showArchive
+                        ? CssTheme.header
+                        : cs.onSurfaceVariant,
+                  ),
+                  onPressed: () {
+                    setState(() {
+                      _showArchive = !_showArchive;
+                      _selected = null;
+                      _filterStatus = 'all';
+                    });
+                    _load();
+                  },
+                ),
+              ),
               IconButton(
                 tooltip: 'Refresh',
                 icon: const Icon(Icons.refresh, size: 20),
@@ -253,55 +300,63 @@ class _IssuesPageState extends State<IssuesPage> {
               ),
             ],
           ),
-          const SizedBox(height: 10),
-          Wrap(
-            spacing: 6,
-            runSpacing: 6,
-            children: [
-              for (final (key, label) in [
-                ('all', 'All'),
-                ('open', 'Open'),
-                ('in_progress', 'In Progress'),
-                ('resolved', 'Resolved'),
-              ])
-                ChoiceChip(
-                  label: Text(label),
-                  selected: _filterStatus == key,
-                  onSelected: (_) => setState(() {
-                    _filterStatus = key;
-                    _selected = null;
-                  }),
-                  selectedColor: CssTheme.header,
+          if (!_showArchive) ...[
+            const SizedBox(height: 10),
+            Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              children: [
+                for (final (key, label) in [
+                  ('all', 'All'),
+                  ('open', 'Open'),
+                  ('in_progress', 'In Progress'),
+                  ('resolved', 'Resolved'),
+                ])
+                  ChoiceChip(
+                    label: Text(label),
+                    selected: _filterStatus == key,
+                    onSelected: (_) => setState(() {
+                      _filterStatus = key;
+                      _selected = null;
+                    }),
+                    selectedColor: CssTheme.header,
+                    backgroundColor: cs.surfaceContainerLowest,
+                    side: BorderSide(color: cs.outlineVariant),
+                    labelStyle: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                      color: _filterStatus == key
+                          ? Colors.white
+                          : CssTheme.text,
+                    ),
+                  ),
+                FilterChip(
+                  label: const Text('Critical'),
+                  selected: _filterCritical,
+                  selectedColor: Colors.red.shade100,
                   backgroundColor: cs.surfaceContainerLowest,
                   side: BorderSide(color: cs.outlineVariant),
+                  checkmarkColor: Colors.red,
                   labelStyle: TextStyle(
                     fontSize: 12,
                     fontWeight: FontWeight.w700,
-                    color: _filterStatus == key
-                        ? Colors.white
-                        : CssTheme.text,
+                    color: _filterCritical ? Colors.red : CssTheme.text,
                   ),
+                  onSelected: (v) => setState(() {
+                    _filterCritical = v;
+                    _selected = null;
+                  }),
                 ),
-              FilterChip(
-                label: const Text('Critical'),
-                selected: _filterCritical,
-                selectedColor: Colors.red.shade100,
-                backgroundColor: cs.surfaceContainerLowest,
-                side: BorderSide(color: cs.outlineVariant),
-                checkmarkColor: Colors.red,
-                labelStyle: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w700,
-                  color:
-                      _filterCritical ? Colors.red : CssTheme.text,
-                ),
-                onSelected: (v) => setState(() {
-                  _filterCritical = v;
-                  _selected = null;
-                }),
-              ),
-            ],
-          ),
+              ],
+            ),
+          ] else ...[
+            const SizedBox(height: 6),
+            Text(
+              'Archived reports — read only',
+              style: TextStyle(
+                  fontSize: 12, color: cs.onSurfaceVariant),
+            ),
+          ],
         ],
       ),
     );
@@ -315,9 +370,11 @@ class _IssuesPageState extends State<IssuesPage> {
     final items = _filtered;
 
     if (items.isEmpty) {
-      return const Center(
-        child: Text('No reports',
-            style: TextStyle(color: CssTheme.textMuted)),
+      return Center(
+        child: Text(
+          _showArchive ? 'No archived reports' : 'No reports',
+          style: const TextStyle(color: CssTheme.textMuted),
+        ),
       );
     }
 
@@ -374,8 +431,7 @@ class _IssuesPageState extends State<IssuesPage> {
                       padding: const EdgeInsets.symmetric(
                           horizontal: 8, vertical: 2),
                       decoration: BoxDecoration(
-                        color: _statusColor(status)
-                            .withOpacity(0.15),
+                        color: _statusColor(status).withOpacity(0.15),
                         borderRadius: BorderRadius.circular(6),
                       ),
                       child: Text(
@@ -416,23 +472,27 @@ class _IssuesPageState extends State<IssuesPage> {
 
 class _IssueDetail extends StatefulWidget {
   final Map<String, dynamic> issue;
+  final bool isArchive;
   final String Function(String?) statusLabel;
   final String Function(String?) categoryLabel;
   final Color Function(String?) statusColor;
   final String driverName;
   final String Function(String?) fmtDate;
   final void Function(Map<String, dynamic>) onSaved;
+  final VoidCallback onArchived;
   final VoidCallback onDeleted;
 
   const _IssueDetail({
     super.key,
     required this.issue,
+    required this.isArchive,
     required this.statusLabel,
     required this.categoryLabel,
     required this.statusColor,
     required this.driverName,
     required this.fmtDate,
     required this.onSaved,
+    required this.onArchived,
     required this.onDeleted,
   });
 
@@ -445,6 +505,7 @@ class _IssueDetailState extends State<_IssueDetail> {
   late String _status;
   late final TextEditingController _noteCtrl;
   bool _saving = false;
+  bool _archiving = false;
   bool _deleting = false;
 
   @override
@@ -461,13 +522,13 @@ class _IssueDetailState extends State<_IssueDetail> {
     super.dispose();
   }
 
-  Future<void> _delete() async {
+  Future<void> _archive() async {
     final confirm = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Delete report'),
+        title: const Text('Archive report'),
         content: const Text(
-            'Are you sure you want to delete this report? This cannot be undone.'),
+            'This report will be moved to the archive. You can find it there later and delete it if needed.'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
@@ -475,8 +536,46 @@ class _IssueDetailState extends State<_IssueDetail> {
           ),
           FilledButton(
             onPressed: () => Navigator.pop(ctx, true),
-            style: FilledButton.styleFrom(
-                backgroundColor: Colors.red),
+            child: const Text('Archive'),
+          ),
+        ],
+      ),
+    );
+    if (confirm != true) return;
+
+    setState(() => _archiving = true);
+    try {
+      await _supabase
+          .from('issues')
+          .update({'archived': true})
+          .eq('id', widget.issue['id']);
+      widget.onArchived();
+    } catch (e) {
+      debugPrint('Archive issue error: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('Error: $e')));
+      }
+    } finally {
+      if (mounted) setState(() => _archiving = false);
+    }
+  }
+
+  Future<void> _delete() async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete permanently'),
+        content: const Text(
+            'This will permanently delete the report. This cannot be undone.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
             child: const Text('Delete'),
           ),
         ],
@@ -499,6 +598,24 @@ class _IssueDetailState extends State<_IssueDetail> {
       }
     } finally {
       if (mounted) setState(() => _deleting = false);
+    }
+  }
+
+  Future<void> _unarchive() async {
+    setState(() => _archiving = true);
+    try {
+      await _supabase
+          .from('issues')
+          .update({'archived': false})
+          .eq('id', widget.issue['id']);
+      widget.onArchived(); // reuses same callback — removes from archive list
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('Error: $e')));
+      }
+    } finally {
+      if (mounted) setState(() => _archiving = false);
     }
   }
 
@@ -655,8 +772,7 @@ class _IssueDetailState extends State<_IssueDetail> {
                   fit: BoxFit.cover,
                   errorBuilder: (_, __, ___) =>
                       const Text('Could not load image',
-                          style:
-                              TextStyle(color: CssTheme.textMuted)),
+                          style: TextStyle(color: CssTheme.textMuted)),
                 ),
               ),
             ),
@@ -676,8 +792,9 @@ class _IssueDetailState extends State<_IssueDetail> {
                   value: 'resolved', label: Text('Resolved')),
             ],
             selected: {_status},
-            onSelectionChanged: (v) =>
-                setState(() => _status = v.first),
+            onSelectionChanged: widget.isArchive
+                ? null
+                : (v) => setState(() => _status = v.first),
             style: ButtonStyle(
               backgroundColor:
                   WidgetStateProperty.resolveWith((states) {
@@ -704,6 +821,7 @@ class _IssueDetailState extends State<_IssueDetail> {
           TextField(
             controller: _noteCtrl,
             maxLines: 4,
+            readOnly: widget.isArchive,
             decoration: const InputDecoration(
               hintText:
                   'Describe what was done or what is happening...',
@@ -713,52 +831,98 @@ class _IssueDetailState extends State<_IssueDetail> {
           const SizedBox(height: 24),
 
           // ── Buttons ──
-          Row(
-            children: [
-              Expanded(
-                child: SizedBox(
+          if (!widget.isArchive) ...[
+            Row(
+              children: [
+                Expanded(
+                  child: SizedBox(
+                    height: 48,
+                    child: FilledButton.icon(
+                      onPressed: _saving ? null : _save,
+                      icon: _saving
+                          ? const SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: Colors.white),
+                            )
+                          : const Icon(Icons.save),
+                      label: Text(_saving
+                          ? 'Saving...'
+                          : 'Save and notify driver'),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                SizedBox(
+                  width: 130,
                   height: 48,
-                  child: FilledButton.icon(
-                    onPressed: _saving ? null : _save,
-                    icon: _saving
+                  child: OutlinedButton.icon(
+                    onPressed: _archiving ? null : _archive,
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: Colors.grey.shade700,
+                      side: BorderSide(color: Colors.grey.shade400),
+                    ),
+                    icon: _archiving
                         ? const SizedBox(
-                            width: 18,
-                            height: 18,
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(
+                                strokeWidth: 2),
+                          )
+                        : const Icon(Icons.archive_outlined),
+                    label: const Text('Archive'),
+                  ),
+                ),
+              ],
+            ),
+          ] else ...[
+            // Archive view — unarchive + delete permanently
+            Row(
+              children: [
+                Expanded(
+                  child: SizedBox(
+                    height: 48,
+                    child: OutlinedButton.icon(
+                      onPressed: _archiving ? null : _unarchive,
+                      icon: _archiving
+                          ? const SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(
+                                  strokeWidth: 2),
+                            )
+                          : const Icon(Icons.unarchive_outlined),
+                      label: const Text('Restore to active'),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                SizedBox(
+                  width: 160,
+                  height: 48,
+                  child: OutlinedButton.icon(
+                    onPressed: _deleting ? null : _delete,
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: Colors.red,
+                      side: const BorderSide(color: Colors.red),
+                    ),
+                    icon: _deleting
+                        ? const SizedBox(
+                            width: 16,
+                            height: 16,
                             child: CircularProgressIndicator(
                                 strokeWidth: 2,
-                                color: Colors.white),
+                                color: Colors.red),
                           )
-                        : const Icon(Icons.save),
-                    label: Text(_saving
-                        ? 'Saving...'
-                        : 'Save and notify driver'),
+                        : const Icon(Icons.delete_outline),
+                    label: const Text('Delete permanently'),
                   ),
                 ),
-              ),
-              const SizedBox(width: 10),
-              SizedBox(
-                width: 120,
-                height: 48,
-                child: OutlinedButton.icon(
-                  onPressed: _deleting ? null : _delete,
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: Colors.red,
-                    side: const BorderSide(color: Colors.red),
-                  ),
-                  icon: _deleting
-                      ? const SizedBox(
-                          width: 16,
-                          height: 16,
-                          child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              color: Colors.red),
-                        )
-                      : const Icon(Icons.delete_outline),
-                  label: const Text('Delete'),
-                ),
-              ),
-            ],
-          ),
+              ],
+            ),
+          ],
         ],
       ),
     );

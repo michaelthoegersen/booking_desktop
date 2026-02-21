@@ -103,11 +103,13 @@ class _BusMapWidgetState extends State<BusMapWidget> {
       final label = _busLabel(bus);
       final position = widget.busLocations[bus]!;
 
+      final prod = position.production;
+
       markers.add(
         Marker(
           point: pos,
-          width: 90,   // wide enough for labels like "YCR 682"
-          height: 72,
+          width: 100,
+          height: prod != null ? 90 : 72,
 
           child: Tooltip(
             message: '$bus\n${position.place ?? "On route"}',
@@ -134,15 +136,32 @@ class _BusMapWidgetState extends State<BusMapWidget> {
                     color: Colors.black87,
                     borderRadius: BorderRadius.circular(7),
                   ),
-                  child: Text(
-                    label,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 10,
-                      fontWeight: FontWeight.bold,
-                    ),
-                    maxLines: 1,
-                    overflow: TextOverflow.visible,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        label,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 10,
+                          fontWeight: FontWeight.bold,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.visible,
+                      ),
+                      if (prod != null) ...[
+                        const SizedBox(height: 1),
+                        Text(
+                          prod,
+                          style: const TextStyle(
+                            color: Colors.white70,
+                            fontSize: 8,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                    ],
                   ),
                 ),
               ],
@@ -211,6 +230,7 @@ class _BusMapWidgetState extends State<BusMapWidget> {
               urlTemplate:
                   'https://api.maptiler.com/maps/streets/256/{z}/{x}/{y}.png?key=qLneWyVuo1A6hcUjh3iS',
               userAgentPackageName: 'com.tourflow.app',
+              errorTileCallback: (tile, error, stackTrace) {},
             ),
 
             // No clustering — each bus always gets its own marker

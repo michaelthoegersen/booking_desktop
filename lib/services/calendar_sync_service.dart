@@ -23,12 +23,12 @@ class CalendarSyncService {
     while (i >= 0) {
       final loc = entries[i].location.trim().toLowerCase();
 
-      if (loc == 'travel' || loc == 'off') {
-        return true;
+      if (loc == 'travel') {
+        return true;   // only Travel triggers the 1200km threshold
       }
 
       if (loc.isNotEmpty) {
-        return false;
+        return false;  // Off or any real city stops the search → normal 600km threshold
       }
 
       i--;
@@ -101,6 +101,24 @@ class CalendarSyncService {
       print("♻️ Cleared previous auto rows for draft");
 
       // --------------------------------------------------
+      // 3️⃣b  Slett foreldreløse rader (draft_id = NULL)
+      // Disse ble opprettet av _assign() før draft_id-fiksing.
+      // De matcher ikke .eq('draft_id', draftId) over.
+      // --------------------------------------------------
+      if (offer.production.isNotEmpty && offer.contact.isNotEmpty) {
+        await sb
+            .from('samletdata')
+            .delete()
+            .eq('produksjon', offer.production)
+            .eq('contact', offer.contact)
+            .inFilter('dato', offerDates.toList())
+            .or('draft_id.is.null')
+            .or('manual_block.is.null,manual_block.eq.false');
+
+        print("♻️ Cleared orphaned rows (no draft_id) for ${offer.production}");
+      }
+
+      // --------------------------------------------------
       // 4️⃣ Bygg nye rader (ENTERPRISE)
       // --------------------------------------------------
 
@@ -142,28 +160,32 @@ class CalendarSyncService {
         final vehicle =
             "${offer.busType.label}${round.trailer ? ' + trailer' : ''}";
 
+        // ENTERPRISE MULTI BUS SUPPORT — include WAITING_LIST as a valid kilde
+        final buses = round.busSlots
+            .whereType<String>()
+            .where((b) => b.isNotEmpty)
+            .toList();
+
+        if (buses.isEmpty) {
+          print("⛔ Skip round $ri — no bus selected");
+          continue;
+        }
+
         for (int i = 0; i < round.entries.length; i++) {
           final e = round.entries[i];
 
           final dateStr =
               e.date.toIso8601String().substring(0, 10);
 
-          // ENTERPRISE MULTI BUS SUPPORT
-          final buses = round.busSlots
-              .whereType<String>()
-              .where((b) => b.isNotEmpty)
-              .toList();
-
-          if (buses.isEmpty) {
-            print("⛔ Skip round $ri — no bus selected");
-            continue;
-          }
-
           // ⭐⭐⭐ EN RAD PER BUSS ⭐⭐⭐
           for (final bus in buses) {
             final key = "$dateStr-$bus";
 
             final row = rowByDate.putIfAbsent(key, () {
+              final legNoDDrive = (calc.noDDrivePerLeg != null &&
+                      i < calc.noDDrivePerLeg!.length)
+                  ? calc.noDDrivePerLeg![i]
+                  : false;
               return {
                 'draft_id': draftId,
                 'round_index': ri,
@@ -180,6 +202,7 @@ class CalendarSyncService {
                 'contact': offer.contact,
                 'status': offer.status,
                 'kilde': bus,
+                'no_ddrive': legNoDDrive,
               };
             });
 

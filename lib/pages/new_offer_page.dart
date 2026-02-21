@@ -989,16 +989,14 @@ Future<void> _syncWaitingListAfterSave() async {
 
     for (int ri = 0; ri < offer.rounds.length; ri++) {
       final round = offer.rounds[ri];
+      if (round.entries.isEmpty) continue; // skip rounds with no dates
+
       for (int si = 0; si < round.busSlots.length; si++) {
         if (round.busSlots[si] != "WAITING_LIST") continue;
 
-        DateTime? dateFrom;
-        DateTime? dateTo;
-        if (round.entries.isNotEmpty) {
-          final dates = round.entries.map((e) => e.date);
-          dateFrom = dates.reduce((a, b) => a.isBefore(b) ? a : b);
-          dateTo = dates.reduce((a, b) => a.isAfter(b) ? a : b);
-        }
+        final dates = round.entries.map((e) => e.date);
+        final dateFrom = dates.reduce((a, b) => a.isBefore(b) ? a : b);
+        final dateTo = dates.reduce((a, b) => a.isAfter(b) ? a : b);
 
         rows.add({
           'draft_id': _draftId,
@@ -1013,12 +1011,8 @@ Future<void> _syncWaitingListAfterSave() async {
           'contact': offer.contact.trim().isEmpty
               ? null
               : offer.contact.trim(),
-          'date_from': dateFrom != null
-              ? dateFrom.toIso8601String().substring(0, 10)
-              : null,
-          'date_to': dateTo != null
-              ? dateTo.toIso8601String().substring(0, 10)
-              : null,
+          'date_from': dateFrom.toIso8601String().substring(0, 10),
+          'date_to': dateTo.toIso8601String().substring(0, 10),
         });
       }
     }

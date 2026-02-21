@@ -8,17 +8,20 @@ import 'package:flutter/gestures.dart';
 import '../services/offer_storage_service.dart';
 import '../services/notification_service.dart';
 import '../services/email_service.dart';
+import '../utils/bus_utils.dart';
 
 // ============================================================
 // HELPERS
 // ============================================================
+extension _NullIfEmpty on String {
+  String? get nullIfEmpty => isEmpty ? null : this;
+}
+
 DateTime parseUtcDay(String s) {
   final d = DateTime.parse(s);
   return DateTime.utc(d.year, d.month, d.day);
 }
-String formatBusName(String raw) {
-  return raw.replaceAll("_", " ");
-}
+String formatBusName(String raw) => fmtBus(raw);
 DateTime startOfWeek(DateTime d) {
   final diff = d.weekday - DateTime.monday;
   return DateTime(d.year, d.month, d.day - diff);
@@ -159,6 +162,12 @@ class _CalendarPageState extends State<CalendarPage> {
 
   Map<String, Map<DateTime, List<Map<String, dynamic>>>> data = {};
 
+  // ============================================================
+  // WAITING LIST STATE
+  // ============================================================
+  List<Map<String, dynamic>> _waitingList = [];
+  bool _wlExpanded = true;
+
   final buses = [
     "CSS_1034",
     "CSS_1023",
@@ -185,6 +194,7 @@ class _CalendarPageState extends State<CalendarPage> {
     // 👉 Start i måned-visning
     isMonthView = true;
     loadMonth();
+    _loadWaitingList();
 
     // ✅ Synk vertikal scroll mellom buss-kolonne og kalender-kolonne
     _leftVScrollCtrl.addListener(_syncLeftToRight);
@@ -355,6 +365,7 @@ final date = DateTime.utc(parsed.year, parsed.month, parsed.day);
       loadWeek();
     }
 
+    _loadWaitingList();
     setState(() {});
   }
 
@@ -377,8 +388,9 @@ final date = DateTime.utc(parsed.year, parsed.month, parsed.day);
       loadWeek();
     }
 
+    _loadWaitingList();
     setState(() {});
-  } 
+  }
 
 
 
@@ -448,6 +460,15 @@ Widget build(BuildContext context) {
           Expanded(
             child: buildContent(days),
           ),
+
+          // =========================
+          // WAITING LIST
+          // =========================
+          const Divider(height: 1),
+
+          const SizedBox(height: 4),
+
+          _buildWaitingListPanel(),
         ],
       ),
     ),
@@ -1116,11 +1137,27 @@ List<Widget> buildSegments(
     final first = chunk.first;
     final isManual = first['manual_block'] == true;
 
+    final kjoretoy = (first['kjoretoy'] as String?) ?? '';
+    final hasTrailer = kjoretoy.contains('+ trailer');
+
+    final noDriver = !isManual &&
+        ((first['sjafor'] as String?)?.trim() ?? '').isEmpty;
+
+    const dDriveThreshold = 600.0;
+    final noDDrive = !isManual && chunk.any((r) {
+      final km = double.tryParse(
+              ((r['km'] as String?)?.trim() ?? '')) ??
+          0.0;
+      final excepted = (r['no_ddrive'] as bool?) ?? false;
+      final dDrive = ((r['d_drive'] as String?)?.trim() ?? '');
+      return km >= dDriveThreshold && !excepted && dDrive.isEmpty;
+    });
+
     result.add(
       BookingSegment(
         title: isManual
             ? (first['note'] ?? 'Blocked')
-            : (first['produksjon'] ?? ''),
+            : ((first['produksjon'] ?? '') + (hasTrailer ? ' +trailer' : '')),
         span: visibleCount,
         bus: bus,
         from: chunkStart,
@@ -1128,6 +1165,9 @@ List<Widget> buildSegments(
         status: isManual ? 'manual' : first['status'],
         width: dayWidth,
         draftId: first['draft_id'].toString(),
+        noDriver: noDriver,
+        noDDrive: noDDrive,
+        driver: (first['sjafor'] as String?)?.trim().nullIfEmpty,
       ),
     );
 
@@ -1146,6 +1186,242 @@ List<Widget> buildSegments(
   // ============================================================
 
   
+  // ============================================================
+  // WAITING LIST — LOAD
+  // ============================================================
+
+  Future<void> _loadWaitingList() async {
+    // Show only entries that overlap with the currently visible period.
+    final DateTime periodStart;
+    final DateTime periodEnd;
+    if (isMonthView) {
+      periodStart = DateTime(monthStart.year, monthStart.month, 1);
+      periodEnd   = DateTime(monthStart.year, monthStart.month + 1, 0);
+    } else {
+      periodStart = weekStart;
+      periodEnd   = weekStart.add(const Duration(days: 6));
+    }
+    final psStr = fmtDb(periodStart);
+    final peStr = fmtDb(periodEnd);
+
+    // Overlap: date_from <= periodEnd AND date_to >= periodStart
+    // Also include entries with null dates (manually added without dates).
+    final res = await supabase
+        .from('waiting_list')
+        .select()
+        .or('date_from.is.null,date_from.lte.$peStr')
+        .or('date_to.is.null,date_to.gte.$psStr')
+        .order('date_from', ascending: true, nullsFirst: true);
+
+    if (mounted) {
+      setState(() {
+        _waitingList = List<Map<String, dynamic>>.from(res);
+      });
+    }
+  }
+
+  // ============================================================
+  // WAITING LIST — DIALOGS
+  // ============================================================
+
+  Future<void> _openAddWaitingListDialog() async {
+    final added = await showDialog<bool>(
+      context: context,
+      builder: (_) => const _WaitingListAddDialog(),
+    );
+    if (added == true && mounted) _loadWaitingList();
+  }
+
+  Future<void> _openAssignToBusDialog(Map<String, dynamic> item) async {
+    final done = await showDialog<bool>(
+      context: context,
+      builder: (_) => _WaitingListAssignDialog(item: item, buses: buses),
+    );
+    if (done == true && mounted) {
+      _loadWaitingList();
+      isMonthView ? loadMonth() : loadWeek();
+    }
+  }
+
+  Future<void> _deleteWaitingListItem(Map<String, dynamic> item) async {
+    final id = item['id'].toString();
+    final draftId = item['draft_id']?.toString();
+
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text("Remove from waiting list?"),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text("Cancel"),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text("Remove"),
+          ),
+        ],
+      ),
+    );
+    if (ok == true) {
+      await supabase.from('waiting_list').delete().eq('id', id);
+      // Also remove any WAITING_LIST samletdata rows for this draft
+      if (draftId != null && draftId.isNotEmpty) {
+        await supabase
+            .from('samletdata')
+            .delete()
+            .eq('draft_id', draftId)
+            .eq('kilde', 'WAITING_LIST');
+      }
+      if (mounted) _loadWaitingList();
+    }
+  }
+
+  // ============================================================
+  // WAITING LIST — PANEL UI
+  // ============================================================
+
+  Widget _buildWaitingListPanel() {
+    final cs = Theme.of(context).colorScheme;
+    final panelHeight = _wlExpanded ? 240.0 : 48.0;
+
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 200),
+      height: panelHeight,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+
+          // ── HEADER ──────────────────────────────────────────
+          InkWell(
+            onTap: () => setState(() => _wlExpanded = !_wlExpanded),
+            child: SizedBox(
+              height: 48,
+              child: Row(
+                children: [
+
+                  Icon(
+                    _wlExpanded ? Icons.expand_less : Icons.expand_more,
+                    size: 20,
+                    color: cs.onSurfaceVariant,
+                  ),
+
+                  const SizedBox(width: 8),
+
+                  Text(
+                    "Waiting List",
+                    style: Theme.of(context)
+                        .textTheme
+                        .titleMedium
+                        ?.copyWith(fontWeight: FontWeight.w700),
+                  ),
+
+                  if (_waitingList.isNotEmpty) ...[
+                    const SizedBox(width: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: Colors.orange.shade100,
+                        borderRadius: BorderRadius.circular(99),
+                      ),
+                      child: Text(
+                        "${_waitingList.length}",
+                        style: TextStyle(
+                          color: Colors.orange.shade800,
+                          fontWeight: FontWeight.w700,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ),
+                  ],
+
+                  const Spacer(),
+
+                  IconButton(
+                    icon: const Icon(Icons.refresh, size: 18),
+                    tooltip: "Refresh waiting list",
+                    onPressed: _loadWaitingList,
+                  ),
+                ],
+              ),
+            ),
+          ),
+
+          // ── LIST ─────────────────────────────────────────────
+          if (_wlExpanded)
+            Expanded(
+              child: _waitingList.isEmpty
+                  ? Center(
+                      child: Text(
+                        "No jobs in waiting list",
+                        style: TextStyle(color: cs.onSurfaceVariant),
+                      ),
+                    )
+                  : ListView.separated(
+                      itemCount: _waitingList.length,
+                      separatorBuilder: (_, __) =>
+                          Divider(height: 1, color: cs.outlineVariant),
+                      itemBuilder: (_, i) {
+                        final item = _waitingList[i];
+                        final fromStr = item['date_from'] != null
+                            ? DateFormat("dd.MM.yy")
+                                .format(DateTime.parse(item['date_from']))
+                            : "—";
+                        final toStr = item['date_to'] != null
+                            ? DateFormat("dd.MM.yy")
+                                .format(DateTime.parse(item['date_to']))
+                            : "—";
+                        final notes = (item['notes'] ?? '').toString().trim();
+
+                        return ListTile(
+                          dense: true,
+                          leading: const Icon(
+                            Icons.hourglass_top_outlined,
+                            color: Colors.orange,
+                          ),
+                          title: Text(
+                            item['production'] ?? "—",
+                            style: const TextStyle(fontWeight: FontWeight.w700),
+                          ),
+                          subtitle: Text(
+                            [
+                              if ((item['company'] ?? '').toString().isNotEmpty)
+                                item['company'],
+                              "$fromStr – $toStr",
+                              if (notes.isNotEmpty) notes,
+                            ].join(' · '),
+                          ),
+                          trailing: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              OutlinedButton.icon(
+                                onPressed: () =>
+                                    _openAssignToBusDialog(item),
+                                icon: const Icon(Icons.directions_bus,
+                                    size: 16),
+                                label: const Text("Assign to bus"),
+                              ),
+                              const SizedBox(width: 8),
+                              IconButton(
+                                icon: const Icon(Icons.delete_outline,
+                                    size: 18),
+                                color: cs.error,
+                                tooltip: "Remove from waiting list",
+                                onPressed: () => _deleteWaitingListItem(item),
+                              ),
+                            ],
+                          ),
+                        );
+                      },
+                    ),
+            ),
+        ],
+      ),
+    );
+  }
+
   Future<void> _openManualBlockDialog() async {
   final changed = await showDialog<bool>(
     context: context,
@@ -1191,6 +1467,9 @@ class BookingSegment extends StatelessWidget {
   final String? status;
   final double width;
   final String draftId;
+  final bool noDriver;
+  final bool noDDrive;
+  final String? driver;
 
   const BookingSegment({
     super.key,
@@ -1202,6 +1481,9 @@ class BookingSegment extends StatelessWidget {
     this.status,
     required this.width,
     required this.draftId,
+    this.noDriver = false,
+    this.noDDrive = false,
+    this.driver,
   });
 
   // ============================================================
@@ -1335,13 +1617,66 @@ class BookingSegment extends StatelessWidget {
         color: statusColor(status),
         borderRadius: BorderRadius.circular(10),
       ),
-      child: Text(
-        title,
-        overflow: TextOverflow.ellipsis,
-        style: const TextStyle(
-          fontWeight: FontWeight.w700,
-          fontSize: 13,
-        ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            children: [
+              Flexible(
+                child: Text(
+                  title,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w700,
+                    fontSize: 13,
+                  ),
+                ),
+              ),
+              if (driver != null) ...[
+                const SizedBox(width: 6),
+                Flexible(
+                  child: Text(
+                    '· $driver',
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 12,
+                      color: Colors.white70,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ),
+              ],
+            ],
+          ),
+          if (noDriver || noDDrive) ...[
+            const SizedBox(height: 2),
+            Row(
+              children: [
+                const Icon(
+                  Icons.warning_amber_rounded,
+                  size: 11,
+                  color: Colors.white70,
+                ),
+                const SizedBox(width: 3),
+                Expanded(
+                  child: Text(
+                    [
+                      if (noDriver) 'No driver',
+                      if (noDDrive) 'No D.Drive',
+                    ].join(' · '),
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 10,
+                      color: Colors.white70,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ],
       ),
     ),
   );
@@ -1516,7 +1851,7 @@ Future<void> copyToBus(String targetBus) async {
     final target = await supabase
         .from('samletdata')
         .select('id')
-        .eq('produksjon', widget.production) // ⭐ FIX
+        .eq('produksjon', widget.production.replaceAll(' +trailer', ''))
         .eq('kilde', targetBus)
         .eq('dato', date)
         .maybeSingle();
@@ -1567,10 +1902,13 @@ Future<void> copyToBus(String targetBus) async {
 
 Future<void> load() async {
 
+  // Strip display-only suffix added in buildSegments()
+  final produksjon = widget.production.replaceAll(' +trailer', '');
+
   final res = await supabase
       .from('samletdata')
       .select()
-      .eq('produksjon', widget.production)
+      .eq('produksjon', produksjon)
       .eq('kilde', widget.bus)
       .gte('dato', fmtDb(widget.from))
       .lte('dato', fmtDb(widget.to))
@@ -1825,13 +2163,40 @@ Future<void> load() async {
             ? const Center(
                 child: CircularProgressIndicator(),
               )
-            : SingleChildScrollView(
+            : rows.isEmpty
+                ? const Center(child: Text("No calendar data found."))
+                : SingleChildScrollView(
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
 
                   children: [
 
                     _field("Driver", sjaforCtrl),
+                    ValueListenableBuilder<TextEditingValue>(
+                      valueListenable: sjaforCtrl,
+                      builder: (_, value, __) {
+                        if (value.text.trim().isNotEmpty) {
+                          return const SizedBox.shrink();
+                        }
+                        return Padding(
+                          padding: const EdgeInsets.only(bottom: 8),
+                          child: Row(
+                            children: [
+                              Icon(Icons.warning_amber_rounded,
+                                  size: 16, color: Colors.orange.shade700),
+                              const SizedBox(width: 4),
+                              Text(
+                                "No driver allocated",
+                                style: TextStyle(
+                                  color: Colors.orange.shade700,
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ],
+                          ),
+                        );
+                      },
+                    ),
                     _field("Status", statusCtrl),
 
                     const SizedBox(height: 16),
@@ -1939,7 +2304,7 @@ Future<void> load() async {
                     const SizedBox(height: 16),
 
 
-                    _dayField("D.Drive", dDriveCtrls),
+                    _dDriveField(),
                     _multiDayField("Itinerary", itinCtrls),
                     _dayField("Venue", venueCtrls),
                     _dayField("Address", addrCtrls),
@@ -1977,7 +2342,7 @@ Future<void> load() async {
               .where((b) => b != widget.bus) // ikke samme buss
               .map((b) => SimpleDialogOption(
                     onPressed: () => Navigator.pop(context, b),
-                    child: Text(b),
+                    child: Text(fmtBus(b)),
                   ))
               .toList(),
         ),
@@ -2030,6 +2395,51 @@ Future<void> load() async {
     );
   }
 
+
+  Widget _dDriveField() {
+    if (rows.isEmpty || activeIndex >= rows.length) {
+      return const SizedBox.shrink();
+    }
+    final row = rows[activeIndex];
+    final kmStr = (row['km'] as String?)?.trim() ?? '';
+    final kmVal = double.tryParse(kmStr) ?? 0.0;
+    final excepted = (row['no_ddrive'] as bool?) ?? false;
+    // Only show field on actual D.Drive days
+    if (kmVal < 600.0 || excepted) return const SizedBox.shrink();
+    final id = row['id'].toString();
+    final ctrl = dDriveCtrls[id];
+    if (ctrl == null) return _dayField("D.Drive", dDriveCtrls);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _dayField("D.Drive", dDriveCtrls),
+        ValueListenableBuilder<TextEditingValue>(
+          valueListenable: ctrl,
+          builder: (_, value, __) {
+            if (value.text.trim().isNotEmpty) return const SizedBox.shrink();
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Row(
+                children: [
+                  Icon(Icons.warning_amber_rounded,
+                      size: 16, color: Colors.orange.shade700),
+                  const SizedBox(width: 4),
+                  Text(
+                    "No driver allocated",
+                    style: TextStyle(
+                      color: Colors.orange.shade700,
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        ),
+      ],
+    );
+  }
 
   Widget _dayField(
     String label,
@@ -2353,7 +2763,7 @@ class _StatusDatePickerDialogState
                     value: selected[key] ?? false,
 
                     title: Text(
-                      "${fmt(b.from)} – ${fmt(b.to)} (${widget.targetBus})",
+                      "${fmt(b.from)} – ${fmt(b.to)} (${fmtBus(widget.targetBus)})",
                     ),
 
                     onChanged: (v) {
@@ -2612,7 +3022,7 @@ class _ManualBlockDialogState
                   .map(
                     (b) => DropdownMenuItem(
                       value: b,
-                      child: Text(b),
+                      child: Text(fmtBus(b)),
                     ),
                   )
                   .toList(),
@@ -2700,6 +3110,427 @@ class _ManualBlockDialogState
                   child: CircularProgressIndicator(strokeWidth: 2),
                 )
               : const Text("Save"),
+        ),
+      ],
+    );
+  }
+}
+
+// ============================================================
+// WAITING LIST — ADD DIALOG
+// ============================================================
+
+class _WaitingListAddDialog extends StatefulWidget {
+  const _WaitingListAddDialog();
+
+  @override
+  State<_WaitingListAddDialog> createState() => _WaitingListAddDialogState();
+}
+
+class _WaitingListAddDialogState extends State<_WaitingListAddDialog> {
+  final _sb = Supabase.instance.client;
+
+  final _productionCtrl = TextEditingController();
+  final _companyCtrl = TextEditingController();
+  final _contactCtrl = TextEditingController();
+  final _notesCtrl = TextEditingController();
+
+  DateTime? _from;
+  DateTime? _to;
+  bool _saving = false;
+
+  @override
+  void dispose() {
+    _productionCtrl.dispose();
+    _companyCtrl.dispose();
+    _contactCtrl.dispose();
+    _notesCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _pickFrom() async {
+    final d = await showDatePicker(
+      context: context,
+      firstDate: DateTime(2020),
+      lastDate: DateTime(2035),
+      initialDate: _from ?? DateTime.now(),
+    );
+    if (d != null) setState(() => _from = d);
+  }
+
+  Future<void> _pickTo() async {
+    final d = await showDatePicker(
+      context: context,
+      firstDate: DateTime(2020),
+      lastDate: DateTime(2035),
+      initialDate: _to ?? _from ?? DateTime.now(),
+    );
+    if (d != null) setState(() => _to = d);
+  }
+
+  Future<void> _save() async {
+    if (_productionCtrl.text.trim().isEmpty) return;
+    if (_saving) return;
+    setState(() => _saving = true);
+    try {
+      await _sb.from('waiting_list').insert({
+        'production': _productionCtrl.text.trim(),
+        'company': _companyCtrl.text.trim().isEmpty
+            ? null
+            : _companyCtrl.text.trim(),
+        'contact': _contactCtrl.text.trim().isEmpty
+            ? null
+            : _contactCtrl.text.trim(),
+        'date_from': _from != null ? fmtDb(_from!) : null,
+        'date_to': _to != null ? fmtDb(_to!) : null,
+        'notes': _notesCtrl.text.trim().isEmpty
+            ? null
+            : _notesCtrl.text.trim(),
+      });
+      if (mounted) Navigator.pop(context, true);
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text("Add to waiting list"),
+      content: SizedBox(
+        width: 420,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+
+              // Production
+              TextField(
+                controller: _productionCtrl,
+                decoration: const InputDecoration(
+                  labelText: "Production *",
+                  border: OutlineInputBorder(),
+                ),
+              ),
+
+              const SizedBox(height: 12),
+
+              // Company
+              TextField(
+                controller: _companyCtrl,
+                decoration: const InputDecoration(
+                  labelText: "Company",
+                  border: OutlineInputBorder(),
+                ),
+              ),
+
+              const SizedBox(height: 12),
+
+              // Contact
+              TextField(
+                controller: _contactCtrl,
+                decoration: const InputDecoration(
+                  labelText: "Contact",
+                  border: OutlineInputBorder(),
+                ),
+              ),
+
+              const SizedBox(height: 12),
+
+              // Date from
+              TextField(
+                readOnly: true,
+                onTap: _pickFrom,
+                decoration: InputDecoration(
+                  labelText: "Date from",
+                  border: const OutlineInputBorder(),
+                  hintText: _from == null
+                      ? 'Pick date'
+                      : DateFormat('dd.MM.yyyy').format(_from!),
+                  suffixIcon: const Icon(Icons.calendar_today, size: 16),
+                ),
+              ),
+
+              const SizedBox(height: 12),
+
+              // Date to
+              TextField(
+                readOnly: true,
+                onTap: _pickTo,
+                decoration: InputDecoration(
+                  labelText: "Date to",
+                  border: const OutlineInputBorder(),
+                  hintText: _to == null
+                      ? 'Pick date'
+                      : DateFormat('dd.MM.yyyy').format(_to!),
+                  suffixIcon: const Icon(Icons.calendar_today, size: 16),
+                ),
+              ),
+
+              const SizedBox(height: 12),
+
+              // Notes
+              TextField(
+                controller: _notesCtrl,
+                maxLines: 2,
+                decoration: const InputDecoration(
+                  labelText: "Notes",
+                  border: OutlineInputBorder(),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text("Cancel"),
+        ),
+        FilledButton(
+          onPressed: _saving ? null : _save,
+          child: _saving
+              ? const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Text("Add"),
+        ),
+      ],
+    );
+  }
+}
+
+// ============================================================
+// WAITING LIST — ASSIGN TO BUS DIALOG
+// ============================================================
+
+class _WaitingListAssignDialog extends StatefulWidget {
+  final Map<String, dynamic> item;
+  final List<String> buses;
+
+  const _WaitingListAssignDialog({
+    required this.item,
+    required this.buses,
+  });
+
+  @override
+  State<_WaitingListAssignDialog> createState() =>
+      _WaitingListAssignDialogState();
+}
+
+class _WaitingListAssignDialogState
+    extends State<_WaitingListAssignDialog> {
+  final _sb = Supabase.instance.client;
+
+  String? _bus;
+  DateTime? _from;
+  DateTime? _to;
+  String _status = 'Inquiry';
+  bool _saving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.item['date_from'] != null) {
+      _from = DateTime.parse(widget.item['date_from']);
+    }
+    if (widget.item['date_to'] != null) {
+      _to = DateTime.parse(widget.item['date_to']);
+    }
+  }
+
+  Future<void> _pickFrom() async {
+    final d = await showDatePicker(
+      context: context,
+      firstDate: DateTime(2020),
+      lastDate: DateTime(2035),
+      initialDate: _from ?? DateTime.now(),
+    );
+    if (d != null) setState(() => _from = d);
+  }
+
+  Future<void> _pickTo() async {
+    final d = await showDatePicker(
+      context: context,
+      firstDate: DateTime(2020),
+      lastDate: DateTime(2035),
+      initialDate: _to ?? _from ?? DateTime.now(),
+    );
+    if (d != null) setState(() => _to = d);
+  }
+
+  Future<void> _assign() async {
+    if (_bus == null || _from == null || _to == null) return;
+    if (_saving) return;
+    setState(() => _saving = true);
+
+    try {
+      final draftIdForRows = widget.item['draft_id']?.toString() ?? '';
+      final roundIdxForRows = widget.item['round_index'];
+
+      if (draftIdForRows.isNotEmpty) {
+        // ── Draft-backed entry: update existing WAITING_LIST rows in samletdata
+        //    This preserves sted, km, kjoretoy, pris, no_ddrive etc.
+        var query = _sb
+            .from('samletdata')
+            .update({'kilde': _bus, 'status': _status})
+            .eq('draft_id', draftIdForRows)
+            .eq('kilde', 'WAITING_LIST');
+        if (roundIdxForRows != null) {
+          final ri = roundIdxForRows is int
+              ? roundIdxForRows
+              : (roundIdxForRows as num).toInt();
+          query = query.eq('round_index', ri);
+        }
+        await query;
+      } else {
+        // ── Manual waiting-list entry (no draft): create new blank rows
+        final rows = <Map<String, dynamic>>[];
+        DateTime d = normalize(_from!);
+        final end = normalize(_to!);
+        while (!d.isAfter(end)) {
+          rows.add({
+            'dato': fmtDb(d),
+            'kilde': _bus,
+            'produksjon': widget.item['production'] ?? '',
+            'contact': widget.item['contact'] ?? '',
+            'status': _status,
+            'manual_block': false,
+          });
+          d = d.add(const Duration(days: 1));
+        }
+        await _sb.from('samletdata').insert(rows);
+      }
+
+      // Remove from waiting list
+      await _sb.from('waiting_list').delete().eq('id', widget.item['id']);
+
+      // Update the offer draft: replace the waiting list slot with the assigned bus
+      final draftId = widget.item['draft_id']?.toString();
+      if (draftId != null && draftId.isNotEmpty) {
+        final roundIdx = widget.item['round_index'];
+        final slotIdx  = widget.item['slot_index'];
+        // Coerce to int defensively — Supabase may return num
+        final ri = roundIdx is int ? roundIdx : (roundIdx as num?)?.toInt() ?? 0;
+        final si = slotIdx  is int ? slotIdx  : (slotIdx  as num?)?.toInt() ?? 0;
+        try {
+          final draft = await OfferStorageService.loadDraft(draftId);
+          if (ri < draft.rounds.length) {
+            final round = draft.rounds[ri];
+            // Extend list if needed (defensive)
+            while (round.busSlots.length <= si) {
+              round.busSlots.add(null);
+            }
+            round.busSlots[si] = _bus!;
+            await OfferStorageService.saveDraft(id: draftId, offer: draft);
+          }
+        } catch (e) {
+          debugPrint('⚠️ Could not update draft busSlots: $e');
+        }
+      }
+
+      if (mounted) Navigator.pop(context, true);
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text(
+        'Assign "${widget.item['production'] ?? ''}" to bus',
+      ),
+      content: SizedBox(
+        width: 400,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+
+            // Bus
+            DropdownButtonFormField<String>(
+              value: _bus,
+              decoration: const InputDecoration(
+                labelText: "Bus *",
+                border: OutlineInputBorder(),
+              ),
+              items: widget.buses
+                  .map((b) => DropdownMenuItem(
+                        value: b,
+                        child: Text(fmtBus(b)),
+                      ))
+                  .toList(),
+              onChanged: (v) => setState(() => _bus = v),
+            ),
+
+            const SizedBox(height: 12),
+
+            // Status
+            DropdownButtonFormField<String>(
+              value: _status,
+              decoration: const InputDecoration(
+                labelText: "Status",
+                border: OutlineInputBorder(),
+              ),
+              items: const [
+                DropdownMenuItem(value: 'Inquiry', child: Text("Inquiry")),
+                DropdownMenuItem(value: 'Confirmed', child: Text("Confirmed")),
+              ],
+              onChanged: (v) => setState(() => _status = v ?? 'Inquiry'),
+            ),
+
+            const SizedBox(height: 12),
+
+            // Date from
+            TextField(
+              readOnly: true,
+              onTap: _pickFrom,
+              decoration: InputDecoration(
+                labelText: "From *",
+                border: const OutlineInputBorder(),
+                hintText: _from == null
+                    ? 'Pick date'
+                    : DateFormat('dd.MM.yyyy').format(_from!),
+                suffixIcon: const Icon(Icons.calendar_today, size: 16),
+              ),
+            ),
+
+            const SizedBox(height: 12),
+
+            // Date to
+            TextField(
+              readOnly: true,
+              onTap: _pickTo,
+              decoration: InputDecoration(
+                labelText: "To *",
+                border: const OutlineInputBorder(),
+                hintText: _to == null
+                    ? 'Pick date'
+                    : DateFormat('dd.MM.yyyy').format(_to!),
+                suffixIcon: const Icon(Icons.calendar_today, size: 16),
+              ),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text("Cancel"),
+        ),
+        FilledButton(
+          onPressed: (_saving || _bus == null || _from == null || _to == null)
+              ? null
+              : _assign,
+          child: _saving
+              ? const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Text("Assign"),
         ),
       ],
     );

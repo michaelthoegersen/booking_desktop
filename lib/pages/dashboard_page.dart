@@ -259,7 +259,7 @@ class _DashboardPageState extends State<DashboardPage> {
 
     final res = await sb
         .from('samletdata')
-        .select('kilde, sted, dato, getin')
+        .select('kilde, sted, dato, getin, produksjon')
         .lte('dato', todayStr)
         .order('dato', ascending: false);
 
@@ -294,12 +294,16 @@ class _DashboardPageState extends State<DashboardPage> {
         final place = latest['sted']?.toString();
         final date = latest['dato']?.toString();
         final raw = latest['getin']?.toString();
+        final production = latest['produksjon']?.toString();
 
         if (place == null || date == null) return;
 
+        // Buss er ikke ute i dag — ikke vis på kart
+        if (date != todayStr) return;
+
         // Kun én rad → statisk
         if (list.length < 2 || raw == null || raw.isEmpty) {
-          result[bus] = BusPosition(place: place);
+          result[bus] = BusPosition(place: place, production: production);
           return;
         }
 
@@ -310,7 +314,7 @@ class _DashboardPageState extends State<DashboardPage> {
         final prevRaw = prev['getin']?.toString();
 
         if (prevPlace == null || prevDate == null) {
-          result[bus] = BusPosition(place: place);
+          result[bus] = BusPosition(place: place, production: production);
           return;
         }
 
@@ -321,7 +325,7 @@ class _DashboardPageState extends State<DashboardPage> {
             _parseDateTime(date, _extractTime(raw));
 
         if (startTime == null || endTime == null) {
-          result[bus] = BusPosition(place: place);
+          result[bus] = BusPosition(place: place, production: production);
           return;
         }
 
@@ -329,7 +333,7 @@ class _DashboardPageState extends State<DashboardPage> {
 
         // Ikke underveis
         if (!now.isAfter(startTime) || !now.isBefore(endTime)) {
-          result[bus] = BusPosition(place: place);
+          result[bus] = BusPosition(place: place, production: production);
           return;
         }
 
@@ -337,7 +341,7 @@ class _DashboardPageState extends State<DashboardPage> {
         final to = cityCoords[place.toLowerCase()];
 
         if (from == null || to == null) {
-          result[bus] = BusPosition(place: place);
+          result[bus] = BusPosition(place: place, production: production);
           return;
         }
 
@@ -367,6 +371,7 @@ class _DashboardPageState extends State<DashboardPage> {
 
           result[bus] = BusPosition(
             livePos: LatLng(lat, lng),
+            production: production,
           );
 
           return;
@@ -380,7 +385,7 @@ class _DashboardPageState extends State<DashboardPage> {
 
         final pos = route[index];
 
-        result[bus] = BusPosition(livePos: pos);
+        result[bus] = BusPosition(livePos: pos, production: production);
       },
     );
 
