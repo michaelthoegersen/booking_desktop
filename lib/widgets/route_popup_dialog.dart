@@ -70,9 +70,6 @@ class _RoutePopupDialogState extends State<RoutePopupDialog> {
   final TextEditingController _ferryNameCtrl =
       TextEditingController();
 
-  final TextEditingController _tollCtrl =
-      TextEditingController();
-
   // =================================================
   // RESOLVE PLACE
   // =================================================
@@ -124,7 +121,6 @@ class _RoutePopupDialogState extends State<RoutePopupDialog> {
     _fromCtrl.dispose();
     _toCtrl.dispose();
     _ferryNameCtrl.dispose();
-    _tollCtrl.dispose();
 
     for (final c in _viaCtrls) {
       c.dispose();
@@ -268,12 +264,6 @@ Future<void> _save() async {
   try {
     final extra = _buildExtra();
     final ferryName = _ferryNameCtrl.text.trim();
-
-    final toll = double.tryParse(
-          _tollCtrl.text.replaceAll(',', '.'),
-        ) ??
-        0.0;
-
     final from = _fromCtrl.text.trim();
     final to = _toCtrl.text.trim();
 
@@ -314,7 +304,6 @@ Future<void> _save() async {
       // metadata
       'extra': extra,
       'ferry_name': ferryName,
-      'toll_nightliner': toll,
 
       // total
       'distance_total_km': _distanceKm,
@@ -533,15 +522,6 @@ TextField(
   decoration: const InputDecoration(
     labelText: "Ferry / Bridge name",
     prefixIcon: Icon(Icons.directions_boat),
-  ),
-),
-
-TextField(
-  controller: _tollCtrl,
-  keyboardType: TextInputType.number,
-  decoration: const InputDecoration(
-    labelText: "Toll (Nightliner)",
-    prefixIcon: Icon(Icons.toll),
   ),
 ),
 

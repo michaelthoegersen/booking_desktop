@@ -111,6 +111,8 @@ static List<pw.Widget> _buildTableForIndexes(
   final widgets = <pw.Widget>[];
 
   double grandTotal = 0;
+  double grandFerry = 0;
+  double grandToll = 0;
   final Map<String, double> allCountryKm = {};
 
   // ================= ROUNDS =================
@@ -124,6 +126,8 @@ static List<pw.Widget> _buildTableForIndexes(
     if (result.totalCost != null) {
       grandTotal += result.totalCost!;
     }
+    grandFerry += result.ferryCost;
+    grandToll += result.tollCost;
 
     for (final entry in round.entries) {
       entry.countryKm.forEach((country, km) {
@@ -147,14 +151,18 @@ static List<pw.Widget> _buildTableForIndexes(
 
   // ================= GRAND TOTAL (KUN ÉN GANG) =================
   if (showGrandTotal && grandTotal > 0) {
+    // VAT base = total excluding ferry and toll (same as new_offer_page)
+    final vatBase = grandTotal - grandFerry - grandToll;
     final vatMap = _calculateForeignVat(
-      basePrice: grandTotal,
+      basePrice: vatBase,
       countryKm: allCountryKm,
     );
 
-    final totalIncVat =
-        grandTotal +
-        vatMap.values.fold(0.0, (a, b) => a + b);
+    // grandTotal is the gross (VAT-inclusive) price.
+    // VAT is extracted from it (not added on top).
+    final vatExtracted = vatMap.values.fold(0.0, (a, b) => a + b);
+    final totalIncVat = grandTotal;                 // gross price (incl VAT)
+    final totalExVat  = grandTotal - vatExtracted;  // net of foreign VAT
 
     widgets.add(
   pw.Padding(
@@ -180,7 +188,7 @@ static List<pw.Widget> _buildTableForIndexes(
 
               _buildVatBox(
                 vatMap,
-                grandTotal,
+                totalExVat,
                 totalIncVat,
                 regular,
                 bold,
@@ -343,8 +351,10 @@ static List<pw.Widget> _buildTotalSection({
     countryKm: countryKm,
   );
 
-  final totalIncVat =
-      grandTotal + vatMap.values.fold(0.0, (a, b) => a + b);
+  // grandTotal is the gross (VAT-inclusive) price.
+  final vatExtracted = vatMap.values.fold(0.0, (a, b) => a + b);
+  final totalIncVat = grandTotal;                 // gross price (incl VAT)
+  final totalExVat  = grandTotal - vatExtracted;  // net of foreign VAT
 
   return [
     pw.Padding(
@@ -361,7 +371,7 @@ static List<pw.Widget> _buildTotalSection({
           pw.SizedBox(height: 6),
           _buildVatBox(
             vatMap,
-            grandTotal,
+            totalExVat,
             totalIncVat,
             regular,
             bold,
@@ -617,82 +627,94 @@ static pw.Widget _buildOfferTitle(pw.Font bold) {
     final rows = <List<String>>[];
 
     // ---------------- ROWS
-    // ---------------- ROWS (TRAVEL LOOKUP VIA ROUTE)
 for (int r = 0; r < round.entries.length; r++) {
   final e = round.entries[r];
 
-  final isTravel =
-      e.location.trim().toLowerCase() == 'travel';
+  final isTravel = e.location.trim().toLowerCase() == 'travel';
+  final isOff    = e.location.trim().toLowerCase() == 'off';
 
-  final isOff =
-      e.location.trim().toLowerCase() == 'off';
+  // Direct look-back: is the closest preceding non-off/empty entry a Travel row?
+  // (More reliable than result.hasTravelBefore which depends on calc path taken.)
+  bool isAfterTravel = false;
+  if (!isTravel && !isOff) {
+    for (int j = r - 1; j >= 0; j--) {
+      final jLoc = round.entries[j].location.trim().toLowerCase();
+      if (jLoc == 'travel') {
+        isAfterTravel = true;
+        break;
+      }
+      if (jLoc.isNotEmpty && jLoc != 'off') break; // real city before us
+    }
+  }
 
-  final bool hadTravelBefore =
-      (r < result.hasTravelBefore.length)
-          ? result.hasTravelBefore[r]
-          : false;
-
-  // ---------------- KM ----------------
+  // ---------------- KM (raw from calc) ----------------
   double km = 0;
+  if (r < result.legKm.length) km = result.legKm[r].toDouble();
 
-  if (r < result.legKm.length) {
-    km = result.legKm[r].toDouble();
-  }
-
-  // ---------------- D.DRIVE ----------------
-  final bool hasDDrive = hadTravelBefore
-      ? km >= 1200   // Travel-merge-regel
-      : km >= 600;   // Normal dag
-
-  // ---------------- EXTRA (FRA CALC) ----------------
-  String extraText = "";
-
-  if (r < result.extraPerLeg.length) {
-    extraText = result.extraPerLeg[r];
-  }
-
-  // ================= FIND FROM / TO =================
-
+  // ---------------- FIND FROM / TO =================
   int? fromIndex;
   int? toIndex;
-
   for (int i = r - 1; i >= 0; i--) {
-    if (round.entries[i]
-            .location
-            .toLowerCase() !=
-        "travel") {
-      fromIndex = i;
-      break;
-    }
+    if (round.entries[i].location.toLowerCase() != "travel") { fromIndex = i; break; }
   }
-
   for (int i = r + 1; i < round.entries.length; i++) {
-    if (round.entries[i]
-            .location
-            .toLowerCase() !=
-        "travel") {
-      toIndex = i;
-      break;
-    }
+    if (round.entries[i].location.toLowerCase() != "travel") { toIndex = i; break; }
   }
 
-  // ================= BUILD EXTRA TEXT =================
-  // ✅ Bruk alltid calc-extra (og legg på D.Drive hvis aktuelt)
+  // ================= DISPLAY VALUES =================
+  // City after Travel → "0" km, "0h 0m" time, no extra (all shown on Travel row).
+  // Travel row        → own km if MERGE path (km>0), else look ahead; extra from city.
+  // Normal row        → own km/time/extra as usual.
 
-  if (!isOff) {
-    extraText = _buildExtraText(
-      hasDDrive: hasDDrive,
-      extraField: extraText, // 👈 VIKTIG: fra result.extraPerLeg
-    );
+  double displayKm = km;
+  String extraText = "";
+
+  if (isAfterTravel) {
+    // Always suppress — Travel row above shows everything.
+    displayKm = 0;
+    extraText = '';
+  } else if (isTravel) {
+    // Look ahead to next real city for noDDrive flag and extra field.
+    // NORMAL path: Travel's own km==0 → also pick up km from city.
+    // MERGE path:  Travel's own km>0  → keep it, only need city for extra/DDrive.
+    for (int j = r + 1; j < round.entries.length; j++) {
+      final jLoc = round.entries[j].location.trim().toLowerCase();
+      if (jLoc.isEmpty || jLoc == 'travel') continue;
+      if (jLoc != 'off') {
+        if (km == 0 && j < result.legKm.length) {
+          displayKm = result.legKm[j].toDouble(); // NORMAL path: pick up km
+        }
+        final jNoDDrive = j < result.noDDrivePerLeg.length
+            ? result.noDDrivePerLeg[j] : false;
+        final jHasDDrive = !jNoDDrive && displayKm >= 600;
+        final jExtra = j < result.extraPerLeg.length ? result.extraPerLeg[j] : '';
+        extraText = _buildExtraText(hasDDrive: jHasDDrive, extraField: jExtra);
+      }
+      break;
+    }
+    // Fallback if no city found: use own data
+    if (extraText.isEmpty && km > 0) {
+      final ownNoDDrive = r < result.noDDrivePerLeg.length
+          ? result.noDDrivePerLeg[r] : false;
+      final hasDDrive = !ownNoDDrive && km >= 600;
+      final rawExtra = r < result.extraPerLeg.length ? result.extraPerLeg[r] : '';
+      extraText = _buildExtraText(hasDDrive: hasDDrive, extraField: rawExtra);
+    }
+  } else {
+    // Normal row: own km and extra.
+    final legIsNoDDrive = r < result.noDDrivePerLeg.length
+        ? result.noDDrivePerLeg[r] : false;
+    final hasDDrive = !legIsNoDDrive && km >= 600;
+    final rawExtra = r < result.extraPerLeg.length ? result.extraPerLeg[r] : '';
+    extraText = _buildExtraText(hasDDrive: hasDDrive, extraField: rawExtra);
   }
 
   // ================= ADD ROW =================
-
   rows.add([
     DateFormat("dd.MM.yyyy").format(e.date),
     e.location,
-    km > 0 ? "${km.round()}" : "",
-    _calcTimeText(km: km, hasDDrive: hasDDrive),
+    isAfterTravel ? "0" : (displayKm > 0 ? "${displayKm.round()}" : ""),
+    isAfterTravel ? "0h 0m" : _calcTimeText(km: displayKm, hasDDrive: false),
     extraText,
   ]);
 }
@@ -927,7 +949,9 @@ static Map<String, double> _calculateForeignVat({
     if (rate <= 0) return;
 
     final share = km / totalKm;
-    final vat = basePrice * share * rate;
+    // Excel formula: (price/[100+rate])*rate = price * rate/(1+rate)
+    // Treats basePrice as gross (VAT-inclusive); extracts the VAT component.
+    final vat = basePrice * share * rate / (1 + rate);
 
     if (vat > 0) {
       result[country] = vat;

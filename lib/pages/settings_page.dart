@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../models/swe_settings.dart';
+import '../services/km_se_updater.dart';
 import '../state/settings_store.dart';
 import '../pages/routes_admin_page.dart';
 
@@ -27,6 +28,7 @@ class _SettingsPageState extends State<SettingsPage> {
   late TextEditingController graphClientIdCtrl;
   late TextEditingController graphClientSecretCtrl;
   late TextEditingController graphSenderEmailCtrl;
+  late TextEditingController tollKmRateCtrl;
 
   // --- Swedish pricing model ---
   late TextEditingController sweTimlonCtrl;
@@ -206,6 +208,7 @@ class _SettingsPageState extends State<SettingsPage> {
     graphClientIdCtrl = TextEditingController(text: s.graphClientId);
     graphClientSecretCtrl = TextEditingController(text: s.graphClientSecret);
     graphSenderEmailCtrl = TextEditingController(text: s.graphSenderEmail);
+    tollKmRateCtrl = TextEditingController(text: s.tollKmRate.toStringAsFixed(2));
 
     final swe = s.sweSettings;
     sweTimlonCtrl = TextEditingController(text: swe.timlon.toStringAsFixed(0));
@@ -258,6 +261,7 @@ class _SettingsPageState extends State<SettingsPage> {
     graphClientIdCtrl.dispose();
     graphClientSecretCtrl.dispose();
     graphSenderEmailCtrl.dispose();
+    tollKmRateCtrl.dispose();
 
     sweTimlonCtrl.dispose();
     sweTimmarCtrl.dispose();
@@ -453,6 +457,57 @@ debugPrint("SESSION: $session");
   }
 
   // =====================================================
+  // =====================================================
+  // POPULATE km_se
+  // =====================================================
+
+  Future<void> _runKmSeUpdater() async {
+    final logs = <String>[];
+
+    await showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (ctx, setS) {
+            // Start the updater the first time the dialog opens
+            if (logs.isEmpty) {
+              logs.add('Starter...');
+              KmSeUpdater.updateAll(
+                onProgress: (msg) => setS(() => logs.add(msg)),
+                onError:    (msg) => setS(() => logs.add(msg)),
+              ).then((_) {
+                setS(() => logs.add('— Lukk vinduet når du er ferdig —'));
+              });
+            }
+
+            return AlertDialog(
+              title: const Text('Oppdater km_se for alle ruter'),
+              content: SizedBox(
+                width: 560,
+                height: 360,
+                child: SingleChildScrollView(
+                  reverse: true,
+                  child: SelectableText(
+                    logs.join('\n'),
+                    style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
+                  ),
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx),
+                  child: const Text('Lukk'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
+  // =====================================================
   // SAVE SETTINGS
   // =====================================================
 
@@ -476,6 +531,7 @@ debugPrint("SESSION: $session");
       graphClientId: graphClientIdCtrl.text.trim(),
       graphClientSecret: graphClientSecretCtrl.text.trim(),
       graphSenderEmail: graphSenderEmailCtrl.text.trim(),
+      tollKmRate: _parseDouble(tollKmRateCtrl.text, current.tollKmRate),
       sweSettings: SweSettings(
         timlon: _parseDouble(sweTimlonCtrl.text, current.sweSettings.timlon),
         timmarPerDag: _parseDouble(sweTimmarCtrl.text, current.sweSettings.timmarPerDag),
@@ -909,6 +965,11 @@ debugPrint("SESSION: $session");
                   width: 240,
                   child: _field("Flight ticket price", flightTicketCtrl, "NOK"),
                 ),
+
+                SizedBox(
+                  width: 240,
+                  child: _field("Toll km-rate", tollKmRateCtrl, "NOK/km"),
+                ),
               ],
             ),
 
@@ -931,6 +992,12 @@ debugPrint("SESSION: $session");
       },
       icon: const Icon(Icons.route),
       label: const Text("Manage routes"),
+    ),
+
+    FilledButton.icon(
+      onPressed: _runKmSeUpdater,
+      icon: const Icon(Icons.map_outlined),
+      label: const Text("Oppdater km Sverige"),
     ),
 
     FilledButton.icon(

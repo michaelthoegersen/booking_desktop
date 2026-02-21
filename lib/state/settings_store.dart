@@ -43,6 +43,7 @@ class SettingsStore {
   static const _kGraphClientId = "graphClientId";
   static const _kGraphClientSecret = "graphClientSecret";
   static const _kGraphSenderEmail = "graphSenderEmail";
+  static const _kTollKmRate = "tollKmRate";
 
   // --- Swedish pricing model ---
   static const _kSweTimlon = "swe_timlon";
@@ -114,6 +115,8 @@ class SettingsStore {
           prefs.getString(_kGraphClientSecret) ?? current.graphClientSecret,
       graphSenderEmail:
           prefs.getString(_kGraphSenderEmail) ?? current.graphSenderEmail,
+      tollKmRate:
+          prefs.getDouble(_kTollKmRate) ?? current.tollKmRate,
       ferries: current.ferries,
       sweSettings: current.sweSettings.copyWith(
         timlon: prefs.getDouble(_kSweTimlon),
@@ -171,6 +174,7 @@ class SettingsStore {
     await prefs.setString(_kGraphClientId, current.graphClientId);
     await prefs.setString(_kGraphClientSecret, current.graphClientSecret);
     await prefs.setString(_kGraphSenderEmail, current.graphSenderEmail);
+    await prefs.setDouble(_kTollKmRate, current.tollKmRate);
 
     final swe = current.sweSettings;
     await prefs.setDouble(_kSweTimlon, swe.timlon);

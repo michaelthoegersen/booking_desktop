@@ -1,12 +1,15 @@
 import 'package:flutter/material.dart';
 import '../models/offer_draft.dart';
+import '../utils/bus_utils.dart';
 
 class OfferPreview extends StatelessWidget {
   final OfferDraft offer;
+  final void Function(int roundIndex)? onDeleteRound;
 
   const OfferPreview({
     super.key,
     required this.offer,
+    this.onDeleteRound,
   });
 
   // --------------------------------------------------
@@ -68,14 +71,14 @@ Widget build(BuildContext context) {
 
   final hasTrailer = offer.rounds.any((r) => r.trailer);
 
-  final vehicle =
+  final vehicle = fmtBus(
     offer.rounds
         .firstWhere(
           (r) => r.bus != null && r.bus!.isNotEmpty,
           orElse: () => OfferRound(),
         )
-        .bus ??
-    "";
+        .bus,
+  );
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -128,45 +131,6 @@ Widget build(BuildContext context) {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-
-              // =================================================
-              // TOP BAR
-              // =================================================
-              Row(
-                children: [
-
-                  // LOGO PLACEHOLDER
-                  Container(
-                    width: 110,
-                    height: 42,
-                    decoration: BoxDecoration(
-                      color: cs.surfaceContainerHighest,
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: cs.outlineVariant),
-                    ),
-                    alignment: Alignment.center,
-                    child: Text(
-                      "LOGO",
-                      style: TextStyle(
-                        fontWeight: FontWeight.w900,
-                        color: cs.onSurfaceVariant,
-                      ),
-                    ),
-                  ),
-
-                  const Spacer(),
-
-                  Text(
-                    "Offer",
-                    style: Theme.of(context)
-                        .textTheme
-                        .titleLarge
-                        ?.copyWith(fontWeight: FontWeight.w900),
-                  ),
-                ],
-              ),
-
-              const SizedBox(height: 18),
 
               // =================================================
               // BASIC INFO
@@ -248,12 +212,12 @@ Widget build(BuildContext context) {
                       final r = offer.rounds[i];
                       final title = "Round ${i + 1}";
                       final busText = r.bus?.isNotEmpty == true
-                          ? r.bus!
-                          : (offer.bus ?? "No bus");
+                          ? fmtBus(r.bus!)
+                          : fmtBus(offer.bus ?? "No bus");
                       final subtitle = "$busText • ${r.entries.length} date(s)";
 
                       return Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 6),
+                        padding: const EdgeInsets.symmetric(vertical: 4),
                         child: Row(
                           children: [
                             SizedBox(
@@ -266,6 +230,21 @@ Widget build(BuildContext context) {
                             Expanded(
                               child: Text(subtitle),
                             ),
+                            if (onDeleteRound != null)
+                              SizedBox(
+                                width: 28,
+                                height: 28,
+                                child: IconButton(
+                                  padding: EdgeInsets.zero,
+                                  iconSize: 16,
+                                  tooltip: "Delete round",
+                                  icon: Icon(
+                                    Icons.delete_outline,
+                                    color: Theme.of(context).colorScheme.error,
+                                  ),
+                                  onPressed: () => onDeleteRound!(i),
+                                ),
+                              ),
                           ],
                         ),
                       );
@@ -274,37 +253,6 @@ Widget build(BuildContext context) {
                 }),
               ),
 
-              const SizedBox(height: 10),
-              Divider(color: cs.outlineVariant),
-              const SizedBox(height: 8),
-
-              // =================================================
-              // TOTAL (PLACEHOLDER)
-              // =================================================
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: cs.surfaceContainerHighest,
-                  borderRadius: BorderRadius.circular(14),
-                ),
-                child: const Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      "Estimated total",
-                      style: TextStyle(fontWeight: FontWeight.w900),
-                    ),
-                    SizedBox(height: 6),
-                    Text(
-                      "NOK 0",
-                      style: TextStyle(
-                        fontSize: 22,
-                        fontWeight: FontWeight.w900,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
             ],
           ),
         ),

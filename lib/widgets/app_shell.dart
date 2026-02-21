@@ -6,7 +6,53 @@ import 'package:go_router/go_router.dart';
 import '../ui/css_theme.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
-class AppShell extends StatelessWidget {
+import '../pages/dashboard_page.dart';
+import '../pages/calendar_page.dart';
+import '../pages/new_offer_page.dart';
+import '../pages/edit_offer_page.dart';
+import '../pages/customers_page.dart';
+import '../pages/invoices_page.dart';
+import '../pages/economy_page.dart';
+import '../pages/issues_page.dart';
+import '../pages/settings_page.dart';
+import '../pages/routes_admin_page.dart';
+
+// --------------------------------------------------------------------------
+// DATA
+// --------------------------------------------------------------------------
+
+class _ExtraTab {
+  final String id;
+  final String route;
+  final String title;
+  final Widget page;
+
+  _ExtraTab({
+    required this.id,
+    required this.route,
+    required this.title,
+    required this.page,
+  });
+}
+
+const _routeTitles = {
+  '/': 'Dashboard',
+  '/calendar': 'Calendar',
+  '/new': 'New offer',
+  '/edit': 'Edit offers',
+  '/customers': 'Customers',
+  '/invoices': 'Invoices',
+  '/economy': 'Economy',
+  '/issues': 'Issues',
+  '/settings': 'Settings',
+  '/routes': 'Route Manager',
+};
+
+// --------------------------------------------------------------------------
+// APP SHELL
+// --------------------------------------------------------------------------
+
+class AppShell extends StatefulWidget {
   final Widget child;
 
   const AppShell({
@@ -15,18 +61,120 @@ class AppShell extends StatelessWidget {
   });
 
   @override
+  State<AppShell> createState() => _AppShellState();
+}
+
+class _AppShellState extends State<AppShell> {
+  final List<_ExtraTab> _extraTabs = [];
+  int _activeTabIndex = 0; // 0 = go_router child, 1+ = extra tabs
+
+  // Null = use go_router path for sidebar highlight (tab 0)
+  // Non-null = use stored route (extra tab is active)
+  String? get _overrideRoute =>
+      _activeTabIndex == 0 ? null : _extraTabs[_activeTabIndex - 1].route;
+
+  void _openInNewTab(String route) {
+    // If tab 0 already shows this route, switch to tab 0
+    final currentPath = GoRouterState.of(context).uri.path;
+    if (currentPath == route || currentPath.startsWith('$route/')) {
+      setState(() => _activeTabIndex = 0);
+      return;
+    }
+
+    // If any extra tab already shows this route, switch to it
+    for (int i = 0; i < _extraTabs.length; i++) {
+      if (_extraTabs[i].route == route) {
+        setState(() => _activeTabIndex = i + 1);
+        return;
+      }
+    }
+
+    // Otherwise create new tab
+    final tab = _ExtraTab(
+      id: DateTime.now().microsecondsSinceEpoch.toString(),
+      route: route,
+      title: _routeTitles[route] ?? route,
+      page: _buildPageForRoute(route),
+    );
+
+    setState(() {
+      _extraTabs.add(tab);
+      _activeTabIndex = _extraTabs.length;
+    });
+  }
+
+  void _closeExtraTab(int extraIndex) {
+    setState(() {
+      _extraTabs.removeAt(extraIndex);
+      // Clamp active index to valid range
+      if (_activeTabIndex > _extraTabs.length) {
+        _activeTabIndex = _extraTabs.length;
+      }
+    });
+  }
+
+  Widget _buildPageForRoute(String route) {
+    switch (route) {
+      case '/':
+        return DashboardPage();
+      case '/calendar':
+        return CalendarPage();
+      case '/new':
+        return NewOfferPage();
+      case '/edit':
+        return EditOfferPage();
+      case '/customers':
+        return CustomersPage();
+      case '/invoices':
+        return InvoicesPage();
+      case '/economy':
+        return EconomyPage();
+      case '/issues':
+        return IssuesPage();
+      case '/settings':
+        return SettingsPage();
+      case '/routes':
+        return RoutesAdminPage();
+      default:
+        return Center(child: Text('Unknown route: $route'));
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: CssTheme.bg,
       body: Row(
         children: [
-          const _SideNav(),
+          _SideNav(
+            onOpenInNewTab: _openInNewTab,
+            overrideActiveRoute: _overrideRoute,
+          ),
 
           Expanded(
             child: Column(
               children: [
                 const _TopBar(),
-                Expanded(child: child),
+
+                if (_extraTabs.isNotEmpty)
+                  _TabBar(
+                    activeIndex: _activeTabIndex,
+                    extraTabs: _extraTabs,
+                    onSelectTab: (i) => setState(() => _activeTabIndex = i),
+                    onCloseTab: _closeExtraTab,
+                  ),
+
+                Expanded(
+                  child: _extraTabs.isEmpty
+                      ? widget.child
+                      : IndexedStack(
+                          index: _activeTabIndex,
+                          children: [
+                            widget.child,
+                            ..._extraTabs.map((t) => t.page),
+                          ],
+                        ),
+                ),
               ],
             ),
           ),
@@ -36,9 +184,118 @@ class AppShell extends StatelessWidget {
   }
 }
 
-// ------------------------------------------------------------
+// --------------------------------------------------------------------------
+// TAB BAR
+// --------------------------------------------------------------------------
+
+class _TabBar extends StatelessWidget {
+  final int activeIndex;
+  final List<_ExtraTab> extraTabs;
+  final void Function(int) onSelectTab;
+  final void Function(int extraIndex) onCloseTab;
+
+  const _TabBar({
+    required this.activeIndex,
+    required this.extraTabs,
+    required this.onSelectTab,
+    required this.onCloseTab,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final currentPath = GoRouterState.of(context).uri.path;
+    final tab0Title = _routeTitles[currentPath] ?? currentPath;
+
+    return Container(
+      height: 36,
+      decoration: BoxDecoration(
+        color: Colors.grey.shade100,
+        border: const Border(
+          bottom: BorderSide(color: Color(0x22000000)),
+        ),
+      ),
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: Row(
+          children: [
+            // Tab 0 — cannot be closed
+            _TabPill(
+              title: tab0Title,
+              isActive: activeIndex == 0,
+              onTap: () => onSelectTab(0),
+              onClose: null,
+            ),
+
+            // Extra tabs
+            for (int i = 0; i < extraTabs.length; i++)
+              _TabPill(
+                title: extraTabs[i].title,
+                isActive: activeIndex == i + 1,
+                onTap: () => onSelectTab(i + 1),
+                onClose: () => onCloseTab(i),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _TabPill extends StatelessWidget {
+  final String title;
+  final bool isActive;
+  final VoidCallback onTap;
+  final VoidCallback? onClose;
+
+  const _TabPill({
+    required this.title,
+    required this.isActive,
+    required this.onTap,
+    this.onClose,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        height: 36,
+        margin: const EdgeInsets.symmetric(horizontal: 2),
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        decoration: BoxDecoration(
+          color: isActive ? Colors.white : Colors.transparent,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(4)),
+          boxShadow: isActive
+              ? const [BoxShadow(blurRadius: 4, color: Colors.black12)]
+              : null,
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              title,
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: isActive ? FontWeight.w600 : FontWeight.normal,
+              ),
+            ),
+            if (onClose != null) ...[
+              const SizedBox(width: 4),
+              GestureDetector(
+                onTap: onClose,
+                child: const Icon(Icons.close, size: 14),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// --------------------------------------------------------------------------
 // TOP BAR
-// ------------------------------------------------------------
+// --------------------------------------------------------------------------
 class _TopBar extends StatefulWidget {
   const _TopBar();
 
@@ -238,11 +495,14 @@ class _TopBarState extends State<_TopBar> {
   }
 }
 
-// ------------------------------------------------------------
+// --------------------------------------------------------------------------
 // SIDE NAV
-// ------------------------------------------------------------
+// --------------------------------------------------------------------------
 class _SideNav extends StatefulWidget {
-  const _SideNav();
+  final void Function(String route)? onOpenInNewTab;
+  final String? overrideActiveRoute;
+
+  const _SideNav({this.onOpenInNewTab, this.overrideActiveRoute});
 
   @override
   State<_SideNav> createState() => _SideNavState();
@@ -331,46 +591,60 @@ class _SideNavState extends State<_SideNav> {
             // --------------------------------------------------
             // NAV ITEMS
             // --------------------------------------------------
-            const _NavItem(
+            _NavItem(
               icon: Icons.dashboard_rounded,
               label: "Dashboard",
               route: "/",
+              onOpenInNewTab: widget.onOpenInNewTab,
+              overrideActiveRoute: widget.overrideActiveRoute,
             ),
 
-            const _NavItem(
+            _NavItem(
               icon: Icons.calendar_month,
               label: "Calendar",
               route: "/calendar",
+              onOpenInNewTab: widget.onOpenInNewTab,
+              overrideActiveRoute: widget.overrideActiveRoute,
             ),
 
-            const _NavItem(
+            _NavItem(
               icon: Icons.add_circle_outline,
               label: "New offer",
               route: "/new",
+              onOpenInNewTab: widget.onOpenInNewTab,
+              overrideActiveRoute: widget.overrideActiveRoute,
             ),
 
-            const _NavItem(
+            _NavItem(
               icon: Icons.edit_note,
               label: "Edit offers",
               route: "/edit",
+              onOpenInNewTab: widget.onOpenInNewTab,
+              overrideActiveRoute: widget.overrideActiveRoute,
             ),
 
-            const _NavItem(
+            _NavItem(
               icon: Icons.apartment_rounded,
               label: "Customers",
               route: "/customers",
+              onOpenInNewTab: widget.onOpenInNewTab,
+              overrideActiveRoute: widget.overrideActiveRoute,
             ),
 
-            const _NavItem(
+            _NavItem(
               icon: Icons.receipt_long_rounded,
               label: "Invoices",
               route: "/invoices",
+              onOpenInNewTab: widget.onOpenInNewTab,
+              overrideActiveRoute: widget.overrideActiveRoute,
             ),
 
-            const _NavItem(
+            _NavItem(
               icon: Icons.bar_chart_rounded,
               label: "Economy",
               route: "/economy",
+              onOpenInNewTab: widget.onOpenInNewTab,
+              overrideActiveRoute: widget.overrideActiveRoute,
             ),
 
             _NavItem(
@@ -378,14 +652,18 @@ class _SideNavState extends State<_SideNav> {
               label: "Issues",
               route: "/issues",
               badge: _unseenCount,
+              onOpenInNewTab: widget.onOpenInNewTab,
+              overrideActiveRoute: widget.overrideActiveRoute,
             ),
 
             const Spacer(),
 
-            const _NavItem(
+            _NavItem(
               icon: Icons.settings,
               label: "Settings",
               route: "/settings",
+              onOpenInNewTab: widget.onOpenInNewTab,
+              overrideActiveRoute: widget.overrideActiveRoute,
             ),
           ],
         ),
@@ -394,32 +672,74 @@ class _SideNavState extends State<_SideNav> {
   }
 }
 
-// ------------------------------------------------------------
+// --------------------------------------------------------------------------
 // NAV ITEM
-// ------------------------------------------------------------
-class _NavItem extends StatelessWidget {
+// --------------------------------------------------------------------------
+class _NavItem extends StatefulWidget {
   final IconData icon;
   final String label;
   final String route;
   final int badge;
+  final void Function(String route)? onOpenInNewTab;
+  final String? overrideActiveRoute;
 
   const _NavItem({
     required this.icon,
     required this.label,
     required this.route,
     this.badge = 0,
+    this.onOpenInNewTab,
+    this.overrideActiveRoute,
   });
 
   @override
+  State<_NavItem> createState() => _NavItemState();
+}
+
+class _NavItemState extends State<_NavItem> {
+  Offset _tapPosition = Offset.zero;
+
+  @override
   Widget build(BuildContext context) {
-    final currentPath = GoRouterState.of(context).uri.path;
+    final currentPath =
+        widget.overrideActiveRoute ?? GoRouterState.of(context).uri.path;
 
     final selected =
-        currentPath == route || currentPath.startsWith("$route/");
+        currentPath == widget.route || currentPath.startsWith('${widget.route}/');
 
-    return InkWell(
-      borderRadius: BorderRadius.circular(14),
-      onTap: () => context.go(route),
+    return GestureDetector(
+      onTap: () => context.go(widget.route),
+      onSecondaryTapDown: (details) {
+        _tapPosition = details.globalPosition;
+      },
+      onSecondaryTap: () {
+        if (widget.onOpenInNewTab == null) return;
+        final overlay =
+            Overlay.of(context).context.findRenderObject()! as RenderBox;
+        showMenu<String>(
+          context: context,
+          position: RelativeRect.fromLTRB(
+            _tapPosition.dx,
+            _tapPosition.dy,
+            overlay.size.width - _tapPosition.dx,
+            overlay.size.height - _tapPosition.dy,
+          ),
+          items: const [
+            PopupMenuItem(
+              value: 'new_tab',
+              child: Row(
+                children: [
+                  Icon(Icons.tab, size: 18),
+                  SizedBox(width: 8),
+                  Text('Åpne i ny fane'),
+                ],
+              ),
+            ),
+          ],
+        ).then((v) {
+          if (v == 'new_tab') widget.onOpenInNewTab?.call(widget.route);
+        });
+      },
 
       child: Container(
         width: double.infinity,
@@ -440,7 +760,7 @@ class _NavItem extends StatelessWidget {
         child: Row(
           children: [
             Icon(
-              icon,
+              widget.icon,
               color: selected ? Colors.white : Colors.black87,
             ),
 
@@ -448,7 +768,7 @@ class _NavItem extends StatelessWidget {
 
             Expanded(
               child: Text(
-                label,
+                widget.label,
                 style: TextStyle(
                   fontWeight: FontWeight.w900,
                   color: selected ? Colors.white : Colors.black87,
@@ -456,7 +776,7 @@ class _NavItem extends StatelessWidget {
               ),
             ),
 
-            if (badge > 0)
+            if (widget.badge > 0)
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
                 decoration: BoxDecoration(
@@ -464,7 +784,7 @@ class _NavItem extends StatelessWidget {
                   borderRadius: BorderRadius.circular(999),
                 ),
                 child: Text(
-                  badge > 99 ? '99+' : '$badge',
+                  widget.badge > 99 ? '99+' : '${widget.badge}',
                   style: TextStyle(
                     fontSize: 11,
                     fontWeight: FontWeight.w800,

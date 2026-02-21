@@ -32,6 +32,9 @@ class AppSettings {
   /// Swedish per-leg pricing model parameters
   final SweSettings sweSettings;
 
+  /// Toll rate per km (NOK/km). Default 2.8.
+  final double tollKmRate;
+
   const AppSettings({
     required this.dayPrice,
     required this.extraKmPrice,
@@ -48,6 +51,7 @@ class AppSettings {
     this.graphClientId = '',
     this.graphClientSecret = '',
     this.graphSenderEmail = '',
+    this.tollKmRate = 2.8,
 
     /// ✅ NEW
     this.ferries = const [],
@@ -69,6 +73,7 @@ class AppSettings {
     String? graphClientId,
     String? graphClientSecret,
     String? graphSenderEmail,
+    double? tollKmRate,
 
     /// ✅ NEW
     List<FerryDefinition>? ferries,
@@ -89,6 +94,7 @@ class AppSettings {
       graphClientId: graphClientId ?? this.graphClientId,
       graphClientSecret: graphClientSecret ?? this.graphClientSecret,
       graphSenderEmail: graphSenderEmail ?? this.graphSenderEmail,
+      tollKmRate: tollKmRate ?? this.tollKmRate,
 
       /// ✅ NEW
       ferries: ferries ?? this.ferries,

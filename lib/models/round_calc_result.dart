@@ -22,6 +22,7 @@ class RoundCalcResult {
   final List<double> legKm;
   final List<String> extraPerLeg;
   final List<bool> hasTravelBefore;
+  final List<bool> noDDrivePerLeg;
 
   final double totalCost;
 
@@ -43,6 +44,7 @@ class RoundCalcResult {
     required this.legKm,
     required this.extraPerLeg,
     required this.hasTravelBefore,
+    this.noDDrivePerLeg = const [],
     required this.totalCost,
   });
 }

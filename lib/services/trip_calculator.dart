@@ -34,6 +34,13 @@ class TripCalculator {
 
     required List<double> tollPerLeg,
     required List<bool> hasTravelBefore,
+
+    /// Per-leg flag: if true, this leg does NOT count as D.Drive
+    List<bool>? noDDrivePerLeg,
+
+    /// Km subject to toll — Swedish km are excluded (toll-free in Sweden).
+    /// Defaults to totalKm when not provided.
+    double? tollableKm,
   }) {
     // ✅ RIKTIG KILDE: dates er sannheten
     final int entryCount = dates.length;
@@ -135,6 +142,12 @@ for (int i = startIndex; i < entryCount; i++) {
     final List<int> dDriveIndexes = [];
 
     for (final e in dayToIndexes.entries) {
+      // Skip if ALL legs on this day are marked no-D.Drive
+      if (noDDrivePerLeg != null &&
+          e.value.every((i) => i < noDDrivePerLeg.length && noDDrivePerLeg[i])) {
+        continue;
+      }
+
       final km = dayKm[e.key] ?? 0;
       if (km < threshold) continue;
 
@@ -162,8 +175,13 @@ for (int i = startIndex; i < entryCount; i++) {
 
     if (current.isNotEmpty) clusters.add(current);
 
-    final int baseDDriveDays =
-        dayKm.values.where((v) => v >= threshold).length;
+    final int baseDDriveDays = dayToIndexes.entries.where((e) {
+      if (noDDrivePerLeg != null &&
+          e.value.every((i) => i < noDDrivePerLeg.length && noDDrivePerLeg[i])) {
+        return false;
+      }
+      return (dayKm[e.key] ?? 0) >= threshold;
+    }).length;
 
     int extraDays = 0;
     int flightTickets = 0;
@@ -234,7 +252,7 @@ for (final c in clusters) {
     // TOLL (midlertidig fast modell)
     // ----------------------------------------
 
-    final double tollCost = totalKm * 2.8;
+    final double tollCost = (tollableKm ?? totalKm) * settings.tollKmRate;
     _log('Toll cost: $tollCost');
 
     // ----------------------------------------
@@ -272,6 +290,9 @@ for (final c in clusters) {
       legKm: List<double>.from(legKm),
       extraPerLeg: List<String>.from(extraPerLeg),
       hasTravelBefore: List<bool>.from(hasTravelBefore),
+      noDDrivePerLeg: noDDrivePerLeg != null
+          ? List<bool>.from(noDDrivePerLeg)
+          : List<bool>.filled(legKm.length, false),
       totalCost: totalCost,
     );
   }

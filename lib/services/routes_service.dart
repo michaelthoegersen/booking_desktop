@@ -36,8 +36,9 @@ class RoutesService {
       distance_total_km,
       ferry_name,
       base_price:ferry_price,
-      toll_nightliner,
       extra,
+      no_ddrive,
+      km_se,
       km_dk,
       km_de,
       km_be,
@@ -183,11 +184,10 @@ class RoutesService {
     required String to,
     required double km,
     double ferry = 0,
-    double toll = 0,
     String extra = '',
   }) async {
     debugPrint(
-      '[ROUTE] ➕ CREATE $from → $to | km=$km ferry=$ferry toll=$toll',
+      '[ROUTE] ➕ CREATE $from → $to | km=$km ferry=$ferry',
     );
 
     await _client.from('routes_all').insert({
@@ -195,7 +195,6 @@ class RoutesService {
       'to_place': to.trim(),
       'distance_total_km': km,
       'ferry_price': ferry,
-      'toll_nightliner': toll,
       'extra': extra,
       'updated_at': DateTime.now().toIso8601String(),
     });
@@ -210,11 +209,10 @@ class RoutesService {
     required String to,
     required double km,
     double ferry = 0,
-    double toll = 0,
     String extra = '',
   }) async {
     debugPrint(
-      '[ROUTE] ✏️ UPDATE id=$id | $from → $to | km=$km ferry=$ferry toll=$toll',
+      '[ROUTE] ✏️ UPDATE id=$id | $from → $to | km=$km ferry=$ferry',
     );
 
     await _client
@@ -224,7 +222,6 @@ class RoutesService {
           'to_place': to.trim(),
           'distance_total_km': km,
           'ferry_price': ferry,
-          'toll_nightliner': toll,
           'extra': extra,
           'updated_at': DateTime.now().toIso8601String(),
         })

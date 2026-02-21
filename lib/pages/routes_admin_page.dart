@@ -105,68 +105,147 @@ class _RoutesAdminPageState extends State<RoutesAdminPage> {
   // EDIT ROUTE
   // =================================================
 
+  TextEditingController _kmCtrl(Map<String, dynamic> row, String field) =>
+      TextEditingController(
+        text: row[field] != null
+            ? (row[field] as num).toDouble().toStringAsFixed(1)
+            : '',
+      );
+
   Future<void> _editRoute(Map<String, dynamic> row) async {
     final fromCtrl = TextEditingController(text: row['from_place']);
     final toCtrl = TextEditingController(text: row['to_place']);
-    final kmCtrl = TextEditingController(
+    final totalKmCtrl = TextEditingController(
       text: row['distance_total_km']?.toString() ?? '',
     );
     final ferryCtrl = TextEditingController(
       text: row['ferry_name']?.toString() ?? '',
     );
 
+    // Per-country km controllers
+    final seCtrl  = _kmCtrl(row, 'km_se');
+    final dkCtrl  = _kmCtrl(row, 'km_dk');
+    final deCtrl  = _kmCtrl(row, 'km_de');
+    final beCtrl  = _kmCtrl(row, 'km_be');
+    final plCtrl  = _kmCtrl(row, 'km_pl');
+    final atCtrl  = _kmCtrl(row, 'km_at');
+    final hrCtrl  = _kmCtrl(row, 'km_hr');
+    final siCtrl  = _kmCtrl(row, 'km_si');
+
+    bool noDDrive = (row['no_ddrive'] as bool?) ?? false;
+
+    final double? currentKm =
+        double.tryParse(row['distance_total_km']?.toString() ?? '');
+    final bool isLongRoute = (currentKm ?? 0) >= 600;
+
     final ok = await showDialog<bool>(
       context: context,
       barrierDismissible: false,
       builder: (ctx) {
-        return AlertDialog(
-          title: const Text("Edit route"),
-          content: SizedBox(
-            width: 420,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TextField(
-                  controller: fromCtrl,
-                  decoration: const InputDecoration(labelText: "From"),
-                ),
-                TextField(
-                  controller: toCtrl,
-                  decoration: const InputDecoration(labelText: "To"),
-                ),
-                TextField(
-                  controller: kmCtrl,
-                  keyboardType: TextInputType.number,
-                  decoration: const InputDecoration(labelText: "Total km"),
-                ),
-                TextField(
-                  controller: ferryCtrl,
-                  decoration: const InputDecoration(
-                    labelText: "Ferry name (optional)",
-                    hintText: "e.g. Puttgarden–Rødby",
+        return StatefulBuilder(
+          builder: (ctx, setLocalState) {
+            return AlertDialog(
+              title: const Text("Edit route"),
+              content: SizedBox(
+                width: 520,
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      TextField(
+                        controller: fromCtrl,
+                        decoration: const InputDecoration(labelText: "From"),
+                      ),
+                      TextField(
+                        controller: toCtrl,
+                        decoration: const InputDecoration(labelText: "To"),
+                      ),
+                      const SizedBox(height: 4),
+                      TextField(
+                        controller: totalKmCtrl,
+                        keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                        decoration: const InputDecoration(labelText: "Total km"),
+                      ),
+                      TextField(
+                        controller: ferryCtrl,
+                        decoration: const InputDecoration(
+                          labelText: "Ferry name (optional)",
+                          hintText: "e.g. Puttgarden–Rødby",
+                        ),
+                      ),
+                      if (isLongRoute) ...[
+                        const SizedBox(height: 8),
+                        CheckboxListTile(
+                          value: noDDrive,
+                          onChanged: (v) =>
+                              setLocalState(() => noDDrive = v ?? false),
+                          title: const Text("No D.Drive"),
+                          subtitle: const Text(
+                            "Route km ≥ 600 but should not trigger D.Drive",
+                            style: TextStyle(fontSize: 12),
+                          ),
+                          controlAffinity: ListTileControlAffinity.leading,
+                          contentPadding: EdgeInsets.zero,
+                        ),
+                      ],
+                      const SizedBox(height: 16),
+                      const Text(
+                        "Km per land",
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                          color: Colors.black54,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Wrap(
+                        spacing: 12,
+                        runSpacing: 8,
+                        children: [
+                          _countryKmField("SE", seCtrl),
+                          _countryKmField("DK", dkCtrl),
+                          _countryKmField("DE", deCtrl),
+                          _countryKmField("BE", beCtrl),
+                          _countryKmField("PL", plCtrl),
+                          _countryKmField("AT", atCtrl),
+                          _countryKmField("HR", hrCtrl),
+                          _countryKmField("SI", siCtrl),
+                        ],
+                      ),
+                    ],
                   ),
                 ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx, false),
+                  child: const Text("Cancel"),
+                ),
+                FilledButton(
+                  onPressed: () => Navigator.pop(ctx, true),
+                  child: const Text("Save"),
+                ),
               ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text("Cancel"),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              child: const Text("Save"),
-            ),
-          ],
+            );
+          },
         );
       },
     );
 
+    // Dispose country km controllers
+    for (final c in [seCtrl, dkCtrl, deCtrl, beCtrl, plCtrl, atCtrl, hrCtrl, siCtrl]) {
+      c.dispose();
+    }
+
     if (ok != true) return;
 
-    final km =
-        double.tryParse(kmCtrl.text.replaceAll(',', '.'));
+    double? parseKm(String text) {
+      final v = double.tryParse(text.replaceAll(',', '.'));
+      return (v != null && v > 0) ? v : null;
+    }
+
+    final km = double.tryParse(totalKmCtrl.text.replaceAll(',', '.'));
 
     await sb.from('routes_all').upsert(
       {
@@ -176,6 +255,15 @@ class _RoutesAdminPageState extends State<RoutesAdminPage> {
         'ferry_name': ferryCtrl.text.trim().isEmpty
             ? null
             : ferryCtrl.text.trim(),
+        'no_ddrive': isLongRoute ? noDDrive : false,
+        'km_se': parseKm(seCtrl.text),
+        'km_dk': parseKm(dkCtrl.text),
+        'km_de': parseKm(deCtrl.text),
+        'km_be': parseKm(beCtrl.text),
+        'km_pl': parseKm(plCtrl.text),
+        'km_at': parseKm(atCtrl.text),
+        'km_hr': parseKm(hrCtrl.text),
+        'km_si': parseKm(siCtrl.text),
       },
       onConflict: 'from_place,to_place',
     );
@@ -187,6 +275,21 @@ class _RoutesAdminPageState extends State<RoutesAdminPage> {
         const SnackBar(content: Text("Route updated")),
       );
     }
+  }
+
+  Widget _countryKmField(String label, TextEditingController ctrl) {
+    return SizedBox(
+      width: 110,
+      child: TextField(
+        controller: ctrl,
+        keyboardType: const TextInputType.numberWithOptions(decimal: true),
+        decoration: InputDecoration(
+          labelText: label,
+          suffixText: "km",
+          isDense: true,
+        ),
+      ),
+    );
   }
 
   // =================================================
@@ -370,7 +473,28 @@ class _RoutesAdminPageState extends State<RoutesAdminPage> {
             subtitle: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text("Total: ${r['distance_total_km'] ?? '-'} km"),
+                Row(
+                  children: [
+                    Text("Total: ${r['distance_total_km'] ?? '-'} km"),
+                    if ((r['no_ddrive'] as bool?) == true) ...[
+                      const SizedBox(width: 8),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: Colors.amber.shade100,
+                          borderRadius: BorderRadius.circular(6),
+                          border: Border.all(color: Colors.amber.shade400),
+                        ),
+                        child: const Text(
+                          "No D.Drive",
+                          style: TextStyle(
+                              fontSize: 11, fontWeight: FontWeight.w700),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
                 const SizedBox(height: 4),
                 Text(
                   "Ferry: ${r['ferry_name'] ?? '—'}",
@@ -386,13 +510,14 @@ class _RoutesAdminPageState extends State<RoutesAdminPage> {
                   spacing: 8,
                   runSpacing: 4,
                   children: [
+                    _kmChip("SE", r['km_se']),
                     _kmChip("DK", r['km_dk']),
                     _kmChip("DE", r['km_de']),
+                    _kmChip("BE", r['km_be']),
                     _kmChip("PL", r['km_pl']),
                     _kmChip("AT", r['km_at']),
                     _kmChip("HR", r['km_hr']),
                     _kmChip("SI", r['km_si']),
-                    _kmChip("BE", r['km_be']),
                   ],
                 ),
               ],
