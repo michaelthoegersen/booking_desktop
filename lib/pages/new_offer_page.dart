@@ -915,8 +915,10 @@ const allBuses = [
       // ⭐ ENTERPRISE: global bus brukes ikke lenger
       // offer.bus = fresh.bus;   <-- kan beholdes om legacy trengs
 
-      offer.busCount   = fresh.busCount;
-      offer.busType    = fresh.busType;
+      offer.busCount      = fresh.busCount;
+      offer.busType       = fresh.busType;
+      offer.pricingModel  = fresh.pricingModel;
+      offer.globalBusSlots = List.from(fresh.globalBusSlots);
 
       // =========================
       // ROUNDS (FULL SYNC)

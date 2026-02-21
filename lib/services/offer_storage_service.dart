@@ -227,6 +227,7 @@ class OfferStorageService {
     'busType': offer.busType.name,
     'bus': offer.bus,
     'globalBusSlots': offer.globalBusSlots,
+    'pricingModel': offer.pricingModel,
 
     // ⭐⭐⭐ LEGG TIL DENNE LINJA
     'pricingOverride': offer.pricingOverride?.toJson(),
@@ -349,6 +350,8 @@ if (r['ferryPerLeg'] != null) {
   if (data['globalBusSlots'] != null) {
     draft.globalBusSlots = List<String?>.from(data['globalBusSlots']);
   }
+
+  draft.pricingModel = (data['pricingModel'] as String?) ?? 'norsk';
 
   // ✅ BACKUP: hvis bare ligger i JSON
   if (draft.bus == null && data['bus'] != null) {
