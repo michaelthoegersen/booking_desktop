@@ -5438,8 +5438,7 @@ class _RoutesTableHeader extends StatelessWidget {
           SizedBox(width: 10 * s),
           SizedBox(width: 52 * s,  child: Text("KM",    style: headerStyle)),
           SizedBox(width: 10 * s),
-          SizedBox(width: 120 * s, child: Text("Extra", style: headerStyle)),
-          const Spacer(),
+          Expanded(child: Text("Extra", style: headerStyle)),
           const SizedBox(width: 56),
         ],
       );
@@ -5548,12 +5547,11 @@ class _RoutesTableRow extends StatelessWidget {
 
             SizedBox(width: 10 * s),
 
-            // EXTRA
-            SizedBox(
-              width: 120 * s,
+            // EXTRA — fills all remaining space so long strings aren't cut
+            Expanded(
               child: Text(
                 extra,
-                maxLines: 1,
+                maxLines: 2,
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(
                   fontSize: (13 * s).clamp(8.0, 13.0),
@@ -5561,8 +5559,6 @@ class _RoutesTableRow extends StatelessWidget {
                 ),
               ),
             ),
-
-            const Spacer(),
 
             // BUTTONS
             SizedBox(
