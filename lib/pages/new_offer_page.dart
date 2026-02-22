@@ -5424,24 +5424,26 @@ class _RoutesTableHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    const headerStyle = TextStyle(
-      fontWeight: FontWeight.w900,
-      fontSize: 14, // 👈 STØRRE
-    );
-
-    return Row(
-      children: const [
-        SizedBox(width: 105, child: Text("Date", style: headerStyle)),
-        SizedBox(width: 12),
-        SizedBox(width: 200, child: Text("Route", style: headerStyle)),
-        SizedBox(width: 12),
-        SizedBox(width: 60, child: Text("KM", style: headerStyle)),
-        SizedBox(width: 12),
-        SizedBox(width: 160, child: Text("Extra", style: headerStyle)),
-        Spacer(),
-        SizedBox(width: 66),
-      ],
-    );
+    return LayoutBuilder(builder: (context, constraints) {
+      final s = (constraints.maxWidth / 620).clamp(0.45, 1.0);
+      final headerStyle = TextStyle(
+        fontWeight: FontWeight.w900,
+        fontSize: (14 * s).clamp(9.0, 14.0),
+      );
+      return Row(
+        children: [
+          SizedBox(width: 105 * s, child: Text("Date",  style: headerStyle)),
+          SizedBox(width: 10 * s),
+          SizedBox(width: 180 * s, child: Text("Route", style: headerStyle)),
+          SizedBox(width: 10 * s),
+          SizedBox(width: 52 * s,  child: Text("KM",    style: headerStyle)),
+          SizedBox(width: 10 * s),
+          SizedBox(width: 120 * s, child: Text("Extra", style: headerStyle)),
+          const Spacer(),
+          const SizedBox(width: 56),
+        ],
+      );
+    });
   }
 }
 class _RoutesTableRow extends StatelessWidget {
@@ -5483,108 +5485,111 @@ class _RoutesTableRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
-
     final tooltipText = _buildCountryKmText();
 
-    return Padding(
-      padding: const EdgeInsets.symmetric(
-        vertical: 8,
-        horizontal: 6,
-      ),
-      child: Row(
-        children: [
+    return LayoutBuilder(builder: (context, constraints) {
+      final s = (constraints.maxWidth / 620).clamp(0.45, 1.0);
+      final vPad = (8 * s).clamp(4.0, 8.0);
 
-          // DATE (fixed)
-          SizedBox(
-            width: 105,
-            child: Text(
-              date,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14),
-            ),
-          ),
+      return Padding(
+        padding: EdgeInsets.symmetric(vertical: vPad, horizontal: 6),
+        child: Row(
+          children: [
 
-          const SizedBox(width: 12),
-
-          // ROUTE (fixed)
-          SizedBox(
-            width: 200,
-            child: Text(
-              route,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14),
-            ),
-          ),
-
-          const SizedBox(width: 12),
-
-          // KM (fixed)
-          Tooltip(
-            message: tooltipText.isEmpty ? "No country breakdown" : tooltipText,
-            child: SizedBox(
-              width: 60,
+            // DATE
+            SizedBox(
+              width: 105 * s,
               child: Text(
-                km == null ? "?" : km!.toStringAsFixed(0),
+                date,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(
                   fontWeight: FontWeight.w800,
-                  fontSize: 14,
-                  color: km == null ? cs.error : cs.onSurface,
+                  fontSize: (14 * s).clamp(9.0, 14.0),
                 ),
               ),
             ),
-          ),
 
-          const SizedBox(width: 12),
+            SizedBox(width: 10 * s),
 
-          // EXTRA (fixed)
-          SizedBox(
-            width: 160,
-            child: Text(
-              extra,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                fontSize: 13,
-                color: extra.isEmpty ? cs.onSurfaceVariant : cs.onSurface,
+            // ROUTE
+            SizedBox(
+              width: 180 * s,
+              child: Text(
+                route,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontWeight: FontWeight.w700,
+                  fontSize: (14 * s).clamp(9.0, 14.0),
+                ),
               ),
             ),
-          ),
 
-          // Flexible gap — pushes buttons to the right
-          const Spacer(),
+            SizedBox(width: 10 * s),
 
-          // BUTTONS
-          SizedBox(
-            width: 66,
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.end,
-              children: [
-
-                IconButton(
-                  onPressed: onEdit,
-                  icon: const Icon(Icons.edit, size: 18),
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+            // KM
+            Tooltip(
+              message: tooltipText.isEmpty ? "No country breakdown" : tooltipText,
+              child: SizedBox(
+                width: 52 * s,
+                child: Text(
+                  km == null ? "?" : km!.toStringAsFixed(0),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontWeight: FontWeight.w800,
+                    fontSize: (14 * s).clamp(9.0, 14.0),
+                    color: km == null ? cs.error : cs.onSurface,
+                  ),
                 ),
-
-                const SizedBox(width: 4),
-
-                IconButton(
-                  onPressed: onDelete,
-                  icon: const Icon(Icons.delete_outline, size: 18),
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
-                ),
-              ],
+              ),
             ),
-          ),
-        ],
-      ),
-    );
+
+            SizedBox(width: 10 * s),
+
+            // EXTRA
+            SizedBox(
+              width: 120 * s,
+              child: Text(
+                extra,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: (13 * s).clamp(8.0, 13.0),
+                  color: extra.isEmpty ? cs.onSurfaceVariant : cs.onSurface,
+                ),
+              ),
+            ),
+
+            const Spacer(),
+
+            // BUTTONS
+            SizedBox(
+              width: 56,
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  IconButton(
+                    onPressed: onEdit,
+                    icon: const Icon(Icons.edit, size: 16),
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(minWidth: 24, minHeight: 24),
+                  ),
+                  const SizedBox(width: 2),
+                  IconButton(
+                    onPressed: onDelete,
+                    icon: const Icon(Icons.delete_outline, size: 16),
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(minWidth: 24, minHeight: 24),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      );
+    });
   }
 }
 class _LocationAutoComplete extends StatelessWidget {
