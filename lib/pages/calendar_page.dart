@@ -1284,7 +1284,10 @@ List<Widget> buildSegments(
 
   Widget _buildWaitingListPanel() {
     final cs = Theme.of(context).colorScheme;
-    final panelHeight = _wlExpanded ? 240.0 : 48.0;
+    final screenH = MediaQuery.of(context).size.height;
+    // Scale expanded height with screen: 22% of height, clamped 120–240 px.
+    final expandedHeight = (screenH * 0.22).clamp(120.0, 240.0);
+    final panelHeight = _wlExpanded ? expandedHeight : 48.0;
 
     return AnimatedContainer(
       duration: const Duration(milliseconds: 200),
