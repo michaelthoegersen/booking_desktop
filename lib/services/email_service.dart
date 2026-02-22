@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
 
@@ -12,6 +13,8 @@ class EmailService {
   // --------------------------------------------------
   // MICROSOFT GRAPH API — hardcoded credentials
   // (hidden from settings UI for all non-admin users)
+  // On web: routed through Supabase Edge Function (avoids CORS on token endpoint).
+  // On desktop: calls Microsoft directly.
   // --------------------------------------------------
   static const _tenantId   = 'abb1c1c4-8653-4a56-91d6-039b8ccbea2d';
   static const _clientId   = 'c9a7931d-973f-4278-90d6-f825250d4b49';
@@ -19,11 +22,45 @@ class EmailService {
   static String get _clientSecret => 'lPZ8Q~x.vS.2' 'QDcqIyWHSXYd' 'HvaMV4e7.aL1ta03';
   static const _senderEmail = 'michael@nttas.com';
 
+  // Edge function URL — server-side proxy used on web to avoid CORS
+  static const _edgeFnUrl =
+      'https://fqefvgqlrntwgschkugf.supabase.co/functions/v1/send-graph-email';
+
   // --------------------------------------------------
   // SEND VIA MICROSOFT GRAPH API
   // --------------------------------------------------
 
   static Future<void> sendEmail({
+    required String to,
+    required String subject,
+    required String body,
+  }) async {
+    if (kIsWeb) {
+      // Web: route through Supabase Edge Function to avoid CORS on token endpoint
+      await _sendViaEdgeFunction(to: to, subject: subject, body: body);
+    } else {
+      // Desktop (macOS): call Microsoft directly — native HTTP has no CORS
+      await _sendViaMicrosoftDirect(to: to, subject: subject, body: body);
+    }
+  }
+
+  static Future<void> _sendViaEdgeFunction({
+    required String to,
+    required String subject,
+    required String body,
+  }) async {
+    final res = await http.post(
+      Uri.parse(_edgeFnUrl),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'to': to, 'subject': subject, 'body': body}),
+    );
+
+    if (res.statusCode != 200) {
+      throw Exception('Edge function error ${res.statusCode}: ${res.body}');
+    }
+  }
+
+  static Future<void> _sendViaMicrosoftDirect({
     required String to,
     required String subject,
     required String body,
