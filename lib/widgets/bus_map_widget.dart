@@ -112,7 +112,7 @@ class _BusMapWidgetState extends State<BusMapWidget> {
           height: prod != null ? 90 : 72,
 
           child: Tooltip(
-            message: '$bus\n${position.place ?? "On route"}',
+            message: '$label\n${position.place ?? "On route"}',
 
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -227,8 +227,7 @@ class _BusMapWidgetState extends State<BusMapWidget> {
           children: [
 
             TileLayer(
-              urlTemplate:
-                  'https://api.maptiler.com/maps/streets/256/{z}/{x}/{y}.png?key=qLneWyVuo1A6hcUjh3iS',
+              urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
               userAgentPackageName: 'com.tourflow.app',
               errorTileCallback: (tile, error, stackTrace) {},
             ),

@@ -368,6 +368,14 @@ if (r.flightCost > 0) {
 // Recalculate all rounds (for PDF + totals)
 // ---------------------------------------------------
 Future<void> _recalcAllRounds() async {
+  // Pre-fetch legs for ALL rounds in parallel before calculating.
+  // Rounds that share routes benefit from a single DB call.
+  await Future.wait([
+    for (final r in offer.rounds)
+      if (r.entries.isNotEmpty)
+        _prefetchLegsParallel(r.entries, _norm(r.startLocation)),
+  ]);
+
   final Map<int, RoundCalcResult> newCache = {};
   _sweCalcCache.clear();
 
@@ -1923,7 +1931,7 @@ offer.rounds[i].bus =
       SnackBar(
         content: Text(
           firstBus != null
-              ? "Lagret på $firstBus ✅"
+              ? "Lagret på ${fmtBus(firstBus)} ✅"
               : "Lagret ✅",
         ),
       ),
@@ -2176,6 +2184,39 @@ Future<void> _scanPdf() async {
   }
 }
   // ------------------------------------------------------------
+  // ✅ PRE-FETCH ALL LEGS IN PARALLEL
+  // Fires all unique route lookups simultaneously so the sequential
+  // merge loop below only hits the in-memory cache (near-instant).
+  // ------------------------------------------------------------
+  Future<void> _prefetchLegsParallel(
+    List<RoundEntry> entries,
+    String start,
+  ) async {
+    final queued = <String>{};
+    final futures = <Future<void>>[];
+
+    for (int i = 0; i < entries.length; i++) {
+      final from   = _findPreviousRealLocation(entries, i, start);
+      final toRaw  = _norm(entries[i].location);
+      final toLower = toRaw.toLowerCase();
+
+      if (toLower == 'off' || toLower == 'travel') continue;
+      if (_norm(from).toLowerCase() == toLower) continue;
+
+      final key = _cacheKey(_norm(from), toRaw);
+      if (queued.contains(key)) continue;
+      if (_distanceCache.containsKey(key)) continue;
+
+      queued.add(key);
+      futures.add(_fetchLegData(from: from, to: toRaw, index: i));
+    }
+
+    if (futures.isNotEmpty) {
+      await Future.wait(futures);
+    }
+  }
+
+  // ------------------------------------------------------------
   // ✅ KM + ferry + toll + extra lookup from Supabase
   // ------------------------------------------------------------
   Future<double?> _fetchLegData({
@@ -2383,6 +2424,12 @@ Future<void> _recalcKm() async {
 
   int? pendingTravelIndex;
   bool inTravelBlock = false;
+
+  // ===================================================
+  // PRE-FETCH — fire all route lookups in parallel so
+  // the sequential merge loop below only hits the cache.
+  // ===================================================
+  await _prefetchLegsParallel(entries, start);
 
   // ===================================================
   // MAIN LOOP
@@ -2877,6 +2924,10 @@ Future<RoundCalcResult> _calcRound(int ri) async {
 
   int? pendingTravelIndex;
   bool seenTravel = false;
+
+  // Pre-fetch any legs not already in cache (no-op if _recalcAllRounds
+  // already pre-fetched everything).
+  await _prefetchLegsParallel(entries, start);
 
   // ================= LOOP =================
   for (int i = 0; i < entries.length; i++) {
