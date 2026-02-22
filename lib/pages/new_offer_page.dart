@@ -48,6 +48,12 @@ class NewOfferPage extends StatefulWidget {
 
   @override
   State<NewOfferPage> createState() => _NewOfferPageState();
+
+  // --------------------------------------------------
+  // Navigation guard — set by _NewOfferPageState
+  // --------------------------------------------------
+  static bool hasUnsavedChanges = false;
+  static Future<void> Function()? saveCallback;
 }
 
 class _NewOfferPageState extends State<NewOfferPage> {
@@ -763,6 +769,9 @@ const allBuses = [
   void initState() {
     super.initState();
 
+    NewOfferPage.hasUnsavedChanges = true;
+    NewOfferPage.saveCallback = _saveDraft;
+
     companyCtrl.text = offer.company;
     contactCtrl.text = offer.contact;
     productionCtrl.text = offer.production;
@@ -792,6 +801,8 @@ const allBuses = [
 
   @override
   void dispose() {
+    NewOfferPage.hasUnsavedChanges = false;
+    NewOfferPage.saveCallback = null;
     _draftSavesSub?.cancel();
     _overrideCtrl.dispose();
     super.dispose();
@@ -1618,19 +1629,22 @@ Future<void> _openRoutePreview() async {
   String? to;
 
   // ================================
-  // FINN FØRSTE REELLE LEG (IKKE OFF / TRAVEL)
+  // FINN FØRSTE MANGLENDE REELLE LEG (IKKE OFF / TRAVEL, KM == NULL)
   // ================================
   for (int i = 0; i < round.entries.length; i++) {
-    final f = i == 0
-        ? _norm(round.startLocation)
-        : _norm(round.entries[i - 1].location);
-
     final t = _norm(round.entries[i].location);
     final tLower = t.toLowerCase();
 
+    if (tLower == 'off' || tLower == 'travel') continue;
+
+    final f = _findPreviousRealLocation(
+      round.entries, i, round.startLocation,
+    );
+
     if (f.isEmpty) continue;
     if (f == t) continue;
-    if (tLower == 'off' || tLower == 'travel') continue;
+    final km = _kmByIndex[i];
+    if (km != null && km > 0) continue;
 
     from = f;
     to = t;
@@ -1640,7 +1654,7 @@ Future<void> _openRoutePreview() async {
   if (from == null || to == null) {
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
-        content: Text("No valid route leg found."),
+        content: Text("No missing routes found."),
       ),
     );
     return;
@@ -1699,26 +1713,26 @@ Future<void> _openRoutePreview() async {
   // FIND FIRST REAL MISSING LEG
   // ================================
   for (int i = 0; i < count; i++) {
-
-    final km = _kmByIndex[i];
-
-    final from = i == 0
-        ? _norm(round.startLocation)
-        : _norm(round.entries[i - 1].location);
-
     final to = _norm(round.entries[i].location);
+    final toLower = to.toLowerCase();
 
-    debugPrint("[$i] $from → $to | km=$km");
+    if (toLower == 'off' || toLower == 'travel') continue;
 
-    // ❗ hopp over hvis samme sted
+    final from = _findPreviousRealLocation(
+      round.entries, i, round.startLocation,
+    );
+
+    debugPrint("[$i] $from → $to | km=${_kmByIndex[i]}");
+
+    if (from.isEmpty) continue;
     if (from == to) continue;
 
-    // ❗ mangler km = denne vil vi ha
-    if (km == null) {
-      suggestedFrom = from;
-      suggestedTo = to;
-      break;
-    }
+    final km = _kmByIndex[i];
+    if (km != null && km > 0) continue;
+
+    suggestedFrom = from;
+    suggestedTo = to;
+    break;
   }
 
   // ================================
@@ -2050,6 +2064,29 @@ for (int i = 0; i < offer.rounds.length; i++) {
     // ===============================
     final path = await _savePdfToFile(bytes);
 
+    // ===============================
+    // Last opp til Supabase Storage
+    // ===============================
+    if (_draftId?.isNotEmpty == true) {
+      try {
+        final production = offer.production.trim().isEmpty
+            ? "UnknownProduction"
+            : offer.production.trim();
+        final safeProduction = _safeFolderName(production);
+        final todayStamp = DateFormat("yyyyMMdd").format(DateTime.now());
+        final filename = "Offer Nightliner $safeProduction $todayStamp.pdf";
+
+        final storagePath = await OfferStorageService.uploadPdf(
+          offerId: _draftId!,
+          bytes: bytes,
+          filename: filename,
+        );
+        await OfferStorageService.updatePdfPath(_draftId!, storagePath);
+      } catch (e) {
+        debugPrint('PDF upload error: $e');
+      }
+    }
+
     if (!mounted) return;
 
     ScaffoldMessenger.of(context).showSnackBar(
@@ -2072,6 +2109,61 @@ for (int i = 0; i < offer.rounds.length; i++) {
     );
   }
 }
+// ------------------------------------------------------------
+// Send offer via email
+// ------------------------------------------------------------
+Future<void> _sendOffer() async {
+  try {
+    final Map<int, RoundCalcResult> roundCalc = {};
+    for (int i = 0; i < offer.rounds.length; i++) {
+      roundCalc[i] = await _calcRound(i);
+    }
+
+    final bytes = await OfferPdfService.generatePdf(offer, roundCalc);
+
+    final production = offer.production.trim().isEmpty
+        ? "UnknownProduction"
+        : offer.production.trim();
+    final safeProduction = _safeFolderName(production);
+    final todayStamp = DateFormat("yyyyMMdd").format(DateTime.now());
+    final filename = "Offer Nightliner $safeProduction $todayStamp.pdf";
+
+    // Last opp til Supabase Storage
+    if (_draftId?.isNotEmpty == true) {
+      try {
+        final storagePath = await OfferStorageService.uploadPdf(
+          offerId: _draftId!,
+          bytes: bytes,
+          filename: filename,
+        );
+        await OfferStorageService.updatePdfPath(_draftId!, storagePath);
+      } catch (e) {
+        debugPrint('PDF upload error (send): $e');
+      }
+    }
+
+    if (!mounted) return;
+
+    await showDialog<void>(
+      context: context,
+      builder: (_) => _SendOfferDialog(
+        initialTo: offer.email,
+        initialSubject: 'Offer – ${offer.production}',
+        bytes: bytes,
+        filename: filename,
+      ),
+    );
+  } catch (e) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text("Could not prepare offer: $e"),
+        backgroundColor: Colors.red,
+      ),
+    );
+  }
+}
+
 // ------------------------------------------------------------
 // ✅ Scan PDF with preview
 // ------------------------------------------------------------
@@ -3740,6 +3832,7 @@ return Padding(
           onExport: _exportPdf,
           onSave: _saveDraft,
           onScanPdf: _scanPdf,
+          onSendOffer: _sendOffer,
           onCreateInvoice: _openCreateInvoiceDialog,
           draftId: _draftId,
         ),
@@ -4447,6 +4540,7 @@ class _LeftOfferCard extends StatefulWidget {
   final Future<void> Function() onExport;
   final Future<void> Function() onSave;
   final Future<void> Function() onScanPdf;
+  final Future<void> Function() onSendOffer;
   final Future<void> Function() onCreateInvoice;
   final String? draftId;
 
@@ -4456,6 +4550,7 @@ class _LeftOfferCard extends StatefulWidget {
   required this.onExport,
   required this.onSave,
   required this.onScanPdf,
+  required this.onSendOffer,
   required this.onCreateInvoice,
   required this.draftId,
 });
@@ -5211,6 +5306,18 @@ SizedBox(
 
     const SizedBox(height: 8),
 
+    // -------- SEND OFFER --------
+    SizedBox(
+      width: double.infinity,
+      child: OutlinedButton.icon(
+        onPressed: widget.onSendOffer,
+        icon: const Icon(Icons.email_outlined),
+        label: const Text("Send offer"),
+      ),
+    ),
+
+    const SizedBox(height: 8),
+
     // -------- OPPRETT FAKTURA --------
     SizedBox(
       width: double.infinity,
@@ -5901,6 +6008,164 @@ class _BusSettingsCard extends StatelessWidget {
           }),
         ],
       ),
+    );
+  }
+}
+
+// ============================================================
+// SEND OFFER DIALOG
+// ============================================================
+
+class _SendOfferDialog extends StatefulWidget {
+  final String initialTo;
+  final String initialSubject;
+  final Uint8List bytes;
+  final String filename;
+
+  const _SendOfferDialog({
+    required this.initialTo,
+    required this.initialSubject,
+    required this.bytes,
+    required this.filename,
+  });
+
+  @override
+  State<_SendOfferDialog> createState() => _SendOfferDialogState();
+}
+
+class _SendOfferDialogState extends State<_SendOfferDialog> {
+  late final TextEditingController _toCtrl;
+  late final TextEditingController _subjectCtrl;
+  late final TextEditingController _messageCtrl;
+
+  bool _sending = false;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _toCtrl = TextEditingController(text: widget.initialTo);
+    _subjectCtrl = TextEditingController(text: widget.initialSubject);
+    _messageCtrl = TextEditingController();
+  }
+
+  @override
+  void dispose() {
+    _toCtrl.dispose();
+    _subjectCtrl.dispose();
+    _messageCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _send() async {
+    final to = _toCtrl.text.trim();
+    if (to.isEmpty) {
+      setState(() => _error = 'Recipient email is required');
+      return;
+    }
+
+    setState(() {
+      _sending = true;
+      _error = null;
+    });
+
+    try {
+      final body = _messageCtrl.text.trim();
+      await EmailService.sendEmailWithAttachment(
+        to: to,
+        subject: _subjectCtrl.text.trim(),
+        body: body.isEmpty ? ' ' : body,
+        attachmentBytes: widget.bytes,
+        attachmentFilename: widget.filename,
+      );
+
+      if (!mounted) return;
+      Navigator.of(context).pop();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Offer sent to $to')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _error = e.toString());
+    } finally {
+      if (mounted) setState(() => _sending = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Send offer'),
+      content: SizedBox(
+        width: 480,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: _toCtrl,
+              keyboardType: TextInputType.emailAddress,
+              decoration: const InputDecoration(
+                labelText: 'To',
+                prefixIcon: Icon(Icons.email_outlined),
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _subjectCtrl,
+              decoration: const InputDecoration(
+                labelText: 'Subject',
+                prefixIcon: Icon(Icons.subject),
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _messageCtrl,
+              maxLines: 4,
+              decoration: const InputDecoration(
+                labelText: 'Message (optional)',
+                alignLabelWithHint: true,
+                prefixIcon: Icon(Icons.message_outlined),
+              ),
+            ),
+            if (_error != null) ...[
+              const SizedBox(height: 10),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: Colors.red.shade50,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.red.shade200),
+                ),
+                child: Text(
+                  _error!,
+                  style: TextStyle(color: Colors.red.shade800),
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: _sending ? null : () => Navigator.of(context).pop(),
+          child: const Text('Cancel'),
+        ),
+        FilledButton.icon(
+          onPressed: _sending ? null : _send,
+          icon: _sending
+              ? const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: Colors.white,
+                  ),
+                )
+              : const Icon(Icons.send),
+          label: const Text('Send'),
+        ),
+      ],
     );
   }
 }

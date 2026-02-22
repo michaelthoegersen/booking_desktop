@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -107,7 +108,7 @@ class OfferStorageService {
   final offersRes = await sb
     .from('offers')
     .select(
-      'id, production, company, created_at, updated_at, created_by, updated_by, payload, offer_json',
+      'id, production, company, created_at, updated_at, created_by, updated_by, payload, offer_json, pdf_path',
     )
     .order('updated_at', ascending: false)
     .limit(limit);
@@ -420,4 +421,32 @@ static String _buildKjoretoy(OfferDraft offer) {
 
   return type;
 }
+
+  // ============================================================
+  // PDF STORAGE
+  // ============================================================
+
+  static Future<String> uploadPdf({
+    required String offerId,
+    required Uint8List bytes,
+    required String filename,
+  }) async {
+    final path = '$offerId/$filename';
+    await sb.storage.from('offer-pdfs').uploadBinary(
+      path,
+      bytes,
+      fileOptions: const FileOptions(
+        contentType: 'application/pdf',
+        upsert: true,
+      ),
+    );
+    return path;
+  }
+
+  static Future<void> updatePdfPath(String offerId, String pdfPath) async {
+    await sb.from('offers').update({'pdf_path': pdfPath}).eq('id', offerId);
+  }
+
+  static String getPdfUrl(String pdfPath) =>
+      sb.storage.from('offer-pdfs').getPublicUrl(pdfPath);
 }

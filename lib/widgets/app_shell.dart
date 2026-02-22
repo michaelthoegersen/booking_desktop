@@ -708,7 +708,45 @@ class _NavItemState extends State<_NavItem> {
         currentPath == widget.route || currentPath.startsWith('${widget.route}/');
 
     return GestureDetector(
-      onTap: () => context.go(widget.route),
+      onTap: () async {
+        final currentPath =
+            widget.overrideActiveRoute ?? GoRouterState.of(context).uri.path;
+        final isOnNewOffer =
+            currentPath == '/new' || currentPath.startsWith('/new/');
+
+        if (NewOfferPage.hasUnsavedChanges && isOnNewOffer) {
+          final result = await showDialog<String>(
+            context: context,
+            builder: (ctx) => AlertDialog(
+              title: const Text('Unsaved changes'),
+              content: const Text(
+                  'You have unsaved changes. Do you want to save before leaving?'),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(ctx).pop('cancel'),
+                  child: const Text('Cancel'),
+                ),
+                TextButton(
+                  onPressed: () => Navigator.of(ctx).pop('discard'),
+                  child: const Text('Don\'t save'),
+                ),
+                FilledButton(
+                  onPressed: () => Navigator.of(ctx).pop('save'),
+                  child: const Text('Save'),
+                ),
+              ],
+            ),
+          );
+
+          if (result == null || result == 'cancel') return;
+
+          if (result == 'save') {
+            await NewOfferPage.saveCallback?.call();
+          }
+        }
+
+        if (context.mounted) context.go(widget.route);
+      },
       onSecondaryTapDown: (details) {
         _tapPosition = details.globalPosition;
       },

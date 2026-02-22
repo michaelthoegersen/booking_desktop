@@ -1,11 +1,14 @@
+import 'dart:convert';
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
+import 'package:http/http.dart' as http;
+import 'package:printing/printing.dart';
 import '../services/offer_storage_service.dart';
 import '../widgets/bus_map_widget.dart';
-import 'dart:convert';
 import '../models/bus_position.dart';
 import '../data/city_coords.dart';
 import '../services/openroute_routing.dart';
@@ -513,6 +516,17 @@ Future<void> _confirmDeleteDraft(
   // ------------------------------------------------------------
 
   // ------------------------------------------------------------
+  // PDF DIALOG
+  // ------------------------------------------------------------
+
+  Future<void> _showPdfDialog(BuildContext context, String pdfUrl) async {
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => _PdfViewDialog(pdfUrl: pdfUrl),
+    );
+  }
+
+  // ------------------------------------------------------------
 // BUS MAP SECTION (MapTiler)
 // ------------------------------------------------------------
 
@@ -840,21 +854,29 @@ Widget build(BuildContext context) {
           ),
         ),
 
-        // DELETE
-        trailing: IconButton(
-          icon: Icon(
-            Icons.delete_outline,
-            color: cs.error,
-          ),
-
-          tooltip: 'Delete draft',
-
-          onPressed: id.isEmpty
-              ? null
-              : () => _confirmDeleteDraft(
-                    id,
-                    production,
+        // PDF + DELETE
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (row['pdf_path'] != null)
+              IconButton(
+                icon: const Icon(Icons.picture_as_pdf, color: Colors.red),
+                tooltip: 'View PDF',
+                onPressed: () => _showPdfDialog(
+                  context,
+                  OfferStorageService.getPdfUrl(
+                    row['pdf_path'] as String,
                   ),
+                ),
+              ),
+            IconButton(
+              icon: Icon(Icons.delete_outline, color: cs.error),
+              tooltip: 'Delete draft',
+              onPressed: id.isEmpty
+                  ? null
+                  : () => _confirmDeleteDraft(id, production),
+            ),
+          ],
         ),
 
         onTap: id.isEmpty
@@ -872,4 +894,119 @@ Widget build(BuildContext context) {
     ),
   );
 }
+}
+
+// ============================================================
+// PDF VIEW DIALOG
+// ============================================================
+
+class _PdfViewDialog extends StatefulWidget {
+  final String pdfUrl;
+  const _PdfViewDialog({required this.pdfUrl});
+
+  @override
+  State<_PdfViewDialog> createState() => _PdfViewDialogState();
+}
+
+class _PdfViewDialogState extends State<_PdfViewDialog> {
+  Uint8List? _pdfBytes;
+  bool _loading = true;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadPdf();
+  }
+
+  Future<void> _loadPdf() async {
+    try {
+      final res = await http.get(Uri.parse(widget.pdfUrl));
+      if (res.statusCode != 200) throw Exception('HTTP ${res.statusCode}');
+      setState(() {
+        _pdfBytes = res.bodyBytes;
+        _loading = false;
+      });
+    } catch (e) {
+      setState(() {
+        _error = e.toString();
+        _loading = false;
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final size = MediaQuery.of(context).size;
+    return Dialog(
+      child: SizedBox(
+        width: size.width * 0.9,
+        height: size.height * 0.9,
+        child: Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.all(8),
+              child: Row(
+                children: [
+                  const SizedBox(width: 8),
+                  const Icon(Icons.picture_as_pdf, color: Colors.red),
+                  const SizedBox(width: 8),
+                  const Expanded(
+                    child: Text(
+                      'PDF Preview',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.close),
+                    onPressed: () => Navigator.of(context).pop(),
+                  ),
+                ],
+              ),
+            ),
+            const Divider(height: 1),
+            Expanded(
+              child: _loading
+                  ? const Center(child: CircularProgressIndicator())
+                  : _error != null
+                      ? Center(
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Icon(Icons.error_outline,
+                                  color: Colors.red, size: 48),
+                              const SizedBox(height: 12),
+                              Text('Failed to load PDF: $_error'),
+                              const SizedBox(height: 12),
+                              FilledButton(
+                                onPressed: () {
+                                  setState(() {
+                                    _loading = true;
+                                    _error = null;
+                                    _pdfBytes = null;
+                                  });
+                                  _loadPdf();
+                                },
+                                child: const Text('Retry'),
+                              ),
+                            ],
+                          ),
+                        )
+                      : PdfPreview(
+                          build: (_) async => _pdfBytes!,
+                          canChangePageFormat: false,
+                          canChangeOrientation: false,
+                          allowPrinting: true,
+                          allowSharing: true,
+                          maxPageWidth: 800,
+                        ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }

@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:typed_data';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
@@ -36,11 +37,31 @@ class EmailService {
     required String body,
   }) async {
     if (kIsWeb) {
-      // Web: route through Supabase Edge Function to avoid CORS on token endpoint
       await _sendViaEdgeFunction(to: to, subject: subject, body: body);
     } else {
-      // Desktop (macOS): call Microsoft directly — native HTTP has no CORS
       await _sendViaMicrosoftDirect(to: to, subject: subject, body: body);
+    }
+  }
+
+  static Future<void> sendEmailWithAttachment({
+    required String to,
+    required String subject,
+    required String body,
+    required Uint8List attachmentBytes,
+    required String attachmentFilename,
+  }) async {
+    final attachment = {
+      'name': attachmentFilename,
+      'contentBytes': base64Encode(attachmentBytes),
+    };
+    if (kIsWeb) {
+      await _sendViaEdgeFunction(
+        to: to, subject: subject, body: body, attachment: attachment,
+      );
+    } else {
+      await _sendViaMicrosoftDirect(
+        to: to, subject: subject, body: body, attachment: attachment,
+      );
     }
   }
 
@@ -48,11 +69,19 @@ class EmailService {
     required String to,
     required String subject,
     required String body,
+    Map<String, String>? attachment,
   }) async {
+    final payload = <String, dynamic>{
+      'to': to,
+      'subject': subject,
+      'body': body,
+    };
+    if (attachment != null) payload['attachment'] = attachment;
+
     final res = await http.post(
       Uri.parse(_edgeFnUrl),
       headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({'to': to, 'subject': subject, 'body': body}),
+      body: jsonEncode(payload),
     );
 
     if (res.statusCode != 200) {
@@ -64,6 +93,7 @@ class EmailService {
     required String to,
     required String subject,
     required String body,
+    Map<String, String>? attachment,
   }) async {
     final token = await _getAccessToken(
       tenantId: _tenantId,
@@ -75,20 +105,24 @@ class EmailService {
       'https://graph.microsoft.com/v1.0/users/$_senderEmail/sendMail',
     );
 
-    final payload = {
-      'message': {
-        'subject': subject,
-        'body': {
-          'contentType': 'Text',
-          'content': body,
-        },
-        'toRecipients': [
-          {
-            'emailAddress': {'address': to},
-          }
-        ],
-      },
+    final message = <String, dynamic>{
+      'subject': subject,
+      'body': {'contentType': 'Text', 'content': body},
+      'toRecipients': [
+        {'emailAddress': {'address': to}},
+      ],
     };
+
+    if (attachment != null) {
+      message['attachments'] = [
+        {
+          '@odata.type': '#microsoft.graph.fileAttachment',
+          'name': attachment['name'],
+          'contentType': 'application/pdf',
+          'contentBytes': attachment['contentBytes'],
+        }
+      ];
+    }
 
     final res = await http.post(
       url,
@@ -96,7 +130,7 @@ class EmailService {
         'Authorization': 'Bearer $token',
         'Content-Type': 'application/json',
       },
-      body: jsonEncode(payload),
+      body: jsonEncode({'message': message}),
     );
 
     if (res.statusCode != 202) {

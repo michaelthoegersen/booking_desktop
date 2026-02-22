@@ -75,29 +75,6 @@ class RoutesService {
         debugPrint('[ROUTE] ⚠️ EXACT found but invalid km');
       }
 
-      // ================= REVERSE =================
-      final reverse = await _client
-          .from('routes_all')
-          .select(selectFields)
-          .eq('from_place', b)
-          .eq('to_place', a)
-          .limit(1);
-
-      if (reverse is List && reverse.isNotEmpty) {
-        final row = Map<String, dynamic>.from(reverse.first);
-
-        debugPrint(
-          '[ROUTE] 🔁 REVERSE HIT $b → $a | '
-          'km=${row['distance_total_km']} '
-          'ferry_name="${row['ferry_name']}" '
-          'ferry_price=${row['ferry_price']}',
-        );
-
-        if (_hasValidKm(row)) return row;
-
-        debugPrint('[ROUTE] ⚠️ REVERSE found but invalid km');
-      }
-
       debugPrint('[ROUTE] ❌ NO ROUTE FOUND: $a → $b');
       return null;
 
