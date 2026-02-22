@@ -27,6 +27,10 @@ class SweCalculator {
     bool trailer = false,
     List<int>? utlTraktPerLeg,
     List<double>? extraPerLeg,
+    /// First leg is a pickup-evening transit — skip vehicle/driver day rate.
+    bool pickupEveningFirstDay = false,
+    /// Last leg is the return-home transit — skip vehicle/driver day rate.
+    bool hasReturnHome = false,
   }) {
     final int n = legKm.length;
 
@@ -51,6 +55,7 @@ class SweCalculator {
     _log('Chauffor/dag: ${driver.toStringAsFixed(0)}');
     _log('DD/dag: ${ddDay.toStringAsFixed(0)}');
     _log('Milpris: ${milpris.toStringAsFixed(2)}');
+    _log('pickupEvening: $pickupEveningFirstDay  hasReturnHome: $hasReturnHome');
 
     for (int i = 0; i < n; i++) {
       final km = legKm[i];
@@ -61,19 +66,27 @@ class SweCalculator {
           ? utlTraktPerLeg[i]
           : 0;
 
+      // Transit days do not count as billable workdays — skip vehicle/driver/DD.
+      final bool isPickupEvening = pickupEveningFirstDay && i == 0;
+      final bool isReturnHome    = hasReturnHome && i == n - 1;
+      final bool chargeDaily     = !isPickupEvening && !isReturnHome;
+
       final kmCost = km * settings.kmPrisPerKm;
-      final ddCost = km > settings.ddKmGrans ? ddDay : 0.0;
+      final vCost  = chargeDaily ? vehicle : 0.0;
+      final dCost  = chargeDaily ? driver  : 0.0;
+      final ddCost = chargeDaily && km > settings.ddKmGrans ? ddDay : 0.0;
       final trCost = trailer ? trailerDag : 0.0;
       final intCost = utl * utlTrakt;
 
       // ROUND to nearest 10 (Excel: ROUND(x, -1))
-      final base = _roundToNearest(vehicle + kmCost + driver + ddCost + extra, 10);
+      final base = _roundToNearest(vCost + kmCost + dCost + ddCost + extra, 10);
       final legTotal = base + trCost + intCost;
 
       _log(
-        'Leg $i: km=$km  vehicle=${vehicle.toStringAsFixed(0)}'
+        'Leg $i${isPickupEvening ? " [pickup-eve]" : isReturnHome ? " [return-home]" : ""}'
+        ': km=$km  vehicle=${vCost.toStringAsFixed(0)}'
         '  km_cost=${kmCost.toStringAsFixed(0)}'
-        '  driver=${driver.toStringAsFixed(0)}'
+        '  driver=${dCost.toStringAsFixed(0)}'
         '  dd=${ddCost.toStringAsFixed(0)}'
         '  extra=${extra.toStringAsFixed(0)}'
         '  base=$base  trailer=${trCost.toStringAsFixed(0)}'
@@ -81,9 +94,9 @@ class SweCalculator {
         '  total=$legTotal',
       );
 
-      vehicleCosts.add(vehicle);
+      vehicleCosts.add(vCost);
       kmCosts.add(kmCost);
-      driverCosts.add(driver);
+      driverCosts.add(dCost);
       ddCosts.add(ddCost);
       extraCosts.add(extra);
       trailerCosts.add(trCost);

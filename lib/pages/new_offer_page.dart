@@ -3135,11 +3135,17 @@ final safeNoDDrive = List<bool>.generate(
       return hasIntl ? 1 : 0;
     });
 
+    // Detect return-home leg: last entry returns to startLocation.
+    final bool hasReturnHome = entries.isNotEmpty &&
+        _norm(entries.last.location).toLowerCase() == start.toLowerCase();
+
     final sweResult = SweCalculator.calculateRound(
       settings: swe,
       legKm: safeLegKm,
       trailer: round.trailer,
       utlTraktPerLeg: utlTrkt,
+      pickupEveningFirstDay: round.pickupEveningFirstDay,
+      hasReturnHome: hasReturnHome,
     );
 
     final busCount = offer.rounds[ri].busSlots
