@@ -18,19 +18,24 @@ class SweCalculator {
   /// Calculate pricing for one round (set of legs).
   ///
   /// [legKm]           — km for each leg
+  /// [dates]           — date for each leg (used for same-day deduplication)
   /// [trailer]         — trailer on this round (same for all legs)
   /// [utlTraktPerLeg]  — number of international allowances per leg (0 or more)
   /// [extraPerLeg]     — manual extra cost per leg (SEK)
+  /// [pickupEveningFirstDay] — first unique date is a transit night, skip
+  ///                           vehicle/driver for all legs on that date.
+  ///
+  /// Vehicle + driver daily rates are charged once per unique date.
+  /// If two entries share the same date (e.g. last show + return home),
+  /// only the first leg of that date carries the daily rate.
   static SweCalcResult calculateRound({
     required SweSettings settings,
     required List<double> legKm,
+    List<DateTime>? dates,
     bool trailer = false,
     List<int>? utlTraktPerLeg,
     List<double>? extraPerLeg,
-    /// First leg is a pickup-evening transit — skip vehicle/driver day rate.
     bool pickupEveningFirstDay = false,
-    /// Last leg is the return-home transit — skip vehicle/driver day rate.
-    bool hasReturnHome = false,
   }) {
     final int n = legKm.length;
 
@@ -50,12 +55,31 @@ class SweCalculator {
     final double trailerDag = settings.trailerhyraPerDygn;
     final double utlTrakt = settings.utlandstraktamente;
 
+    // Build set of unique date strings in order of first appearance.
+    // Index → date key (yyyy-MM-dd).
+    final List<String> dateKeys = List.generate(n, (i) {
+      if (dates != null && i < dates.length) {
+        final d = dates[i];
+        return '${d.year}-${d.month.toString().padLeft(2,'0')}-${d.day.toString().padLeft(2,'0')}';
+      }
+      return '$i'; // fallback: treat each leg as its own "date"
+    });
+
+    // Determine which dates are billable (not the pickup-evening date).
+    // The first unique date is the pickup-evening date when pickupEveningFirstDay.
+    final String? pickupEveDate = pickupEveningFirstDay && dateKeys.isNotEmpty
+        ? dateKeys[0]
+        : null;
+
+    // Track which dates have already had the daily rate charged.
+    final Set<String> chargedDates = {};
+
     _log('--- START SWE ROUND CALC ---');
     _log('Fordon/dag: ${vehicle.toStringAsFixed(0)}');
     _log('Chauffor/dag: ${driver.toStringAsFixed(0)}');
     _log('DD/dag: ${ddDay.toStringAsFixed(0)}');
     _log('Milpris: ${milpris.toStringAsFixed(2)}');
-    _log('pickupEvening: $pickupEveningFirstDay  hasReturnHome: $hasReturnHome');
+    _log('pickupEvening: $pickupEveningFirstDay  pickupEveDate: $pickupEveDate');
 
     for (int i = 0; i < n; i++) {
       final km = legKm[i];
@@ -66,10 +90,12 @@ class SweCalculator {
           ? utlTraktPerLeg[i]
           : 0;
 
-      // Transit days do not count as billable workdays — skip vehicle/driver/DD.
-      final bool isPickupEvening = pickupEveningFirstDay && i == 0;
-      final bool isReturnHome    = hasReturnHome && i == n - 1;
-      final bool chargeDaily     = !isPickupEvening && !isReturnHome;
+      final dateKey = dateKeys[i];
+      final bool isPickupEveDay = dateKey == pickupEveDate;
+      // Charge daily rate only for the first leg of each billable date.
+      final bool firstLegOfDate = !chargedDates.contains(dateKey);
+      final bool chargeDaily = !isPickupEveDay && firstLegOfDate;
+      if (firstLegOfDate) chargedDates.add(dateKey);
 
       final kmCost = km * settings.kmPrisPerKm;
       final vCost  = chargeDaily ? vehicle : 0.0;
@@ -82,8 +108,11 @@ class SweCalculator {
       final base = _roundToNearest(vCost + kmCost + dCost + ddCost + extra, 10);
       final legTotal = base + trCost + intCost;
 
+      final tag = isPickupEveDay
+          ? ' [pickup-eve]'
+          : (!chargeDaily && !isPickupEveDay ? ' [same-date]' : '');
       _log(
-        'Leg $i${isPickupEvening ? " [pickup-eve]" : isReturnHome ? " [return-home]" : ""}'
+        'Leg $i$tag [$dateKey]'
         ': km=$km  vehicle=${vCost.toStringAsFixed(0)}'
         '  km_cost=${kmCost.toStringAsFixed(0)}'
         '  driver=${dCost.toStringAsFixed(0)}'

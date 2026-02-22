@@ -3135,17 +3135,20 @@ final safeNoDDrive = List<bool>.generate(
       return hasIntl ? 1 : 0;
     });
 
-    // Detect return-home leg: last entry returns to startLocation.
-    final bool hasReturnHome = entries.isNotEmpty &&
-        _norm(entries.last.location).toLowerCase() == start.toLowerCase();
+    // Pass entry dates so SweCalculator can deduplicate vehicle/driver
+    // for legs that share the same date (e.g. last show + return home).
+    final legDates = List<DateTime>.generate(
+      len,
+      (i) => i < entries.length ? entries[i].date : DateTime(2000),
+    );
 
     final sweResult = SweCalculator.calculateRound(
       settings: swe,
       legKm: safeLegKm,
+      dates: legDates,
       trailer: round.trailer,
       utlTraktPerLeg: utlTrkt,
       pickupEveningFirstDay: round.pickupEveningFirstDay,
-      hasReturnHome: hasReturnHome,
     );
 
     final busCount = offer.rounds[ri].busSlots
