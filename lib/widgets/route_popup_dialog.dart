@@ -213,8 +213,13 @@ String _buildExtra() {
       lines.add(line);
 
       final km = meters / 1000;
-      final country =
-          await _analyzer.kmPerCountry(polyline);
+
+      Map<String, double> country = {};
+      try {
+        country = await _analyzer.kmPerCountry(polyline);
+      } catch (e) {
+        debugPrint('Country analysis failed (non-fatal): $e');
+      }
 
       kms.add(km);
       countries.add(country);

@@ -21,81 +21,92 @@ class GoogleRoutesService {
       : (dotenv.env['GOOGLE_MAPS_API_KEY'] ?? '');
 
   // ============================================================
-  // WEB: Directions API (GET, CORS-friendly)
-  // routes.googleapis.com requires POST + custom headers which
-  // triggers CORS preflight and is blocked by browsers.
-  // maps.googleapis.com/directions is GET-based and CORS-safe.
+  // WEB: Nominatim geocoding + OSRM routing
+  // Both are open, free, and return proper CORS headers.
+  // No API key required.
   // ============================================================
+
+  /// Geocode an address string → [lat, lon] via Nominatim
+  Future<List<double>> _geocode(String address) async {
+    final url = Uri.parse(
+      'https://nominatim.openstreetmap.org/search'
+      '?q=${Uri.encodeComponent(address)}'
+      '&format=json&limit=1',
+    );
+
+    final res = await http.get(url, headers: {
+      'Accept': 'application/json',
+    }).timeout(const Duration(seconds: 10));
+
+    if (res.statusCode != 200) {
+      throw Exception('Nominatim error ${res.statusCode} for "$address"');
+    }
+
+    final data = jsonDecode(res.body) as List;
+    if (data.isEmpty) {
+      throw Exception('Could not geocode: "$address"');
+    }
+
+    return [
+      double.parse(data[0]['lat'] as String),
+      double.parse(data[0]['lon'] as String),
+    ];
+  }
+
   Future<Map<String, dynamic>> _getRouteWeb({
     required List<String> places,
   }) async {
-    if (_apiKey.isEmpty) {
-      throw Exception('Missing GOOGLE_MAPS_API_KEY');
+    debugPrint('🌍 WEB ROUTE: Nominatim + OSRM for ${places.length} places');
+
+    // Geocode every place (rate-limit: 1 req/s for Nominatim)
+    final coords = <List<double>>[];
+    for (int i = 0; i < places.length; i++) {
+      if (i > 0) {
+        await Future.delayed(const Duration(milliseconds: 1100));
+      }
+      coords.add(await _geocode(places[i]));
+      debugPrint('  📍 ${places[i]} → ${coords.last}');
     }
 
-    final origin = Uri.encodeComponent(places.first);
-    final destination = Uri.encodeComponent(places.last);
-    final vias = places.sublist(1, places.length - 1);
+    // OSRM expects lon,lat pairs separated by semicolons
+    final coordStr = coords.map((c) => '${c[1]},${c[0]}').join(';');
 
-    String urlStr =
-        'https://maps.googleapis.com/maps/api/directions/json'
-        '?origin=$origin'
-        '&destination=$destination'
-        '&alternatives=true'
-        '&key=$_apiKey';
+    final osrmUrl = Uri.parse(
+      'https://router.project-osrm.org/route/v1/driving/$coordStr'
+      '?overview=full&alternatives=true&geometries=polyline',
+    );
 
-    if (vias.isNotEmpty) {
-      final waypointStr =
-          vias.map((w) => 'via:${Uri.encodeComponent(w)}').join('|');
-      urlStr += '&waypoints=$waypointStr';
-    }
+    debugPrint('🚗 OSRM: $osrmUrl');
 
-    debugPrint('🌐 DIRECTIONS API (web): $urlStr');
-
-    late http.Response res;
-    try {
-      res = await http
-          .get(Uri.parse(urlStr))
-          .timeout(const Duration(seconds: 25));
-    } on TimeoutException {
-      throw Exception('Google Directions API timeout');
-    }
+    final res = await http
+        .get(osrmUrl)
+        .timeout(const Duration(seconds: 30));
 
     if (res.statusCode != 200) {
-      throw Exception('Directions API error ${res.statusCode}: ${res.body}');
+      throw Exception('OSRM error ${res.statusCode}: ${res.body}');
     }
 
-    final data = jsonDecode(res.body);
-    final status = data['status'] as String?;
-
-    if (status != 'OK') {
-      throw Exception(
-        'Directions API: $status — ${data['error_message'] ?? ''}',
-      );
+    final data = jsonDecode(res.body) as Map<String, dynamic>;
+    if (data['code'] != 'Ok') {
+      throw Exception('OSRM: ${data['code']} — ${data['message'] ?? ''}');
     }
 
     final routes = data['routes'] as List;
     final List<Map<String, dynamic>> parsedRoutes = [];
 
     for (final route in routes) {
-      final polyline = route['overview_polyline']?['points'];
+      final polyline = route['geometry'] as String?;
       if (polyline == null) continue;
-
-      num distanceMeters = 0;
-      for (final leg in (route['legs'] as List)) {
-        distanceMeters += (leg['distance']['value'] as int);
-      }
-
+      final distanceMeters = route['distance'] as num;
       parsedRoutes.add({
         'distanceMeters': distanceMeters,
         'polyline': polyline,
       });
     }
 
-    if (parsedRoutes.isEmpty) {
-      throw Exception('Directions API returned no routes');
-    }
+    if (parsedRoutes.isEmpty) throw Exception('OSRM returned no routes');
 
+    debugPrint('✅ OSRM: ${parsedRoutes.length} route(s) found');
     return {'routes': parsedRoutes};
   }
 
@@ -105,7 +116,7 @@ class GoogleRoutesService {
   Future<Map<String, dynamic>> getRouteWithVia({
     required List<String> places,
   }) async {
-    // On web use Directions API (GET) — Routes API is CORS-blocked
+    // On web: use Nominatim + OSRM (no API key, proper CORS headers)
     if (kIsWeb) {
       return _getRouteWeb(places: places);
     }
