@@ -21,11 +21,95 @@ class GoogleRoutesService {
       : (dotenv.env['GOOGLE_MAPS_API_KEY'] ?? '');
 
   // ============================================================
+  // WEB: Directions API (GET, CORS-friendly)
+  // routes.googleapis.com requires POST + custom headers which
+  // triggers CORS preflight and is blocked by browsers.
+  // maps.googleapis.com/directions is GET-based and CORS-safe.
+  // ============================================================
+  Future<Map<String, dynamic>> _getRouteWeb({
+    required List<String> places,
+  }) async {
+    if (_apiKey.isEmpty) {
+      throw Exception('Missing GOOGLE_MAPS_API_KEY');
+    }
+
+    final origin = Uri.encodeComponent(places.first);
+    final destination = Uri.encodeComponent(places.last);
+    final vias = places.sublist(1, places.length - 1);
+
+    String urlStr =
+        'https://maps.googleapis.com/maps/api/directions/json'
+        '?origin=$origin'
+        '&destination=$destination'
+        '&alternatives=true'
+        '&key=$_apiKey';
+
+    if (vias.isNotEmpty) {
+      final waypointStr =
+          vias.map((w) => 'via:${Uri.encodeComponent(w)}').join('|');
+      urlStr += '&waypoints=$waypointStr';
+    }
+
+    debugPrint('🌐 DIRECTIONS API (web): $urlStr');
+
+    late http.Response res;
+    try {
+      res = await http
+          .get(Uri.parse(urlStr))
+          .timeout(const Duration(seconds: 25));
+    } on TimeoutException {
+      throw Exception('Google Directions API timeout');
+    }
+
+    if (res.statusCode != 200) {
+      throw Exception('Directions API error ${res.statusCode}: ${res.body}');
+    }
+
+    final data = jsonDecode(res.body);
+    final status = data['status'] as String?;
+
+    if (status != 'OK') {
+      throw Exception(
+        'Directions API: $status — ${data['error_message'] ?? ''}',
+      );
+    }
+
+    final routes = data['routes'] as List;
+    final List<Map<String, dynamic>> parsedRoutes = [];
+
+    for (final route in routes) {
+      final polyline = route['overview_polyline']?['points'];
+      if (polyline == null) continue;
+
+      num distanceMeters = 0;
+      for (final leg in (route['legs'] as List)) {
+        distanceMeters += (leg['distance']['value'] as int);
+      }
+
+      parsedRoutes.add({
+        'distanceMeters': distanceMeters,
+        'polyline': polyline,
+      });
+    }
+
+    if (parsedRoutes.isEmpty) {
+      throw Exception('Directions API returned no routes');
+    }
+
+    return {'routes': parsedRoutes};
+  }
+
+  // ============================================================
   // ROUTE WITH VIA + ALTERNATIVES
   // ============================================================
   Future<Map<String, dynamic>> getRouteWithVia({
     required List<String> places,
   }) async {
+    // On web use Directions API (GET) — Routes API is CORS-blocked
+    if (kIsWeb) {
+      return _getRouteWeb(places: places);
+    }
+
     if (_apiKey.isEmpty) {
       throw Exception('Missing GOOGLE_MAPS_API_KEY in .env');
     }
