@@ -83,6 +83,67 @@ class OfferStorageService {
   }
 
   // ============================================================
+  // ARCHIVE
+  // ============================================================
+  static Future<void> archiveDraft(String id) async {
+    await sb.from('offers').update({'archived': true}).eq('id', id);
+    recentOffersRefresh.value++;
+  }
+
+  static Future<void> unarchiveDraft(String id) async {
+    await sb.from('offers').update({'archived': false}).eq('id', id);
+    recentOffersRefresh.value++;
+  }
+
+  static Future<List<Map<String, dynamic>>> loadArchivedOffers() async {
+    final user = sb.auth.currentUser;
+    if (user == null) return [];
+
+    final offersRes = await sb
+        .from('offers')
+        .select(
+          'id, production, company, created_at, updated_at, created_by, updated_by, payload, offer_json, pdf_path',
+        )
+        .eq('archived', true)
+        .order('updated_at', ascending: false);
+
+    final offers = (offersRes as List).cast<Map<String, dynamic>>();
+    if (offers.isEmpty) return [];
+
+    final Set<String> userIds = {};
+    for (final o in offers) {
+      if (o['created_by'] != null) userIds.add(o['created_by']);
+      if (o['updated_by'] != null) userIds.add(o['updated_by']);
+    }
+
+    if (userIds.isEmpty) return offers;
+
+    final profilesRes = await sb
+        .from('profiles')
+        .select('id, name')
+        .filter('id', 'in', '(${userIds.join(',')})');
+
+    final profiles = (profilesRes as List).cast<Map<String, dynamic>>();
+    final Map<String, String> profileMap = {};
+    for (final p in profiles) {
+      profileMap[p['id']] = p['name'] ?? 'Unknown';
+    }
+
+    for (final o in offers) {
+      o['created_name'] = profileMap[o['created_by']] ?? 'Unknown';
+      o['updated_name'] = profileMap[o['updated_by']] ?? 'Unknown';
+    }
+
+    return offers;
+  }
+
+  static Future<void> permanentlyDeleteDraft(String id) async {
+    await sb.from('samletdata').delete().eq('draft_id', id);
+    await sb.from('offers').delete().eq('id', id);
+    recentOffersRefresh.value++;
+  }
+
+  // ============================================================
   // LOAD SINGLE
   // ============================================================
   static Future<OfferDraft> loadDraft(String id) async {
@@ -110,6 +171,7 @@ class OfferStorageService {
     .select(
       'id, production, company, created_at, updated_at, created_by, updated_by, payload, offer_json, pdf_path',
     )
+    .eq('archived', false)
     .order('updated_at', ascending: false)
     .limit(limit);
 

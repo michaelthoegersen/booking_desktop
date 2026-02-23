@@ -16,6 +16,9 @@ import '../pages/economy_page.dart';
 import '../pages/issues_page.dart';
 import '../pages/settings_page.dart';
 import '../pages/routes_admin_page.dart';
+import '../pages/chat_page.dart';
+import '../pages/archive_page.dart';
+import '../services/chat_service.dart';
 
 // --------------------------------------------------------------------------
 // DATA
@@ -40,10 +43,12 @@ const _routeTitles = {
   '/calendar': 'Calendar',
   '/new': 'New offer',
   '/edit': 'Edit offers',
+  '/archive': 'Archive',
   '/customers': 'Customers',
   '/invoices': 'Invoices',
   '/economy': 'Economy',
   '/issues': 'Issues',
+  '/chat': 'Chat',
   '/settings': 'Settings',
   '/routes': 'Route Manager',
 };
@@ -131,10 +136,14 @@ class _AppShellState extends State<AppShell> {
         return EconomyPage();
       case '/issues':
         return IssuesPage();
+      case '/chat':
+        return ChatPage();
       case '/settings':
         return SettingsPage();
       case '/routes':
         return RoutesAdminPage();
+      case '/archive':
+        return const ArchivePage();
       default:
         return Center(child: Text('Unknown route: $route'));
     }
@@ -511,6 +520,7 @@ class _SideNav extends StatefulWidget {
 class _SideNavState extends State<_SideNav> {
   final _supabase = Supabase.instance.client;
   int _unseenCount = 0;
+  int _unreadChatCount = 0;
   RealtimeChannel? _channel;
   Timer? _pollTimer;
 
@@ -518,16 +528,31 @@ class _SideNavState extends State<_SideNav> {
   void initState() {
     super.initState();
     _loadUnseenCount();
+    _loadUnreadChatCount();
     _subscribeRealtime();
+    ChatService.readEventNotifier.addListener(_loadUnreadChatCount);
     // Poll every 15 seconds as fallback if realtime doesn't fire
-    _pollTimer = Timer.periodic(const Duration(seconds: 15), (_) => _loadUnseenCount());
+    _pollTimer = Timer.periodic(const Duration(seconds: 15), (_) {
+      _loadUnseenCount();
+      _loadUnreadChatCount();
+    });
   }
 
   @override
   void dispose() {
+    ChatService.readEventNotifier.removeListener(_loadUnreadChatCount);
     _channel?.unsubscribe();
     _pollTimer?.cancel();
     super.dispose();
+  }
+
+  Future<void> _loadUnreadChatCount() async {
+    try {
+      final count = await ChatService.unreadCount();
+      if (mounted) setState(() => _unreadChatCount = count);
+    } catch (e) {
+      debugPrint('Chat badge error: $e');
+    }
   }
 
   Future<void> _loadUnseenCount() async {
@@ -544,12 +569,18 @@ class _SideNavState extends State<_SideNav> {
 
   void _subscribeRealtime() {
     _channel = _supabase
-        .channel('issues-badge')
+        .channel('sidenav-badges')
         .onPostgresChanges(
           event: PostgresChangeEvent.all,
           schema: 'public',
           table: 'issues',
           callback: (_) => _loadUnseenCount(),
+        )
+        .onPostgresChanges(
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: 'tour_messages',
+          callback: (_) => _loadUnreadChatCount(),
         )
         .subscribe();
   }
@@ -571,10 +602,14 @@ class _SideNavState extends State<_SideNav> {
             Padding(
               padding: const EdgeInsets.only(bottom: 20, top: 10),
               child: Center(
-                child: Image.asset(
-                  "assets/pdf/logos/TourFlowLogo.png",
+                child: Image(
+                  image: const ResizeImage(
+                    AssetImage("assets/pdf/logos/TourFlowLogo.png"),
+                    width: 900,
+                  ),
                   height: 150,
                   fit: BoxFit.contain,
+                  filterQuality: FilterQuality.medium,
                   errorBuilder: (context, error, stack) {
                     return const Text(
                       "TourFlow",
@@ -624,6 +659,14 @@ class _SideNavState extends State<_SideNav> {
             ),
 
             _NavItem(
+              icon: Icons.archive_outlined,
+              label: "Archive",
+              route: "/archive",
+              onOpenInNewTab: widget.onOpenInNewTab,
+              overrideActiveRoute: widget.overrideActiveRoute,
+            ),
+
+            _NavItem(
               icon: Icons.apartment_rounded,
               label: "Customers",
               route: "/customers",
@@ -652,6 +695,15 @@ class _SideNavState extends State<_SideNav> {
               label: "Issues",
               route: "/issues",
               badge: _unseenCount,
+              onOpenInNewTab: widget.onOpenInNewTab,
+              overrideActiveRoute: widget.overrideActiveRoute,
+            ),
+
+            _NavItem(
+              icon: Icons.chat_bubble_outline_rounded,
+              label: "Chat",
+              route: "/chat",
+              badge: _unreadChatCount,
               onOpenInNewTab: widget.onOpenInNewTab,
               overrideActiveRoute: widget.overrideActiveRoute,
             ),

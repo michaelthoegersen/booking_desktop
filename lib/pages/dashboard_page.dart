@@ -71,6 +71,9 @@ class _DashboardPageState extends State<DashboardPage> {
 
   List<Map<String, dynamic>> recentOffers = [];
 
+  final TextEditingController _searchCtrl = TextEditingController();
+  String _searchQuery = '';
+
 
   // ------------------------------------------------------------
   // BUS LOCATIONS (TODAY)
@@ -103,6 +106,10 @@ class _DashboardPageState extends State<DashboardPage> {
 
     OfferStorageService.recentOffersRefresh
         .addListener(_onRecentRefresh);
+
+    _searchCtrl.addListener(() {
+      setState(() => _searchQuery = _searchCtrl.text.trim().toLowerCase());
+    });
   }
 
 
@@ -110,6 +117,8 @@ class _DashboardPageState extends State<DashboardPage> {
   void dispose() {
     OfferStorageService.recentOffersRefresh
         .removeListener(_onRecentRefresh);
+
+    _searchCtrl.dispose();
 
     super.dispose();
   }
@@ -512,6 +521,28 @@ Future<void> _confirmDeleteDraft(
   }
 }
   // ------------------------------------------------------------
+  // ARCHIVE DRAFT (FROM DASHBOARD)
+  // ------------------------------------------------------------
+
+  Future<void> _archiveDraft(String id, String production) async {
+    try {
+      await OfferStorageService.archiveDraft(id);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Archived "$production"')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Archive failed: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
+  // ------------------------------------------------------------
   // BUS MAP WIDGET
   // ------------------------------------------------------------
 
@@ -697,6 +728,28 @@ Widget build(BuildContext context) {
                           ),
                     ),
 
+                    const SizedBox(width: 16),
+
+                    SizedBox(
+                      width: 240,
+                      height: 36,
+                      child: TextField(
+                        controller: _searchCtrl,
+                        decoration: InputDecoration(
+                          hintText: 'Search offers…',
+                          prefixIcon: const Icon(Icons.search, size: 18),
+                          contentPadding: const EdgeInsets.symmetric(
+                            vertical: 0,
+                            horizontal: 12,
+                          ),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                          isDense: true,
+                        ),
+                      ),
+                    ),
+
                     const Spacer(),
 
                     OutlinedButton.icon(
@@ -733,18 +786,21 @@ Widget build(BuildContext context) {
                 else
 
         Expanded(
-  child: ListView.separated(
+  child: Builder(
+    builder: (context) {
+      final filtered = _searchQuery.isEmpty
+          ? recentOffers
+          : recentOffers.where((row) {
+              final prod = (row['production'] ?? '').toString().toLowerCase();
+              final comp = (row['company'] ?? '').toString().toLowerCase();
+              return prod.contains(_searchQuery) || comp.contains(_searchQuery);
+            }).toList();
 
-    itemCount: recentOffers.length,
-
-    separatorBuilder: (_, __) =>
-        Divider(
-          color: cs.outlineVariant,
-        ),
-
-    itemBuilder: (_, i) {
-
-      final row = recentOffers[i];
+      return ListView.separated(
+        itemCount: filtered.length,
+        separatorBuilder: (_, __) => Divider(color: cs.outlineVariant),
+        itemBuilder: (_, i) {
+          final row = filtered[i];
 
       final id = row['id']?.toString() ?? '';
 
@@ -870,11 +926,11 @@ Widget build(BuildContext context) {
                 ),
               ),
             IconButton(
-              icon: Icon(Icons.delete_outline, color: cs.error),
-              tooltip: 'Delete draft',
+              icon: const Icon(Icons.archive_outlined),
+              tooltip: 'Archive',
               onPressed: id.isEmpty
                   ? null
-                  : () => _confirmDeleteDraft(id, production),
+                  : () => _archiveDraft(id, production),
             ),
           ],
         ),
@@ -882,6 +938,8 @@ Widget build(BuildContext context) {
         onTap: id.isEmpty
             ? null
             : () => context.go("/new/$id"),
+      );
+        },
       );
     },
   ),

@@ -17,6 +17,8 @@ import 'pages/google_test_page.dart';
 import 'pages/invoices_page.dart';
 import 'pages/issues_page.dart';
 import 'pages/economy_page.dart';
+import 'pages/chat_page.dart';
+import 'pages/archive_page.dart';
 
 import 'state/settings_store.dart';
 import 'ui/css_theme.dart';
@@ -31,22 +33,32 @@ Future<void> main() async {
   String? supabaseUrl;
   String? supabaseKey;
 
-  try {
-    // 👉 Prøv først dart-define (Release / DMG)
-    const envUrl = String.fromEnvironment('SUPABASE_URL');
-    const envKey = String.fromEnvironment('SUPABASE_ANON_KEY');
+  // 1. dart-define (Release / DMG)
+  const envUrl = String.fromEnvironment('SUPABASE_URL');
+  const envKey = String.fromEnvironment('SUPABASE_ANON_KEY');
 
-    if (envUrl.isNotEmpty && envKey.isNotEmpty) {
-      supabaseUrl = envUrl;
-      supabaseKey = envKey;
-    } else {
-      // 👉 Fallback til .env (VSCode / flutter run)
+  if (envUrl.isNotEmpty && envKey.isNotEmpty) {
+    supabaseUrl = envUrl;
+    supabaseKey = envKey;
+  } else {
+    // 2. .env-fil (VSCode / flutter run desktop)
+    try {
       await dotenv.load(fileName: ".env");
-
       supabaseUrl = dotenv.env['SUPABASE_URL'];
       supabaseKey = dotenv.env['SUPABASE_ANON_KEY'];
+    } catch (e) {
+      // Chrome dev-server blokkerer .env-filer — bruk inline fallback.
+      // Anon-nøkkelen er offentlig (synlig i nettverksforespørsler).
+      debugPrint("dotenv load failed ($e) — using inline fallback");
+      supabaseUrl = 'https://fqefvgqlrntwgschkugf.supabase.co';
+      supabaseKey =
+          'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9'
+          '.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZxZWZ2Z3Fscm50d2dzY2hrdWdmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjkwNzQxMjAsImV4cCI6MjA4NDY1MDEyMH0'
+          '.ZamQr1qQRuYnQcy-yKfOr0IZrRJxIb4SP8_USn9uMoU';
     }
+  }
 
+  try {
     if (supabaseUrl == null ||
         supabaseKey == null ||
         supabaseUrl.isEmpty ||
@@ -232,10 +244,22 @@ class BookingApp extends StatelessWidget {
               builder: (context, state) => const IssuesPage(),
             ),
 
+            // ---------------- CHAT ----------------
+            GoRoute(
+              path: "/chat",
+              builder: (context, state) => const ChatPage(),
+            ),
+
             // ---------------- ECONOMY ----------------
             GoRoute(
               path: "/economy",
               builder: (context, state) => const EconomyPage(),
+            ),
+
+            // ---------------- ARCHIVE ----------------
+            GoRoute(
+              path: "/archive",
+              builder: (context, state) => const ArchivePage(),
             ),
 
             // ---------------- GOOGLE TEST ----------------
