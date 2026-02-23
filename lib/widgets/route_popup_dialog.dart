@@ -61,6 +61,7 @@ class _RoutePopupDialogState extends State<RoutePopupDialog> {
 
   late TextEditingController _fromCtrl;
   late TextEditingController _toCtrl;
+  final TextEditingController _kmCtrl = TextEditingController();
 
   final List<TextEditingController> _viaCtrls = [];
 
@@ -120,6 +121,7 @@ class _RoutePopupDialogState extends State<RoutePopupDialog> {
   void dispose() {
     _fromCtrl.dispose();
     _toCtrl.dispose();
+    _kmCtrl.dispose();
     _ferryNameCtrl.dispose();
 
     for (final c in _viaCtrls) {
@@ -239,6 +241,7 @@ String _buildExtra() {
       _countryKm = countries.first;
       _loading = false;
     });
+    _kmCtrl.text = kms.first.toStringAsFixed(0);
 
   } catch (e) {
     // ❗ ALDRI blokker popup
@@ -259,7 +262,15 @@ String _buildExtra() {
 // SAVE
 // =================================================
 Future<void> _save() async {
-  if (_distanceKm == null) return;
+  final kmText = _kmCtrl.text.trim().replaceAll(',', '.');
+  final km = double.tryParse(kmText) ?? _distanceKm;
+
+  if (km == null || km <= 0) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text("Enter km before saving")),
+    );
+    return;
+  }
 
   try {
     final extra = _buildExtra();
@@ -306,7 +317,7 @@ Future<void> _save() async {
       'ferry_name': ferryName,
 
       // total
-      'distance_total_km': _distanceKm,
+      'distance_total_km': km,
 
       // per country (only allowed)
       ...countryFields,
@@ -444,6 +455,12 @@ Future<void> _save() async {
             controller: _toCtrl,
             decoration:
                 const InputDecoration(labelText: "To"),
+          ),
+
+          TextField(
+            controller: _kmCtrl,
+            keyboardType: TextInputType.number,
+            decoration: const InputDecoration(labelText: "KM"),
           ),
 
           const SizedBox(height: 12),
@@ -632,9 +649,12 @@ const SizedBox(height: 24),
 
         TileLayer(
           urlTemplate:
-              "https://tiles.stadiamaps.com/tiles/alidade_smooth/{z}/{x}/{y}{r}.png?api_key=4311967b-a373-405e-85e3-071633b7e949",
-
+              'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
+          subdomains: const ['a', 'b', 'c', 'd'],
+          retinaMode: true,
+          maxZoom: 19,
           userAgentPackageName: 'com.tourflow.app',
+          errorTileCallback: (tile, error, stackTrace) {},
         ),
 
         PolylineLayer(

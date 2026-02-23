@@ -162,9 +162,8 @@ Map<int, double> _tollByIndex = {};
 Map<int, String> _extraByIndex = {};
 Map<int, Map<String, double>> _countryKmByIndex = {};
 Map<int, bool> _noDDriveByIndex = {};
-/// true when km_se was NULL in DB (not yet computed by KmSeUpdater).
-/// Distinct from km_se = 0 (confirmed non-Swedish route).
-Map<int, bool> _kmSeNullByIndex = {};
+// Indices whose km was merged into the preceding TRAVEL block
+Set<int> _travelMergedIndices = {};
 
 // Global caches (per route)
 final Map<String, double?> _distanceCache = {};
@@ -175,8 +174,6 @@ final Map<String, String> _extraCache = {};
 final Map<String, String> _ferryNameCache = {};
 Map<int, String> _ferryNameByIndex = {};
 final Map<String, Map<String, double>> _countryKmCache = {};
-/// Cached per-route: was km_se NULL in DB at last fetch?
-final Map<String, bool> _kmSeNullCache = {};
   // ===================================================
   // ROUND BREAKDOWN
   // ===================================================
@@ -1646,6 +1643,10 @@ Future<void> _openRoutePreview() async {
     final km = _kmByIndex[i];
     if (km != null && km > 0) continue;
 
+    // Skip cities whose km was successfully merged into the preceding
+    // TRAVEL block — these are NOT missing routes.
+    if (_travelMergedIndices.contains(i)) continue;
+
     from = f;
     to = t;
     break;
@@ -1682,7 +1683,7 @@ Future<void> _openRoutePreview() async {
     context: context,
     builder: (_) => RoutePopupDialog(
       start: from!,
-      stops: stops,
+      stops: [to!],
     ),
   );
 
@@ -2332,8 +2333,6 @@ Future<void> _scanPdf() async {
     _ferryNameByIndex[index]= _ferryNameCache[key] ?? '';
     _countryKmByIndex[index]= _countryKmCache[key] ?? {};
     _noDDriveByIndex[index] = _noDDriveCache[key] ?? false;
-    _kmSeNullByIndex[index] = _kmSeNullCache[key] ?? false;
-
     return _distanceCache[key];
   }
 
@@ -2383,12 +2382,6 @@ Future<void> _scanPdf() async {
 
     final noDDrive = (res['no_ddrive'] as bool?) ?? false;
 
-    // Track whether km_se was NULL (not yet computed by KmSeUpdater).
-    // km_se = NULL  →  unknown (not computed yet)
-    // km_se = 0     →  computed, confirmed non-Swedish route
-    // km_se > 0     →  computed, X km are in Sweden
-    final bool kmSeIsNull = res['km_se'] == null;
-
     // ===================================================
     // COUNTRY KM BREAKDOWN
     // ===================================================
@@ -2423,7 +2416,6 @@ Future<void> _scanPdf() async {
     _ferryNameCache[key] = ferryName;
     _countryKmCache[key] = countryKm;
     _noDDriveCache[key]  = noDDrive;
-    _kmSeNullCache[key]  = kmSeIsNull;
 
     // ===================================================
     // PER-INDEX WRITE (UI + CALC)
@@ -2433,7 +2425,6 @@ Future<void> _scanPdf() async {
     _extraByIndex[index]      = extra;
     _ferryNameByIndex[index] = ferryName;
     _countryKmByIndex[index] = countryKm;
-    _kmSeNullByIndex[index]  = kmSeIsNull;
 
     debugPrint(
       "[ROUTE] $fromN → $toN | km=$km ferry='$ferryName' price=$ferryPrice",
@@ -2484,6 +2475,7 @@ Future<void> _recalcKm() async {
       _countryKmByIndex = {};
       _noDDriveByIndex = {};
       _travelBefore = [];
+      _travelMergedIndices = {};
       _kmError = null;
     });
 
@@ -2507,7 +2499,7 @@ Future<void> _recalcKm() async {
   final Map<int, String> ferryNameByIndex = {};
   final Map<int, Map<String, double>> countryKmByIndex = {};
   final Map<int, bool> noDDriveByIndex = {};
-  final Map<int, bool> kmSeNullByIndex = {};
+  final Set<int> travelMergedIndices = {};
 
   final List<bool> travelBefore =
       List<bool>.filled(entries.length, false);
@@ -2542,7 +2534,6 @@ Future<void> _recalcKm() async {
       extraByIndex[i] = '';
       ferryNameByIndex[i] = '';
       countryKmByIndex[i] = {};
-      kmSeNullByIndex[i] = false;
 
       pendingTravelIndex = null;
       inTravelBlock = false;
@@ -2558,7 +2549,6 @@ Future<void> _recalcKm() async {
       extraByIndex[i] = '';
       ferryNameByIndex[i] = '';
       countryKmByIndex[i] = {};
-      kmSeNullByIndex[i] = false;
 
       if (pendingTravelIndex == null) {
         pendingTravelIndex = i; // første Travel i blokken
@@ -2576,7 +2566,6 @@ Future<void> _recalcKm() async {
       extraByIndex[i] = '';
       ferryNameByIndex[i] = '';
       countryKmByIndex[i] = {};
-      kmSeNullByIndex[i] = false;
 
       pendingTravelIndex = null;
       inTravelBlock = false;
@@ -2604,7 +2593,6 @@ Future<void> _recalcKm() async {
       _countryKmCache[key] ?? {},
     );
     final noDDrive = _noDDriveCache[key] ?? false;
-    final kmSeNull = _kmSeNullCache[key] ?? false;
 
     // ===================================================
     // MERGE TRAVEL BLOCK
@@ -2617,7 +2605,6 @@ Future<void> _recalcKm() async {
       ferryNameByIndex[pendingTravelIndex] = ferryName;
       countryKmByIndex[pendingTravelIndex] = country;
       noDDriveByIndex[pendingTravelIndex] = noDDrive;
-      kmSeNullByIndex[pendingTravelIndex] = kmSeNull;
 
       // null ut dagens leg
       kmByIndex[i] = 0;
@@ -2627,10 +2614,10 @@ Future<void> _recalcKm() async {
       ferryNameByIndex[i] = '';
       countryKmByIndex[i] = {};
       noDDriveByIndex[i] = false;
-      kmSeNullByIndex[i] = false;
 
       travelBefore[pendingTravelIndex] = true;
       travelBefore[i] = true;
+      travelMergedIndices.add(i); // this index's km was moved into the TRAVEL row
 
       pendingTravelIndex = null;
       inTravelBlock = false;
@@ -2647,7 +2634,6 @@ Future<void> _recalcKm() async {
     ferryNameByIndex[i] = ferryName;
     countryKmByIndex[i] = country;
     noDDriveByIndex[i] = noDDrive;
-    kmSeNullByIndex[i] = kmSeNull;
 
     travelBefore[i] = inTravelBlock;
     inTravelBlock = false;
@@ -2676,8 +2662,8 @@ Future<void> _recalcKm() async {
     _ferryNameByIndex = ferryNameByIndex;
     _countryKmByIndex = countryKmByIndex;
     _noDDriveByIndex = noDDriveByIndex;
-    _kmSeNullByIndex = kmSeNullByIndex;
     _travelBefore = travelBefore;
+    _travelMergedIndices = travelMergedIndices;
 
     _loadingKm = false;
     _kmError = missing
@@ -3109,13 +3095,11 @@ Future<RoundCalcResult> _calcRound(int ri) async {
       // Move country km to the travel index (mirror _recalcKm behaviour)
       _countryKmByIndex[pendingTravelIndex] =
           Map<String, double>.from(_countryKmByIndex[i] ?? {});
-      _kmSeNullByIndex[pendingTravelIndex] = _kmSeNullCache[key] ?? false;
 
       kmByIndex[i] = 0;
       ferryByIndex[i] = 0;
       tollByIndex[i] = 0;
       _countryKmByIndex[i] = {};
-      _kmSeNullByIndex[i] = false;
 
       travelBefore[pendingTravelIndex] = true;
       travelBefore[i] = true;
@@ -3130,7 +3114,6 @@ Future<RoundCalcResult> _calcRound(int ri) async {
     ferryByIndex[i] = ferry;
     tollByIndex[i] = toll;
     extraByIndex[i] = extra;
-    _kmSeNullByIndex[i] = _kmSeNullCache[key] ?? false;
 
     // 🔧 ENDRET: ferry_name lagres også på normale legs
     _ferryNameByIndex[i] = _ferryNameCache[key] ?? '';
@@ -3195,24 +3178,16 @@ final safeNoDDrive = List<bool>.generate(
 
   // Swedish km are toll-free — subtract from the km base used for toll.
   //
-  // If km_se is NULL (not yet computed by KmSeUpdater), we distinguish:
-  //   - km_se = NULL  →  _kmSeNullByIndex[i] == true  → unknown, treat as Swedish
-  //   - km_se = 0     →  _kmSeNullByIndex[i] == false → confirmed non-Swedish
-  //   - km_se > 0     →  _kmSeNullByIndex[i] == false → confirmed partial/full Swedish
+  // Both km_se = NULL and km_se = 0 mean 0 Swedish km (no subtraction).
+  // Only km_se > 0 reduces the tollable km.
   final totalSweKm = List.generate(len, (i) {
     final seKm = _countryKmByIndex[i]?['SE'];
-    if (seKm != null && seKm > 0) return seKm;           // km_se set and > 0
-    if (_kmSeNullByIndex[i] == true) {
-      // km_se not yet computed — conservatively treat entire leg as Swedish
-      // (toll-free) to avoid incorrectly charging toll on Swedish routes.
-      // Run the KmSeUpdater to populate correct values.
-      return kmByIndex[i] ?? 0.0;
-    }
-    return 0.0;                                           // km_se = 0 confirmed
+    if (seKm != null && seKm > 0) return seKm;           // km_se > 0: subtract
+    return 0.0;                                           // km_se = NULL or 0: no subtraction
   }).fold<double>(0.0, (a, b) => a + b);
   final tollableKm = (totalKm - totalSweKm).clamp(0.0, double.infinity);
 
-  debugPrint('🇸🇪 Round $ri: totalKm=${totalKm.toStringAsFixed(1)} sweKm=${totalSweKm.toStringAsFixed(1)} tollableKm=${tollableKm.toStringAsFixed(1)} (nullLegs=${List.generate(len, (i) => _kmSeNullByIndex[i] == true ? 1 : 0).fold(0, (a, b) => a + b)})');
+  debugPrint('🇸🇪 Round $ri: totalKm=${totalKm.toStringAsFixed(1)} sweKm=${totalSweKm.toStringAsFixed(1)} tollableKm=${tollableKm.toStringAsFixed(1)}');
 
   if (offer.pricingModel == 'svensk') {
     final swe = SettingsStore.current.sweSettings;
@@ -3249,11 +3224,24 @@ final safeNoDDrive = List<bool>.generate(
             .length;
     final effectiveBusCount = busCount == 0 ? 1 : busCount;
 
+    // D.Drive: same calendar-date cluster algorithm as Norwegian
+    final sweNewDdDays = TripCalculator.calcDDriveDays(
+      dates: legDates,
+      legKm: safeLegKm,
+      noDDrivePerLeg: safeNoDDrive,
+      pickupEveningFirstDay: round.pickupEveningFirstDay,
+      threshold: swe.ddKmGrans,
+    ).dDriveDays;
+    final sweDdDays = sweResult.legDdCost.where((v) => v > 0).length;
+    final extraDdDays = (sweNewDdDays - sweDdDays).clamp(0, 999);
+    final extraDdCostRaw = extraDdDays * sweResult.ddDagpris;
+
     // Scale per-leg totals and round grand total up to nearest 1000 SEK
     final scaledLegTotal = sweResult.legTotal
         .map((v) => v * effectiveBusCount)
         .toList();
-    final rawScaled = sweResult.totalCost * effectiveBusCount;
+    final rawScaled = sweResult.totalCost * effectiveBusCount
+        + extraDdCostRaw * effectiveBusCount;
     final scaledTotal =
         (rawScaled / 1000).ceil() * 1000.0;
 
@@ -3286,12 +3274,16 @@ final safeNoDDrive = List<bool>.generate(
     // Toll: exclude Swedish km (toll-free in Sweden)
     final roundTollCost = tollableKm * SettingsStore.current.tollKmRate * effectiveBusCount;
 
+    // D.Drive: cluster-based count, priced at Swedish ddDagpris
+    final ddDays = sweNewDdDays;
+    final ddCostScaled = ddDays * sweResult.ddDagpris * effectiveBusCount;
+
     // Create minimal RoundCalcResult for UI compatibility (km stats etc.)
     final minimal = RoundCalcResult(
       billableDays: round.billableDays,
       includedKm: 0,
       extraKm: 0,
-      dDriveDays: 0,
+      dDriveDays: ddDays,
       flightTickets: 0,
       legKm: safeLegKm,
       tollPerLeg: safeToll,
@@ -3300,7 +3292,7 @@ final safeNoDDrive = List<bool>.generate(
       noDDrivePerLeg: safeNoDDrive,
       dayCost: 0,
       extraKmCost: 0,
-      dDriveCost: 0,
+      dDriveCost: ddCostScaled,
       trailerDayCost: 0,
       trailerKmCost: 0,
       ferryCost: roundFerryCost,
@@ -3485,6 +3477,14 @@ Future<String> _savePdfToFile(Uint8List bytes) async {
             " → ${_sek(r.legTotal[i])}",
           );
         }
+      }
+
+      // D.Drive — cluster-based count stored in norR (same logic as Norwegian)
+      if (norR != null && norR.dDriveDays > 0) {
+        b.writeln(
+          "  D.Drive:         ${norR.dDriveDays} d × ${_sek(r.ddDagpris)}"
+          " → ${_sek(norR.dDriveCost)} (incl. i subtotal)",
+        );
       }
 
       b.writeln("  Swedish subtotal: ${_sek(r.totalCost)}");

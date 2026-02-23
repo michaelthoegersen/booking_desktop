@@ -1,7 +1,9 @@
 import 'dart:io';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:path_provider/path_provider.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
+import 'package:printing/printing.dart';
 import 'package:flutter/services.dart' show rootBundle;
 
 class PdfExportService {
@@ -276,30 +278,22 @@ class PdfExportService {
       ),
     );
 
-    // =====================================================
-    // 💾 SAVE FILE
-    // =====================================================
+    final bytes = await pdf.save();
 
-    final dir = await getApplicationDocumentsDirectory();
-
-    if (!await dir.exists()) {
-      await dir.create(recursive: true);
-    }
-
-    final file = File("${dir.path}/customers.pdf");
-
-    await file.writeAsBytes(await pdf.save());
-
-    print("✅ ENTERPRISE+ PDF SAVED: ${file.path}");
-
-    // =====================================================
-    // 🍏 MAC AUTO OPEN
-    // =====================================================
-
-    try {
+    if (kIsWeb) {
+      // Web: vis print-dialog med lagre-mulighet
+      await Printing.layoutPdf(
+        name: 'customers.pdf',
+        onLayout: (_) async => bytes,
+      );
+    } else {
+      // macOS/desktop: lagre til Documents og åpne i Preview
+      final dir = await getApplicationDocumentsDirectory();
+      final file = File('${dir.path}/customers.pdf');
+      await file.writeAsBytes(bytes);
       await Process.run('open', [file.path]);
-    } catch (e) {
-      print("❌ OPEN FAILED: $e");
     }
+
+    print("✅ ENTERPRISE+ PDF DONE");
   }
 }

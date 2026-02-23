@@ -624,91 +624,99 @@ class _SideNavState extends State<_SideNav> {
             ),
 
             // --------------------------------------------------
-            // NAV ITEMS
+            // NAV ITEMS (scrollable so adding items never overflows)
             // --------------------------------------------------
-            _NavItem(
-              icon: Icons.dashboard_rounded,
-              label: "Dashboard",
-              route: "/",
-              onOpenInNewTab: widget.onOpenInNewTab,
-              overrideActiveRoute: widget.overrideActiveRoute,
+            Expanded(
+              child: SingleChildScrollView(
+                child: Column(
+                  children: [
+                    _NavItem(
+                      icon: Icons.dashboard_rounded,
+                      label: "Dashboard",
+                      route: "/",
+                      onOpenInNewTab: widget.onOpenInNewTab,
+                      overrideActiveRoute: widget.overrideActiveRoute,
+                    ),
+
+                    _NavItem(
+                      icon: Icons.calendar_month,
+                      label: "Calendar",
+                      route: "/calendar",
+                      onOpenInNewTab: widget.onOpenInNewTab,
+                      overrideActiveRoute: widget.overrideActiveRoute,
+                    ),
+
+                    _NavItem(
+                      icon: Icons.add_circle_outline,
+                      label: "New offer",
+                      route: "/new",
+                      onOpenInNewTab: widget.onOpenInNewTab,
+                      overrideActiveRoute: widget.overrideActiveRoute,
+                    ),
+
+                    _NavItem(
+                      icon: Icons.edit_note,
+                      label: "Edit offers",
+                      route: "/edit",
+                      onOpenInNewTab: widget.onOpenInNewTab,
+                      overrideActiveRoute: widget.overrideActiveRoute,
+                    ),
+
+                    _NavItem(
+                      icon: Icons.archive_outlined,
+                      label: "Archive",
+                      route: "/archive",
+                      onOpenInNewTab: widget.onOpenInNewTab,
+                      overrideActiveRoute: widget.overrideActiveRoute,
+                    ),
+
+                    _NavItem(
+                      icon: Icons.apartment_rounded,
+                      label: "Customers",
+                      route: "/customers",
+                      onOpenInNewTab: widget.onOpenInNewTab,
+                      overrideActiveRoute: widget.overrideActiveRoute,
+                    ),
+
+                    _NavItem(
+                      icon: Icons.receipt_long_rounded,
+                      label: "Invoices",
+                      route: "/invoices",
+                      onOpenInNewTab: widget.onOpenInNewTab,
+                      overrideActiveRoute: widget.overrideActiveRoute,
+                    ),
+
+                    _NavItem(
+                      icon: Icons.bar_chart_rounded,
+                      label: "Economy",
+                      route: "/economy",
+                      onOpenInNewTab: widget.onOpenInNewTab,
+                      overrideActiveRoute: widget.overrideActiveRoute,
+                    ),
+
+                    _NavItem(
+                      icon: Icons.report_problem_rounded,
+                      label: "Issues",
+                      route: "/issues",
+                      badge: _unseenCount,
+                      onOpenInNewTab: widget.onOpenInNewTab,
+                      overrideActiveRoute: widget.overrideActiveRoute,
+                    ),
+
+                    _NavItem(
+                      icon: Icons.chat_bubble_outline_rounded,
+                      label: "Chat",
+                      route: "/chat",
+                      badge: _unreadChatCount,
+                      onOpenInNewTab: widget.onOpenInNewTab,
+                      overrideActiveRoute: widget.overrideActiveRoute,
+                    ),
+                  ],
+                ),
+              ),
             ),
 
-            _NavItem(
-              icon: Icons.calendar_month,
-              label: "Calendar",
-              route: "/calendar",
-              onOpenInNewTab: widget.onOpenInNewTab,
-              overrideActiveRoute: widget.overrideActiveRoute,
-            ),
-
-            _NavItem(
-              icon: Icons.add_circle_outline,
-              label: "New offer",
-              route: "/new",
-              onOpenInNewTab: widget.onOpenInNewTab,
-              overrideActiveRoute: widget.overrideActiveRoute,
-            ),
-
-            _NavItem(
-              icon: Icons.edit_note,
-              label: "Edit offers",
-              route: "/edit",
-              onOpenInNewTab: widget.onOpenInNewTab,
-              overrideActiveRoute: widget.overrideActiveRoute,
-            ),
-
-            _NavItem(
-              icon: Icons.archive_outlined,
-              label: "Archive",
-              route: "/archive",
-              onOpenInNewTab: widget.onOpenInNewTab,
-              overrideActiveRoute: widget.overrideActiveRoute,
-            ),
-
-            _NavItem(
-              icon: Icons.apartment_rounded,
-              label: "Customers",
-              route: "/customers",
-              onOpenInNewTab: widget.onOpenInNewTab,
-              overrideActiveRoute: widget.overrideActiveRoute,
-            ),
-
-            _NavItem(
-              icon: Icons.receipt_long_rounded,
-              label: "Invoices",
-              route: "/invoices",
-              onOpenInNewTab: widget.onOpenInNewTab,
-              overrideActiveRoute: widget.overrideActiveRoute,
-            ),
-
-            _NavItem(
-              icon: Icons.bar_chart_rounded,
-              label: "Economy",
-              route: "/economy",
-              onOpenInNewTab: widget.onOpenInNewTab,
-              overrideActiveRoute: widget.overrideActiveRoute,
-            ),
-
-            _NavItem(
-              icon: Icons.report_problem_rounded,
-              label: "Issues",
-              route: "/issues",
-              badge: _unseenCount,
-              onOpenInNewTab: widget.onOpenInNewTab,
-              overrideActiveRoute: widget.overrideActiveRoute,
-            ),
-
-            _NavItem(
-              icon: Icons.chat_bubble_outline_rounded,
-              label: "Chat",
-              route: "/chat",
-              badge: _unreadChatCount,
-              onOpenInNewTab: widget.onOpenInNewTab,
-              overrideActiveRoute: widget.overrideActiveRoute,
-            ),
-
-            const Spacer(),
+            const SizedBox(height: 8),
 
             _NavItem(
               icon: Icons.settings,

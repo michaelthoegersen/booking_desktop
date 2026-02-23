@@ -3,6 +3,7 @@ import 'package:intl/intl.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:go_router/go_router.dart';
 import 'dart:async';
+import 'dart:math';
 import 'package:flutter/gestures.dart';
 
 import '../services/offer_storage_service.dart';
@@ -59,7 +60,8 @@ class DragBookingData {
   final String fromBus;
   final DateTime from;
   final DateTime to;
-  final String draftId; // 👈 NY
+  final String draftId;
+  final bool isManual;
 
   DragBookingData({
     required this.production,
@@ -67,7 +69,21 @@ class DragBookingData {
     required this.from,
     required this.to,
     required this.draftId,
+    this.isManual = false,
   });
+}
+
+// ============================================================
+// UUID GENERATOR
+// ============================================================
+
+String _generateUuid() {
+  final rng = Random.secure();
+  final b = List<int>.generate(16, (_) => rng.nextInt(256));
+  b[6] = (b[6] & 0x0f) | 0x40;
+  b[8] = (b[8] & 0x3f) | 0x80;
+  final h = b.map((e) => e.toRadixString(16).padLeft(2, '0')).join();
+  return '${h.substring(0, 8)}-${h.substring(8, 12)}-${h.substring(12, 16)}-${h.substring(16, 20)}-${h.substring(20)}';
 }
 
 // ============================================================
@@ -767,28 +783,33 @@ Widget _buildCalendarOnlyRow(
     // =====================================================
 // ✅ VED DROP
 // =====================================================
-onAccept: (data) async {
+onAccept: (drag) async {
 
   if (!mounted) return;
 
-  // ============================
-  // 1️⃣ VIS DIALOG FØRST
-  // ============================
-  final changed = await showDialog<bool>(
-    context: context,
-    builder: (_) => StatusDatePickerDialog(
-      draftId: data.draftId,
-      newStatus: '',
-      targetBus: bus,
-      fromBus: data.fromBus,
-    ),
-  );
+  if (drag.isManual) {
+    // Manuelle blokker: flytt direkte ved å oppdatere kilde
+    await supabase
+        .from('samletdata')
+        .update({'kilde': bus})
+        .eq('manual_block', true)
+        .eq('kilde', drag.fromBus)
+        .gte('dato', fmtDb(drag.from))
+        .lte('dato', fmtDb(drag.to));
+  } else {
+    // Vanlige bookinger: vis StatusDatePickerDialog
+    final changed = await showDialog<bool>(
+      context: context,
+      builder: (_) => StatusDatePickerDialog(
+        draftId: drag.draftId,
+        newStatus: '',
+        targetBus: bus,
+        fromBus: drag.fromBus,
+      ),
+    );
+    if (changed != true) return;
+  }
 
-  if (changed != true) return;
-
-  // ============================
-  // 3️⃣ RELOAD
-  // ============================
   await loadRange(
     isMonthView
         ? DateTime(monthStart.year, monthStart.month, 1)
@@ -920,15 +941,25 @@ Widget buildRow(String bus, List<DateTime> days) {
       return data != null && data.fromBus != bus;
     },
 
-    onAccept: (data) async {
+    onAccept: (drag) async {
 
-      await supabase
-          .from('samletdata')
-          .update({'kilde': bus})
-          .eq('produksjon', data.production)
-          .eq('kilde', data.fromBus)
-          .gte('dato', fmtDb(data.from))
-          .lte('dato', fmtDb(data.to));
+      if (drag.isManual) {
+        await supabase
+            .from('samletdata')
+            .update({'kilde': bus})
+            .eq('manual_block', true)
+            .eq('kilde', drag.fromBus)
+            .gte('dato', fmtDb(drag.from))
+            .lte('dato', fmtDb(drag.to));
+      } else {
+        await supabase
+            .from('samletdata')
+            .update({'kilde': bus})
+            .eq('produksjon', drag.production)
+            .eq('kilde', drag.fromBus)
+            .gte('dato', fmtDb(drag.from))
+            .lte('dato', fmtDb(drag.to));
+      }
 
       // Reload correct range
       await loadRange(
@@ -1140,7 +1171,7 @@ List<Widget> buildSegments(
     final kjoretoy = (first['kjoretoy'] as String?) ?? '';
     final hasTrailer = kjoretoy.contains('+ trailer');
 
-    final noDriver = !isManual &&
+    final noDriver =
         ((first['sjafor'] as String?)?.trim() ?? '').isEmpty;
 
     const dDriveThreshold = 600.0;
@@ -1156,18 +1187,23 @@ List<Widget> buildSegments(
     result.add(
       BookingSegment(
         title: isManual
-            ? (first['note'] ?? 'Blocked')
+            ? (first['produksjon'] == '[BLOCK]' || (first['produksjon'] as String?)?.isEmpty == true
+                ? (first['note'] ?? 'Blocked')
+                : (first['produksjon'] ?? first['note'] ?? 'Blocked'))
             : ((first['produksjon'] ?? '') + (hasTrailer ? ' +trailer' : '')),
         span: visibleCount,
         bus: bus,
         from: chunkStart,
         to: chunkEnd,
-        status: isManual ? 'manual' : first['status'],
+        status: first['status'],
         width: dayWidth,
         draftId: first['draft_id'].toString(),
         noDriver: noDriver,
         noDDrive: noDDrive,
         driver: (first['sjafor'] as String?)?.trim().nullIfEmpty,
+        venue: (first['venue'] as String?)?.trim().nullIfEmpty,
+        isManual: isManual,
+        manualBuses: isManual ? buses : const [],
       ),
     );
 
@@ -1473,6 +1509,9 @@ class BookingSegment extends StatelessWidget {
   final bool noDriver;
   final bool noDDrive;
   final String? driver;
+  final String? venue;
+  final bool isManual;
+  final List<String> manualBuses;
 
   const BookingSegment({
     super.key,
@@ -1487,6 +1526,9 @@ class BookingSegment extends StatelessWidget {
     this.noDriver = false,
     this.noDDrive = false,
     this.driver,
+    this.venue,
+    this.isManual = false,
+    this.manualBuses = const [],
   });
 
   // ============================================================
@@ -1514,6 +1556,7 @@ class BookingSegment extends StatelessWidget {
       bus: bus,
       from: from,
       to: to,
+      isManual: isManual,
     ),
   );
 
@@ -1525,9 +1568,10 @@ class BookingSegment extends StatelessWidget {
 },
 
     // =====================================================
-    // ⭐ HØYREKLIKK (STATUS MENU – DIN NYE)
+    // ⭐ HØYREKLIKK (STATUS MENU)
     // =====================================================
     onSecondaryTapDown: (details) async {
+
       final result = await showMenu<String>(
         context: context,
         position: RelativeRect.fromLTRB(
@@ -1586,9 +1630,7 @@ class BookingSegment extends StatelessWidget {
 
       if (result == null) return;
 
-      final parent =
-          context.findAncestorStateOfType<_CalendarPageState>();
-
+      final parent = context.findAncestorStateOfType<_CalendarPageState>();
       if (parent == null) return;
 
       final changed = await showDialog<bool>(
@@ -1679,6 +1721,49 @@ class BookingSegment extends StatelessWidget {
               ],
             ),
           ],
+          if ((venue ?? '').isNotEmpty) ...[
+            const SizedBox(height: 2),
+            GestureDetector(
+              onDoubleTap: () async {
+                final parent = context.findAncestorStateOfType<_CalendarPageState>();
+                if (parent == null) return;
+                final changed = await showDialog<bool>(
+                  context: context,
+                  builder: (_) => _QuickVenueDialog(
+                    bus: bus,
+                    from: from,
+                    to: to,
+                    initialVenue: venue ?? '',
+                    draftId: draftId,
+                  ),
+                );
+                if (changed == true) {
+                  parent.isMonthView ? parent.loadMonth() : parent.loadWeek();
+                }
+              },
+              child: Row(
+                children: [
+                  const Icon(
+                    Icons.location_on,
+                    size: 10,
+                    color: Colors.white70,
+                  ),
+                  const SizedBox(width: 3),
+                  Expanded(
+                    child: Text(
+                      venue!,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 10,
+                        color: Colors.white70,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
         ],
       ),
     ),
@@ -1700,6 +1785,7 @@ class BookingSegment extends StatelessWidget {
           from: from,
           to: to,
           draftId: draftId,
+          isManual: isManual,
         ),
         feedback: Material(
           color: Colors.transparent,
@@ -1718,6 +1804,102 @@ class BookingSegment extends StatelessWidget {
     );
   }
 }
+// ============================================================
+// QUICK VENUE EDIT DIALOG
+// ============================================================
+
+class _QuickVenueDialog extends StatefulWidget {
+  final String bus;
+  final DateTime from;
+  final DateTime to;
+  final String initialVenue;
+  final String draftId;
+
+  const _QuickVenueDialog({
+    required this.bus,
+    required this.from,
+    required this.to,
+    required this.initialVenue,
+    required this.draftId,
+  });
+
+  @override
+  State<_QuickVenueDialog> createState() => _QuickVenueDialogState();
+}
+
+class _QuickVenueDialogState extends State<_QuickVenueDialog> {
+  final supabase = Supabase.instance.client;
+  late final TextEditingController _ctrl;
+  bool _saving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = TextEditingController(text: widget.initialVenue);
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _save() async {
+    setState(() => _saving = true);
+    try {
+      await supabase
+          .from('samletdata')
+          .update({'venue': _ctrl.text.trim()})
+          .eq('draft_id', widget.draftId)
+          .eq('kilde', widget.bus)
+          .gte('dato', fmtDb(widget.from))
+          .lte('dato', fmtDb(widget.to));
+      if (!mounted) return;
+      Navigator.pop(context, true);
+    } catch (e) {
+      setState(() => _saving = false);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('Error: $e')));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Edit venue'),
+      content: SizedBox(
+        width: 340,
+        child: TextField(
+          controller: _ctrl,
+          autofocus: true,
+          decoration: const InputDecoration(
+            labelText: 'Venue',
+            border: OutlineInputBorder(),
+          ),
+          onSubmitted: (_) => _save(),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: _saving ? null : () => Navigator.pop(context, false),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: _saving ? null : _save,
+          child: _saving
+              ? const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Text('Save'),
+        ),
+      ],
+    );
+  }
+}
+
 // ============================================================
 // BUS CELL
 // ============================================================
@@ -1795,6 +1977,7 @@ class EditCalendarDialog extends StatefulWidget {
   final String bus;
   final DateTime from;
   final DateTime to;
+  final bool isManual;
 
   const EditCalendarDialog({
     super.key,
@@ -1802,6 +1985,7 @@ class EditCalendarDialog extends StatefulWidget {
     required this.bus,
     required this.from,
     required this.to,
+    this.isManual = false,
   });
 
   @override
@@ -2320,6 +2504,42 @@ Future<void> load() async {
 
       actions: [
 
+  if (widget.isManual)
+    TextButton.icon(
+      icon: const Icon(Icons.delete, color: Colors.red),
+      label: const Text("Delete", style: TextStyle(color: Colors.red)),
+      onPressed: saving ? null : () async {
+        final ok = await showDialog<bool>(
+          context: context,
+          builder: (_) => AlertDialog(
+            title: const Text("Delete block?"),
+            content: const Text("This will permanently remove this manual block."),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text("Cancel"),
+              ),
+              FilledButton(
+                style: FilledButton.styleFrom(backgroundColor: Colors.red),
+                onPressed: () => Navigator.pop(context, true),
+                child: const Text("Delete"),
+              ),
+            ],
+          ),
+        );
+        if (ok != true) return;
+        await supabase
+            .from('samletdata')
+            .delete()
+            .eq('manual_block', true)
+            .eq('kilde', widget.bus)
+            .gte('dato', fmtDb(widget.from))
+            .lte('dato', fmtDb(widget.to));
+        if (!mounted) return;
+        Navigator.pop(context, true);
+      },
+    ),
+
   OutlinedButton.icon(
     icon: const Icon(Icons.copy),
     label: const Text("Copy to"),
@@ -2801,6 +3021,7 @@ class _ManualBlockDialog extends StatefulWidget {
   final DateTime? initialFrom;
   final DateTime? initialTo;
   final String? initialNote;
+  final String? initialDraftId;
 
   const _ManualBlockDialog({
     super.key,
@@ -2809,6 +3030,7 @@ class _ManualBlockDialog extends StatefulWidget {
     this.initialFrom,
     this.initialTo,
     this.initialNote,
+    this.initialDraftId,
   });
 
   @override
@@ -2828,6 +3050,8 @@ class _ManualBlockDialogState
   late bool isEdit;
 
   final noteCtrl = TextEditingController();
+  final fromCtrl = TextEditingController();
+  final toCtrl   = TextEditingController();
 
   bool saving = false;
 
@@ -2846,6 +3070,9 @@ class _ManualBlockDialogState
     to = widget.initialTo;
 
     noteCtrl.text = widget.initialNote ?? '';
+
+    if (from != null) fromCtrl.text = DateFormat('dd.MM.yyyy').format(from!);
+    if (to   != null) toCtrl.text   = DateFormat('dd.MM.yyyy').format(to!);
   }
 
   // ============================================================
@@ -2855,6 +3082,8 @@ class _ManualBlockDialogState
   @override
   void dispose() {
     noteCtrl.dispose();
+    fromCtrl.dispose();
+    toCtrl.dispose();
     super.dispose();
   }
 
@@ -2871,7 +3100,15 @@ class _ManualBlockDialogState
     );
 
     if (d != null) {
-      setState(() => from = d);
+      setState(() {
+        from = d;
+        fromCtrl.text = DateFormat('dd.MM.yyyy').format(d);
+        // Juster to hvis den er før from
+        if (to != null && to!.isBefore(d)) {
+          to = d;
+          toCtrl.text = DateFormat('dd.MM.yyyy').format(d);
+        }
+      });
     }
   }
 
@@ -2884,7 +3121,10 @@ class _ManualBlockDialogState
     );
 
     if (d != null) {
-      setState(() => to = d);
+      setState(() {
+        to = d;
+        toCtrl.text = DateFormat('dd.MM.yyyy').format(d);
+      });
     }
   }
 
@@ -2964,6 +3204,16 @@ class _ManualBlockDialogState
       // =====================================
       // INSERT NEW
       // =====================================
+      // Behold eksisterende draft_id ved redigering, generer ny ved opprettelse
+      final draftId = (widget.initialDraftId != null &&
+              widget.initialDraftId!.isNotEmpty &&
+              widget.initialDraftId != 'null')
+          ? widget.initialDraftId!
+          : _generateUuid();
+
+      final produksjon =
+          noteCtrl.text.trim().isEmpty ? 'Blocked' : noteCtrl.text.trim();
+
       final rows = <Map<String, dynamic>>[];
 
       DateTime d = normalize(from!);
@@ -2973,9 +3223,9 @@ class _ManualBlockDialogState
         rows.add({
           'dato': fmtDb(d),
           'kilde': bus,
-          'produksjon': '[BLOCK]',
+          'produksjon': produksjon,
           'manual_block': true,
-          'note': noteCtrl.text.trim(),
+          'draft_id': draftId,
           'status': 'manual',
         });
 
@@ -3037,15 +3287,15 @@ class _ManualBlockDialogState
 
             // ================= FROM =================
             TextField(
+              controller: fromCtrl,
               readOnly: true,
               onTap: _pickFrom,
 
-              decoration: InputDecoration(
+              decoration: const InputDecoration(
                 labelText: "From",
-                border: const OutlineInputBorder(),
-                hintText: from == null
-                    ? ''
-                    : DateFormat('dd.MM.yyyy').format(from!),
+                border: OutlineInputBorder(),
+                hintText: 'dd.MM.yyyy',
+                suffixIcon: Icon(Icons.calendar_today, size: 18),
               ),
             ),
 
@@ -3053,27 +3303,27 @@ class _ManualBlockDialogState
 
             // ================= TO =================
             TextField(
+              controller: toCtrl,
               readOnly: true,
               onTap: _pickTo,
 
-              decoration: InputDecoration(
+              decoration: const InputDecoration(
                 labelText: "To",
-                border: const OutlineInputBorder(),
-                hintText: to == null
-                    ? ''
-                    : DateFormat('dd.MM.yyyy').format(to!),
+                border: OutlineInputBorder(),
+                hintText: 'dd.MM.yyyy',
+                suffixIcon: Icon(Icons.calendar_today, size: 18),
               ),
             ),
 
             const SizedBox(height: 12),
 
-            // ================= NOTE =================
+            // ================= PRODUKSJON =================
             TextField(
               controller: noteCtrl,
               maxLines: 2,
 
               decoration: const InputDecoration(
-                labelText: "Note",
+                labelText: "Produksjon",
                 border: OutlineInputBorder(),
               ),
             ),

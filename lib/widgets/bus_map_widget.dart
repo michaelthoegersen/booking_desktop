@@ -108,8 +108,8 @@ class _BusMapWidgetState extends State<BusMapWidget> {
       markers.add(
         Marker(
           point: pos,
-          width: 100,
-          height: prod != null ? 90 : 72,
+          width: 110,
+          height: prod != null ? 100 : 80,
 
           child: Tooltip(
             message: '$label\n${position.place ?? "On route"}',
@@ -118,11 +118,15 @@ class _BusMapWidgetState extends State<BusMapWidget> {
               mainAxisSize: MainAxisSize.min,
               children: [
 
-                Image.asset(
-                  'assets/pdf/buses/DDBuskart.png',
-                  width: 42,
-                  height: 42,
+                Image(
+                  image: ResizeImage(
+                    const AssetImage('assets/pdf/buses/DDBuskart.png'),
+                    width: 192,
+                  ),
+                  width: 48,
+                  height: 48,
                   fit: BoxFit.contain,
+                  filterQuality: FilterQuality.medium,
                 ),
 
                 const SizedBox(height: 3),
@@ -227,7 +231,11 @@ class _BusMapWidgetState extends State<BusMapWidget> {
           children: [
 
             TileLayer(
-              urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+              urlTemplate:
+                  'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
+              subdomains: const ['a', 'b', 'c', 'd'],
+              retinaMode: true,
+              maxZoom: 19,
               userAgentPackageName: 'com.tourflow.app',
               errorTileCallback: (tile, error, stackTrace) {},
             ),

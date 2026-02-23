@@ -115,97 +115,17 @@ class TripCalculator {
     // ----------------------------------------
 
     final double threshold = settings.dDriveKmThreshold;
-    final double hardLimit = threshold * 2;
 
-    // --------------------------------------------------
-// D.DRIVE START INDEX (IGNORE PICKUP EVENING)
-// --------------------------------------------------
+    final dd = calcDDriveDays(
+      dates: dates,
+      legKm: legKm,
+      pickupEveningFirstDay: pickupEveningFirstDay,
+      threshold: threshold,
+      noDDrivePerLeg: noDDrivePerLeg,
+    );
 
-final int startIndex =
-    pickupEveningFirstDay ? 1 : 0;
-
-final Map<String, List<int>> dayToIndexes = {};
-
-for (int i = startIndex; i < entryCount; i++) {
-  final d = dates[i];
-  final key = '${d.year}-${d.month}-${d.day}';
-
-  dayToIndexes.putIfAbsent(key, () => []);
-  dayToIndexes[key]!.add(i);
-}
-
-    final Map<String, double> dayKm = {};
-    dayToIndexes.forEach((day, idx) {
-      dayKm[day] = idx.fold(0.0, (s, i) => s + legKm[i]);
-    });
-
-    final List<int> dDriveIndexes = [];
-
-    for (final e in dayToIndexes.entries) {
-      // Skip if ALL legs on this day are marked no-D.Drive
-      if (noDDrivePerLeg != null &&
-          e.value.every((i) => i < noDDrivePerLeg.length && noDDrivePerLeg[i])) {
-        continue;
-      }
-
-      final km = dayKm[e.key] ?? 0;
-      if (km < threshold) continue;
-
-      final bool hadTravel =
-          e.value.any((i) => hasTravelBefore[i]);
-
-      if (hadTravel && km < hardLimit) continue;
-
-      dDriveIndexes.addAll(e.value);
-    }
-
-    dDriveIndexes.sort();
-
-    final List<List<int>> clusters = [];
-    List<int> current = [];
-
-    for (final idx in dDriveIndexes) {
-      if (current.isEmpty || idx - current.last <= 2) {
-        current.add(idx);
-      } else {
-        clusters.add(List.from(current));
-        current = [idx];
-      }
-    }
-
-    if (current.isNotEmpty) clusters.add(current);
-
-    final int baseDDriveDays = dayToIndexes.entries.where((e) {
-      if (noDDrivePerLeg != null &&
-          e.value.every((i) => i < noDDrivePerLeg.length && noDDrivePerLeg[i])) {
-        return false;
-      }
-      return (dayKm[e.key] ?? 0) >= threshold;
-    }).length;
-
-    int extraDays = 0;
-    int flightTickets = 0;
-
-    // --------------------------------------------------
-// RESPECT PICKUP EVENING FOR D.DRIVE EDGES
-// --------------------------------------------------
-
-final int endIndex = entryCount - 1;
-
-for (final c in clusters) {
-  if (c.first != startIndex) {
-    extraDays++;
-    flightTickets++;
-  }
-
-  if (c.last != endIndex) {
-    extraDays++;
-    flightTickets++;
-  }
-}
-
-    final int totalDDriveDays =
-        baseDDriveDays + extraDays;
+    final int totalDDriveDays = dd.dDriveDays;
+    final int flightTickets   = dd.flightTickets;
 
     final double dDriveCost =
         totalDDriveDays * settings.dDriveDayPrice;
@@ -295,6 +215,114 @@ for (final c in clusters) {
           : List<bool>.filled(legKm.length, false),
       totalCost: totalCost,
     );
+  }
+
+  // ===================================================
+  // SHARED D.DRIVE DAY COUNT
+  // ===================================================
+  //
+  // Used by both the Norwegian and Swedish pricing models so they
+  // always produce the same D.Drive day count.
+  //
+  // Algorithm (calendar-date based):
+  //   • Group km by calendar date; skip dates where ALL legs are noDDrive.
+  //   • A date qualifies when km > threshold.
+  //   • Cluster qualifying dates:
+  //       diff ≤ 3 days → merge  (all span days count)
+  //       diff ≥ 4 days → separate  (+1 after first cluster, +1 before next)
+  //   • +1 travel day before the first cluster (if not at round start).
+  //   • +1 travel day after  the last  cluster (if not at round end).
+  static ({int dDriveDays, int flightTickets}) calcDDriveDays({
+    required List<DateTime> dates,
+    required List<double> legKm,
+    required bool pickupEveningFirstDay,
+    required double threshold,
+    List<bool>? noDDrivePerLeg,
+  }) {
+    final int n = dates.length;
+    if (n == 0) return (dDriveDays: 0, flightTickets: 0);
+
+    final startIdx = pickupEveningFirstDay ? 1 : 0;
+    if (startIdx >= n) return (dDriveDays: 0, flightTickets: 0);
+
+    // Group km by calendar date; track whether ANY leg on that date is
+    // NOT marked noDDrive (a date only counts if at least one leg qualifies).
+    final kmByDate = <DateTime, double>{};
+    final hasNonNoDrive = <DateTime, bool>{};
+
+    for (int i = startIdx; i < n; i++) {
+      final d = DateTime(dates[i].year, dates[i].month, dates[i].day);
+      kmByDate[d] = (kmByDate[d] ?? 0.0) + legKm[i];
+      if (noDDrivePerLeg == null ||
+          i >= noDDrivePerLeg.length ||
+          !noDDrivePerLeg[i]) {
+        hasNonNoDrive[d] = true;
+      } else {
+        hasNonNoDrive.putIfAbsent(d, () => false);
+      }
+    }
+
+    // Qualifying D.Drive dates
+    final ddDates = kmByDate.keys
+        .where((d) =>
+            (kmByDate[d] ?? 0) > threshold && (hasNonNoDrive[d] ?? false))
+        .toList()
+      ..sort();
+
+    if (ddDates.isEmpty) return (dDriveDays: 0, flightTickets: 0);
+
+    // Round boundaries for travel-day checks
+    final effectiveStart = DateTime(
+        dates[startIdx].year, dates[startIdx].month, dates[startIdx].day);
+    final effectiveEnd =
+        DateTime(dates.last.year, dates.last.month, dates.last.day);
+
+    // Build clusters: merge dates that are ≤ 3 calendar days apart
+    final clusters = <List<DateTime>>[];
+    var current = [ddDates.first];
+    for (int i = 1; i < ddDates.length; i++) {
+      if (ddDates[i].difference(current.last).inDays <= 3) {
+        current.add(ddDates[i]);
+      } else {
+        clusters.add(current);
+        current = [ddDates[i]];
+      }
+    }
+    clusters.add(current);
+
+    int totalDD = 0;
+    int tickets = 0;
+
+    for (int ci = 0; ci < clusters.length; ci++) {
+      final cFirst = clusters[ci].first;
+      final cLast  = clusters[ci].last;
+
+      // All calendar days from first to last D.Drive date in cluster
+      totalDD += cLast.difference(cFirst).inDays + 1;
+
+      // Travel day INTO the round (before first cluster)
+      if (ci == 0 && cFirst != effectiveStart) {
+        totalDD++;
+        tickets++;
+      }
+
+      // Travel day OUT of the round (after last cluster)
+      if (ci == clusters.length - 1 && cLast != effectiveEnd) {
+        totalDD++;
+        tickets++;
+      }
+
+      // Between separate clusters: +1 after this + +1 before next
+      if (ci < clusters.length - 1) {
+        final nextFirst = clusters[ci + 1].first;
+        if (nextFirst.difference(cLast).inDays >= 4) {
+          totalDD += 2;
+          tickets += 2;
+        }
+      }
+    }
+
+    return (dDriveDays: totalDD, flightTickets: tickets);
   }
 
   // ===================================================

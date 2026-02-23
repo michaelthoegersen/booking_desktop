@@ -13,8 +13,12 @@ class GoogleRoutesService {
   static const String _baseUrl =
       'https://routes.googleapis.com/directions/v2:computeRoutes';
 
-  final String _apiKey =
-      dotenv.env['GOOGLE_MAPS_API_KEY'] ?? '';
+  static const String _dartDefineKey =
+      String.fromEnvironment('GOOGLE_MAPS_API_KEY');
+
+  final String _apiKey = _dartDefineKey.isNotEmpty
+      ? _dartDefineKey
+      : (dotenv.env['GOOGLE_MAPS_API_KEY'] ?? '');
 
   // ============================================================
   // ROUTE WITH VIA + ALTERNATIVES
