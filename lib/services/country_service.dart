@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:http/http.dart' as http;
 
@@ -29,6 +30,12 @@ class CountryService {
       return _cache[key]!;
     }
 
+    // On web: BigDataCloud — free, no API key, proper CORS headers
+    if (kIsWeb) {
+      return _getCountryWeb(lat, lng, key);
+    }
+
+    // Desktop: Google Geocoding API
     if (_apiKey.isEmpty) {
       throw Exception('Missing GOOGLE_MAPS_API_KEY');
     }
@@ -51,16 +58,41 @@ class CountryService {
       for (final c in r['address_components']) {
         if (c['types'].contains('country')) {
           final country = c['short_name'];
-
           _cache[key] = country;
-
           return country;
         }
       }
     }
 
     _cache[key] = 'Unknown';
+    return 'Unknown';
+  }
 
+  Future<String> _getCountryWeb(
+    double lat,
+    double lng,
+    String cacheKey,
+  ) async {
+    try {
+      final url = Uri.parse(
+        'https://api.bigdatacloud.net/data/reverse-geocode-client'
+        '?latitude=$lat&longitude=$lng&localityLanguage=en',
+      );
+
+      final res = await http
+          .get(url)
+          .timeout(const Duration(seconds: 8));
+
+      if (res.statusCode == 200) {
+        final data = jsonDecode(res.body) as Map<String, dynamic>;
+        final country =
+            (data['countryCode'] as String?)?.toUpperCase() ?? 'Unknown';
+        _cache[cacheKey] = country;
+        return country;
+      }
+    } catch (_) {}
+
+    _cache[cacheKey] = 'Unknown';
     return 'Unknown';
   }
 }

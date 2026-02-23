@@ -71,9 +71,10 @@ class GoogleRoutesService {
     // OSRM expects lon,lat pairs separated by semicolons
     final coordStr = coords.map((c) => '${c[1]},${c[0]}').join(';');
 
+    // Use geojson — gives plain [lon,lat] coordinates, no decoding issues
     final osrmUrl = Uri.parse(
       'https://router.project-osrm.org/route/v1/driving/$coordStr'
-      '?overview=full&alternatives=true&geometries=polyline',
+      '?overview=full&alternatives=true&geometries=geojson',
     );
 
     debugPrint('🚗 OSRM: $osrmUrl');
@@ -95,9 +96,24 @@ class GoogleRoutesService {
     final List<Map<String, dynamic>> parsedRoutes = [];
 
     for (final route in routes) {
-      final polyline = route['geometry'] as String?;
-      if (polyline == null) continue;
+      // GeoJSON geometry: { "type": "LineString", "coordinates": [[lon,lat], ...] }
+      final geometry = route['geometry'] as Map<String, dynamic>?;
+      if (geometry == null) continue;
+
+      final rawCoords = geometry['coordinates'] as List?;
+      if (rawCoords == null || rawCoords.isEmpty) continue;
+
+      // GeoJSON uses [lon, lat] — convert to [lat, lon] then encode polyline
+      final latLonPoints = rawCoords
+          .map<List<double>>((c) => [
+                (c[1] as num).toDouble(), // lat
+                (c[0] as num).toDouble(), // lon
+              ])
+          .toList();
+
+      final polyline = _encodePolyline(latLonPoints);
       final distanceMeters = route['distance'] as num;
+
       parsedRoutes.add({
         'distanceMeters': distanceMeters,
         'polyline': polyline,
@@ -108,6 +124,30 @@ class GoogleRoutesService {
 
     debugPrint('✅ OSRM: ${parsedRoutes.length} route(s) found');
     return {'routes': parsedRoutes};
+  }
+
+  /// Encode [lat, lon] pairs as Google Polyline (1e5 precision)
+  String _encodePolyline(List<List<double>> points) {
+    final buf = StringBuffer();
+    int prevLat = 0, prevLng = 0;
+    for (final p in points) {
+      final lat = (p[0] * 1e5).round();
+      final lng = (p[1] * 1e5).round();
+      _encodeVal(buf, lat - prevLat);
+      _encodeVal(buf, lng - prevLng);
+      prevLat = lat;
+      prevLng = lng;
+    }
+    return buf.toString();
+  }
+
+  void _encodeVal(StringBuffer buf, int value) {
+    int v = value < 0 ? ~(value << 1) : (value << 1);
+    while (v >= 0x20) {
+      buf.writeCharCode((0x20 | (v & 0x1f)) + 63);
+      v >>= 5;
+    }
+    buf.writeCharCode(v + 63);
   }
 
   // ============================================================
