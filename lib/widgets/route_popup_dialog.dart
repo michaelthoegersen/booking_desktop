@@ -163,12 +163,6 @@ String _buildExtra() {
   // LOAD ROUTES
   // =================================================
   Future<void> _loadRoute() async {
-  // Google Routes API is blocked by CORS in browsers — skip on web
-  if (kIsWeb) {
-    setState(() => _loading = false);
-    return;
-  }
-
   setState(() {
     _loading = true;
     _error = null;
@@ -640,14 +634,8 @@ const SizedBox(height: 24),
   // =================================================
   Widget _buildMap() {
     if (_allRoutes.isEmpty) {
-      return Center(
-        child: Text(
-          kIsWeb
-              ? "Enter route details and KM manually.\nMap preview is not available in the browser."
-              : "Route cached (no map)",
-          textAlign: TextAlign.center,
-          style: const TextStyle(color: Colors.grey),
-        ),
+      return const Center(
+        child: Text("Route cached (no map)"),
       );
     }
 
