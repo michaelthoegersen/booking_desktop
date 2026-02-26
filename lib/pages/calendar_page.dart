@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -9,6 +11,7 @@ import 'package:flutter/gestures.dart';
 import '../services/offer_storage_service.dart';
 import '../services/notification_service.dart';
 import '../services/email_service.dart';
+import '../services/round_summary_pdf_service.dart';
 import '../utils/bus_utils.dart';
 
 // ============================================================
@@ -50,6 +53,7 @@ final Map<String, String> busTypes = {
   "RLC 29G": "16-sleeper",
   "Rental 1 (Hasse)": "16-sleeper",
   "Rental 2 (Rickard)": "16-sleeper",
+  "Conference": "20-50 seats",
 };
 // ============================================================
 // DRAG DATA
@@ -194,6 +198,7 @@ class _CalendarPageState extends State<CalendarPage> {
     "RLC 29G",
     "Rental 1 (Hasse)",
     "Rental 2 (Rickard)",
+    "Conference",
   ];
 
   // ============================================================
@@ -1204,6 +1209,7 @@ List<Widget> buildSegments(
         venue: (first['venue'] as String?)?.trim().nullIfEmpty,
         isManual: isManual,
         manualBuses: isManual ? buses : const [],
+        pris: isManual ? (first['pris'] as String?)?.trim().nullIfEmpty : null,
       ),
     );
 
@@ -1512,6 +1518,7 @@ class BookingSegment extends StatelessWidget {
   final String? venue;
   final bool isManual;
   final List<String> manualBuses;
+  final String? pris;
 
   const BookingSegment({
     super.key,
@@ -1529,6 +1536,7 @@ class BookingSegment extends StatelessWidget {
     this.venue,
     this.isManual = false,
     this.manualBuses = const [],
+    this.pris,
   });
 
   // ============================================================
@@ -2006,6 +2014,7 @@ class _EditCalendarDialogState extends State<EditCalendarDialog> {
 
   final sjaforCtrl = TextEditingController();
   final statusCtrl = TextEditingController();
+  final prisCtrl   = TextEditingController();
 
   final contactNameCtrl = TextEditingController();
   final contactEmailCtrl = TextEditingController();
@@ -2119,6 +2128,7 @@ Future<void> load() async {
 
   sjaforCtrl.text = list.first['sjafor'] ?? '';
   statusCtrl.text = list.first['status'] ?? '';
+  prisCtrl.text   = list.first['pris']   ?? '';
   contactNameCtrl.text = list.first['contact_name'] ?? '';
   contactEmailCtrl.text = list.first['contact_email'] ?? '';
   contactPhoneCtrl.text = list.first['contact_phone'] ?? '';
@@ -2159,6 +2169,69 @@ Future<void> load() async {
 }
 
 
+
+  // ============================================================
+  // SEND ROUND SUMMARY
+  // ============================================================
+
+  Future<void> _sendRoundSummary() async {
+    try {
+      final dayList = <Map<String, dynamic>>[];
+      for (final r in rows) {
+        final id = r['id'].toString();
+        dayList.add({
+          'dato': r['dato'],
+          'sted': r['sted'] ?? '',
+          'venue': venueCtrls[id]?.text.trim() ?? '',
+          'adresse': addrCtrls[id]?.text.trim() ?? '',
+          'getin': itinCtrls[id]?.text.trim() ?? '',
+          'd_drive': dDriveCtrls[id]?.text.trim() ?? '',
+          'kommentarer': commentCtrls[id]?.text.trim() ?? '',
+        });
+      }
+
+      final contactName = contactNameCtrl.text.trim();
+      final contactEmail = contactEmailCtrl.text.trim();
+      final contactPhone = contactPhoneCtrl.text.trim();
+
+      final bytes = await RoundSummaryPdfService.generate(
+        production: widget.production,
+        bus: widget.bus,
+        driver: sjaforCtrl.text.trim(),
+        status: statusCtrl.text.trim(),
+        contactName: contactName,
+        contactEmail: contactEmail,
+        contactPhone: contactPhone,
+        days: dayList,
+      );
+
+      final fromStr = fmt(widget.from);
+      final toStr = fmt(widget.to);
+      final safeProd = widget.production.replaceAll(RegExp(r'[^\w\s-]'), '');
+      final filename = 'Tour Schedule $safeProd $fromStr-$toStr.pdf';
+
+      if (!mounted) return;
+
+      await showDialog<void>(
+        context: context,
+        builder: (_) => _SendRoundSummaryDialog(
+          initialTo: contactEmail,
+          initialSubject:
+              'Tour schedule — ${widget.production} — $fromStr – $toStr',
+          bytes: bytes,
+          filename: filename,
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Could not prepare summary: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
 
   // ============================================================
   // SAVE
@@ -2203,6 +2276,7 @@ Future<void> load() async {
         .update({
           'sjafor': newSjafor,
           'status': newStatus,
+          'pris': prisCtrl.text.trim().isEmpty ? null : prisCtrl.text.trim(),
           'contact_name': contactNameCtrl.text.trim(),
           'contact_email': contactEmailCtrl.text.trim(),
           'contact_phone': contactPhoneCtrl.text.trim(),
@@ -2304,6 +2378,7 @@ Future<void> load() async {
 
     sjaforCtrl.dispose();
     statusCtrl.dispose();
+    prisCtrl.dispose();
     contactNameCtrl.dispose();
     contactEmailCtrl.dispose();
     contactPhoneCtrl.dispose();
@@ -2358,6 +2433,7 @@ Future<void> load() async {
 
                   children: [
 
+                    if (widget.isManual) _field("Sum (kr)", prisCtrl),
                     _field("Driver", sjaforCtrl),
                     ValueListenableBuilder<TextEditingValue>(
                       valueListenable: sjaforCtrl,
@@ -2494,7 +2570,7 @@ Future<void> load() async {
                     _dDriveField(),
                     _multiDayField("Itinerary", itinCtrls),
                     _dayField("Venue", venueCtrls),
-                    _dayField("Address", addrCtrls),
+                    _multiDayField("Address", addrCtrls),
                     _multiDayField("Comment", commentCtrls),
                   ],
                 ),
@@ -2555,6 +2631,7 @@ Future<void> load() async {
         "RLC 29G",
         "Rental 1 (Hasse)",
         "Rental 2 (Rickard)",
+        "Conference",
       ];
 
       final target = await showDialog<String>(
@@ -2580,6 +2657,15 @@ Future<void> load() async {
   TextButton(
     onPressed: saving ? null : () => Navigator.pop(context),
     child: const Text("Cancel"),
+  ),
+
+  FilledButton.icon(
+    onPressed: saving || loading ? null : _sendRoundSummary,
+    icon: const Icon(Icons.send, size: 16),
+    label: const Text("Send PDF"),
+    style: FilledButton.styleFrom(
+      backgroundColor: Colors.teal,
+    ),
   ),
 
   FilledButton(
@@ -3022,6 +3108,7 @@ class _ManualBlockDialog extends StatefulWidget {
   final DateTime? initialTo;
   final String? initialNote;
   final String? initialDraftId;
+  final String? initialPris;
 
   const _ManualBlockDialog({
     super.key,
@@ -3031,6 +3118,7 @@ class _ManualBlockDialog extends StatefulWidget {
     this.initialTo,
     this.initialNote,
     this.initialDraftId,
+    this.initialPris,
   });
 
   @override
@@ -3050,6 +3138,7 @@ class _ManualBlockDialogState
   late bool isEdit;
 
   final noteCtrl = TextEditingController();
+  final prisCtrl = TextEditingController();
   final fromCtrl = TextEditingController();
   final toCtrl   = TextEditingController();
 
@@ -3070,6 +3159,7 @@ class _ManualBlockDialogState
     to = widget.initialTo;
 
     noteCtrl.text = widget.initialNote ?? '';
+    prisCtrl.text = widget.initialPris ?? '';
 
     if (from != null) fromCtrl.text = DateFormat('dd.MM.yyyy').format(from!);
     if (to   != null) toCtrl.text   = DateFormat('dd.MM.yyyy').format(to!);
@@ -3082,6 +3172,7 @@ class _ManualBlockDialogState
   @override
   void dispose() {
     noteCtrl.dispose();
+    prisCtrl.dispose();
     fromCtrl.dispose();
     toCtrl.dispose();
     super.dispose();
@@ -3214,6 +3305,8 @@ class _ManualBlockDialogState
       final produksjon =
           noteCtrl.text.trim().isEmpty ? 'Blocked' : noteCtrl.text.trim();
 
+      final pris = prisCtrl.text.trim();
+
       final rows = <Map<String, dynamic>>[];
 
       DateTime d = normalize(from!);
@@ -3227,6 +3320,7 @@ class _ManualBlockDialogState
           'manual_block': true,
           'draft_id': draftId,
           'status': 'manual',
+          if (pris.isNotEmpty) 'pris': pris,
         });
 
         d = d.add(const Duration(days: 1));
@@ -3325,6 +3419,20 @@ class _ManualBlockDialogState
               decoration: const InputDecoration(
                 labelText: "Produksjon",
                 border: OutlineInputBorder(),
+              ),
+            ),
+
+            const SizedBox(height: 12),
+
+            // ================= SUM =================
+            TextField(
+              controller: prisCtrl,
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+
+              decoration: const InputDecoration(
+                labelText: "Sum (kr)",
+                border: OutlineInputBorder(),
+                hintText: "Optional — shows in Economy",
               ),
             ),
           ],
@@ -3784,6 +3892,306 @@ class _WaitingListAssignDialogState
                   child: CircularProgressIndicator(strokeWidth: 2),
                 )
               : const Text("Assign"),
+        ),
+      ],
+    );
+  }
+}
+
+// ============================================================
+// SEND ROUND SUMMARY DIALOG
+// ============================================================
+
+class _SendRoundSummaryDialog extends StatefulWidget {
+  final String initialTo;
+  final String initialSubject;
+  final Uint8List bytes;
+  final String filename;
+
+  const _SendRoundSummaryDialog({
+    required this.initialTo,
+    required this.initialSubject,
+    required this.bytes,
+    required this.filename,
+  });
+
+  @override
+  State<_SendRoundSummaryDialog> createState() =>
+      _SendRoundSummaryDialogState();
+}
+
+class _SendRoundSummaryDialogState extends State<_SendRoundSummaryDialog> {
+  final sb = Supabase.instance.client;
+  late final TextEditingController emailInputCtrl;
+  late final TextEditingController subjectCtrl;
+  late final TextEditingController messageCtrl;
+  final FocusNode emailFocus = FocusNode();
+
+  List<String> recipients = [];
+  List<Map<String, String>> allProfiles = [];
+  List<Map<String, String>> suggestions = [];
+  bool sending = false;
+
+  @override
+  void initState() {
+    super.initState();
+    emailInputCtrl = TextEditingController();
+    subjectCtrl = TextEditingController(text: widget.initialSubject);
+    messageCtrl = TextEditingController();
+
+    // Add initial email as first recipient if provided
+    if (widget.initialTo.trim().isNotEmpty) {
+      recipients.add(widget.initialTo.trim());
+    }
+
+    _loadProfiles();
+  }
+
+  Future<void> _loadProfiles() async {
+    try {
+      final rows = await sb.from('profiles').select('name, email');
+      final list = <Map<String, String>>[];
+      for (final r in rows) {
+        final email = (r['email'] ?? '').toString().trim();
+        if (email.isNotEmpty) {
+          list.add({
+            'name': (r['name'] ?? '').toString(),
+            'email': email,
+          });
+        }
+      }
+      if (mounted) setState(() => allProfiles = list);
+    } catch (_) {}
+  }
+
+  void _onSearchChanged(String query) {
+    if (query.trim().isEmpty) {
+      setState(() => suggestions = []);
+      return;
+    }
+    final q = query.toLowerCase();
+    setState(() {
+      suggestions = allProfiles
+          .where((p) =>
+              !recipients.contains(p['email']) &&
+              (p['name']!.toLowerCase().contains(q) ||
+               p['email']!.toLowerCase().contains(q)))
+          .take(5)
+          .toList();
+    });
+  }
+
+  void _addRecipient(String email) {
+    final trimmed = email.trim();
+    if (trimmed.isEmpty || recipients.contains(trimmed)) return;
+    setState(() {
+      recipients.add(trimmed);
+      emailInputCtrl.clear();
+      suggestions = [];
+    });
+  }
+
+  void _removeRecipient(String email) {
+    setState(() => recipients.remove(email));
+  }
+
+  void _handleEmailSubmit(String value) {
+    // Split by comma/semicolon for manual entry
+    final parts = value
+        .split(RegExp(r'[,;]'))
+        .map((s) => s.trim())
+        .where((s) => s.isNotEmpty);
+    for (final part in parts) {
+      _addRecipient(part);
+    }
+  }
+
+  @override
+  void dispose() {
+    emailInputCtrl.dispose();
+    subjectCtrl.dispose();
+    messageCtrl.dispose();
+    emailFocus.dispose();
+    super.dispose();
+  }
+
+  Future<void> _send() async {
+    if (recipients.isEmpty) return;
+
+    setState(() => sending = true);
+
+    try {
+      // Send as one email with all recipients (shared conversation)
+      await EmailService.sendEmailWithAttachment(
+        to: recipients.join(', '),
+        subject: subjectCtrl.text.trim(),
+        body: messageCtrl.text.trim(),
+        attachmentBytes: widget.bytes,
+        attachmentFilename: widget.filename,
+      );
+
+      if (!mounted) return;
+      Navigator.pop(context);
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Tour schedule sent!'),
+          backgroundColor: Colors.green,
+        ),
+      );
+    } catch (e) {
+      setState(() => sending = false);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Send failed: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Send tour schedule'),
+      content: SizedBox(
+        width: 480,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // To field with chips inside + autocomplete
+            InputDecorator(
+              decoration: InputDecoration(
+                labelText: 'To',
+                border: const OutlineInputBorder(),
+                contentPadding: const EdgeInsets.fromLTRB(8, 8, 8, 8),
+                // Shrink label when there are chips or text
+                floatingLabelBehavior: FloatingLabelBehavior.always,
+              ),
+              child: Wrap(
+                spacing: 4,
+                runSpacing: 4,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  // Chips for added recipients
+                  ...recipients.map((email) {
+                    final profile = allProfiles
+                        .where((p) => p['email'] == email)
+                        .firstOrNull;
+                    final label = profile != null && profile['name']!.isNotEmpty
+                        ? profile['name']!
+                        : email;
+                    return Chip(
+                      label: Text(label, style: const TextStyle(fontSize: 12)),
+                      deleteIcon: const Icon(Icons.close, size: 14),
+                      onDeleted: () => _removeRecipient(email),
+                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      visualDensity: VisualDensity.compact,
+                      padding: EdgeInsets.zero,
+                      labelPadding: const EdgeInsets.symmetric(horizontal: 6),
+                    );
+                  }),
+                  // Inline text input
+                  IntrinsicWidth(
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(minWidth: 120),
+                      child: TextField(
+                        controller: emailInputCtrl,
+                        focusNode: emailFocus,
+                        decoration: const InputDecoration(
+                          hintText: 'Name or email...',
+                          border: InputBorder.none,
+                          isDense: true,
+                          contentPadding: EdgeInsets.symmetric(vertical: 8),
+                        ),
+                        style: const TextStyle(fontSize: 13),
+                        onChanged: _onSearchChanged,
+                        onSubmitted: (v) {
+                          _handleEmailSubmit(v);
+                          emailFocus.requestFocus();
+                        },
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
+            // Suggestions dropdown
+            if (suggestions.isNotEmpty)
+              Container(
+                constraints: const BoxConstraints(maxHeight: 160),
+                margin: const EdgeInsets.only(top: 2),
+                decoration: BoxDecoration(
+                  color: Theme.of(context).colorScheme.surface,
+                  border: Border.all(color: Colors.grey.shade300),
+                  borderRadius: BorderRadius.circular(4),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.1),
+                      blurRadius: 4,
+                      offset: const Offset(0, 2),
+                    ),
+                  ],
+                ),
+                child: ListView.builder(
+                  shrinkWrap: true,
+                  itemCount: suggestions.length,
+                  itemBuilder: (_, i) {
+                    final s = suggestions[i];
+                    return ListTile(
+                      dense: true,
+                      visualDensity: VisualDensity.compact,
+                      title: Text(s['name']!,
+                          style: const TextStyle(fontSize: 13)),
+                      subtitle: Text(s['email']!,
+                          style: const TextStyle(fontSize: 11)),
+                      onTap: () {
+                        _addRecipient(s['email']!);
+                        emailFocus.requestFocus();
+                      },
+                    );
+                  },
+                ),
+              ),
+
+            const SizedBox(height: 12),
+            TextField(
+              controller: subjectCtrl,
+              decoration: const InputDecoration(
+                labelText: 'Subject',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: messageCtrl,
+              maxLines: 4,
+              decoration: const InputDecoration(
+                labelText: 'Message (optional)',
+                border: OutlineInputBorder(),
+              ),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: sending ? null : () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
+        FilledButton.icon(
+          onPressed: sending || recipients.isEmpty ? null : _send,
+          icon: const Icon(Icons.send, size: 16),
+          label: sending
+              ? const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Text('Send'),
         ),
       ],
     );
