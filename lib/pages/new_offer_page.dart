@@ -1991,6 +1991,32 @@ offer.rounds[i].bus =
 }
 
 // ------------------------------------------------------------
+// Version history
+// ------------------------------------------------------------
+Future<void> _showVersionHistory() async {
+  if (_draftId == null) return;
+
+  final restored = await showDialog<bool>(
+    context: context,
+    builder: (_) => _OfferVersionHistoryDialog(
+      offerId: _draftId!,
+      onRestore: (versionId) async {
+        await OfferStorageService.restoreVersion(_draftId!, versionId);
+      },
+    ),
+  );
+
+  if (restored == true && _draftId != null) {
+    await _loadDraft(_draftId!);
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Version restored")),
+      );
+    }
+  }
+}
+
+// ------------------------------------------------------------
 // Ferry booking email — fires once when status → Confirmed
 // ------------------------------------------------------------
 void _maybeSendFerryEmail(OfferDraft confirmed) {
@@ -3857,6 +3883,7 @@ return Padding(
           onScanPdf: _scanPdf,
           onSendOffer: _sendOffer,
           onCreateInvoice: _openCreateInvoiceDialog,
+          onShowVersions: _draftId != null ? _showVersionHistory : null,
           draftId: _draftId,
         ),
       ),
@@ -4600,6 +4627,7 @@ class _LeftOfferCard extends StatefulWidget {
   final Future<void> Function() onScanPdf;
   final Future<void> Function() onSendOffer;
   final Future<void> Function() onCreateInvoice;
+  final VoidCallback? onShowVersions;
   final String? draftId;
 
   const _LeftOfferCard({
@@ -4610,6 +4638,7 @@ class _LeftOfferCard extends StatefulWidget {
   required this.onScanPdf,
   required this.onSendOffer,
   required this.onCreateInvoice,
+  this.onShowVersions,
   required this.draftId,
 });
 
@@ -5335,6 +5364,17 @@ Column(
         onPressed: widget.onSave,
         icon: const Icon(Icons.save),
         label: const Text("Save draft"),
+      ),
+    ),
+
+    // -------- VERSION HISTORY --------
+    const SizedBox(height: 8),
+    SizedBox(
+      width: double.infinity,
+      child: OutlinedButton.icon(
+        onPressed: widget.draftId != null ? widget.onShowVersions : null,
+        icon: const Icon(Icons.history),
+        label: const Text("Versions"),
       ),
     ),
 
@@ -6232,6 +6272,158 @@ class _SendOfferDialogState extends State<_SendOfferDialog> {
                 )
               : const Icon(Icons.send),
           label: const Text('Send'),
+        ),
+      ],
+    );
+  }
+}
+
+// =================================================
+// VERSION HISTORY DIALOG
+// =================================================
+
+class _OfferVersionHistoryDialog extends StatefulWidget {
+  final String offerId;
+  final Future<void> Function(String versionId) onRestore;
+
+  const _OfferVersionHistoryDialog({
+    required this.offerId,
+    required this.onRestore,
+  });
+
+  @override
+  State<_OfferVersionHistoryDialog> createState() =>
+      _OfferVersionHistoryDialogState();
+}
+
+class _OfferVersionHistoryDialogState
+    extends State<_OfferVersionHistoryDialog> {
+  List<Map<String, dynamic>>? _versions;
+  bool _loading = true;
+  bool _restoring = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    try {
+      final v = await OfferStorageService.loadVersions(widget.offerId);
+      if (mounted) setState(() { _versions = v; _loading = false; });
+    } catch (e) {
+      if (mounted) setState(() { _loading = false; });
+    }
+  }
+
+  Future<void> _confirmRestore(Map<String, dynamic> ver) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Restore version?'),
+        content: Text(
+          'This will restore version ${ver['version']} and save the '
+          'current state as a new version. Continue?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Restore'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true || !mounted) return;
+
+    setState(() => _restoring = true);
+
+    try {
+      await widget.onRestore(ver['id'] as String);
+      if (mounted) Navigator.pop(context, true);
+    } catch (e) {
+      if (mounted) {
+        setState(() => _restoring = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Restore failed: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final dateFmt = DateFormat('dd.MM.yyyy HH:mm');
+
+    return AlertDialog(
+      title: const Text('Version history'),
+      content: SizedBox(
+        width: 500,
+        height: 400,
+        child: _loading
+            ? const Center(child: CircularProgressIndicator())
+            : (_versions == null || _versions!.isEmpty)
+                ? const Center(child: Text('No previous versions'))
+                : ListView.separated(
+                    itemCount: _versions!.length,
+                    separatorBuilder: (_, __) => const Divider(height: 1),
+                    itemBuilder: (_, i) {
+                      final v = _versions![i];
+                      final createdAt =
+                          DateTime.tryParse(v['created_at'] ?? '');
+                      final dateStr = createdAt != null
+                          ? dateFmt.format(createdAt.toLocal())
+                          : '—';
+                      final name = v['created_name'] ?? 'Unknown';
+                      final status = v['status'] ?? '';
+                      final note = v['note'] as String?;
+
+                      return ListTile(
+                        leading: CircleAvatar(
+                          backgroundColor: cs.primaryContainer,
+                          child: Text(
+                            'v${v['version']}',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: cs.onPrimaryContainer,
+                            ),
+                          ),
+                        ),
+                        title: Text('Version ${v['version']}'),
+                        subtitle: Text(
+                          '$dateStr  •  $name'
+                          '${status.isNotEmpty ? '  •  $status' : ''}'
+                          '${note != null && note.isNotEmpty ? '\n$note' : ''}',
+                        ),
+                        trailing: _restoring
+                            ? const SizedBox(
+                                width: 20,
+                                height: 20,
+                                child: CircularProgressIndicator(
+                                    strokeWidth: 2),
+                              )
+                            : IconButton(
+                                tooltip: 'Restore this version',
+                                icon: const Icon(Icons.restore),
+                                onPressed: () => _confirmRestore(v),
+                              ),
+                      );
+                    },
+                  ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Close'),
         ),
       ],
     );

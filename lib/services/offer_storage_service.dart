@@ -40,9 +40,21 @@ class OfferStorageService {
     // UPDATE
     // -----------------------------
     if (id != null && id.isNotEmpty) {
+      // Snapshot current state before overwriting
+      await _snapshotBeforeUpdate(id);
+
+      // Hent nåværende version
+      final currentRow = await sb
+          .from('offers')
+          .select('version')
+          .eq('id', id)
+          .single();
+      final nextVersion = ((currentRow['version'] ?? 1) as int) + 1;
+
       await sb.from('offers').update({
         ...payload,
         if (totalExclVat != null) 'total_excl_vat': totalExclVat,
+        'version': nextVersion,
         'updated_at': DateTime.now().toIso8601String(),
         'updated_by': userId,
       }).eq('id', id);
@@ -510,4 +522,104 @@ static String _buildKjoretoy(OfferDraft offer) {
 
   static String getPdfUrl(String pdfPath) =>
       sb.storage.from('offer-pdfs').getPublicUrl(pdfPath);
+
+  // ============================================================
+  // VERSION HISTORY
+  // ============================================================
+
+  /// Snapshot the current offer state into offer_versions before an update.
+  static Future<void> _snapshotBeforeUpdate(String id) async {
+    final current = await sb
+        .from('offers')
+        .select('payload, status, total_excl_vat, version, updated_by')
+        .eq('id', id)
+        .single();
+
+    await sb.from('offer_versions').insert({
+      'offer_id': id,
+      'version': current['version'] ?? 1,
+      'payload': current['payload'],
+      'status': current['status'],
+      'total_excl_vat': current['total_excl_vat'],
+      'created_by': current['updated_by'],
+      'created_at': DateTime.now().toIso8601String(),
+    });
+  }
+
+  /// Load all versions for an offer, newest first, with profile names.
+  static Future<List<Map<String, dynamic>>> loadVersions(
+      String offerId) async {
+    final versions = await sb
+        .from('offer_versions')
+        .select()
+        .eq('offer_id', offerId)
+        .order('version', ascending: false);
+
+    final list =
+        (versions as List).cast<Map<String, dynamic>>();
+
+    if (list.isEmpty) return list;
+
+    // Resolve profile names
+    final Set<String> userIds = {};
+    for (final v in list) {
+      if (v['created_by'] != null) userIds.add(v['created_by']);
+    }
+
+    if (userIds.isNotEmpty) {
+      final profilesRes = await sb
+          .from('profiles')
+          .select('id, name')
+          .filter('id', 'in', '(${userIds.join(',')})');
+
+      final Map<String, String> profileMap = {};
+      for (final p in (profilesRes as List)) {
+        profileMap[p['id']] = p['name'] ?? 'Unknown';
+      }
+
+      for (final v in list) {
+        v['created_name'] = profileMap[v['created_by']] ?? 'Unknown';
+      }
+    }
+
+    return list;
+  }
+
+  /// Restore a previous version: snapshot current state, then overwrite
+  /// the offer with the version's payload.
+  static Future<void> restoreVersion(
+      String offerId, String versionId) async {
+    // 1. Snapshot current state
+    await _snapshotBeforeUpdate(offerId);
+
+    // 2. Read the version row
+    final ver = await sb
+        .from('offer_versions')
+        .select()
+        .eq('id', versionId)
+        .single();
+
+    // 3. Get current version number
+    final current = await sb
+        .from('offers')
+        .select('version')
+        .eq('id', offerId)
+        .single();
+    final nextVersion = ((current['version'] ?? 1) as int) + 1;
+
+    // 4. Overwrite offers row with the version's payload
+    final payload = ver['payload'] as Map<String, dynamic>;
+    final jsonString = jsonEncode(payload);
+
+    await sb.from('offers').update({
+      'payload': payload,
+      'offer_json': jsonString,
+      'status': ver['status'],
+      'version': nextVersion,
+      'updated_at': DateTime.now().toIso8601String(),
+      'updated_by': sb.auth.currentUser?.id,
+    }).eq('id', offerId);
+
+    recentOffersRefresh.value++;
+  }
 }
