@@ -196,19 +196,33 @@ String _buildExtra() {
     final List<Map<String, double>> countries = [];
 
     for (final r in routes) {
-      final polyline = r['polyline'];
+      final rawPoints = r['rawPoints'] as List?;
+      final polyline = r['polyline'] as String?;
       final meters = r['distanceMeters'] as num?;
 
-      if (polyline == null || meters == null) continue;
+      if (meters == null) continue;
 
-      final decoded =
-          PolylineDecoder.decode(polyline);
+      List<LatLng> line;
 
-      if (decoded.isEmpty) continue;
+      if (rawPoints != null && rawPoints.isNotEmpty) {
+        // Web: raw [lat, lon] list from OSRM (no polyline encoding)
+        line = rawPoints.map<LatLng>((p) {
+          final pair = p as List;
+          return LatLng(
+            (pair[0] as num).toDouble(),
+            (pair[1] as num).toDouble(),
+          );
+        }).toList();
+      } else if (polyline != null && polyline.isNotEmpty) {
+        // Desktop: encoded polyline from Google Routes API
+        final decoded = PolylineDecoder.decode(polyline);
+        if (decoded.isEmpty) continue;
+        line = decoded.map((p) => LatLng(p.lat, p.lng)).toList();
+      } else {
+        continue;
+      }
 
-      final line = decoded
-          .map((p) => LatLng(p.lat, p.lng))
-          .toList();
+      if (line.isEmpty) continue;
 
       lines.add(line);
 
@@ -216,7 +230,18 @@ String _buildExtra() {
 
       Map<String, double> country = {};
       try {
-        country = await _analyzer.kmPerCountry(polyline);
+        if (rawPoints != null && rawPoints.isNotEmpty) {
+          final pts = rawPoints.map<List<double>>((p) {
+            final pair = p as List;
+            return [
+              (pair[0] as num).toDouble(),
+              (pair[1] as num).toDouble(),
+            ];
+          }).toList();
+          country = await _analyzer.kmPerCountryFromPoints(pts);
+        } else if (polyline != null && polyline.isNotEmpty) {
+          country = await _analyzer.kmPerCountry(polyline);
+        }
       } catch (e) {
         debugPrint('Country analysis failed (non-fatal): $e');
       }
@@ -295,7 +320,8 @@ Future<void> _save() async {
       'at',
       'hr',
       'si',
-      'de'
+      'de',
+      'se',
     };
 
     final Map<String, double> countryFields = {};

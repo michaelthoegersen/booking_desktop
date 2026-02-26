@@ -525,7 +525,37 @@ Future<void> _confirmDeleteDraft(
   // ------------------------------------------------------------
 
   Future<void> _archiveDraft(String id, String production) async {
+    // Ask whether to also remove calendar entries
+    final result = await showDialog<String>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: Text('Archive "$production"?'),
+        content: const Text(
+          'Do you also want to remove this draft from the calendar?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context, rootNavigator: true).pop(null),
+            child: const Text('Cancel'),
+          ),
+          OutlinedButton(
+            onPressed: () => Navigator.of(context, rootNavigator: true).pop('keep'),
+            child: const Text('Keep in calendar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context, rootNavigator: true).pop('remove'),
+            child: const Text('Remove from calendar'),
+          ),
+        ],
+      ),
+    );
+
+    if (result == null) return;
+
     try {
+      if (result == 'remove') {
+        await sb.from('samletdata').delete().eq('draft_id', id);
+      }
       await OfferStorageService.archiveDraft(id);
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(

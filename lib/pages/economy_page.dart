@@ -11,6 +11,7 @@ enum _StatusFilter {
   confirmed,
   invoiced,
   inquiry,
+  manual,
 }
 
 extension _StatusFilterLabel on _StatusFilter {
@@ -20,6 +21,7 @@ extension _StatusFilterLabel on _StatusFilter {
         _StatusFilter.confirmed => 'Confirmed only',
         _StatusFilter.invoiced => 'Invoiced only',
         _StatusFilter.inquiry => 'Inquiry only',
+        _StatusFilter.manual => 'Manual blocks',
       };
 }
 
@@ -54,7 +56,7 @@ class _EconomyPageState extends State<EconomyPage> {
       final data = await _supabase
           .from('samletdata')
           .select('round_id, draft_id, id, dato, pris, produksjon, status')
-          .or('status.eq.invoiced,status.eq.Confirmed,status.eq.confirmed,status.eq.Inquiry')
+          .or('status.eq.invoiced,status.eq.Confirmed,status.eq.confirmed,status.eq.Inquiry,status.eq.manual')
           .not('pris', 'is', null)
           .order('dato', ascending: true);
 
@@ -164,6 +166,7 @@ class _EconomyPageState extends State<EconomyPage> {
       _StatusFilter.confirmed => s == 'confirmed',
       _StatusFilter.invoiced => s == 'invoiced',
       _StatusFilter.inquiry => s == 'inquiry',
+      _StatusFilter.manual => s == 'manual',
     };
   }
 

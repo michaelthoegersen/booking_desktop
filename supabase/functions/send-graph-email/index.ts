@@ -49,10 +49,11 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const { to, subject, body } = await req.json() as {
+    const { to, subject, body, attachment } = await req.json() as {
       to: string;
       subject: string;
       body: string;
+      attachment?: { name: string; contentBytes: string };
     };
 
     if (!to || !subject || !body) {
@@ -69,6 +70,30 @@ Deno.serve(async (req) => {
 
     const token = await getAccessToken(clientSecret);
 
+    // Support comma- or semicolon-separated list of recipients
+    const recipients = to
+      .split(/[,;]/)
+      .map((a: string) => a.trim())
+      .filter((a: string) => a.length > 0)
+      .map((a: string) => ({ emailAddress: { address: a } }));
+
+    const message: Record<string, unknown> = {
+      subject,
+      body: { contentType: 'Text', content: body },
+      toRecipients: recipients,
+    };
+
+    if (attachment) {
+      message['attachments'] = [
+        {
+          '@odata.type': '#microsoft.graph.fileAttachment',
+          name: attachment.name,
+          contentType: 'application/pdf',
+          contentBytes: attachment.contentBytes,
+        },
+      ];
+    }
+
     const sendRes = await fetch(
       `https://graph.microsoft.com/v1.0/users/${SENDER}/sendMail`,
       {
@@ -77,13 +102,7 @@ Deno.serve(async (req) => {
           Authorization: `Bearer ${token}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          message: {
-            subject,
-            body: { contentType: 'Text', content: body },
-            toRecipients: [{ emailAddress: { address: to } }],
-          },
-        }),
+        body: JSON.stringify({ message }),
       },
     );
 

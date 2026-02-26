@@ -1,3 +1,4 @@
+import 'dart:typed_data';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:pdf/pdf.dart';
@@ -25,19 +26,29 @@ class InvoicePdfService {
   static Future<Uint8List> generatePdf(Invoice invoice) async {
     final doc = pw.Document();
 
-    // Fonts (same as offer PDF)
+    ByteData safeByteData(ByteData d) {
+      final fresh = ByteData(d.lengthInBytes);
+      fresh.buffer.asUint8List().setAll(
+        0, d.buffer.asUint8List(d.offsetInBytes, d.lengthInBytes));
+      return fresh;
+    }
+    Uint8List safeBytes(ByteData d) {
+      final src = d.buffer.asUint8List(d.offsetInBytes, d.lengthInBytes);
+      final copy = Uint8List(src.length);
+      copy.setAll(0, src);
+      return copy;
+    }
+
     final regular = pw.Font.ttf(
-      await rootBundle.load('assets/fonts/calibri.ttf'),
+      safeByteData(await rootBundle.load('assets/fonts/calibri.ttf')),
     );
     final bold = pw.Font.ttf(
-      await rootBundle.load('assets/fonts/calibrib.ttf'),
+      safeByteData(await rootBundle.load('assets/fonts/calibrib.ttf')),
     );
 
     // Logo
     final appLogo = pw.MemoryImage(
-      (await rootBundle.load('assets/pdf/logos/LOGOapp.png'))
-          .buffer
-          .asUint8List(),
+      safeBytes(await rootBundle.load('assets/pdf/logos/LOGOapp.png')),
     );
 
     doc.addPage(

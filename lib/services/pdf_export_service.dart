@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:typed_data';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:path_provider/path_provider.dart';
 import 'package:pdf/pdf.dart';
@@ -22,14 +23,19 @@ class PdfExportService {
     // ✅ LOAD UNICODE FONTS
     // =====================================================
 
-    final regularFontData =
-        await rootBundle.load("assets/fonts/Roboto-Regular.ttf");
+    ByteData safeFont(ByteData d) {
+      final fresh = ByteData(d.lengthInBytes);
+      fresh.buffer.asUint8List().setAll(
+        0, d.buffer.asUint8List(d.offsetInBytes, d.lengthInBytes));
+      return fresh;
+    }
 
-    final boldFontData =
-        await rootBundle.load("assets/fonts/Roboto-Bold.ttf");
-
-    final regular = pw.Font.ttf(regularFontData);
-    final bold = pw.Font.ttf(boldFontData);
+    final regular = pw.Font.ttf(
+      safeFont(await rootBundle.load("assets/fonts/Roboto-Regular.ttf")),
+    );
+    final bold = pw.Font.ttf(
+      safeFont(await rootBundle.load("assets/fonts/Roboto-Bold.ttf")),
+    );
 
     final theme = pw.ThemeData.withFont(
       base: regular,

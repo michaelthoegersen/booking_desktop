@@ -1,5 +1,6 @@
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:pdf/pdf.dart';
@@ -78,6 +79,9 @@ static String _busImageForType(BusType type) {
       return 'assets/pdf/buses/18_sleeper.png';
 
     case BusType.sleeper12StarRoom:
+      return 'assets/pdf/buses/12_sleeper.png';
+
+    case BusType.conference:
       return 'assets/pdf/buses/12_sleeper.png';
   }
 }
@@ -218,33 +222,46 @@ static Future<Uint8List> buildPdf({
 }) async {
   final doc = pw.Document();
 
+  // rootBundle.load() on web returns a ByteData that is a *view* into a
+  // larger JS ArrayBuffer with a non-zero byteOffset.  The pdf package's
+  // TtfParser calls bytes.buffer.asUint8List(absoluteOffset, n) using
+  // offsets that assume the font data starts at position 0 in the buffer.
+  // ByteData(n) is the only constructor guaranteed to produce a fresh
+  // ByteData with offsetInBytes==0 backed by its own ArrayBuffer of
+  // exactly n bytes.
+  ByteData _safeByteData(ByteData d) {
+    final fresh = ByteData(d.lengthInBytes);
+    final src = d.buffer.asUint8List(d.offsetInBytes, d.lengthInBytes);
+    fresh.buffer.asUint8List().setAll(0, src);
+    debugPrint('pdf font loaded: offset=${fresh.offsetInBytes} len=${fresh.lengthInBytes}');
+    return fresh;
+  }
+  Uint8List _safeBytes(ByteData d) {
+    final src = d.buffer.asUint8List(d.offsetInBytes, d.lengthInBytes);
+    final copy = Uint8List(src.length);
+    copy.setAll(0, src);
+    return copy;
+  }
+
   // ---------------- FONTS ----------------
   final regular = pw.Font.ttf(
-    await rootBundle.load('assets/fonts/calibri.ttf'),
+    _safeByteData(await rootBundle.load('assets/fonts/calibri.ttf')),
   );
   final bold = pw.Font.ttf(
-    await rootBundle.load('assets/fonts/calibrib.ttf'),
+    _safeByteData(await rootBundle.load('assets/fonts/calibrib.ttf')),
   );
 
   // ---------------- IMAGES ----------------
   final appLogo = pw.MemoryImage(
-    (await rootBundle.load('assets/pdf/logos/LOGOapp.png'))
-        .buffer
-        .asUint8List(),
+    _safeBytes(await rootBundle.load('assets/pdf/logos/LOGOapp.png')),
   );
 
   final busLayout = pw.MemoryImage(
-    (await rootBundle.load('assets/pdf/buses/DDBus.png'))
-        .buffer
-        .asUint8List(),
+    _safeBytes(await rootBundle.load('assets/pdf/buses/DDBus.png')),
   );
 
   final busTypeImage = pw.MemoryImage(
-    (await rootBundle.load(
-      _busImageForType(offer.busType),
-    ))
-        .buffer
-        .asUint8List(),
+    _safeBytes(await rootBundle.load(_busImageForType(offer.busType))),
   );
 
   doc.addPage(

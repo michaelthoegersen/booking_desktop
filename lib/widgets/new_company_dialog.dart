@@ -2,7 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 class NewCompanyDialog extends StatefulWidget {
-  const NewCompanyDialog({super.key});
+  /// When set, the created company is linked to this management company
+  /// and the dialog pops with the new company's ID (String).
+  /// When null, behaves as before and pops with `true` (bool).
+  final String? ownerCompanyId;
+
+  const NewCompanyDialog({super.key, this.ownerCompanyId});
 
   @override
   State<NewCompanyDialog> createState() => _NewCompanyDialogState();
@@ -101,6 +106,8 @@ class _NewCompanyDialogState extends State<NewCompanyDialog> {
             'city': city.isEmpty ? null : city,
             'country': country.isEmpty ? null : country,
             'separate_invoice_recipient': _separateInvoice,
+            if (widget.ownerCompanyId != null)
+              'owner_company_id': widget.ownerCompanyId,
             if (_separateInvoice) ...{
               'invoice_name': invoiceName.isEmpty ? null : invoiceName,
               'invoice_org_nr': invoiceOrgNr.isEmpty ? null : invoiceOrgNr,
@@ -114,7 +121,7 @@ class _NewCompanyDialogState extends State<NewCompanyDialog> {
           .select()
           .single();
 
-      final companyId = companyRes['id'];
+      final companyId = companyRes['id'] as String;
 
       // ------------------------------------
       // 2. INSERT CONTACT (optional)
@@ -140,7 +147,11 @@ class _NewCompanyDialogState extends State<NewCompanyDialog> {
 
       if (!mounted) return;
 
-      Navigator.of(context).pop(true);
+      // When ownerCompanyId is set, pop with the new company's ID so the
+      // caller can auto-select it. Otherwise use legacy bool for old callers.
+      Navigator.of(context).pop(
+        widget.ownerCompanyId != null ? companyId : true,
+      );
     } catch (e) {
       debugPrint("CREATE COMPANY ERROR: $e");
 

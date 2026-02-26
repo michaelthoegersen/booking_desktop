@@ -19,6 +19,7 @@ import '../pages/routes_admin_page.dart';
 import '../pages/chat_page.dart';
 import '../pages/archive_page.dart';
 import '../services/chat_service.dart';
+import '../pages/bus_requests_page.dart';
 
 // --------------------------------------------------------------------------
 // DATA
@@ -49,6 +50,7 @@ const _routeTitles = {
   '/economy': 'Economy',
   '/issues': 'Issues',
   '/chat': 'Chat',
+  '/bus-requests': 'Bus Requests',
   '/settings': 'Settings',
   '/routes': 'Route Manager',
 };
@@ -144,6 +146,8 @@ class _AppShellState extends State<AppShell> {
         return RoutesAdminPage();
       case '/archive':
         return const ArchivePage();
+      case '/bus-requests':
+        return const BusRequestsPage();
       default:
         return Center(child: Text('Unknown route: $route'));
     }
@@ -521,6 +525,7 @@ class _SideNavState extends State<_SideNav> {
   final _supabase = Supabase.instance.client;
   int _unseenCount = 0;
   int _unreadChatCount = 0;
+  int _pendingBusRequests = 0;
   RealtimeChannel? _channel;
   Timer? _pollTimer;
 
@@ -529,21 +534,43 @@ class _SideNavState extends State<_SideNav> {
     super.initState();
     _loadUnseenCount();
     _loadUnreadChatCount();
+    _loadPendingBusRequests();
     _subscribeRealtime();
     ChatService.readEventNotifier.addListener(_loadUnreadChatCount);
+    busRequestsBadgeNotifier.addListener(_onBusRequestBadgeChanged);
     // Poll every 15 seconds as fallback if realtime doesn't fire
     _pollTimer = Timer.periodic(const Duration(seconds: 15), (_) {
       _loadUnseenCount();
       _loadUnreadChatCount();
+      _loadPendingBusRequests();
     });
   }
 
   @override
   void dispose() {
     ChatService.readEventNotifier.removeListener(_loadUnreadChatCount);
+    busRequestsBadgeNotifier.removeListener(_onBusRequestBadgeChanged);
     _channel?.unsubscribe();
     _pollTimer?.cancel();
     super.dispose();
+  }
+
+  void _onBusRequestBadgeChanged() {
+    if (mounted) {
+      setState(() => _pendingBusRequests = busRequestsBadgeNotifier.value);
+    }
+  }
+
+  Future<void> _loadPendingBusRequests() async {
+    try {
+      final res = await _supabase
+          .from('bus_requests')
+          .select('id')
+          .eq('status', 'pending');
+      if (mounted) setState(() => _pendingBusRequests = (res as List).length);
+    } catch (e) {
+      debugPrint('Bus requests badge error: $e');
+    }
   }
 
   Future<void> _loadUnreadChatCount() async {
@@ -581,6 +608,12 @@ class _SideNavState extends State<_SideNav> {
           schema: 'public',
           table: 'tour_messages',
           callback: (_) => _loadUnreadChatCount(),
+        )
+        .onPostgresChanges(
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: 'bus_requests',
+          callback: (_) => _loadPendingBusRequests(),
         )
         .subscribe();
   }
@@ -708,6 +741,15 @@ class _SideNavState extends State<_SideNav> {
                       label: "Chat",
                       route: "/chat",
                       badge: _unreadChatCount,
+                      onOpenInNewTab: widget.onOpenInNewTab,
+                      overrideActiveRoute: widget.overrideActiveRoute,
+                    ),
+
+                    _NavItem(
+                      icon: Icons.directions_bus_rounded,
+                      label: "Bus Requests",
+                      route: "/bus-requests",
+                      badge: _pendingBusRequests,
                       onOpenInNewTab: widget.onOpenInNewTab,
                       overrideActiveRoute: widget.overrideActiveRoute,
                     ),

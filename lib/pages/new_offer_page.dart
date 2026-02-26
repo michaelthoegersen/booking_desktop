@@ -77,6 +77,7 @@ class _NewOfferPageState extends State<NewOfferPage> {
     "RLC 29G",
     "Rental 1 (Hasse)",
     "Rental 2 (Rickard)",
+    "Conference",
   ];
 
   return showDialog<String>(
@@ -463,6 +464,7 @@ const allBuses = [
   "RLC 29G",
   "Rental 1 (Hasse)",
   "Rental 2 (Rickard)",
+  "Conference",
 ];
 
   final available =
@@ -775,6 +777,14 @@ const allBuses = [
     phoneCtrl.text = offer.phone ?? '';
     emailCtrl.text = offer.email ?? '';
 
+    // Mark dirty whenever a text field changes
+    for (final ctrl in [
+      companyCtrl, contactCtrl, productionCtrl,
+      phoneCtrl, emailCtrl, startLocCtrl,
+    ]) {
+      ctrl.addListener(_markDirty);
+    }
+
     _syncRoundControllers();
 
     // Reload when another tab saves this same draft (e.g. calendar assigns a bus)
@@ -803,6 +813,10 @@ const allBuses = [
     _draftSavesSub?.cancel();
     _overrideCtrl.dispose();
     super.dispose();
+  }
+
+  void _markDirty() {
+    NewOfferPage.hasUnsavedChanges = true;
   }
 
   // ===================================================
@@ -1952,6 +1966,11 @@ offer.rounds[i].bus =
       ),
     );
 
+    // ----------------------------------------
+    // Mark as saved — suppress navigation guard
+    // ----------------------------------------
+    NewOfferPage.hasUnsavedChanges = false;
+
   } catch (e, st) {
 
     debugPrint("SAVE ERROR:");
@@ -2741,10 +2760,6 @@ Future<void> _validateSelectedBus() async {
       ),
     );
 
-    // Sort by date
-    offer.rounds[roundIndex].entries
-        .sort((a, b) => a.date.compareTo(b.date));
-
     // Auto next day
     selectedDate =
         selectedDate!.add(const Duration(days: 1));
@@ -2753,6 +2768,8 @@ Future<void> _validateSelectedBus() async {
     locationCtrl.clear();
     _locationSuggestions = [];
   });
+
+  _markDirty();
 
   // ---------------- REFOCUS ----------------
 
@@ -2817,6 +2834,8 @@ Future<void> _validateSelectedBus() async {
     locationCtrl.clear();
     _locationSuggestions = [];
   });
+
+  _markDirty();
 
   // ---------------- REFOCUS ----------------
 
@@ -2961,8 +2980,7 @@ Future<RoundCalcResult> _calcRound(int ri) async {
 
   final round = offer.rounds[ri];
 
-  final entries = [...round.entries]
-    ..sort((a, b) => a.date.compareTo(b.date));
+  final entries = List<RoundEntry>.from(round.entries);
 
   // ---------------- DATES ----------------
   final dates = entries
@@ -3176,18 +3194,23 @@ final safeNoDDrive = List<bool>.generate(
 
   // ================= SWEDISH MODEL =================
 
-  // Swedish km are toll-free — subtract from the km base used for toll.
+  // Swedish and German km are toll-free — subtract from the km base used for toll.
   //
-  // Both km_se = NULL and km_se = 0 mean 0 Swedish km (no subtraction).
-  // Only km_se > 0 reduces the tollable km.
+  // Both km_se/km_de = NULL and = 0 mean 0 km (no subtraction).
+  // Only values > 0 reduce the tollable km.
   final totalSweKm = List.generate(len, (i) {
     final seKm = _countryKmByIndex[i]?['SE'];
-    if (seKm != null && seKm > 0) return seKm;           // km_se > 0: subtract
-    return 0.0;                                           // km_se = NULL or 0: no subtraction
+    if (seKm != null && seKm > 0) return seKm;
+    return 0.0;
   }).fold<double>(0.0, (a, b) => a + b);
-  final tollableKm = (totalKm - totalSweKm).clamp(0.0, double.infinity);
+  final totalDeKm = List.generate(len, (i) {
+    final deKm = _countryKmByIndex[i]?['DE'];
+    if (deKm != null && deKm > 0) return deKm;
+    return 0.0;
+  }).fold<double>(0.0, (a, b) => a + b);
+  final tollableKm = (totalKm - totalSweKm - totalDeKm).clamp(0.0, double.infinity);
 
-  debugPrint('🇸🇪 Round $ri: totalKm=${totalKm.toStringAsFixed(1)} sweKm=${totalSweKm.toStringAsFixed(1)} tollableKm=${tollableKm.toStringAsFixed(1)}');
+  debugPrint('🇸🇪🇩🇪 Round $ri: totalKm=${totalKm.toStringAsFixed(1)} sweKm=${totalSweKm.toStringAsFixed(1)} deKm=${totalDeKm.toStringAsFixed(1)} tollableKm=${tollableKm.toStringAsFixed(1)}');
 
   if (offer.pricingModel == 'svensk') {
     final swe = SettingsStore.current.sweSettings;
@@ -3271,7 +3294,7 @@ final safeNoDDrive = List<bool>.generate(
           ferryPerLeg: safeFerryPerLeg,
         ) * effectiveBusCount;
 
-    // Toll: exclude Swedish km (toll-free in Sweden)
+    // Toll: exclude Swedish and German km (toll-free)
     final roundTollCost = tollableKm * SettingsStore.current.tollKmRate * effectiveBusCount;
 
     // D.Drive: cluster-based count, priced at Swedish ddDagpris
@@ -3312,7 +3335,7 @@ final safeNoDDrive = List<bool>.generate(
     pickupEveningFirstDay: round.pickupEveningFirstDay,
     trailer: round.trailer,
     totalKm: totalKm,
-    tollableKm: tollableKm, // excludes Swedish km (toll-free)
+    tollableKm: tollableKm, // excludes Swedish and German km (toll-free)
     legKm: safeLegKm,
     ferries: SettingsStore.current.ferries,
     ferryPerLeg: safeFerryPerLeg, // 🔥 nå korrekt
@@ -4173,12 +4196,20 @@ Expanded(
           const Center(child: Text("No entries yet."))
         else
           Expanded(
-            child: ListView.separated(
+            child: ReorderableListView.builder(
+              buildDefaultDragHandles: false,
               itemCount: round.entries.length,
-              separatorBuilder: (_, __) =>
-                  Divider(height: 1, color: cs.outlineVariant),
+              onReorder: (oldIndex, newIndex) {
+                setState(() {
+                  if (newIndex > oldIndex) newIndex--;
+                  final entry = offer.rounds[roundIndex].entries.removeAt(oldIndex);
+                  offer.rounds[roundIndex].entries.insert(newIndex, entry);
+                });
+                _markDirty();
+                CurrentOfferStore.set(offer);
+                _recalcKm();
+              },
               itemBuilder: (_, i) {
-
                 final e = round.entries[i];
                 final km = _kmByIndex[i];
 
@@ -4207,7 +4238,6 @@ Expanded(
                 // Ferry/Bridge: show on Travel row, suppress on city row after Travel.
                 String rawExtra;
                 if (isTravel) {
-                  // For Travel row: try own extra first, else look ahead to next real city.
                   rawExtra = _extraByIndex[i] ?? '';
                   if (rawExtra.isEmpty) {
                     for (int j = i + 1; j < round.entries.length; j++) {
@@ -4219,7 +4249,7 @@ Expanded(
                     }
                   }
                 } else if (travelBefore) {
-                  rawExtra = ''; // Ferry/Bridge already shown on Travel row above.
+                  rawExtra = '';
                 } else {
                   rawExtra = _extraByIndex[i] ?? '';
                 }
@@ -4235,19 +4265,47 @@ Expanded(
                 }
                 final String extraText = extraParts.join(' / ');
 
-                return _RoutesTableRow(
-                  date: _fmtDate(e.date),
-                  route: routeText,
-                  km: km,
-                  extra: extraText,
-                  countryKm: _countryKmByIndex[i] ?? {},
-                  onEdit: () => _editEntry(i),
-                  onDelete: () async {
-                    setState(() {
-                      offer.rounds[roundIndex].entries.removeAt(i);
-                    });
-                    await _recalcKm();
-                  },
+                return Column(
+                  key: ValueKey('entry-$roundIndex-${e.date.millisecondsSinceEpoch}-${e.location}-$i'),
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Row(
+                      children: [
+                        ReorderableDragStartListener(
+                          index: i,
+                          child: MouseRegion(
+                            cursor: SystemMouseCursors.grab,
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 4),
+                              child: Icon(
+                                Icons.drag_handle,
+                                size: 16,
+                                color: cs.onSurfaceVariant.withValues(alpha: 0.4),
+                              ),
+                            ),
+                          ),
+                        ),
+                        Expanded(
+                          child: _RoutesTableRow(
+                            date: _fmtDate(e.date),
+                            route: routeText,
+                            km: km,
+                            extra: extraText,
+                            countryKm: _countryKmByIndex[i] ?? {},
+                            onEdit: () => _editEntry(i),
+                            onDelete: () async {
+                              setState(() {
+                                offer.rounds[roundIndex].entries.removeAt(i);
+                              });
+                              await _recalcKm();
+                            },
+                          ),
+                        ),
+                      ],
+                    ),
+                    if (i < round.entries.length - 1)
+                      Divider(height: 1, color: cs.outlineVariant),
+                  ],
                 );
               },
             ),
@@ -6064,6 +6122,15 @@ class _SendOfferDialogState extends State<_SendOfferDialog> {
       return;
     }
 
+    // Validate all addresses
+    final addresses = to.split(RegExp(r'[,;]')).map((a) => a.trim()).where((a) => a.isNotEmpty).toList();
+    final emailRe = RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$');
+    final invalid = addresses.where((a) => !emailRe.hasMatch(a)).toList();
+    if (invalid.isNotEmpty) {
+      setState(() => _error = 'Invalid address: ${invalid.first}');
+      return;
+    }
+
     setState(() {
       _sending = true;
       _error = null;
@@ -6106,6 +6173,7 @@ class _SendOfferDialogState extends State<_SendOfferDialog> {
               keyboardType: TextInputType.emailAddress,
               decoration: const InputDecoration(
                 labelText: 'To',
+                hintText: 'email@example.com, another@example.com',
                 prefixIcon: Icon(Icons.email_outlined),
               ),
             ),

@@ -31,8 +31,20 @@
 
   <title>booking_desktop</title>
   <link rel="manifest" href="manifest.json">
+  <style>
+    /* Prevent horizontal overscroll / swipe-back gesture */
+    html, body {
+      overscroll-behavior-x: none;
+    }
+  </style>
 </head>
 <body>
+  <script>
+    // Disable browser right-click context menu (Flutter handles its own)
+    document.addEventListener('contextmenu', function(e) {
+      e.preventDefault();
+    });
+  </script>
   <script src="flutter_bootstrap.js" async></script>
 </body>
 </html>

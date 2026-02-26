@@ -298,78 +298,204 @@ class _SettingsPageState extends State<SettingsPage> {
   // ADD USER DIALOG
   // =====================================================
 
+  Future<List<Map<String, dynamic>>> _loadCompanies() async {
+    try {
+      final res = await Supabase.instance.client
+          .from('companies')
+          .select('id, name')
+          .order('name');
+      return List<Map<String, dynamic>>.from(res);
+    } catch (e) {
+      debugPrint('Load companies error: $e');
+      return [];
+    }
+  }
+
   Future<void> _openAddUserDialog() async {
     final emailCtrl = TextEditingController();
     final nameCtrl = TextEditingController();
-    final roleCtrl = TextEditingController(text: "user");
+    String selectedRole = 'user';
+    String? selectedCompanyId;
+    List<Map<String, dynamic>> companies = [];
+
+    // Load companies for management role selection
+    companies = await _loadCompanies();
+
+    if (!mounted) return;
 
     await showDialog(
       context: context,
       builder: (context) {
-        return AlertDialog(
-          title: const Text("Add user"),
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return AlertDialog(
+              title: const Text("Add user"),
 
-          content: SizedBox(
-            width: 400,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
+              content: SizedBox(
+                width: 440,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
 
-                TextField(
-                  controller: nameCtrl,
-                  decoration: const InputDecoration(
-                    labelText: "Name",
-                  ),
+                    TextField(
+                      controller: nameCtrl,
+                      decoration: const InputDecoration(
+                        labelText: "Name",
+                      ),
+                    ),
+
+                    const SizedBox(height: 10),
+
+                    TextField(
+                      controller: emailCtrl,
+                      decoration: const InputDecoration(
+                        labelText: "Email",
+                      ),
+                    ),
+
+                    const SizedBox(height: 10),
+
+                    DropdownButtonFormField<String>(
+                      value: selectedRole,
+                      decoration: const InputDecoration(
+                        labelText: "Role",
+                      ),
+                      items: const [
+                        DropdownMenuItem(value: 'admin', child: Text('admin')),
+                        DropdownMenuItem(value: 'user', child: Text('user')),
+                        DropdownMenuItem(
+                            value: 'management', child: Text('management')),
+                      ],
+                      onChanged: (v) {
+                        setDialogState(() {
+                          selectedRole = v ?? 'user';
+                          if (selectedRole != 'management') {
+                            selectedCompanyId = null;
+                          }
+                        });
+                      },
+                    ),
+
+                    // Company dropdown — only shown for management role
+                    if (selectedRole == 'management') ...[
+                      const SizedBox(height: 10),
+                      DropdownButtonFormField<String>(
+                        value: selectedCompanyId,
+                        decoration: const InputDecoration(
+                          labelText: "Company",
+                          hintText: "Select company",
+                        ),
+                        items: companies
+                            .map((c) => DropdownMenuItem<String>(
+                                  value: c['id'] as String,
+                                  child: Text(c['name'] as String? ?? ''),
+                                ))
+                            .toList(),
+                        onChanged: (v) =>
+                            setDialogState(() => selectedCompanyId = v),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+
+              actions: [
+
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text("Cancel"),
                 ),
 
-                const SizedBox(height: 10),
+                FilledButton(
+                  onPressed: () async {
 
-                TextField(
-                  controller: emailCtrl,
-                  decoration: const InputDecoration(
-                    labelText: "Email",
-                  ),
-                ),
+                    if (selectedRole == 'management' &&
+                        selectedCompanyId == null) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text("Please select a company for management users"),
+                          backgroundColor: Colors.red,
+                        ),
+                      );
+                      return;
+                    }
 
-                const SizedBox(height: 10),
+                    final tempPassword = await _createProfileUser(
+                      name: nameCtrl.text.trim(),
+                      email: emailCtrl.text.trim(),
+                      role: selectedRole,
+                      companyId: selectedRole == 'management'
+                          ? selectedCompanyId
+                          : null,
+                    );
 
-                TextField(
-                  controller: roleCtrl,
-                  decoration: const InputDecoration(
-                    labelText: "Role (admin / user)",
-                  ),
+                    if (!mounted) return;
+
+                    Navigator.pop(context);
+
+                    if (tempPassword != null) {
+                      await showDialog(
+                        context: context,
+                        builder: (ctx) => AlertDialog(
+                          title: const Text("User created"),
+                          content: SizedBox(
+                            width: 420,
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text("Send these login details to ${nameCtrl.text.trim()}:"),
+                                const SizedBox(height: 16),
+                                Container(
+                                  width: double.infinity,
+                                  padding: const EdgeInsets.all(14),
+                                  decoration: BoxDecoration(
+                                    color: Colors.grey.shade100,
+                                    borderRadius: BorderRadius.circular(10),
+                                    border: Border.all(color: Colors.grey.shade300),
+                                  ),
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      SelectableText(
+                                        "Email:     ${emailCtrl.text.trim()}",
+                                        style: const TextStyle(fontFamily: 'monospace'),
+                                      ),
+                                      const SizedBox(height: 4),
+                                      SelectableText(
+                                        "Password:  $tempPassword",
+                                        style: const TextStyle(fontFamily: 'monospace'),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                const SizedBox(height: 10),
+                                const Text(
+                                  "The user should change their password after first login.",
+                                  style: TextStyle(color: Colors.grey, fontSize: 12),
+                                ),
+                              ],
+                            ),
+                          ),
+                          actions: [
+                            FilledButton(
+                              onPressed: () => Navigator.pop(ctx),
+                              child: const Text("OK"),
+                            ),
+                          ],
+                        ),
+                      );
+                    } else {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text("User created")),
+                      );
+                    }
+                  },
+                  child: const Text("Create"),
                 ),
               ],
-            ),
-          ),
-
-          actions: [
-
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text("Cancel"),
-            ),
-
-            FilledButton(
-              onPressed: () async {
-
-                await _createProfileUser(
-                  name: nameCtrl.text.trim(),
-                  email: emailCtrl.text.trim(),
-                  role: roleCtrl.text.trim(),
-                );
-
-                if (!mounted) return;
-
-                Navigator.pop(context);
-
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text("User created")),
-                );
-              },
-              child: const Text("Create"),
-            ),
-          ],
+            );
+          },
         );
       },
     );
@@ -379,49 +505,46 @@ class _SettingsPageState extends State<SettingsPage> {
   // CALL EDGE FUNCTION
   // =====================================================
 
-  Future<void> _createProfileUser({
+  Future<String?> _createProfileUser({
     required String name,
     required String email,
     required String role,
+    String? companyId,
   }) async {
 
     if (name.isEmpty || email.isEmpty) {
       debugPrint("❌ Name or email empty");
-      return;
+      return null;
     }
 
     try {
 
       final supabase = Supabase.instance.client;
 
-      final token =
-          supabase.auth.currentSession?.accessToken;
+      final body = {
+        'name': name,
+        'email': email,
+        'role': role.isEmpty ? 'user' : role,
+        if (companyId != null) 'company_id': companyId,
+      };
 
-      if (token == null) {
-        debugPrint("❌ No auth token (not logged in)");
-        return;
-      }
-final session = supabase.auth.currentSession;
+      debugPrint("Creating user: $body");
 
-debugPrint("SESSION: $session");
       final res = await supabase.functions.invoke(
         'create-user',
-        body: {
-          'name': name,
-          'email': email,
-          'role': role.isEmpty ? 'user' : role,
-        },
-        headers: {
-          'Authorization': 'Bearer $token',
-        },
+        body: body,
       );
 
       debugPrint("✅ Create user result: ${res.data}");
+
+      final data = res.data as Map<String, dynamic>?;
+      return data?['temp_password'] as String?;
 
     } catch (e, st) {
       debugPrint("❌ Create user error:");
       debugPrint(e.toString());
       debugPrint(st.toString());
+      return null;
     }
   }
 

@@ -8,6 +8,7 @@ enum BusType {
   sleeper16,
   sleeper18,
   sleeper12StarRoom,
+  conference,
 }
 
 extension BusTypeLabel on BusType {
@@ -23,6 +24,8 @@ extension BusTypeLabel on BusType {
         return "18-sleeper";
       case BusType.sleeper12StarRoom:
         return "12-sleeper + Star room";
+      case BusType.conference:
+        return "20-50 seats";
     }
   }
 }

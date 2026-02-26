@@ -406,8 +406,7 @@ if (r['ferryPerLeg'] != null) {
       );
     }
 
-    draft.rounds[i].entries
-        .sort((a, b) => a.date.compareTo(b.date));
+    // Order preserved as saved (drag-reorder is authoritative)
   }
 
   if (data['globalBusSlots'] != null) {

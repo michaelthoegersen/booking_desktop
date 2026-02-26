@@ -21,6 +21,7 @@ class RouteCountryAnalyzer {
     'PL',
     'SI',
     'HR',
+    'SE',
   };
 
   double _deg(double d) => d * pi / 180;
@@ -49,14 +50,29 @@ class RouteCountryAnalyzer {
   }
 
   // =============================================================
-  // MAIN
+  // MAIN — encoded polyline
   // =============================================================
   Future<Map<String, double>> kmPerCountry(
     String encodedPolyline,
   ) async {
-    final points =
-        PolylineDecoder.decode(encodedPolyline);
+    final points = PolylineDecoder.decode(encodedPolyline);
+    return _run(points);
+  }
 
+  // =============================================================
+  // MAIN — raw [lat, lon] list (used on web to avoid polyline
+  // encoding/decoding which has bitwise issues in JS)
+  // =============================================================
+  Future<Map<String, double>> kmPerCountryFromPoints(
+    List<List<double>> rawPoints,
+  ) async {
+    final points = rawPoints
+        .map((p) => LatLngPoint(p[0], p[1]))
+        .toList();
+    return _run(points);
+  }
+
+  Future<Map<String, double>> _run(List<LatLngPoint> points) async {
     if (points.length < 2) return {};
 
     final Map<String, double> result = {};
@@ -64,11 +80,10 @@ class RouteCountryAnalyzer {
     final futures = <Future<_SegResult>>[];
 
     for (int i = 0; i < points.length - 1; i += step) {
-      final p1 = points[i];
-      final p2 = points[
-          min(i + step, points.length - 1)];
+      final start = i;
+      final end = min(i + step, points.length - 1);
 
-      futures.add(_processSegment(p1, p2));
+      futures.add(_processSegment(points, start, end));
 
       // Batch for ikke å drepe API
       if (futures.length >= maxParallel) {
@@ -84,22 +99,28 @@ class RouteCountryAnalyzer {
 
   // =============================================================
   // HANDLE ONE SEGMENT
+  // Summer alle konsekutive haversines i segmentet — mye mer
+  // nøyaktig enn bare endpoint-haversine (straight-line underestimerer)
   // =============================================================
   Future<_SegResult> _processSegment(
-    LatLngPoint p1,
-    LatLngPoint p2,
+    List<LatLngPoint> points,
+    int start,
+    int end,
   ) async {
-    final km = _distance(
-      p1.lat,
-      p1.lng,
-      p2.lat,
-      p2.lng,
-    );
+    double km = 0;
+    for (int j = start; j < end; j++) {
+      km += _distance(
+        points[j].lat,
+        points[j].lng,
+        points[j + 1].lat,
+        points[j + 1].lng,
+      );
+    }
 
     final country =
         await _countryService.getCountry(
-      p1.lat,
-      p1.lng,
+      points[start].lat,
+      points[start].lng,
     );
 
     final code = vatCountries.contains(country)

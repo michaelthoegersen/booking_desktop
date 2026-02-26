@@ -243,6 +243,7 @@ class RoutesService {
       'km_at': countryKm['AT'] ?? 0,
       'km_hr': countryKm['HR'] ?? 0,
       'km_si': countryKm['SI'] ?? 0,
+      'km_se': countryKm['SE'] ?? 0,
       'km_other': countryKm['OTHER'] ?? 0,
       'updated_at': DateTime.now().toIso8601String(),
     };

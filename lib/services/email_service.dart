@@ -78,9 +78,15 @@ class EmailService {
     };
     if (attachment != null) payload['attachment'] = attachment;
 
+    const _supabaseAnonKey =
+        'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZxZWZ2Z3Fscm50d2dzY2hrdWdmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjkwNzQxMjAsImV4cCI6MjA4NDY1MDEyMH0.ZamQr1qQRuYnQcy-yKfOr0IZrRJxIb4SP8_USn9uMoU';
+
     final res = await http.post(
       Uri.parse(_edgeFnUrl),
-      headers: {'Content-Type': 'application/json'},
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer $_supabaseAnonKey',
+      },
       body: jsonEncode(payload),
     );
 
@@ -105,12 +111,18 @@ class EmailService {
       'https://graph.microsoft.com/v1.0/users/$_senderEmail/sendMail',
     );
 
+    // Support comma- or semicolon-separated list of recipients
+    final recipients = to
+        .split(RegExp(r'[,;]'))
+        .map((a) => a.trim())
+        .where((a) => a.isNotEmpty)
+        .map((a) => {'emailAddress': {'address': a}})
+        .toList();
+
     final message = <String, dynamic>{
       'subject': subject,
       'body': {'contentType': 'Text', 'content': body},
-      'toRecipients': [
-        {'emailAddress': {'address': to}},
-      ],
+      'toRecipients': recipients,
     };
 
     if (attachment != null) {

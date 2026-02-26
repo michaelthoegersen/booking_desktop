@@ -89,6 +89,7 @@ flutter:
     - assets/pdf/logos/Starcoachlogo.png
     - assets/pdf/logos/LOGOapp.png
     - assets/pdf/logos/TourFlowLogo.png
+    - assets/pdf/logos/TourFlowLogoComplete.png
 
     # Bus images
     - assets/pdf/buses/12_sleeper.png
@@ -102,7 +103,7 @@ flutter:
     - assets/pdf/template_page0.png
 
     # Fonts
-    - assets/fonts/Calibri.ttf
-    - assets/fonts/Calibrib.ttf
+    - assets/fonts/calibri.ttf
+    - assets/fonts/calibrib.ttf
     - assets/fonts/Roboto-Regular.ttf
     - assets/fonts/Roboto-Bold.ttf

@@ -103,20 +103,19 @@ class GoogleRoutesService {
       final rawCoords = geometry['coordinates'] as List?;
       if (rawCoords == null || rawCoords.isEmpty) continue;
 
-      // GeoJSON uses [lon, lat] — convert to [lat, lon] then encode polyline
+      // GeoJSON uses [lon, lat] — store as [lat, lon] raw points, no encoding
       final latLonPoints = rawCoords
-          .map<List<double>>((c) => [
+          .map((c) => [
                 (c[1] as num).toDouble(), // lat
                 (c[0] as num).toDouble(), // lon
               ])
           .toList();
 
-      final polyline = _encodePolyline(latLonPoints);
       final distanceMeters = route['distance'] as num;
 
       parsedRoutes.add({
         'distanceMeters': distanceMeters,
-        'polyline': polyline,
+        'rawPoints': latLonPoints, // List of [lat, lon]
       });
     }
 
@@ -126,29 +125,6 @@ class GoogleRoutesService {
     return {'routes': parsedRoutes};
   }
 
-  /// Encode [lat, lon] pairs as Google Polyline (1e5 precision)
-  String _encodePolyline(List<List<double>> points) {
-    final buf = StringBuffer();
-    int prevLat = 0, prevLng = 0;
-    for (final p in points) {
-      final lat = (p[0] * 1e5).round();
-      final lng = (p[1] * 1e5).round();
-      _encodeVal(buf, lat - prevLat);
-      _encodeVal(buf, lng - prevLng);
-      prevLat = lat;
-      prevLng = lng;
-    }
-    return buf.toString();
-  }
-
-  void _encodeVal(StringBuffer buf, int value) {
-    int v = value < 0 ? ~(value << 1) : (value << 1);
-    while (v >= 0x20) {
-      buf.writeCharCode((0x20 | (v & 0x1f)) + 63);
-      v >>= 5;
-    }
-    buf.writeCharCode(v + 63);
-  }
 
   // ============================================================
   // ROUTE WITH VIA + ALTERNATIVES

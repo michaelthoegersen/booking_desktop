@@ -5,6 +5,7 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 
 import 'pages/login_page.dart';
 import 'widgets/app_shell.dart';
+import 'widgets/mgmt_shell.dart';
 
 import 'pages/dashboard_page.dart';
 import 'pages/new_offer_page.dart';
@@ -19,6 +20,16 @@ import 'pages/issues_page.dart';
 import 'pages/economy_page.dart';
 import 'pages/chat_page.dart';
 import 'pages/archive_page.dart';
+import 'pages/bus_requests_page.dart';
+
+import 'pages/mgmt/mgmt_dashboard_page.dart';
+import 'pages/mgmt/mgmt_tours_page.dart';
+import 'pages/mgmt/mgmt_tour_detail_page.dart';
+import 'pages/mgmt/mgmt_gigs_page.dart';
+import 'pages/mgmt/mgmt_gig_detail_page.dart';
+import 'pages/mgmt/mgmt_people_page.dart';
+import 'pages/mgmt/mgmt_messages_page.dart';
+import 'pages/mgmt/mgmt_settings_page.dart';
 
 import 'state/settings_store.dart';
 import 'ui/css_theme.dart';
@@ -91,13 +102,44 @@ final supabase = Supabase.instance.client;
 
 bool get isLoggedIn => supabase.auth.currentSession != null;
 
+// Cached user role to avoid repeated DB calls on every redirect
+String? _cachedUserRole;
+String? _cachedCompanyId;
+
+Future<void> _loadUserRole() async {
+  final uid = Supabase.instance.client.auth.currentUser?.id;
+  if (uid == null) {
+    _cachedUserRole = null;
+    _cachedCompanyId = null;
+    return;
+  }
+  try {
+    final res = await Supabase.instance.client
+        .from('profiles')
+        .select('role, company_id')
+        .eq('id', uid)
+        .maybeSingle();
+    _cachedUserRole = res?['role'] as String?;
+    _cachedCompanyId = res?['company_id'] as String?;
+  } catch (e) {
+    debugPrint('_loadUserRole error: $e');
+    _cachedUserRole = null;
+    _cachedCompanyId = null;
+  }
+}
+
 
 // ------------------------------------------------------------
 // SUPABASE AUTH REFRESHER
 // ------------------------------------------------------------
 class SupabaseAuthRefresher extends ChangeNotifier {
   SupabaseAuthRefresher() {
-    Supabase.instance.client.auth.onAuthStateChange.listen((_) {
+    Supabase.instance.client.auth.onAuthStateChange.listen((event) {
+      // Clear cached role on auth state change
+      if (event.event == AuthChangeEvent.signedOut) {
+        _cachedUserRole = null;
+        _cachedCompanyId = null;
+      }
       notifyListeners();
     });
   }
@@ -118,18 +160,37 @@ class BookingApp extends StatelessWidget {
       initialLocation: "/",
 
       // --------------------------------------------------
-      // AUTH REDIRECT
+      // AUTH REDIRECT (async for role-based routing)
       // --------------------------------------------------
-      redirect: (context, state) {
+      redirect: (context, state) async {
         final loggedIn = isLoggedIn;
-        final goingToLogin = state.matchedLocation == "/login";
+        final path = state.matchedLocation;
 
-        if (!loggedIn && !goingToLogin) {
-          return "/login";
+        if (!loggedIn && path != '/login') return '/login';
+
+        if (loggedIn && path == '/login') {
+          await _loadUserRole();
+          return _cachedUserRole == 'management' ? '/m' : '/';
         }
 
-        if (loggedIn && goingToLogin) {
-          return "/";
+        // If role not yet loaded but user is logged in, load it
+        if (loggedIn && _cachedUserRole == null) {
+          await _loadUserRole();
+        }
+
+        // Prevent management users from accessing CSS routes
+        if (loggedIn &&
+            _cachedUserRole == 'management' &&
+            !path.startsWith('/m') &&
+            path != '/login') {
+          return '/m';
+        }
+
+        // Prevent non-management users from accessing /m routes
+        if (loggedIn &&
+            _cachedUserRole != 'management' &&
+            path.startsWith('/m')) {
+          return '/';
         }
 
         return null;
@@ -172,7 +233,7 @@ class BookingApp extends StatelessWidget {
           builder: (context, state) => const LoginPage(),
         ),
 
-        // ---------------- APP SHELL ----------------
+        // ---------------- CSS APP SHELL ----------------
         ShellRoute(
           builder: (context, state, child) {
             return AppShell(child: child);
@@ -262,10 +323,59 @@ class BookingApp extends StatelessWidget {
               builder: (context, state) => const ArchivePage(),
             ),
 
+            // ---------------- BUS REQUESTS ----------------
+            GoRoute(
+              path: "/bus-requests",
+              builder: (context, state) => const BusRequestsPage(),
+            ),
+
             // ---------------- GOOGLE TEST ----------------
             GoRoute(
               path: "/google-test",
               builder: (context, state) => const GoogleTestPage(),
+            ),
+          ],
+        ),
+
+        // ---------------- MANAGEMENT SHELL ----------------
+        ShellRoute(
+          builder: (context, state, child) => MgmtShell(child: child),
+          routes: [
+            GoRoute(
+              path: '/m',
+              builder: (_, __) => const MgmtDashboardPage(),
+            ),
+            GoRoute(
+              path: '/m/tours',
+              builder: (_, __) => const MgmtToursPage(),
+            ),
+            GoRoute(
+              path: '/m/tours/:id',
+              builder: (_, s) => MgmtTourDetailPage(
+                tourId: s.pathParameters['id']!,
+              ),
+            ),
+            GoRoute(
+              path: '/m/gigs',
+              builder: (_, __) => const MgmtGigsPage(),
+            ),
+            GoRoute(
+              path: '/m/gigs/:id',
+              builder: (_, s) => MgmtGigDetailPage(
+                gigId: s.pathParameters['id']!,
+              ),
+            ),
+            GoRoute(
+              path: '/m/people',
+              builder: (_, __) => const MgmtPeoplePage(),
+            ),
+            GoRoute(
+              path: '/m/messages',
+              builder: (_, __) => const MgmtMessagesPage(),
+            ),
+            GoRoute(
+              path: '/m/settings',
+              builder: (_, __) => const MgmtSettingsPage(),
             ),
           ],
         ),
