@@ -1,6 +1,8 @@
 import 'dart:convert';
 
 import 'package:flutter/services.dart';
+
+import '../state/settings_store.dart';
 import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
 import 'package:pdf/pdf.dart';
@@ -453,7 +455,7 @@ class RoundSummaryPdfService {
     final kmValue = double.tryParse(
       dDrive.replaceAll(RegExp(r'[^0-9.]'), ''),
     );
-    final showDDrive = dDrive.trim().isNotEmpty && (kmValue == null || kmValue >= 600);
+    final showDDrive = dDrive.trim().isNotEmpty && (kmValue == null || kmValue > SettingsStore.current.dDriveKmThreshold);
 
     return pw.Padding(
       padding: const pw.EdgeInsets.only(left: 40, right: 40, bottom: 12),

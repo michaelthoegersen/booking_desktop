@@ -12,6 +12,7 @@ import '../services/offer_storage_service.dart';
 import '../services/notification_service.dart';
 import '../services/email_service.dart';
 import '../services/round_summary_pdf_service.dart';
+import '../state/settings_store.dart';
 import '../utils/bus_utils.dart';
 
 // ============================================================
@@ -1179,15 +1180,24 @@ List<Widget> buildSegments(
     final noDriver =
         ((first['sjafor'] as String?)?.trim() ?? '').isEmpty;
 
-    const dDriveThreshold = 600.0;
-    final noDDrive = !isManual && chunk.any((r) {
-      final km = double.tryParse(
-              ((r['km'] as String?)?.trim() ?? '')) ??
-          0.0;
-      final excepted = (r['no_ddrive'] as bool?) ?? false;
-      final dDrive = ((r['d_drive'] as String?)?.trim() ?? '');
-      return km >= dDriveThreshold && !excepted && dDrive.isEmpty;
-    });
+    final dDriveThreshold = SettingsStore.current.dDriveKmThreshold;
+    final missingDDriveDates = <String>[];
+    if (!isManual) {
+      for (final r in chunk) {
+        final km = double.tryParse(
+                ((r['km'] as String?)?.trim() ?? '')) ??
+            0.0;
+        final excepted = (r['no_ddrive'] as bool?) ?? false;
+        final dDrive = ((r['d_drive'] as String?)?.trim() ?? '');
+        if (km > dDriveThreshold && !excepted && dDrive.isEmpty) {
+          final d = DateTime.parse(r['dato'] as String);
+          missingDDriveDates.add(
+            '${d.day.toString().padLeft(2, '0')}.${d.month.toString().padLeft(2, '0')}',
+          );
+        }
+      }
+    }
+    final noDDrive = missingDDriveDates.isNotEmpty;
 
     result.add(
       BookingSegment(
@@ -1205,6 +1215,7 @@ List<Widget> buildSegments(
         draftId: first['draft_id'].toString(),
         noDriver: noDriver,
         noDDrive: noDDrive,
+        missingDDriveDates: missingDDriveDates,
         driver: (first['sjafor'] as String?)?.trim().nullIfEmpty,
         venue: (first['venue'] as String?)?.trim().nullIfEmpty,
         isManual: isManual,
@@ -1514,6 +1525,7 @@ class BookingSegment extends StatelessWidget {
   final String draftId;
   final bool noDriver;
   final bool noDDrive;
+  final List<String> missingDDriveDates;
   final String? driver;
   final String? venue;
   final bool isManual;
@@ -1532,6 +1544,7 @@ class BookingSegment extends StatelessWidget {
     required this.draftId,
     this.noDriver = false,
     this.noDDrive = false,
+    this.missingDDriveDates = const [],
     this.driver,
     this.venue,
     this.isManual = false,
@@ -1716,7 +1729,7 @@ class BookingSegment extends StatelessWidget {
                   child: Text(
                     [
                       if (noDriver) 'No driver',
-                      if (noDDrive) 'No D.Drive',
+                      if (noDDrive) 'No D.Drive: ${missingDDriveDates.join(', ')}',
                     ].join(' · '),
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
@@ -1727,49 +1740,6 @@ class BookingSegment extends StatelessWidget {
                   ),
                 ),
               ],
-            ),
-          ],
-          if ((venue ?? '').isNotEmpty) ...[
-            const SizedBox(height: 2),
-            GestureDetector(
-              onDoubleTap: () async {
-                final parent = context.findAncestorStateOfType<_CalendarPageState>();
-                if (parent == null) return;
-                final changed = await showDialog<bool>(
-                  context: context,
-                  builder: (_) => _QuickVenueDialog(
-                    bus: bus,
-                    from: from,
-                    to: to,
-                    initialVenue: venue ?? '',
-                    draftId: draftId,
-                  ),
-                );
-                if (changed == true) {
-                  parent.isMonthView ? parent.loadMonth() : parent.loadWeek();
-                }
-              },
-              child: Row(
-                children: [
-                  const Icon(
-                    Icons.location_on,
-                    size: 10,
-                    color: Colors.white70,
-                  ),
-                  const SizedBox(width: 3),
-                  Expanded(
-                    child: Text(
-                      venue!,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        fontSize: 10,
-                        color: Colors.white70,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
             ),
           ],
         ],
@@ -2714,7 +2684,7 @@ Future<void> load() async {
     final kmVal = double.tryParse(kmStr) ?? 0.0;
     final excepted = (row['no_ddrive'] as bool?) ?? false;
     // Only show field on actual D.Drive days
-    if (kmVal < 600.0 || excepted) return const SizedBox.shrink();
+    if (kmVal <= SettingsStore.current.dDriveKmThreshold || excepted) return const SizedBox.shrink();
     final id = row['id'].toString();
     final ctrl = dDriveCtrls[id];
     if (ctrl == null) return _dayField("D.Drive", dDriveCtrls);
