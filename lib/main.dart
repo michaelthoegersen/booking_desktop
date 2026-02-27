@@ -6,6 +6,7 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'pages/login_page.dart';
 import 'widgets/app_shell.dart';
 import 'widgets/mgmt_shell.dart';
+import 'widgets/crew_shell.dart';
 
 import 'pages/dashboard_page.dart';
 import 'pages/new_offer_page.dart';
@@ -30,6 +31,9 @@ import 'pages/mgmt/mgmt_gig_detail_page.dart';
 import 'pages/mgmt/mgmt_people_page.dart';
 import 'pages/mgmt/mgmt_messages_page.dart';
 import 'pages/mgmt/mgmt_settings_page.dart';
+
+import 'pages/crew/crew_gigs_page.dart';
+import 'pages/crew/crew_gig_detail_page.dart';
 
 import 'state/active_company.dart';
 import 'state/settings_store.dart';
@@ -169,7 +173,9 @@ class BookingApp extends StatelessWidget {
         if (loggedIn && path == '/login') {
           await _loadUserRole();
           final mode = activeCompanyNotifier.value?.appMode ?? 'css';
-          return mode == 'management' ? '/m' : '/';
+          if (mode == 'management') return '/m';
+          if (mode == 'crew') return '/c';
+          return '/';
         }
 
         // If role not yet loaded but user is logged in, load it
@@ -185,8 +191,14 @@ class BookingApp extends StatelessWidget {
           return '/m';
         }
 
+        if (loggedIn && mode == 'crew' &&
+            !path.startsWith('/c') &&
+            path != '/login') {
+          return '/c';
+        }
+
         if (loggedIn && mode == 'css' &&
-            path.startsWith('/m')) {
+            (path.startsWith('/m') || path.startsWith('/c'))) {
           return '/';
         }
 
@@ -381,6 +393,23 @@ class BookingApp extends StatelessWidget {
             GoRoute(
               path: '/m/settings',
               builder: (_, __) => const MgmtSettingsPage(),
+            ),
+          ],
+        ),
+
+        // ---------------- CREW SHELL ----------------
+        ShellRoute(
+          builder: (context, state, child) => CrewShell(child: child),
+          routes: [
+            GoRoute(
+              path: '/c',
+              builder: (_, __) => const CrewGigsPage(),
+            ),
+            GoRoute(
+              path: '/c/gigs/:id',
+              builder: (_, s) => CrewGigDetailPage(
+                gigId: s.pathParameters['id']!,
+              ),
             ),
           ],
         ),

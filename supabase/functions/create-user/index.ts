@@ -98,6 +98,24 @@ Deno.serve(async (req) => {
     const newUser = await createRes.json();
     const userId = newUser.id as string;
 
+    // --- Explicitly set password (admin create doesn't always hash correctly) ---
+    const pwRes = await fetch(
+      `${supabaseUrl}/auth/v1/admin/users/${userId}`,
+      {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          apikey: serviceKey,
+          Authorization: `Bearer ${serviceKey}`,
+        },
+        body: JSON.stringify({ password: tempPassword }),
+      },
+    );
+
+    if (!pwRes.ok) {
+      console.error('Password update error:', await pwRes.text());
+    }
+
     // --- Upsert profile with role and company_id ---
     const profileData: Record<string, unknown> = {
       id: userId,
@@ -146,6 +164,9 @@ Deno.serve(async (req) => {
             user_id: userId,
             company_id,
             role: userRole,
+            app_mode: (userRole === 'management' || userRole === 'admin')
+              ? 'management'
+              : 'crew',
           }),
         },
       );

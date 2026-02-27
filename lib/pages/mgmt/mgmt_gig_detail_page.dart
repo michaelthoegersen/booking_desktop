@@ -7,6 +7,7 @@ import 'package:printing/printing.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../ui/css_theme.dart';
+import '../../state/active_company.dart';
 import '../../services/intensjonsavtale_pdf_service.dart';
 import '../../services/email_service.dart';
 
@@ -28,8 +29,9 @@ class _MgmtGigDetailPageState extends State<MgmtGigDetailPage>
   Map<String, dynamic>? _gig;
 
   List<Map<String, dynamic>> _shows = [];
-  List<Map<String, dynamic>> _crew = [];
   List<Map<String, dynamic>> _showTypes = [];
+  List<Map<String, dynamic>> _companyMembers = []; // {user_id, name, status}
+
 
   @override
   void initState() {
@@ -69,19 +71,43 @@ class _MgmtGigDetailPageState extends State<MgmtGigDetailPage>
           .order('sort_order');
       _shows = List<Map<String, dynamic>>.from(shows);
 
-      final crew = await _sb
-          .from('gig_crew')
-          .select('*')
-          .eq('gig_id', widget.gigId)
-          .order('sort_order');
-      _crew = List<Map<String, dynamic>>.from(crew);
-
       final types = await _sb
           .from('show_types')
           .select('*')
           .eq('active', true)
           .order('sort_order');
       _showTypes = List<Map<String, dynamic>>.from(types);
+
+      // Fetch team members from profiles (same source as Settings)
+      final companyId = _gig?['company_id'] as String? ??
+          activeCompanyNotifier.value?.id;
+      if (companyId != null) {
+        final members = await _sb
+            .from('profiles')
+            .select('id, name, role')
+            .eq('company_id', companyId);
+
+        final avail = await _sb
+            .from('gig_availability')
+            .select('user_id, status')
+            .eq('gig_id', widget.gigId);
+        final availMap = <String, String>{};
+        for (final a in (avail as List)) {
+          availMap[a['user_id'] as String] = a['status'] as String;
+        }
+
+        _companyMembers = (members as List).map((m) {
+          final uid = m['id'] as String;
+          return {
+            'user_id': uid,
+            'name': m['name'] as String? ?? '',
+            'role': m['role'] as String? ?? 'bruker',
+            'status': availMap[uid] ?? 'pending',
+          };
+        }).toList();
+        _companyMembers.sort((a, b) =>
+            (a['name'] as String).compareTo(b['name'] as String));
+      }
     } catch (e) {
       debugPrint('Gig detail load error: $e');
     }
@@ -608,100 +634,6 @@ class _MgmtGigDetailPageState extends State<MgmtGigDetailPage>
     }
   }
 
-  // -------------------------------------------------------------------------
-  // CREW
-  // -------------------------------------------------------------------------
-
-  Future<void> _addCrewMember() async {
-    final nameCtrl = TextEditingController();
-    String role = 'skarp';
-
-    await showDialog(
-      context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setS) => AlertDialog(
-          title: const Text('Add Crew Member'),
-          content: SizedBox(
-            width: 360,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                _tf(nameCtrl, 'Name'),
-                const SizedBox(height: 10),
-                DropdownButtonFormField<String>(
-                  value: role,
-                  decoration: const InputDecoration(labelText: 'Role'),
-                  items: ['skarp', 'bass', 'danser', 'annet']
-                      .map((r) => DropdownMenuItem(
-                            value: r,
-                            child: Text(_roleLabel(r)),
-                          ))
-                      .toList(),
-                  onChanged: (v) => setS(() => role = v ?? role),
-                ),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('Cancel'),
-            ),
-            FilledButton(
-              onPressed: () async {
-                if (nameCtrl.text.trim().isEmpty) return;
-                try {
-                  await _sb.from('gig_crew').insert({
-                    'gig_id': widget.gigId,
-                    'name': nameCtrl.text.trim(),
-                    'role': role,
-                    'confirmed': false,
-                    'sort_order': _crew.length,
-                  });
-                  if (ctx.mounted) Navigator.pop(ctx);
-                  await _load();
-                } catch (e) {
-                  debugPrint('Add crew error: $e');
-                }
-              },
-              child: const Text('Add'),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Future<void> _toggleCrewConfirmed(String crewId, bool current) async {
-    try {
-      await _sb
-          .from('gig_crew')
-          .update({'confirmed': !current})
-          .eq('id', crewId);
-      await _load();
-    } catch (e) {
-      debugPrint('Toggle crew error: $e');
-    }
-  }
-
-  Future<void> _deleteCrewMember(String crewId) async {
-    try {
-      await _sb.from('gig_crew').delete().eq('id', crewId);
-      await _load();
-    } catch (e) {
-      debugPrint('Delete crew error: $e');
-    }
-  }
-
-  String _roleLabel(String role) {
-    const labels = {
-      'skarp': 'Skarp',
-      'bass': 'Bass',
-      'danser': 'Danser',
-      'annet': 'Annet',
-    };
-    return labels[role] ?? role;
-  }
 
   // -------------------------------------------------------------------------
   // PDF / EMAIL
@@ -1000,11 +932,7 @@ class _MgmtGigDetailPageState extends State<MgmtGigDetailPage>
                             ),
                             const SizedBox(height: 12),
                             _CrewTab(
-                              crew: _crew,
-                              onAdd: _addCrewMember,
-                              onToggle: _toggleCrewConfirmed,
-                              onDelete: _deleteCrewMember,
-                              roleLabel: _roleLabel,
+                              companyMembers: _companyMembers,
                             ),
                           ],
                         ),
@@ -1623,141 +1551,98 @@ class _PriceRow extends StatelessWidget {
 // ===========================================================================
 
 class _CrewTab extends StatelessWidget {
-  final List<Map<String, dynamic>> crew;
-  final VoidCallback onAdd;
-  final Future<void> Function(String id, bool current) onToggle;
-  final Future<void> Function(String id) onDelete;
-  final String Function(String role) roleLabel;
+  final List<Map<String, dynamic>> companyMembers;
 
   const _CrewTab({
-    required this.crew,
-    required this.onAdd,
-    required this.onToggle,
-    required this.onDelete,
-    required this.roleLabel,
+    required this.companyMembers,
   });
 
   @override
   Widget build(BuildContext context) {
-    final confirmed = crew.where((c) => c['confirmed'] == true).length;
-    final total = crew.length;
-    final progress = total > 0 ? confirmed / total : 0.0;
+    // Availability counts
+    final availCount = companyMembers
+        .where((m) => m['status'] == 'available')
+        .length;
+    final unavailCount = companyMembers
+        .where((m) => m['status'] == 'unavailable')
+        .length;
+    final pendingCount = companyMembers
+        .where((m) => m['status'] == 'pending')
+        .length;
 
     return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Header + add button
-          Row(
-            children: [
-              Text('Crew', style: Theme.of(context).textTheme.titleMedium),
-              const Spacer(),
-              FilledButton.icon(
-                onPressed: onAdd,
-                icon: const Icon(Icons.person_add, size: 18),
-                label: const Text('Add member'),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
+          Text('Tilgjengelighet',
+              style: Theme.of(context).textTheme.titleMedium),
+          const SizedBox(height: 8),
 
-          // Progress
-          if (total > 0) ...[
+          if (companyMembers.isEmpty)
+            const Text('Ingen medlemmer lagt til ennå.',
+                style: TextStyle(color: CssTheme.textMuted))
+          else ...[
             Row(
               children: [
-                Text(
-                  '$confirmed / $total bekreftet',
-                  style: const TextStyle(
-                    fontWeight: FontWeight.w700,
-                    color: CssTheme.textMuted,
-                  ),
-                ),
+                _availBadge(Icons.check_circle, Colors.green,
+                    '$availCount kan'),
+                const SizedBox(width: 12),
+                _availBadge(Icons.cancel, Colors.red,
+                    '$unavailCount kan ikke'),
+                const SizedBox(width: 12),
+                _availBadge(Icons.help_outline, Colors.grey,
+                    '$pendingCount ikke svart'),
               ],
             ),
-            const SizedBox(height: 6),
-            ClipRRect(
-              borderRadius: BorderRadius.circular(999),
-              child: LinearProgressIndicator(
-                value: progress,
-                minHeight: 8,
-                backgroundColor: CssTheme.surface2,
-                valueColor:
-                    const AlwaysStoppedAnimation<Color>(Colors.green),
-              ),
-            ),
-            const SizedBox(height: 16),
-          ],
-
-          // Crew list
-          if (crew.isEmpty)
-            const Text('No crew members yet.',
-                style: TextStyle(color: CssTheme.textMuted))
-          else
+            const SizedBox(height: 12),
             Container(
               decoration: BoxDecoration(
                 border: Border.all(color: CssTheme.outline),
                 borderRadius: BorderRadius.circular(12),
               ),
               child: Column(
-                children: crew.asMap().entries.map((entry) {
+                children: companyMembers.asMap().entries.map((entry) {
                   final i = entry.key;
-                  final member = entry.value;
-                  final isLast = i == crew.length - 1;
-                  final isConfirmed = member['confirmed'] == true;
+                  final m = entry.value;
+                  final isLast = i == companyMembers.length - 1;
+
+                  IconData statusIcon;
+                  Color statusColor;
+                  switch (m['status'] as String?) {
+                    case 'available':
+                      statusIcon = Icons.check_circle;
+                      statusColor = Colors.green;
+                      break;
+                    case 'unavailable':
+                      statusIcon = Icons.cancel;
+                      statusColor = Colors.red;
+                      break;
+                    default:
+                      statusIcon = Icons.help_outline;
+                      statusColor = Colors.grey;
+                  }
 
                   return Container(
                     padding: const EdgeInsets.symmetric(
                         horizontal: 12, vertical: 10),
                     decoration: BoxDecoration(
-                      color: isConfirmed
-                          ? Colors.green.withOpacity(0.05)
-                          : null,
                       border: isLast
                           ? null
                           : const Border(
                               bottom:
                                   BorderSide(color: CssTheme.outline)),
-                      borderRadius: isLast
-                          ? const BorderRadius.vertical(
-                              bottom: Radius.circular(12))
-                          : null,
                     ),
                     child: Row(
                       children: [
-                        // Checkbox
-                        GestureDetector(
-                          onTap: () => onToggle(
-                              member['id'] as String, isConfirmed),
-                          child: Container(
-                            width: 24,
-                            height: 24,
-                            decoration: BoxDecoration(
-                              color: isConfirmed
-                                  ? Colors.green
-                                  : Colors.transparent,
-                              borderRadius: BorderRadius.circular(6),
-                              border: Border.all(
-                                color: isConfirmed
-                                    ? Colors.green
-                                    : CssTheme.outline,
-                                width: 2,
-                              ),
-                            ),
-                            child: isConfirmed
-                                ? const Icon(Icons.check,
-                                    color: Colors.white, size: 16)
-                                : null,
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        // Avatar
                         CircleAvatar(
                           radius: 16,
                           backgroundColor: CssTheme.surface2,
                           child: Text(
-                            (member['name'] as String? ?? '?')
-                                .characters
-                                .first
-                                .toUpperCase(),
+                            (m['name'] as String? ?? '?').isNotEmpty
+                                ? (m['name'] as String)
+                                    .characters
+                                    .first
+                                    .toUpperCase()
+                                : '?',
                             style: const TextStyle(
                                 fontWeight: FontWeight.w900,
                                 fontSize: 14),
@@ -1765,40 +1650,40 @@ class _CrewTab extends StatelessWidget {
                         ),
                         const SizedBox(width: 10),
                         Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                member['name'] as String? ?? '',
-                                style: const TextStyle(
-                                    fontWeight: FontWeight.w700),
-                              ),
-                              if (member['role'] != null)
-                                Text(
-                                  roleLabel(member['role'] as String),
-                                  style: const TextStyle(
-                                    fontSize: 12,
-                                    color: CssTheme.textMuted,
-                                  ),
-                                ),
-                            ],
+                          child: Text(
+                            (m['name'] as String?) ?? 'Ukjent',
+                            style: const TextStyle(
+                                fontWeight: FontWeight.w700),
                           ),
                         ),
-                        // Delete
-                        IconButton(
-                          icon: const Icon(Icons.close, size: 16),
-                          color: Colors.grey,
-                          onPressed: () =>
-                              onDelete(member['id'] as String),
-                          tooltip: 'Remove',
-                        ),
+                        Icon(statusIcon,
+                            color: statusColor, size: 22),
                       ],
                     ),
                   );
                 }).toList(),
               ),
             ),
+          ],
         ],
+    );
+  }
+
+  Widget _availBadge(IconData icon, Color color, String label) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, color: color, size: 16),
+        const SizedBox(width: 4),
+        Text(
+          label,
+          style: TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.w700,
+            color: color,
+          ),
+        ),
+      ],
     );
   }
 }
