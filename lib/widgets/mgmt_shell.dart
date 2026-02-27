@@ -387,9 +387,9 @@ class _MgmtSideNavState extends State<_MgmtSideNav> {
                 child: Image(
                   image: const ResizeImage(
                     AssetImage("assets/pdf/logos/TourFlowLogoComplete.png"),
-                    width: 900,
+                    width: 500,
                   ),
-                  height: 150,
+                  height: 110,
                   fit: BoxFit.contain,
                   filterQuality: FilterQuality.medium,
                   errorBuilder: (context, error, stack) {
