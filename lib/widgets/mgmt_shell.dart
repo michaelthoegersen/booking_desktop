@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../pages/mgmt/mgmt_settings_page.dart' show companyFlagsNotifier;
+import '../state/active_company.dart';
 import '../ui/css_theme.dart';
 
 /// Notifier so the sidebar badge updates immediately after marking messages read.
@@ -53,15 +54,25 @@ class _MgmtTopBar extends StatefulWidget {
 
 class _MgmtTopBarState extends State<_MgmtTopBar> {
   String? _userName;
-  String? _companyName;
 
   @override
   void initState() {
     super.initState();
-    _load();
+    activeCompanyNotifier.addListener(_onCompanyChanged);
+    _loadUserName();
   }
 
-  Future<void> _load() async {
+  @override
+  void dispose() {
+    activeCompanyNotifier.removeListener(_onCompanyChanged);
+    super.dispose();
+  }
+
+  void _onCompanyChanged() {
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _loadUserName() async {
     final sb = Supabase.instance.client;
     final user = sb.auth.currentUser;
     if (user == null) return;
@@ -69,28 +80,80 @@ class _MgmtTopBarState extends State<_MgmtTopBar> {
     try {
       final profile = await sb
           .from('profiles')
-          .select('name, company_id')
+          .select('name')
           .eq('id', user.id)
           .maybeSingle();
-
-      String? companyName;
-      if (profile?['company_id'] != null) {
-        final company = await sb
-            .from('companies')
-            .select('name')
-            .eq('id', profile!['company_id'])
-            .maybeSingle();
-        companyName = company?['name'] as String?;
-      }
 
       if (!mounted) return;
       setState(() {
         _userName = profile?['name'] as String?;
-        _companyName = companyName;
       });
     } catch (e) {
       debugPrint('MgmtTopBar load error: $e');
     }
+  }
+
+  Widget _buildCompanySwitcher() {
+    final active = activeCompanyNotifier.value;
+    final all = activeCompanyNotifier.companies;
+
+    if (active == null) return const SizedBox.shrink();
+
+    // Single company — just show the name
+    if (all.length <= 1) {
+      return Text(
+        active.name,
+        style: const TextStyle(
+          fontSize: 14,
+          fontWeight: FontWeight.w600,
+          color: Colors.white,
+        ),
+      );
+    }
+
+    // Multiple companies — show dropdown
+    return PopupMenuButton<String>(
+      tooltip: 'Switch company',
+      onSelected: (id) => activeCompanyNotifier.switchTo(id),
+      itemBuilder: (_) => all
+          .map((c) => PopupMenuItem(
+                value: c.id,
+                child: Row(
+                  children: [
+                    if (c.id == active.id)
+                      const Icon(Icons.check, size: 16)
+                    else
+                      const SizedBox(width: 16),
+                    const SizedBox(width: 8),
+                    Text(c.name),
+                  ],
+                ),
+              ))
+          .toList(),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: Colors.white10,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: Colors.white24),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              active.name,
+              style: const TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+                color: Colors.white,
+              ),
+            ),
+            const SizedBox(width: 4),
+            const Icon(Icons.unfold_more, size: 16, color: Colors.white70),
+          ],
+        ),
+      ),
+    );
   }
 
   @override
@@ -110,9 +173,9 @@ class _MgmtTopBarState extends State<_MgmtTopBar> {
       child: Row(
         children: [
           RichText(
-            text: TextSpan(
+            text: const TextSpan(
               children: [
-                const TextSpan(
+                TextSpan(
                   text: "TourFlow",
                   style: TextStyle(
                     fontSize: 22,
@@ -120,15 +183,13 @@ class _MgmtTopBarState extends State<_MgmtTopBar> {
                     color: Colors.white,
                   ),
                 ),
-                const TextSpan(
+                TextSpan(
                   text: "  —  ",
                   style: TextStyle(fontSize: 16, color: Colors.white70),
                 ),
                 TextSpan(
-                  text: _companyName != null
-                      ? 'Management · $_companyName'
-                      : 'Management',
-                  style: const TextStyle(
+                  text: 'Management',
+                  style: TextStyle(
                     fontSize: 14,
                     fontWeight: FontWeight.w500,
                     color: Colors.white70,
@@ -137,6 +198,8 @@ class _MgmtTopBarState extends State<_MgmtTopBar> {
               ],
             ),
           ),
+          const SizedBox(width: 12),
+          _buildCompanySwitcher(),
           const Spacer(),
           PopupMenuButton<String>(
             tooltip: "Account",
@@ -231,6 +294,7 @@ class _MgmtSideNavState extends State<_MgmtSideNav> {
     _loadUnreadMessages();
     companyFlagsNotifier.addListener(_onFlagsChanged);
     mgmtUnreadNotifier.addListener(_loadUnreadMessages);
+    activeCompanyNotifier.addListener(_onCompanyChanged);
     _channel = _sb
         .channel('mgmt-sidenav-badges')
         .onPostgresChanges(
@@ -249,9 +313,15 @@ class _MgmtSideNavState extends State<_MgmtSideNav> {
   void dispose() {
     companyFlagsNotifier.removeListener(_onFlagsChanged);
     mgmtUnreadNotifier.removeListener(_loadUnreadMessages);
+    activeCompanyNotifier.removeListener(_onCompanyChanged);
     _channel?.unsubscribe();
     _pollTimer?.cancel();
     super.dispose();
+  }
+
+  void _onCompanyChanged() {
+    _loadFlags();
+    _loadUnreadMessages();
   }
 
   Future<void> _loadUnreadMessages() async {
@@ -276,17 +346,9 @@ class _MgmtSideNavState extends State<_MgmtSideNav> {
 
   Future<void> _loadFlags() async {
     try {
-      final sb = Supabase.instance.client;
-      final uid = sb.auth.currentUser?.id;
-      if (uid == null) return;
-      final profile = await sb
-          .from('profiles')
-          .select('company_id')
-          .eq('id', uid)
-          .maybeSingle();
-      final companyId = profile?['company_id'] as String?;
+      final companyId = activeCompanyNotifier.value?.id;
       if (companyId == null) return;
-      final company = await sb
+      final company = await Supabase.instance.client
           .from('companies')
           .select('show_tours')
           .eq('id', companyId)

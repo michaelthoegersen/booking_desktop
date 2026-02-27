@@ -90,6 +90,7 @@ flutter:
     - assets/pdf/logos/LOGOapp.png
     - assets/pdf/logos/TourFlowLogo.png
     - assets/pdf/logos/TourFlowLogoComplete.png
+    - assets/pdf/logos/CompleteDrumsWhite.png
 
     # Bus images
     - assets/pdf/buses/12_sleeper.png

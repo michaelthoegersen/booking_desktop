@@ -526,6 +526,7 @@ class _SideNavState extends State<_SideNav> {
   int _unseenCount = 0;
   int _unreadChatCount = 0;
   int _pendingBusRequests = 0;
+  bool _showBusRequests = true;
   RealtimeChannel? _channel;
   Timer? _pollTimer;
 
@@ -535,6 +536,7 @@ class _SideNavState extends State<_SideNav> {
     _loadUnseenCount();
     _loadUnreadChatCount();
     _loadPendingBusRequests();
+    _loadBusRequestsFlag();
     _subscribeRealtime();
     ChatService.readEventNotifier.addListener(_loadUnreadChatCount);
     busRequestsBadgeNotifier.addListener(_onBusRequestBadgeChanged);
@@ -570,6 +572,30 @@ class _SideNavState extends State<_SideNav> {
       if (mounted) setState(() => _pendingBusRequests = (res as List).length);
     } catch (e) {
       debugPrint('Bus requests badge error: $e');
+    }
+  }
+
+  Future<void> _loadBusRequestsFlag() async {
+    try {
+      final uid = _supabase.auth.currentUser?.id;
+      if (uid == null) return;
+      final profile = await _supabase
+          .from('profiles')
+          .select('company_id')
+          .eq('id', uid)
+          .maybeSingle();
+      final companyId = profile?['company_id'] as String?;
+      if (companyId == null) return;
+      final company = await _supabase
+          .from('companies')
+          .select('show_bus_requests')
+          .eq('id', companyId)
+          .maybeSingle();
+      if (mounted) {
+        setState(() => _showBusRequests = company?['show_bus_requests'] != false);
+      }
+    } catch (e) {
+      debugPrint('Bus requests flag error: $e');
     }
   }
 
@@ -745,6 +771,7 @@ class _SideNavState extends State<_SideNav> {
                       overrideActiveRoute: widget.overrideActiveRoute,
                     ),
 
+                    if (_showBusRequests)
                     _NavItem(
                       icon: Icons.directions_bus_rounded,
                       label: "Bus Requests",

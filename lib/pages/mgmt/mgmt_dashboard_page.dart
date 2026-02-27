@@ -3,6 +3,7 @@ import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../../state/active_company.dart';
 import '../../ui/css_theme.dart';
 
 class MgmtDashboardPage extends StatefulWidget {
@@ -17,7 +18,9 @@ class _MgmtDashboardPageState extends State<MgmtDashboardPage> {
 
   bool _loading = true;
   String? _userName;
-  String? _companyId;
+  String? get _companyId => activeCompanyNotifier.value?.id;
+  bool _showTours = true;
+  bool _showBusRequests = true;
 
   // Combined upcoming events: management_shows (tour-based) + gigs
   List<Map<String, dynamic>> _upcomingEvents = [];
@@ -27,8 +30,17 @@ class _MgmtDashboardPageState extends State<MgmtDashboardPage> {
   @override
   void initState() {
     super.initState();
+    activeCompanyNotifier.addListener(_onCompanyChanged);
     _load();
   }
+
+  @override
+  void dispose() {
+    activeCompanyNotifier.removeListener(_onCompanyChanged);
+    super.dispose();
+  }
+
+  void _onCompanyChanged() => _load();
 
   Future<void> _load() async {
     setState(() => _loading = true);
@@ -36,47 +48,56 @@ class _MgmtDashboardPageState extends State<MgmtDashboardPage> {
       final uid = _sb.auth.currentUser?.id;
       if (uid == null) return;
 
+      // Load user name from profile (company comes from notifier)
       final profile = await _sb
           .from('profiles')
-          .select('name, company_id')
+          .select('name')
           .eq('id', uid)
           .maybeSingle();
-
       _userName = profile?['name'] as String?;
-      _companyId = profile?['company_id'] as String?;
 
       if (_companyId == null) {
         setState(() => _loading = false);
         return;
       }
 
+      // Load feature flags
+      final company = await _sb
+          .from('companies')
+          .select('show_tours, show_bus_requests')
+          .eq('id', _companyId!)
+          .maybeSingle();
+      _showTours = company?['show_tours'] != false;
+      _showBusRequests = company?['show_bus_requests'] != false;
+
       final now = DateTime.now();
       final in30 = now.add(const Duration(days: 30));
       final fmt = DateFormat('yyyy-MM-dd');
 
       // Upcoming tour shows (management_shows) in next 30 days
-      final tourIds = await _sb
-          .from('management_tours')
-          .select('id')
-          .eq('company_id', _companyId!);
-      final ids = (tourIds as List).map((t) => t['id'] as String).toList();
-
       final List<Map<String, dynamic>> tourShows = [];
-      if (ids.isNotEmpty) {
-        final shows = await _sb
-            .from('management_shows')
-            .select('*, management_tours!inner(name, artist)')
-            .inFilter('tour_id', ids)
-            .gte('date', fmt.format(now))
-            .lte('date', fmt.format(in30))
-            .neq('status', 'cancelled')
-            .order('date');
-        // Normalize to common format: add _source and _sortDate
-        for (final s in (shows as List)) {
-          final m = Map<String, dynamic>.from(s as Map);
-          m['_source'] = 'tour_show';
-          m['_sortDate'] = m['date'] as String? ?? '';
-          tourShows.add(m);
+      if (_showTours) {
+        final tourIds = await _sb
+            .from('management_tours')
+            .select('id')
+            .eq('company_id', _companyId!);
+        final ids = (tourIds as List).map((t) => t['id'] as String).toList();
+
+        if (ids.isNotEmpty) {
+          final shows = await _sb
+              .from('management_shows')
+              .select('*, management_tours!inner(name, artist)')
+              .inFilter('tour_id', ids)
+              .gte('date', fmt.format(now))
+              .lte('date', fmt.format(in30))
+              .neq('status', 'cancelled')
+              .order('date');
+          for (final s in (shows as List)) {
+            final m = Map<String, dynamic>.from(s as Map);
+            m['_source'] = 'tour_show';
+            m['_sortDate'] = m['date'] as String? ?? '';
+            tourShows.add(m);
+          }
         }
       }
 
@@ -103,22 +124,30 @@ class _MgmtDashboardPageState extends State<MgmtDashboardPage> {
       _upcomingEvents = all;
 
       // Active tours
-      final activeTours = await _sb
-          .from('management_tours')
-          .select('*')
-          .eq('company_id', _companyId!)
-          .eq('status', 'active')
-          .order('tour_start');
-      _activeTours = List<Map<String, dynamic>>.from(activeTours);
+      if (_showTours) {
+        final activeTours = await _sb
+            .from('management_tours')
+            .select('*')
+            .eq('company_id', _companyId!)
+            .eq('status', 'active')
+            .order('tour_start');
+        _activeTours = List<Map<String, dynamic>>.from(activeTours);
+      } else {
+        _activeTours = [];
+      }
 
       // Pending bus requests
-      final pending = await _sb
-          .from('bus_requests')
-          .select('*, management_tours(name, artist)')
-          .eq('company_id', _companyId!)
-          .eq('status', 'pending')
-          .order('created_at', ascending: false);
-      _pendingBusRequests = List<Map<String, dynamic>>.from(pending);
+      if (_showBusRequests) {
+        final pending = await _sb
+            .from('bus_requests')
+            .select('*, management_tours(name, artist)')
+            .eq('company_id', _companyId!)
+            .eq('status', 'pending')
+            .order('created_at', ascending: false);
+        _pendingBusRequests = List<Map<String, dynamic>>.from(pending);
+      } else {
+        _pendingBusRequests = [];
+      }
 
     } catch (e) {
       debugPrint('Dashboard load error: $e');
@@ -172,46 +201,50 @@ class _MgmtDashboardPageState extends State<MgmtDashboardPage> {
                   else
                     ..._upcomingEvents.map((event) => _EventCard(event: event)),
 
-                  const SizedBox(height: 24),
+                  if (_showTours) ...[
+                    const SizedBox(height: 24),
 
-                  // Active tours
-                  _SectionHeader(
-                    title: 'Active Tours',
-                    count: _activeTours.length,
-                    action: TextButton(
-                      onPressed: () => context.go('/m/tours'),
-                      child: const Text('View all'),
+                    // Active tours
+                    _SectionHeader(
+                      title: 'Active Tours',
+                      count: _activeTours.length,
+                      action: TextButton(
+                        onPressed: () => context.go('/m/tours'),
+                        child: const Text('View all'),
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 12),
-                  if (_activeTours.isEmpty)
-                    _EmptyCard(message: 'No active tours')
-                  else
-                    Wrap(
-                      spacing: 12,
-                      runSpacing: 12,
-                      children: _activeTours
-                          .map((t) => _TourCard(
-                                tour: t,
-                                onTap: () =>
-                                    context.go('/m/tours/${t['id']}'),
-                              ))
-                          .toList(),
+                    const SizedBox(height: 12),
+                    if (_activeTours.isEmpty)
+                      _EmptyCard(message: 'No active tours')
+                    else
+                      Wrap(
+                        spacing: 12,
+                        runSpacing: 12,
+                        children: _activeTours
+                            .map((t) => _TourCard(
+                                  tour: t,
+                                  onTap: () =>
+                                      context.go('/m/tours/${t['id']}'),
+                                ))
+                            .toList(),
+                      ),
+                  ],
+
+                  if (_showBusRequests) ...[
+                    const SizedBox(height: 24),
+
+                    // Pending bus requests
+                    _SectionHeader(
+                      title: 'Pending Bus Requests',
+                      count: _pendingBusRequests.length,
                     ),
-
-                  const SizedBox(height: 24),
-
-                  // Pending bus requests
-                  _SectionHeader(
-                    title: 'Pending Bus Requests',
-                    count: _pendingBusRequests.length,
-                  ),
-                  const SizedBox(height: 12),
-                  if (_pendingBusRequests.isEmpty)
-                    _EmptyCard(message: 'No pending bus requests')
-                  else
-                    ..._pendingBusRequests
-                        .map((r) => _BusRequestCard(request: r)),
+                    const SizedBox(height: 12),
+                    if (_pendingBusRequests.isEmpty)
+                      _EmptyCard(message: 'No pending bus requests')
+                    else
+                      ..._pendingBusRequests
+                          .map((r) => _BusRequestCard(request: r)),
+                  ],
 
                   const SizedBox(height: 24),
                 ],
@@ -329,9 +362,14 @@ class _EventCard extends StatelessWidget {
       final type = event['type'] as String? ?? 'gig';
       final firma = event['customer_firma'] as String? ?? '';
       final custName = event['customer_name'] as String? ?? '';
-      title = [if (venue.isNotEmpty) venue, if (city.isNotEmpty) city].join(', ');
-      if (title.isEmpty) title = type == 'rehearsal' ? 'Øvelse' : 'Gig';
-      subtitle = [firma, custName].where((s) => s.isNotEmpty).join(' — ');
+      if (type == 'rehearsal') {
+        title = 'Øvelse';
+        subtitle = [venue, city].where((s) => s.isNotEmpty).join(' · ');
+      } else {
+        title = [if (venue.isNotEmpty) venue, if (city.isNotEmpty) city].join(', ');
+        if (title.isEmpty) title = 'Gig';
+        subtitle = [firma, custName].where((s) => s.isNotEmpty).join(' — ');
+      }
     } else {
       final tour = event['management_tours'] as Map<String, dynamic>?;
       final tourName = tour?['name'] as String? ?? '';
@@ -426,7 +464,8 @@ class _EventCard extends StatelessWidget {
               ),
               const SizedBox(width: 8),
             ],
-            _StatusBadge(status: status),
+            if (gigType != 'rehearsal')
+              _StatusBadge(status: status),
           ],
         ),
       ),

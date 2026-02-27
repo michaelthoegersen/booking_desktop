@@ -20,7 +20,7 @@ class MgmtGigDetailPage extends StatefulWidget {
 }
 
 class _MgmtGigDetailPageState extends State<MgmtGigDetailPage>
-    with SingleTickerProviderStateMixin {
+    with TickerProviderStateMixin {
   final _sb = Supabase.instance.client;
   late TabController _tabCtrl;
 
@@ -34,7 +34,7 @@ class _MgmtGigDetailPageState extends State<MgmtGigDetailPage>
   @override
   void initState() {
     super.initState();
-    _tabCtrl = TabController(length: 4, vsync: this);
+    _tabCtrl = TabController(length: 2, vsync: this);
     _load();
   }
 
@@ -56,7 +56,7 @@ class _MgmtGigDetailPageState extends State<MgmtGigDetailPage>
 
       // Adjust tab count: rehearsal only needs Info tab
       final isRehearsal = (gig?['type'] as String?) == 'rehearsal';
-      final desiredLength = isRehearsal ? 1 : 4;
+      final desiredLength = isRehearsal ? 1 : 2;
       if (_tabCtrl.length != desiredLength) {
         _tabCtrl.dispose();
         _tabCtrl = TabController(length: desiredLength, vsync: this);
@@ -162,12 +162,13 @@ class _MgmtGigDetailPageState extends State<MgmtGigDetailPage>
     bool playbackFromUs = _gig!['playback_from_us'] != false;
     bool invoiceOnEhf = _gig!['invoice_on_ehf'] == true;
     String status = _gig!['status'] as String? ?? 'inquiry';
+    final isRehearsal = (_gig!['type'] as String? ?? 'gig') == 'rehearsal';
 
     await showDialog(
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setS) => AlertDialog(
-          title: const Text('Edit Gig Info'),
+          title: Text(isRehearsal ? 'Rediger øvelse' : 'Edit Gig Info'),
           content: SizedBox(
             width: 640,
             height: 600,
@@ -218,7 +219,8 @@ class _MgmtGigDetailPageState extends State<MgmtGigDetailPage>
                   ),
                   const SizedBox(height: 12),
 
-                  // Status + responsible
+                  // Status + responsible (gig only)
+                  if (!isRehearsal)
                   Row(
                     children: [
                       Expanded(
@@ -235,6 +237,8 @@ class _MgmtGigDetailPageState extends State<MgmtGigDetailPage>
                       Expanded(child: _tf(c['responsible']!, 'Responsible')),
                     ],
                   ),
+                  if (isRehearsal)
+                    _tf(c['responsible']!, 'Ansvarlig'),
 
                   // Venue / City / Country
                   const _SectionHeader('Location'),
@@ -248,6 +252,7 @@ class _MgmtGigDetailPageState extends State<MgmtGigDetailPage>
                     ],
                   ),
 
+                  if (!isRehearsal) ...[
                   // Customer
                   const _SectionHeader('Customer'),
                   _tf(c['firma']!, 'Firma / Company'),
@@ -281,8 +286,21 @@ class _MgmtGigDetailPageState extends State<MgmtGigDetailPage>
                   // Show desc
                   const _SectionHeader('Show Description'),
                   _tf(c['showDesc']!, 'Show description', maxLines: 2),
+                  ],
 
                   // Schedule
+                  if (isRehearsal) ...[
+                  const _SectionHeader('Timeplan'),
+                  Row(
+                    children: [
+                      Expanded(child: _tf(c['meetingTime']!, 'Fra (HH:mm)')),
+                      const SizedBox(width: 8),
+                      Expanded(child: _tf(c['getOutTime']!, 'Til (HH:mm)')),
+                    ],
+                  ),
+                  ],
+
+                  if (!isRehearsal) ...[
                   const _SectionHeader('Schedule'),
                   Row(
                     children: [
@@ -362,6 +380,13 @@ class _MgmtGigDetailPageState extends State<MgmtGigDetailPage>
                   _tf(c['notesForContract']!, 'Notes for contract', maxLines: 3),
                   const SizedBox(height: 8),
                   _tf(c['infoFromOrganizer']!, 'Info from organizer', maxLines: 3),
+                  ],
+
+                  // Rehearsal notes
+                  if (isRehearsal) ...[
+                  const _SectionHeader('Notat'),
+                  _tf(c['notesForContract']!, 'Dette skal vi gjøre på øvelsen', maxLines: 3),
+                  ],
                 ],
               ),
             ),
@@ -845,7 +870,9 @@ class _MgmtGigDetailPageState extends State<MgmtGigDetailPage>
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      title.isNotEmpty ? title : (dateLabel.isNotEmpty ? dateLabel : 'Gig'),
+                      gigType == 'rehearsal'
+                          ? 'Øvelse'
+                          : (title.isNotEmpty ? title : (dateLabel.isNotEmpty ? dateLabel : 'Gig')),
                       style: Theme.of(context).textTheme.headlineMedium,
                       overflow: TextOverflow.ellipsis,
                     ),
@@ -855,6 +882,14 @@ class _MgmtGigDetailPageState extends State<MgmtGigDetailPage>
                         style: Theme.of(context).textTheme.bodyLarge?.copyWith(
                               color: CssTheme.textMuted,
                             ),
+                      ),
+                    if (gigType == 'rehearsal' && title.isNotEmpty)
+                      Text(
+                        title,
+                        style: const TextStyle(
+                          color: CssTheme.textMuted,
+                          fontSize: 13,
+                        ),
                       ),
                     if (customerLine.isNotEmpty && gigType != 'rehearsal')
                       Text(
@@ -883,7 +918,8 @@ class _MgmtGigDetailPageState extends State<MgmtGigDetailPage>
                 ),
                 const SizedBox(width: 8),
               ],
-              _GigStatusBadge(status: status),
+              if (gigType != 'rehearsal')
+                _GigStatusBadge(status: status),
               PopupMenuButton<String>(
                 icon: const Icon(Icons.more_vert),
                 onSelected: (v) {
@@ -926,8 +962,6 @@ class _MgmtGigDetailPageState extends State<MgmtGigDetailPage>
                 ? const [Tab(text: 'Info')]
                 : const [
                     Tab(text: 'Info'),
-                    Tab(text: 'Shows & Pris'),
-                    Tab(text: 'Crew'),
                     Tab(text: 'Kontrakt'),
                   ],
           ),
@@ -939,29 +973,41 @@ class _MgmtGigDetailPageState extends State<MgmtGigDetailPage>
               controller: _tabCtrl,
               children: _gig?['type'] == 'rehearsal'
                   ? [
-                      _InfoTab(gig: _gig!),
+                      SingleChildScrollView(
+                        child: _InfoTab(gig: _gig!),
+                      ),
                     ]
                   : [
-                      _InfoTab(gig: _gig!),
-                      _ShowsPrisTab(
-                        gig: _gig!,
-                        shows: _shows,
-                        showTypes: _showTypes,
-                        onAddShow: _addShow,
-                        onDeleteShow: _deleteShow,
-                        onUpdatePrice: _updateShowPrice,
-                        showsTotal: _showsTotal,
-                        inearPrice: _inearPrice,
-                        transportPrice: _transportPrice,
-                        extraPrice: _extraPrice,
-                        total: _total,
-                      ),
-                      _CrewTab(
-                        crew: _crew,
-                        onAdd: _addCrewMember,
-                        onToggle: _toggleCrewConfirmed,
-                        onDelete: _deleteCrewMember,
-                        roleLabel: _roleLabel,
+                      // Combined Info tab with shows + crew
+                      SingleChildScrollView(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            _InfoTab(gig: _gig!),
+                            const SizedBox(height: 12),
+                            _ShowsPrisTab(
+                              gig: _gig!,
+                              shows: _shows,
+                              showTypes: _showTypes,
+                              onAddShow: _addShow,
+                              onDeleteShow: _deleteShow,
+                              onUpdatePrice: _updateShowPrice,
+                              showsTotal: _showsTotal,
+                              inearPrice: _inearPrice,
+                              transportPrice: _transportPrice,
+                              extraPrice: _extraPrice,
+                              total: _total,
+                            ),
+                            const SizedBox(height: 12),
+                            _CrewTab(
+                              crew: _crew,
+                              onAdd: _addCrewMember,
+                              onToggle: _toggleCrewConfirmed,
+                              onDelete: _deleteCrewMember,
+                              roleLabel: _roleLabel,
+                            ),
+                          ],
+                        ),
                       ),
                       _KontraktTab(
                         gig: _gig!,
@@ -1039,11 +1085,11 @@ class _InfoTab extends StatelessWidget {
     final gigType = gig['type'] as String? ?? 'gig';
     final isGig = gigType == 'gig';
 
-    return SingleChildScrollView(
-      child: Row(
+    if (!isGig) {
+      // Rehearsal layout
+      return Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Left column
           Expanded(
             child: Column(
               children: [
@@ -1052,73 +1098,107 @@ class _InfoTab extends StatelessWidget {
                   MapEntry('By', gig['city']),
                   MapEntry('Land', gig['country']),
                 ]),
-                if (isGig)
-                  _card('Kunde', [
-                    MapEntry('Firma', gig['customer_firma']),
-                    MapEntry('Kontakt', gig['customer_name']),
-                    MapEntry('Telefon', gig['customer_phone']),
-                    MapEntry('E-post', gig['customer_email']),
-                    MapEntry('Org.nr', gig['customer_org_nr']),
-                    MapEntry('Adresse', gig['customer_address']),
-                    MapEntry('EHF', gig['invoice_on_ehf'] == true ? 'Ja' : null),
-                  ]),
                 _card('Tider', [
-                  MapEntry('Oppmøte', gig['meeting_time']),
-                  MapEntry('Get-in', gig['get_in_time']),
-                  MapEntry('Prøver', gig['rehearsal_time']),
-                  MapEntry('Opptreden', gig['performance_time']),
-                  MapEntry('Get-out', gig['get_out_time']),
-                  MapEntry('Notat', gig['meeting_notes']),
+                  MapEntry('Fra', gig['meeting_time']),
+                  MapEntry('Til', gig['get_out_time']),
                 ]),
               ],
             ),
           ),
           const SizedBox(width: 12),
-          // Right column
           Expanded(
             child: Column(
               children: [
-                _card('Scene', [
-                  MapEntry('Form', gig['stage_shape']),
-                  MapEntry('Størrelse', gig['stage_size']),
-                  MapEntry('Notat', gig['stage_notes']),
+                if (gig['responsible'] != null)
+                  _card('Ansvarlig', [
+                    MapEntry('Navn', gig['responsible']),
+                  ]),
+                _card('Notat', [
+                  MapEntry('Dette skal vi gjøre', gig['notes_for_contract']),
                 ]),
-                if (isGig) ...[
-                  _card('Teknikk', [
-                    MapEntry('In-ear fra oss',
-                        gig['inear_from_us'] == true ? 'Ja' : 'Nei'),
-                    MapEntry(
-                        'In-ear pris',
-                        gig['inear_from_us'] == true
-                            ? 'kr ${_fmt(gig['inear_price'])}'
-                            : null),
-                    MapEntry('Playback fra oss',
-                        gig['playback_from_us'] != false ? 'Ja' : 'Nei'),
-                  ]),
-                  _card('Transport & Extra', [
-                    MapEntry('Km', gig['transport_km']?.toString()),
-                    MapEntry(
-                        'Transport',
-                        gig['transport_price'] != null
-                            ? 'kr ${_fmt(gig['transport_price'])}'
-                            : null),
-                    MapEntry('Extra', gig['extra_desc']),
-                    MapEntry(
-                        'Extra pris',
-                        gig['extra_price'] != null
-                            ? 'kr ${_fmt(gig['extra_price'])}'
-                            : null),
-                  ]),
-                  _card('Notater', [
-                    MapEntry('For kontrakt', gig['notes_for_contract']),
-                    MapEntry('Fra arrangør', gig['info_from_organizer']),
-                  ]),
-                ],
               ],
             ),
           ),
         ],
-      ),
+      );
+    }
+
+    // Gig layout
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // Left column
+        Expanded(
+          child: Column(
+            children: [
+              _card('Sted', [
+                MapEntry('Venue', gig['venue_name']),
+                MapEntry('By', gig['city']),
+                MapEntry('Land', gig['country']),
+              ]),
+              _card('Kunde', [
+                MapEntry('Firma', gig['customer_firma']),
+                MapEntry('Kontakt', gig['customer_name']),
+                MapEntry('Telefon', gig['customer_phone']),
+                MapEntry('E-post', gig['customer_email']),
+                MapEntry('Org.nr', gig['customer_org_nr']),
+                MapEntry('Adresse', gig['customer_address']),
+                MapEntry('EHF', gig['invoice_on_ehf'] == true ? 'Ja' : null),
+              ]),
+              _card('Tider', [
+                MapEntry('Oppmøte', gig['meeting_time']),
+                MapEntry('Get-in', gig['get_in_time']),
+                MapEntry('Prøver', gig['rehearsal_time']),
+                MapEntry('Opptreden', gig['performance_time']),
+                MapEntry('Get-out', gig['get_out_time']),
+                MapEntry('Notat', gig['meeting_notes']),
+              ]),
+            ],
+          ),
+        ),
+        const SizedBox(width: 12),
+        // Right column
+        Expanded(
+          child: Column(
+            children: [
+              _card('Scene', [
+                MapEntry('Form', gig['stage_shape']),
+                MapEntry('Størrelse', gig['stage_size']),
+                MapEntry('Notat', gig['stage_notes']),
+              ]),
+              _card('Teknikk', [
+                MapEntry('In-ear fra oss',
+                    gig['inear_from_us'] == true ? 'Ja' : 'Nei'),
+                MapEntry(
+                    'In-ear pris',
+                    gig['inear_from_us'] == true
+                        ? 'kr ${_fmt(gig['inear_price'])}'
+                        : null),
+                MapEntry('Playback fra oss',
+                    gig['playback_from_us'] != false ? 'Ja' : 'Nei'),
+              ]),
+              _card('Transport & Extra', [
+                MapEntry('Km', gig['transport_km']?.toString()),
+                MapEntry(
+                    'Transport',
+                    gig['transport_price'] != null
+                        ? 'kr ${_fmt(gig['transport_price'])}'
+                        : null),
+                MapEntry('Extra', gig['extra_desc']),
+                MapEntry(
+                    'Extra pris',
+                    gig['extra_price'] != null
+                        ? 'kr ${_fmt(gig['extra_price'])}'
+                        : null),
+              ]),
+              _card('Notater', [
+                MapEntry('For kontrakt', gig['notes_for_contract']),
+                MapEntry('Fra arrangør', gig['info_from_organizer']),
+              ]),
+            ],
+          ),
+        ),
+      ],
     );
   }
 
@@ -1241,8 +1321,7 @@ class _ShowsPrisTabState extends State<_ShowsPrisTab> {
 
   @override
   Widget build(BuildContext context) {
-    return SingleChildScrollView(
-      child: Column(
+    return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
@@ -1377,7 +1456,6 @@ class _ShowsPrisTabState extends State<_ShowsPrisTab> {
             ),
           ),
         ],
-      ),
     );
   }
 }
@@ -1565,8 +1643,7 @@ class _CrewTab extends StatelessWidget {
     final total = crew.length;
     final progress = total > 0 ? confirmed / total : 0.0;
 
-    return SingleChildScrollView(
-      child: Column(
+    return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           // Header + add button
@@ -1722,7 +1799,6 @@ class _CrewTab extends StatelessWidget {
               ),
             ),
         ],
-      ),
     );
   }
 }

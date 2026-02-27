@@ -31,6 +31,7 @@ import 'pages/mgmt/mgmt_people_page.dart';
 import 'pages/mgmt/mgmt_messages_page.dart';
 import 'pages/mgmt/mgmt_settings_page.dart';
 
+import 'state/active_company.dart';
 import 'state/settings_store.dart';
 import 'ui/css_theme.dart';
 
@@ -104,27 +105,24 @@ bool get isLoggedIn => supabase.auth.currentSession != null;
 
 // Cached user role to avoid repeated DB calls on every redirect
 String? _cachedUserRole;
-String? _cachedCompanyId;
 
 Future<void> _loadUserRole() async {
   final uid = Supabase.instance.client.auth.currentUser?.id;
   if (uid == null) {
     _cachedUserRole = null;
-    _cachedCompanyId = null;
     return;
   }
   try {
     final res = await Supabase.instance.client
         .from('profiles')
-        .select('role, company_id')
+        .select('role')
         .eq('id', uid)
         .maybeSingle();
     _cachedUserRole = res?['role'] as String?;
-    _cachedCompanyId = res?['company_id'] as String?;
+    await activeCompanyNotifier.load();
   } catch (e) {
     debugPrint('_loadUserRole error: $e');
     _cachedUserRole = null;
-    _cachedCompanyId = null;
   }
 }
 
@@ -138,7 +136,7 @@ class SupabaseAuthRefresher extends ChangeNotifier {
       // Clear cached role on auth state change
       if (event.event == AuthChangeEvent.signedOut) {
         _cachedUserRole = null;
-        _cachedCompanyId = null;
+        activeCompanyNotifier.clear();
       }
       notifyListeners();
     });

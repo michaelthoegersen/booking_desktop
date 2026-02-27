@@ -67,6 +67,12 @@ Denne intensjonsavtalen er gyldig i 14 dager fra utstedelsesdato. Dersom den ikk
       boldFont = pw.Font.helveticaBold();
     }
 
+    // Load logo
+    final logo = pw.MemoryImage(
+      (await rootBundle.load('assets/pdf/logos/CompleteDrumsWhite.png'))
+          .buffer.asUint8List(),
+    );
+
     final nok = NumberFormat('#,##0', 'nb_NO');
 
     // Extract gig fields
@@ -131,7 +137,7 @@ Denne intensjonsavtalen er gyldig i 14 dager fra utstedelsesdato. Dersom den ikk
         build: (pw.Context ctx) {
           return [
             // ── HEADER ──────────────────────────────────────────────────
-            _buildHeader(boldFont, regularFont),
+            _buildHeader(boldFont, regularFont, logo),
             pw.SizedBox(height: 20),
 
             // ── TITLE ───────────────────────────────────────────────────
@@ -191,6 +197,7 @@ Denne intensjonsavtalen er gyldig i 14 dager fra utstedelsesdato. Dersom den ikk
               boldFont,
               regularFont,
               nok,
+              shows: shows,
               showsTotal: showsTotal,
               inearFromUs: inearFromUs,
               inearPrice: inearPrice,
@@ -234,49 +241,60 @@ Denne intensjonsavtalen er gyldig i 14 dager fra utstedelsesdato. Dersom den ikk
   // HEADER
   // --------------------------------------------------------------------------
 
-  static pw.Widget _buildHeader(pw.Font bold, pw.Font regular) {
+  static pw.Widget _buildHeader(
+      pw.Font bold, pw.Font regular, pw.ImageProvider logo) {
+    // Negative margin to counteract the 40px page margin on top/left/right
     return pw.Container(
-      padding: const pw.EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      decoration: const pw.BoxDecoration(color: PdfColors.black),
-      child: pw.Row(
-        mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+      margin: const pw.EdgeInsets.only(left: -40, right: -40, top: -40),
+      width: double.infinity,
+      height: 80,
+      color: PdfColors.black,
+      child: pw.Stack(
         children: [
-          pw.Column(
-            crossAxisAlignment: pw.CrossAxisAlignment.start,
-            children: [
-              pw.Text(
-                'Complete Drums',
-                style: pw.TextStyle(
-                  font: bold,
-                  fontSize: 16,
-                  color: PdfColors.white,
-                ),
+          // Logo left
+          pw.Positioned(
+            left: 10,
+            top: 0,
+            bottom: 0,
+            child: pw.Center(
+              child: pw.Image(
+                logo,
+                height: 65,
+                fit: pw.BoxFit.contain,
               ),
-              pw.SizedBox(height: 2),
-              pw.Text(
-                'Stian Skog',
-                style: pw.TextStyle(
-                  font: regular,
-                  fontSize: 10,
-                  color: PdfColors.grey300,
-                ),
-              ),
-            ],
+            ),
           ),
-          pw.Column(
-            crossAxisAlignment: pw.CrossAxisAlignment.end,
-            children: [
-              pw.Text(
-                'Holteveien 18C, 1410 Kolbotn',
-                style: pw.TextStyle(
-                    font: regular, fontSize: 9, color: PdfColors.grey300),
-              ),
-              pw.Text(
-                '+47 480 24 259  ·  stian@completedrums.no',
-                style: pw.TextStyle(
-                    font: regular, fontSize: 9, color: PdfColors.grey300),
-              ),
-            ],
+          // Contact info right
+          pw.Positioned(
+            right: 16,
+            top: 0,
+            bottom: 0,
+            child: pw.Column(
+              mainAxisAlignment: pw.MainAxisAlignment.center,
+              crossAxisAlignment: pw.CrossAxisAlignment.start,
+              children: [
+                pw.Text(
+                  'Complete Drums',
+                  style: pw.TextStyle(
+                    font: bold,
+                    fontSize: 10,
+                    color: PdfColors.white,
+                  ),
+                ),
+                pw.SizedBox(height: 2),
+                pw.Text(
+                  'Stian Skog  ·  Holteveien 18C, 1410 Kolbotn',
+                  style: pw.TextStyle(
+                      font: regular, fontSize: 9, color: PdfColors.grey300),
+                ),
+                pw.SizedBox(height: 1),
+                pw.Text(
+                  '+47 480 24 259  ·  stian@completedrums.no',
+                  style: pw.TextStyle(
+                      font: regular, fontSize: 9, color: PdfColors.grey300),
+                ),
+              ],
+            ),
           ),
         ],
       ),
@@ -354,7 +372,6 @@ Denne intensjonsavtalen er gyldig i 14 dager fra utstedelsesdato. Dersom den ikk
   ) {
     final headerStyle = pw.TextStyle(
         font: bold, fontSize: 9.5, color: PdfColors.white);
-    final cellStyle = pw.TextStyle(font: regular, fontSize: 10);
     final boldCell = pw.TextStyle(font: bold, fontSize: 10);
 
     final headerBg = PdfColors.black;
@@ -376,10 +393,7 @@ Denne intensjonsavtalen er gyldig i 14 dager fra utstedelsesdato. Dersom den ikk
         pw.Table(
           columnWidths: {
             0: const pw.FlexColumnWidth(4),
-            1: const pw.FixedColumnWidth(70),
-            2: const pw.FixedColumnWidth(70),
-            3: const pw.FixedColumnWidth(70),
-            4: const pw.FixedColumnWidth(90),
+            1: const pw.FixedColumnWidth(90),
           },
           children: [
             // Header row
@@ -387,9 +401,6 @@ Denne intensjonsavtalen er gyldig i 14 dager fra utstedelsesdato. Dersom den ikk
               decoration: pw.BoxDecoration(color: headerBg),
               children: [
                 _cell('Show', headerStyle, pw.Alignment.centerLeft),
-                _cell('Trommer', headerStyle, pw.Alignment.center),
-                _cell('Dansere', headerStyle, pw.Alignment.center),
-                _cell('Andre', headerStyle, pw.Alignment.center),
                 _cell('Pris', headerStyle, pw.Alignment.centerRight),
               ],
             ),
@@ -405,12 +416,6 @@ Denne intensjonsavtalen er gyldig i 14 dager fra utstedelsesdato. Dersom den ikk
                 children: [
                   _cell(show['show_name'] as String? ?? '',
                       boldCell, pw.Alignment.centerLeft),
-                  _cell('${show['drummers'] ?? 0}',
-                      cellStyle, pw.Alignment.center),
-                  _cell('${show['dancers'] ?? 0}',
-                      cellStyle, pw.Alignment.center),
-                  _cell('${show['others'] ?? 0}',
-                      cellStyle, pw.Alignment.center),
                   _cell('kr ${nok.format(price)}',
                       boldCell, pw.Alignment.centerRight),
                 ],
@@ -441,6 +446,7 @@ Denne intensjonsavtalen er gyldig i 14 dager fra utstedelsesdato. Dersom den ikk
     pw.Font bold,
     pw.Font regular,
     NumberFormat nok, {
+    required List<Map<String, dynamic>> shows,
     required double showsTotal,
     required bool inearFromUs,
     required double inearPrice,
@@ -449,8 +455,11 @@ Denne intensjonsavtalen er gyldig i 14 dager fra utstedelsesdato. Dersom den ikk
     required double extraPrice,
     required double total,
   }) {
+    final showLabel = shows.length == 1
+        ? (shows.first['show_name'] as String? ?? 'Show')
+        : 'Sum shows';
     final rows = <_PriceLine>[
-      _PriceLine('Sum show', showsTotal),
+      _PriceLine(showLabel, showsTotal),
       if (inearFromUs && inearPrice > 0)
         _PriceLine('In-ear monitor', inearPrice),
       if (transportPrice > 0) _PriceLine('Transport', transportPrice),

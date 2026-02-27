@@ -3,6 +3,7 @@ import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../../state/active_company.dart';
 import '../../ui/css_theme.dart';
 
 class MgmtTourDetailPage extends StatefulWidget {
@@ -21,7 +22,7 @@ class _MgmtTourDetailPageState extends State<MgmtTourDetailPage>
 
   bool _loading = true;
   Map<String, dynamic>? _tour;
-  String? _companyId;
+  String? get _companyId => activeCompanyNotifier.value?.id;
 
   List<Map<String, dynamic>> _shows = [];
   List<Map<String, dynamic>> _itinerary = [];
@@ -31,26 +32,22 @@ class _MgmtTourDetailPageState extends State<MgmtTourDetailPage>
   void initState() {
     super.initState();
     _tabCtrl = TabController(length: 4, vsync: this);
+    activeCompanyNotifier.addListener(_onCompanyChanged);
     _load();
   }
 
   @override
   void dispose() {
+    activeCompanyNotifier.removeListener(_onCompanyChanged);
     _tabCtrl.dispose();
     super.dispose();
   }
 
+  void _onCompanyChanged() => _load();
+
   Future<void> _load() async {
     setState(() => _loading = true);
     try {
-      final uid = _sb.auth.currentUser?.id;
-      final profile = await _sb
-          .from('profiles')
-          .select('company_id')
-          .eq('id', uid!)
-          .maybeSingle();
-      _companyId = profile?['company_id'] as String?;
-
       final tour = await _sb
           .from('management_tours')
           .select('*')

@@ -3,6 +3,7 @@ import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../../state/active_company.dart';
 import '../../ui/css_theme.dart';
 
 class MgmtToursPage extends StatefulWidget {
@@ -17,35 +18,29 @@ class _MgmtToursPageState extends State<MgmtToursPage> {
   final _searchCtrl = TextEditingController();
 
   bool _loading = true;
-  String? _companyId;
+  String? get _companyId => activeCompanyNotifier.value?.id;
   List<Map<String, dynamic>> _tours = [];
   String _search = '';
 
   @override
   void initState() {
     super.initState();
+    activeCompanyNotifier.addListener(_onCompanyChanged);
     _load();
   }
 
   @override
   void dispose() {
+    activeCompanyNotifier.removeListener(_onCompanyChanged);
     _searchCtrl.dispose();
     super.dispose();
   }
 
+  void _onCompanyChanged() => _load();
+
   Future<void> _load() async {
     setState(() => _loading = true);
     try {
-      final uid = _sb.auth.currentUser?.id;
-      if (uid == null) return;
-
-      final profile = await _sb
-          .from('profiles')
-          .select('company_id')
-          .eq('id', uid)
-          .maybeSingle();
-      _companyId = profile?['company_id'] as String?;
-
       if (_companyId == null) {
         setState(() => _loading = false);
         return;

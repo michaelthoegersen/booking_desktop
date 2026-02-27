@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../../state/active_company.dart';
 import '../../ui/css_theme.dart';
 
 class MgmtPeoplePage extends StatefulWidget {
@@ -13,28 +14,27 @@ class MgmtPeoplePage extends StatefulWidget {
 class _MgmtPeoplePageState extends State<MgmtPeoplePage> {
   final _sb = Supabase.instance.client;
   bool _loading = true;
-  String? _companyId;
+  String? get _companyId => activeCompanyNotifier.value?.id;
   List<Map<String, dynamic>> _people = [];
 
   @override
   void initState() {
     super.initState();
+    activeCompanyNotifier.addListener(_onCompanyChanged);
     _load();
   }
+
+  @override
+  void dispose() {
+    activeCompanyNotifier.removeListener(_onCompanyChanged);
+    super.dispose();
+  }
+
+  void _onCompanyChanged() => _load();
 
   Future<void> _load() async {
     setState(() => _loading = true);
     try {
-      final uid = _sb.auth.currentUser?.id;
-      if (uid == null) return;
-
-      final profile = await _sb
-          .from('profiles')
-          .select('company_id')
-          .eq('id', uid)
-          .maybeSingle();
-      _companyId = profile?['company_id'] as String?;
-
       if (_companyId == null) {
         setState(() => _loading = false);
         return;

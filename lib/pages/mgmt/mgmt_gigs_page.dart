@@ -3,6 +3,7 @@ import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../../state/active_company.dart';
 import '../../ui/css_theme.dart';
 import '../../widgets/new_company_dialog.dart';
 
@@ -18,7 +19,7 @@ class _MgmtGigsPageState extends State<MgmtGigsPage> {
   final _searchCtrl = TextEditingController();
 
   bool _loading = true;
-  String? _companyId;
+  String? get _companyId => activeCompanyNotifier.value?.id;
   List<Map<String, dynamic>> _gigs = [];
   String _search = '';
   String _statusFilter = 'all';
@@ -28,28 +29,22 @@ class _MgmtGigsPageState extends State<MgmtGigsPage> {
   @override
   void initState() {
     super.initState();
+    activeCompanyNotifier.addListener(_onCompanyChanged);
     _load();
   }
 
   @override
   void dispose() {
+    activeCompanyNotifier.removeListener(_onCompanyChanged);
     _searchCtrl.dispose();
     super.dispose();
   }
 
+  void _onCompanyChanged() => _load();
+
   Future<void> _load() async {
     setState(() => _loading = true);
     try {
-      final uid = _sb.auth.currentUser?.id;
-      if (uid == null) return;
-
-      final profile = await _sb
-          .from('profiles')
-          .select('company_id')
-          .eq('id', uid)
-          .maybeSingle();
-      _companyId = profile?['company_id'] as String?;
-
       if (_companyId == null) {
         setState(() => _loading = false);
         return;
@@ -319,10 +314,19 @@ class _NewGigDialogState extends State<_NewGigDialog> {
 
   bool _saving = false;
 
+  // ── Show types ──────────────────────────────────────────────────────────
+  List<Map<String, dynamic>> _showTypes = [];
+  Map<String, dynamic>? _selectedShow;
+  final _showPriceCtrl = TextEditingController();
+  final _drumCtrl = TextEditingController();
+  final _danceCtrl = TextEditingController();
+  final _othersCtrl = TextEditingController();
+
   @override
   void initState() {
     super.initState();
     _loadCompanies();
+    _loadShowTypes();
   }
 
   @override
@@ -335,6 +339,7 @@ class _NewGigDialogState extends State<_NewGigDialog> {
       _stageShapeCtrl, _stageSizeCtrl, _stageNotesCtrl, _inearPriceCtrl,
       _transportKmCtrl, _transportPriceCtrl, _extraDescCtrl, _extraPriceCtrl,
       _notesCtrl, _infoFromOrgCtrl,
+      _showPriceCtrl, _drumCtrl, _danceCtrl, _othersCtrl,
     ]) {
       c.dispose();
     }
@@ -362,6 +367,21 @@ class _NewGigDialogState extends State<_NewGigDialog> {
     } catch (e) {
       debugPrint('Load companies error: $e');
       if (mounted) setState(() => _loadingCompanies = false);
+    }
+  }
+
+  Future<void> _loadShowTypes() async {
+    try {
+      final res = await _sb
+          .from('show_types')
+          .select('*')
+          .eq('active', true)
+          .order('sort_order');
+      if (mounted) setState(() {
+        _showTypes = List<Map<String, dynamic>>.from(res);
+      });
+    } catch (e) {
+      debugPrint('Load show types error: $e');
     }
   }
 
@@ -477,7 +497,23 @@ class _NewGigDialogState extends State<_NewGigDialog> {
         'created_by': _sb.auth.currentUser?.id,
       }).select('id').single();
 
-      if (mounted) Navigator.of(context).pop(res['id'] as String);
+      final gigId = res['id'] as String;
+
+      // Insert show if selected
+      if (_selectedShow != null) {
+        await _sb.from('gig_shows').insert({
+          'gig_id': gigId,
+          'show_type_id': _selectedShow!['id'],
+          'show_name': _selectedShow!['name'],
+          'drummers': int.tryParse(_drumCtrl.text) ?? 0,
+          'dancers': int.tryParse(_danceCtrl.text) ?? 0,
+          'others': int.tryParse(_othersCtrl.text) ?? 0,
+          'price': double.tryParse(_showPriceCtrl.text) ?? 0,
+          'sort_order': 0,
+        });
+      }
+
+      if (mounted) Navigator.of(context).pop(gigId);
     } catch (e) {
       debugPrint('Create gig error: $e');
       if (mounted) setState(() => _saving = false);
@@ -565,6 +601,7 @@ class _NewGigDialogState extends State<_NewGigDialog> {
                               },
                             ),
                           ),
+                          if (_type != 'rehearsal') ...[
                           const SizedBox(width: 8),
                           SizedBox(
                             width: 160,
@@ -583,6 +620,7 @@ class _NewGigDialogState extends State<_NewGigDialog> {
                                   setState(() => _status = v ?? _status),
                             ),
                           ),
+                          ],
                         ],
                       ),
 
@@ -650,11 +688,56 @@ class _NewGigDialogState extends State<_NewGigDialog> {
                       ),
 
                       // ── SHOW (gig only) ─────────────────────────────────
-                      _sec('Show-beskrivelse'),
-                      _tfFull(_showDescCtrl, 'Beskriv showet', maxLines: 2),
+                      _sec('Show'),
+                      DropdownButtonFormField<Map<String, dynamic>>(
+                        decoration: const InputDecoration(labelText: 'Velg show'),
+                        value: _selectedShow,
+                        items: _showTypes
+                            .map((t) => DropdownMenuItem(
+                                  value: t,
+                                  child: Text(t['name'] as String),
+                                ))
+                            .toList(),
+                        onChanged: (v) {
+                          setState(() {
+                            _selectedShow = v;
+                            if (v != null) {
+                              _showPriceCtrl.text = v['price']?.toString() ?? '0';
+                              _drumCtrl.text = v['drummers']?.toString() ?? '0';
+                              _danceCtrl.text = v['dancers']?.toString() ?? '0';
+                              _othersCtrl.text = v['others']?.toString() ?? '0';
+                            }
+                          });
+                        },
+                      ),
+                      if (_selectedShow != null) ...[
+                        const SizedBox(height: 8),
+                        _row([
+                          _tf(_drumCtrl, 'Trommeslagere',
+                              keyboardType: TextInputType.number),
+                          _tf(_danceCtrl, 'Dansere',
+                              keyboardType: TextInputType.number),
+                          _tf(_othersCtrl, 'Andre',
+                              keyboardType: TextInputType.number),
+                        ]),
+                        const SizedBox(height: 8),
+                        _tfFull(_showPriceCtrl, 'Pris (kr)',
+                            keyboardType: TextInputType.number),
+                      ],
+                      const SizedBox(height: 8),
+                      _tfFull(_showDescCtrl, 'Beskriv showet (valgfritt)', maxLines: 2),
                       ], // end if gig
 
                       // ── SCHEDULE ────────────────────────────────────────
+                      if (_type == 'rehearsal') ...[
+                      _sec('Timeplan'),
+                      _row([
+                        _tf(_meetingTimeCtrl, 'Fra (HH:mm)'),
+                        _tf(_getOutTimeCtrl, 'Til (HH:mm)'),
+                      ]),
+                      ],
+
+                      if (_type != 'rehearsal') ...[
                       _sec('Timeplan'),
                       _row([
                         _tf(_meetingTimeCtrl, 'Oppmøte (HH:mm)'),
@@ -682,6 +765,7 @@ class _NewGigDialogState extends State<_NewGigDialog> {
                       ]),
                       const SizedBox(height: 8),
                       _tfFull(_stageNotesCtrl, 'Scenenoter', maxLines: 2),
+                      ],
 
                       // ── TECH (gig only) ─────────────────────────────────
                       if (_type == 'gig') ...[
@@ -737,7 +821,7 @@ class _NewGigDialogState extends State<_NewGigDialog> {
                       // ── REHEARSAL NOTES ─────────────────────────────────
                       if (_type == 'rehearsal') ...[
                       _sec('Notat'),
-                      _tfFull(_notesCtrl, 'Notat (intern)', maxLines: 3),
+                      _tfFull(_notesCtrl, 'Dette skal vi gjøre på øvelsen', maxLines: 3),
                       ],
 
                       const SizedBox(height: 8),
@@ -1126,24 +1210,38 @@ class _GigRow extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  if (locationLine.isNotEmpty)
-                    Text(
-                      locationLine,
-                      style: const TextStyle(
+                  if (type == 'rehearsal') ...[
+                    const Text(
+                      'Øvelse',
+                      style: TextStyle(
                           fontWeight: FontWeight.w900, fontSize: 15),
                     ),
-                  if (customerLine.isNotEmpty)
-                    Text(
-                      customerLine,
-                      style: const TextStyle(
-                          color: CssTheme.textMuted, fontSize: 13),
-                    ),
-                  if (shows.isNotEmpty)
-                    Text(
-                      shows,
-                      style: const TextStyle(
-                          fontSize: 12, color: CssTheme.textMuted),
-                    ),
+                    if (locationLine.isNotEmpty)
+                      Text(
+                        locationLine,
+                        style: const TextStyle(
+                            color: CssTheme.textMuted, fontSize: 13),
+                      ),
+                  ] else ...[
+                    if (locationLine.isNotEmpty)
+                      Text(
+                        locationLine,
+                        style: const TextStyle(
+                            fontWeight: FontWeight.w900, fontSize: 15),
+                      ),
+                    if (customerLine.isNotEmpty)
+                      Text(
+                        customerLine,
+                        style: const TextStyle(
+                            color: CssTheme.textMuted, fontSize: 13),
+                      ),
+                    if (shows.isNotEmpty)
+                      Text(
+                        shows,
+                        style: const TextStyle(
+                            fontSize: 12, color: CssTheme.textMuted),
+                      ),
+                  ],
                 ],
               ),
             ),
@@ -1162,7 +1260,8 @@ class _GigRow extends StatelessWidget {
               ),
               const SizedBox(width: 8),
             ],
-            _GigStatusBadge(status: status),
+            if (type != 'rehearsal')
+              _GigStatusBadge(status: status),
             PopupMenuButton<String>(
               icon: const Icon(Icons.more_vert, color: CssTheme.textMuted),
               onSelected: (v) {

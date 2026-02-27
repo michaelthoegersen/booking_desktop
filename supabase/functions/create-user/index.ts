@@ -130,6 +130,32 @@ Deno.serve(async (req) => {
       // User was created but profile failed — not critical, log it
     }
 
+    // --- Also insert into company_members junction table ---
+    if (company_id) {
+      const memberRes = await fetch(
+        `${supabaseUrl}/rest/v1/company_members`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            apikey: serviceKey,
+            Authorization: `Bearer ${serviceKey}`,
+            Prefer: 'resolution=merge-duplicates',
+          },
+          body: JSON.stringify({
+            user_id: userId,
+            company_id,
+            role: userRole,
+          }),
+        },
+      );
+
+      if (!memberRes.ok) {
+        const err = await memberRes.text();
+        console.error('company_members insert error:', err);
+      }
+    }
+
     console.log(
       `✅ User created: ${email} (${userId}) role=${userRole} company=${company_id ?? 'none'}`,
     );

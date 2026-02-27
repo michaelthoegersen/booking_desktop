@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../../state/active_company.dart';
 import '../../ui/css_theme.dart';
 
 /// Notifier so the sidebar can react to feature-flag changes without restart.
@@ -18,7 +19,7 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
 
   bool _loading = true;
   Map<String, dynamic>? _company;
-  String? _companyId;
+  String? get _companyId => activeCompanyNotifier.value?.id;
   List<Map<String, dynamic>> _members = [];
   List<Map<String, dynamic>> _showTypes = [];
   bool _showTours = true;
@@ -27,22 +28,21 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
   @override
   void initState() {
     super.initState();
+    activeCompanyNotifier.addListener(_onCompanyChanged);
     _load();
   }
+
+  @override
+  void dispose() {
+    activeCompanyNotifier.removeListener(_onCompanyChanged);
+    super.dispose();
+  }
+
+  void _onCompanyChanged() => _load();
 
   Future<void> _load() async {
     setState(() => _loading = true);
     try {
-      final uid = _sb.auth.currentUser?.id;
-      if (uid == null) return;
-
-      final profile = await _sb
-          .from('profiles')
-          .select('company_id')
-          .eq('id', uid)
-          .maybeSingle();
-      _companyId = profile?['company_id'] as String?;
-
       if (_companyId != null) {
         final company = await _sb
             .from('companies')
