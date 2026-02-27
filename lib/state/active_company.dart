@@ -5,12 +5,17 @@ class ActiveCompany {
   final String id;
   final String name;
   final String role;
+  final String appMode; // 'css' or 'management'
 
   const ActiveCompany({
     required this.id,
     required this.name,
     required this.role,
+    this.appMode = 'management',
   });
+
+  bool get isCss => appMode == 'css';
+  bool get isManagement => appMode == 'management';
 }
 
 class ActiveCompanyNotifier extends ValueNotifier<ActiveCompany?> {
@@ -31,20 +36,29 @@ class ActiveCompanyNotifier extends ValueNotifier<ActiveCompany?> {
 
     final list = <ActiveCompany>[];
 
-    // Try company_members first
+    // Try company_members first (no join — fetch names separately)
     try {
       final rows = await sb
           .from('company_members')
-          .select('company_id, role, companies(name)')
+          .select('company_id, role, app_mode')
           .eq('user_id', uid);
 
       for (final r in (rows as List)) {
         final companyId = r['company_id'] as String?;
-        final company = r['companies'] as Map<String, dynamic>?;
-        final name = company?['name'] as String? ?? '';
         final role = r['role'] as String? ?? 'bruker';
+        final appMode = r['app_mode'] as String? ?? 'management';
         if (companyId != null) {
-          list.add(ActiveCompany(id: companyId, name: name, role: role));
+          final company = await sb
+              .from('companies')
+              .select('name')
+              .eq('id', companyId)
+              .maybeSingle();
+          list.add(ActiveCompany(
+            id: companyId,
+            name: company?['name'] as String? ?? '',
+            role: role,
+            appMode: appMode,
+          ));
         }
       }
     } catch (e) {

@@ -168,7 +168,8 @@ class BookingApp extends StatelessWidget {
 
         if (loggedIn && path == '/login') {
           await _loadUserRole();
-          return _cachedUserRole == 'management' ? '/m' : '/';
+          final mode = activeCompanyNotifier.value?.appMode ?? 'css';
+          return mode == 'management' ? '/m' : '/';
         }
 
         // If role not yet loaded but user is logged in, load it
@@ -176,16 +177,22 @@ class BookingApp extends StatelessWidget {
           await _loadUserRole();
         }
 
-        // Prevent management users from accessing CSS routes
-        if (loggedIn &&
-            _cachedUserRole == 'management' &&
+        // Route based on active company's app mode
+        final mode = activeCompanyNotifier.value?.appMode;
+        if (loggedIn && mode == 'management' &&
             !path.startsWith('/m') &&
             path != '/login') {
           return '/m';
         }
 
-        // Prevent non-management users from accessing /m routes
+        if (loggedIn && mode == 'css' &&
+            path.startsWith('/m')) {
+          return '/';
+        }
+
+        // Fallback: non-management role users can't access /m
         if (loggedIn &&
+            mode == null &&
             _cachedUserRole != 'management' &&
             path.startsWith('/m')) {
           return '/';

@@ -20,6 +20,7 @@ import '../pages/chat_page.dart';
 import '../pages/archive_page.dart';
 import '../services/chat_service.dart';
 import '../pages/bus_requests_page.dart';
+import '../state/active_company.dart';
 
 // --------------------------------------------------------------------------
 // DATA
@@ -323,7 +324,18 @@ class _TopBarState extends State<_TopBar> {
   @override
   void initState() {
     super.initState();
+    activeCompanyNotifier.addListener(_onCompanyChanged);
     _loadUser();
+  }
+
+  @override
+  void dispose() {
+    activeCompanyNotifier.removeListener(_onCompanyChanged);
+    super.dispose();
+  }
+
+  void _onCompanyChanged() {
+    if (mounted) setState(() {});
   }
 
   Future<void> _loadUser() async {
@@ -355,6 +367,62 @@ class _TopBarState extends State<_TopBar> {
         loading = false;
       });
     }
+  }
+
+  Widget _buildCompanySwitcher(BuildContext context) {
+    final active = activeCompanyNotifier.value;
+    final all = activeCompanyNotifier.companies;
+
+    if (active == null || all.length <= 1) return const SizedBox.shrink();
+
+    return PopupMenuButton<String>(
+      tooltip: 'Switch company',
+      onSelected: (id) {
+        activeCompanyNotifier.switchTo(id);
+        final company = activeCompanyNotifier.value;
+        if (company != null && company.isManagement && context.mounted) {
+          context.go('/m');
+        }
+      },
+      itemBuilder: (_) => all
+          .map((c) => PopupMenuItem(
+                value: c.id,
+                child: Row(
+                  children: [
+                    if (c.id == active.id)
+                      const Icon(Icons.check, size: 16)
+                    else
+                      const SizedBox(width: 16),
+                    const SizedBox(width: 8),
+                    Text(c.name),
+                  ],
+                ),
+              ))
+          .toList(),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: Colors.white10,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: Colors.white24),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              active.name,
+              style: const TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+                color: Colors.white,
+              ),
+            ),
+            const SizedBox(width: 4),
+            const Icon(Icons.unfold_more, size: 16, color: Colors.white70),
+          ],
+        ),
+      ),
+    );
   }
 
   @override
@@ -410,7 +478,7 @@ class _TopBarState extends State<_TopBar> {
           ),
 
           const SizedBox(width: 12),
-
+          _buildCompanySwitcher(context),
           const Spacer(),
 
           // ---------------- USER MENU ----------------

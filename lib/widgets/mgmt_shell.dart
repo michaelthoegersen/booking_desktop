@@ -114,7 +114,13 @@ class _MgmtTopBarState extends State<_MgmtTopBar> {
     // Multiple companies — show dropdown
     return PopupMenuButton<String>(
       tooltip: 'Switch company',
-      onSelected: (id) => activeCompanyNotifier.switchTo(id),
+      onSelected: (id) {
+        activeCompanyNotifier.switchTo(id);
+        final company = activeCompanyNotifier.value;
+        if (company != null && company.isCss && context.mounted) {
+          context.go('/');
+        }
+      },
       itemBuilder: (_) => all
           .map((c) => PopupMenuItem(
                 value: c.id,
