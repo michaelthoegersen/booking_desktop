@@ -380,8 +380,13 @@ class _TopBarState extends State<_TopBar> {
       onSelected: (id) {
         activeCompanyNotifier.switchTo(id);
         final company = activeCompanyNotifier.value;
-        if (company != null && company.isManagement && context.mounted) {
-          context.go('/m');
+        if (company != null && context.mounted) {
+          if (company.isManagement) {
+            context.go('/m');
+          } else if (company.appMode == 'crew') {
+            context.go('/c');
+          }
+          // css stays at /
         }
       },
       itemBuilder: (_) => all

@@ -117,8 +117,13 @@ class _MgmtTopBarState extends State<_MgmtTopBar> {
       onSelected: (id) {
         activeCompanyNotifier.switchTo(id);
         final company = activeCompanyNotifier.value;
-        if (company != null && company.isCss && context.mounted) {
-          context.go('/');
+        if (company != null && context.mounted) {
+          if (company.isCss) {
+            context.go('/');
+          } else if (company.appMode == 'crew') {
+            context.go('/c');
+          }
+          // management stays at /m
         }
       },
       itemBuilder: (_) => all

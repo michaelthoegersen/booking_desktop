@@ -183,33 +183,6 @@ class BookingApp extends StatelessWidget {
           await _loadUserRole();
         }
 
-        // Route based on active company's app mode
-        final mode = activeCompanyNotifier.value?.appMode;
-        if (loggedIn && mode == 'management' &&
-            !path.startsWith('/m') &&
-            path != '/login') {
-          return '/m';
-        }
-
-        if (loggedIn && mode == 'crew' &&
-            !path.startsWith('/c') &&
-            path != '/login') {
-          return '/c';
-        }
-
-        if (loggedIn && mode == 'css' &&
-            (path.startsWith('/m') || path.startsWith('/c'))) {
-          return '/';
-        }
-
-        // Fallback: non-management role users can't access /m
-        if (loggedIn &&
-            mode == null &&
-            _cachedUserRole != 'management' &&
-            path.startsWith('/m')) {
-          return '/';
-        }
-
         return null;
       },
 
