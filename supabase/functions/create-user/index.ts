@@ -4,7 +4,7 @@
 // Body-parametere:
 //   name        (string, required)
 //   email       (string, required)
-//   role        (string, default: 'user') — 'admin' | 'user' | 'management'
+//   role        (string, default: 'user') — 'admin' | 'gruppeleder' | 'bruker'
 //   company_id  (string, optional) — påkrevd når role = 'management'
 //
 // Krever: Authorization: Bearer <session-token> fra en pålogget admin
@@ -61,8 +61,8 @@ Deno.serve(async (req) => {
 
     const userRole = role || 'user';
 
-    // Generate a random temporary password — user should change it
-    const tempPassword = crypto.randomUUID().replace(/-/g, '') + 'Aa1!';
+    // Fixed password — user changes it in the mobile app
+    const tempPassword = 'Complete2026';
 
     // --- Create auth user ---
     const createRes = await fetch(

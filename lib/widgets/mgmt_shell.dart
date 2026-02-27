@@ -1,8 +1,14 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../pages/mgmt/mgmt_settings_page.dart' show companyFlagsNotifier;
 import '../ui/css_theme.dart';
+
+/// Notifier so the sidebar badge updates immediately after marking messages read.
+final mgmtUnreadNotifier = ValueNotifier<int>(0);
 
 // --------------------------------------------------------------------------
 // MANAGEMENT SHELL
@@ -204,8 +210,96 @@ class _MgmtTopBarState extends State<_MgmtTopBar> {
 // SIDE NAV
 // --------------------------------------------------------------------------
 
-class _MgmtSideNav extends StatelessWidget {
+class _MgmtSideNav extends StatefulWidget {
   const _MgmtSideNav();
+
+  @override
+  State<_MgmtSideNav> createState() => _MgmtSideNavState();
+}
+
+class _MgmtSideNavState extends State<_MgmtSideNav> {
+  final _sb = Supabase.instance.client;
+  bool _showTours = true;
+  int _unreadMessages = 0;
+  RealtimeChannel? _channel;
+  Timer? _pollTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadFlags();
+    _loadUnreadMessages();
+    companyFlagsNotifier.addListener(_onFlagsChanged);
+    mgmtUnreadNotifier.addListener(_loadUnreadMessages);
+    _channel = _sb
+        .channel('mgmt-sidenav-badges')
+        .onPostgresChanges(
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: 'gig_messages',
+          callback: (_) => _loadUnreadMessages(),
+        )
+        .subscribe();
+    _pollTimer = Timer.periodic(const Duration(seconds: 15), (_) {
+      _loadUnreadMessages();
+    });
+  }
+
+  @override
+  void dispose() {
+    companyFlagsNotifier.removeListener(_onFlagsChanged);
+    mgmtUnreadNotifier.removeListener(_loadUnreadMessages);
+    _channel?.unsubscribe();
+    _pollTimer?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _loadUnreadMessages() async {
+    try {
+      final res = await _sb
+          .from('gig_messages')
+          .select('id')
+          .eq('is_admin', false)
+          .or('read_by_admin.is.null,read_by_admin.eq.false');
+      if (mounted) setState(() => _unreadMessages = (res as List).length);
+    } catch (e) {
+      debugPrint('Mgmt chat badge error: $e');
+    }
+  }
+
+  void _onFlagsChanged() {
+    if (!mounted) return;
+    setState(() {
+      _showTours = companyFlagsNotifier.value['show_tours'] ?? true;
+    });
+  }
+
+  Future<void> _loadFlags() async {
+    try {
+      final sb = Supabase.instance.client;
+      final uid = sb.auth.currentUser?.id;
+      if (uid == null) return;
+      final profile = await sb
+          .from('profiles')
+          .select('company_id')
+          .eq('id', uid)
+          .maybeSingle();
+      final companyId = profile?['company_id'] as String?;
+      if (companyId == null) return;
+      final company = await sb
+          .from('companies')
+          .select('show_tours')
+          .eq('id', companyId)
+          .maybeSingle();
+      if (mounted) {
+        setState(() {
+          _showTours = company?['show_tours'] != false;
+        });
+      }
+    } catch (e) {
+      debugPrint('SideNav flags error: $e');
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -252,11 +346,12 @@ class _MgmtSideNav extends StatelessWidget {
                       label: 'Dashboard',
                       route: '/m',
                     ),
-                    _MgmtNavItem(
-                      icon: Icons.map_rounded,
-                      label: 'Tours',
-                      route: '/m/tours',
-                    ),
+                    if (_showTours)
+                      _MgmtNavItem(
+                        icon: Icons.map_rounded,
+                        label: 'Tours',
+                        route: '/m/tours',
+                      ),
                     _MgmtNavItem(
                       icon: Icons.music_note_rounded,
                       label: 'Gigs',
@@ -271,6 +366,7 @@ class _MgmtSideNav extends StatelessWidget {
                       icon: Icons.chat_bubble_outline_rounded,
                       label: 'Messages',
                       route: '/m/messages',
+                      badge: _unreadMessages,
                     ),
                   ],
                 ),
