@@ -6,6 +6,7 @@ import 'package:intl/intl.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../ui/css_theme.dart';
+import '../services/bus_availability_service.dart';
 
 // Global notifier for CSS sidebar badge count
 final busRequestsBadgeNotifier = ValueNotifier<int>(0);
@@ -22,7 +23,9 @@ class _BusRequestsPageState extends State<BusRequestsPage> {
 
   bool _loading = true;
   List<Map<String, dynamic>> _requests = [];
-  String _filterStatus = 'pending';
+  String _filterStatus = 'all';
+  int _pendingCount = 0;
+  int _awaitingConfirmCount = 0;
 
   @override
   void initState() {
@@ -35,22 +38,49 @@ class _BusRequestsPageState extends State<BusRequestsPage> {
     try {
       final query = _sb
           .from('bus_requests')
-          .select('*, companies(name), management_tours(name, artist)');
+          .select('*, companies(name), management_tours(name, artist), gigs(venue_name, city, date_from, date_to, customer_firma, customer_name, customer_phone, customer_email), bus_request_gigs(sort_order, gigs(id, venue_name, city, date_from, date_to, customer_name, customer_phone, customer_email))');
 
-      final data = _filterStatus == 'all'
-          ? await query.order('created_at', ascending: false)
-          : await query
-              .eq('status', _filterStatus)
-              .order('created_at', ascending: false);
+      final List<dynamic> data;
+      if (_filterStatus == 'archived') {
+        data = await query
+            .eq('archived_css', true)
+            .order('created_at', ascending: false);
+      } else if (_filterStatus == 'all') {
+        data = await query
+            .eq('archived_css', false)
+            .order('created_at', ascending: false);
+      } else {
+        data = await query
+            .eq('status', _filterStatus)
+            .eq('archived_css', false)
+            .order('created_at', ascending: false);
+      }
 
       _requests = List<Map<String, dynamic>>.from(data);
 
-      // Update badge with pending count
-      final pending = await _sb
+      // Update badge counts (exclude archived)
+      final pendingRows = await _sb
           .from('bus_requests')
           .select('id')
-          .eq('status', 'pending');
-      busRequestsBadgeNotifier.value = (pending as List).length;
+          .eq('status', 'pending')
+          .eq('archived_css', false);
+      _pendingCount = (pendingRows as List).length;
+
+      final awaitingRows = await _sb
+          .from('bus_requests')
+          .select('id')
+          .eq('status', 'accepted_by_client')
+          .eq('archived_css', false);
+      _awaitingConfirmCount = (awaitingRows as List).length;
+
+      final cancelledRows = await _sb
+          .from('bus_requests')
+          .select('id')
+          .eq('status', 'cancelled')
+          .eq('archived_css', false);
+      final cancelledCount = (cancelledRows as List).length;
+
+      busRequestsBadgeNotifier.value = _pendingCount + _awaitingConfirmCount + cancelledCount;
     } catch (e) {
       debugPrint('BusRequests load error: $e');
     }
@@ -84,33 +114,155 @@ class _BusRequestsPageState extends State<BusRequestsPage> {
   }
 
   Future<void> _createOffer(Map<String, dynamic> request) async {
-    // Navigate to new offer page with bus request context
-    // Pre-populate by passing query parameters
-    final dateFrom = request['date_from'] as String?;
-    final dateTo = request['date_to'] as String?;
+    final dateFrom = request['date_from'] as String? ?? '';
+    final dateTo = request['date_to'] as String? ?? '';
     final fromCity = request['from_city'] as String? ?? '';
     final toCity = request['to_city'] as String? ?? '';
     final company = request['companies'] as Map<String, dynamic>?;
     final companyName = company?['name'] as String? ?? '';
+    final busRequestId = request['id'] as String;
+    final pax = request['pax'] as int?;
+    final busCount = request['bus_count'] as int?;
+    final trailer = request['trailer'] as bool? ?? false;
 
-    // Update status to quoted first
-    await _sb.from('bus_requests').update({
-      'status': 'quoted',
-    }).eq('id', request['id']);
+    // Build stops list for the route (from junction gigs sorted by date)
+    final junctionGigs = (request['bus_request_gigs'] as List<dynamic>? ?? [])
+        .map((e) => Map<String, dynamic>.from(e as Map))
+        .toList()
+      ..sort((a, b) => (a['sort_order'] as int? ?? 0).compareTo(b['sort_order'] as int? ?? 0));
+
+    final stops = junctionGigs
+        .map((jg) => jg['gigs'] as Map<String, dynamic>?)
+        .whereType<Map<String, dynamic>>()
+        .map((g) => g['city'] as String? ?? '')
+        .where((c) => c.isNotEmpty)
+        .join(',');
+
+    // Build production name
+    final tour = request['management_tours'] as Map<String, dynamic>?;
+    final production = tour?['name'] as String? ?? '';
 
     if (mounted) {
+      // Navigate directly to new offer with prefill params
+      final params = <String, String>{
+        'busRequestId': busRequestId,
+        if (companyName.isNotEmpty) 'company': companyName,
+        if (production.isNotEmpty) 'production': production,
+        if (fromCity.isNotEmpty) 'fromCity': fromCity,
+        if (toCity.isNotEmpty) 'toCity': toCity,
+        if (dateFrom.isNotEmpty) 'dateFrom': dateFrom,
+        if (dateTo.isNotEmpty) 'dateTo': dateTo,
+        if (stops.isNotEmpty) 'stops': stops,
+        if (pax != null) 'pax': pax.toString(),
+        if (busCount != null) 'busCount': busCount.toString(),
+        if (trailer) 'trailer': 'true',
+      };
+      final queryString = params.entries
+          .map((e) => '${e.key}=${Uri.encodeComponent(e.value)}')
+          .join('&');
+      context.go('/new?$queryString');
+    }
+  }
+
+  Future<void> _acceptRequest(String requestId) async {
+    await _sb
+        .from('bus_requests')
+        .update({'status': 'confirmed'}).eq('id', requestId);
+    if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            'Request marked as quoted. Create offer for $companyName — $fromCity → $toCity ($dateFrom to $dateTo)',
-          ),
-          duration: const Duration(seconds: 4),
-          action: SnackBarAction(
-            label: 'New offer',
-            onPressed: () => context.go('/new'),
-          ),
-        ),
+        const SnackBar(content: Text('Forespørsel bekreftet')),
       );
+    }
+    await _load();
+  }
+
+  Future<void> _declineRequest(String requestId) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Avslå forespørsel?'),
+        content: const Text('Er du sikker på at du vil avslå denne forespørselen?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Avbryt'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            child: const Text('Avslå'),
+          ),
+        ],
+      ),
+    );
+    if (confirm == true) {
+      await _sb
+          .from('bus_requests')
+          .update({'status': 'declined'}).eq('id', requestId);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Forespørsel avslått')),
+        );
+      }
+      await _load();
+    }
+  }
+
+  Future<void> _archiveRequest(String requestId) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Archive request?'),
+        content: const Text('This request will be moved to your archive.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Archive'),
+          ),
+        ],
+      ),
+    );
+    if (confirm == true) {
+      await _sb
+          .from('bus_requests')
+          .update({'archived_css': true}).eq('id', requestId);
+      await _load();
+    }
+  }
+
+  Future<void> _restoreRequest(String requestId) async {
+    await _sb
+        .from('bus_requests')
+        .update({'archived_css': false}).eq('id', requestId);
+    await _load();
+  }
+
+  Future<void> _permanentlyDeleteRequest(String requestId) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete permanently?'),
+        content: const Text(
+            'This request will be permanently deleted. This action cannot be undone.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            child: const Text('Delete permanently'),
+          ),
+        ],
+      ),
+    );
+    if (confirm == true) {
+      await _sb.from('bus_requests').delete().eq('id', requestId);
       await _load();
     }
   }
@@ -142,10 +294,36 @@ class _BusRequestsPageState extends State<BusRequestsPage> {
               const Spacer(),
               // Status filter
               SegmentedButton<String>(
-                segments: const [
-                  ButtonSegment(value: 'pending', label: Text('Pending')),
-                  ButtonSegment(value: 'quoted', label: Text('Quoted')),
-                  ButtonSegment(value: 'all', label: Text('All')),
+                segments: [
+                  ButtonSegment(
+                    value: 'pending',
+                    label: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Text('Pending'),
+                        if (_pendingCount > 0) ...[
+                          const SizedBox(width: 6),
+                          _BadgeChip(count: _pendingCount),
+                        ],
+                      ],
+                    ),
+                  ),
+                  const ButtonSegment(value: 'quoted', label: Text('Quoted')),
+                  ButtonSegment(
+                    value: 'accepted_by_client',
+                    label: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Text('Awaiting confirm'),
+                        if (_awaitingConfirmCount > 0) ...[
+                          const SizedBox(width: 6),
+                          _BadgeChip(count: _awaitingConfirmCount),
+                        ],
+                      ],
+                    ),
+                  ),
+                  const ButtonSegment(value: 'all', label: Text('All')),
+                  const ButtonSegment(value: 'archived', label: Text('Archived')),
                 ],
                 selected: {_filterStatus},
                 onSelectionChanged: (s) {
@@ -173,7 +351,9 @@ class _BusRequestsPageState extends State<BusRequestsPage> {
                             Text(
                               _filterStatus == 'pending'
                                   ? 'No pending requests'
-                                  : 'No requests',
+                                  : _filterStatus == 'archived'
+                                      ? 'No archived requests'
+                                      : 'No requests',
                               style: Theme.of(context)
                                   .textTheme
                                   .titleMedium
@@ -190,6 +370,12 @@ class _BusRequestsPageState extends State<BusRequestsPage> {
                             request: req,
                             onCreateOffer: () => _createOffer(req),
                             onReject: () => _reject(req['id']),
+                            onAccept: () => _acceptRequest(req['id']),
+                            onDecline: () => _declineRequest(req['id']),
+                            onArchive: () => _archiveRequest(req['id']),
+                            onRestore: () => _restoreRequest(req['id']),
+                            onDelete: () => _permanentlyDeleteRequest(req['id']),
+                            isArchiveView: _filterStatus == 'archived',
                           );
                         },
                       ),
@@ -200,34 +386,131 @@ class _BusRequestsPageState extends State<BusRequestsPage> {
   }
 }
 
-class _BusRequestCard extends StatelessWidget {
+class _BusRequestCard extends StatefulWidget {
   final Map<String, dynamic> request;
   final VoidCallback onCreateOffer;
   final VoidCallback onReject;
+  final VoidCallback? onAccept;
+  final VoidCallback? onDecline;
+  final VoidCallback? onArchive;
+  final VoidCallback? onRestore;
+  final VoidCallback? onDelete;
+  final bool isArchiveView;
 
   const _BusRequestCard({
     required this.request,
     required this.onCreateOffer,
     required this.onReject,
+    this.onAccept,
+    this.onDecline,
+    this.onArchive,
+    this.onRestore,
+    this.onDelete,
+    this.isArchiveView = false,
   });
 
   @override
+  State<_BusRequestCard> createState() => _BusRequestCardState();
+}
+
+class _BusRequestCardState extends State<_BusRequestCard> {
+  Map<String, bool>? _availability;
+  bool _loadingAvailability = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _checkAvailability();
+  }
+
+  Future<void> _checkAvailability() async {
+    final dateFrom = widget.request['date_from'] as String?;
+    final dateTo = widget.request['date_to'] as String?;
+    if (dateFrom == null || dateTo == null) {
+      setState(() => _loadingAvailability = false);
+      return;
+    }
+    try {
+      final avail = await BusAvailabilityService.fetchAvailability(
+        start: DateTime.parse(dateFrom),
+        end: DateTime.parse(dateTo),
+      );
+      if (mounted) setState(() {
+        _availability = avail;
+        _loadingAvailability = false;
+      });
+    } catch (e) {
+      debugPrint('Availability check error: $e');
+      if (mounted) setState(() => _loadingAvailability = false);
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final company = request['companies'] as Map<String, dynamic>?;
+    final req = widget.request;
+    final company = req['companies'] as Map<String, dynamic>?;
     final companyName = company?['name'] as String? ?? 'Unknown company';
-    final tour = request['management_tours'] as Map<String, dynamic>?;
+    final tour = req['management_tours'] as Map<String, dynamic>?;
     final tourName = tour?['name'] as String? ?? '';
     final artist = tour?['artist'] as String? ?? '';
-    final dateFrom = request['date_from'] as String? ?? '';
-    final dateTo = request['date_to'] as String? ?? '';
-    final fromCity = request['from_city'] as String? ?? '';
-    final toCity = request['to_city'] as String? ?? '';
-    final pax = request['pax'] as int?;
-    final notes = request['notes'] as String? ?? '';
-    final status = request['status'] as String? ?? 'pending';
-    final createdAt = request['created_at'] as String?;
+    final gig = req['gigs'] as Map<String, dynamic>?;
+    final dateFrom = req['date_from'] as String? ?? '';
+    final dateTo = req['date_to'] as String? ?? '';
+    final fromCity = req['from_city'] as String? ?? '';
+    final toCity = req['to_city'] as String? ?? '';
+    final pax = req['pax'] as int?;
+    final trailer = req['trailer'] as bool? ?? false;
+    final busCount = req['bus_count'] as int?;
+    final notes = req['notes'] as String? ?? '';
+    final status = req['status'] as String? ?? 'pending';
+    final createdAt = req['created_at'] as String?;
 
     final isPending = status == 'pending';
+    final isAwaitingConfirm = status == 'accepted_by_client';
+
+    // Multi-gig route from junction table
+    final junctionGigs = (req['bus_request_gigs'] as List<dynamic>? ?? [])
+        .map((e) => Map<String, dynamic>.from(e as Map))
+        .toList()
+      ..sort((a, b) => (a['sort_order'] as int? ?? 0).compareTo(b['sort_order'] as int? ?? 0));
+
+    final gigStops = junctionGigs
+        .map((jg) {
+          final g = jg['gigs'] as Map<String, dynamic>?;
+          return g?['city'] as String? ?? '';
+        })
+        .where((c) => c.isNotEmpty)
+        .toList();
+
+    // Build full route string: fromCity → stop1 → stop2 → toCity
+    final routeParts = <String>[
+      if (fromCity.isNotEmpty) fromCity,
+      ...gigStops,
+      if (toCity.isNotEmpty) toCity,
+    ];
+    final routeLabel = routeParts.isNotEmpty
+        ? routeParts.join(' → ')
+        : '$fromCity → $toCity';
+
+    // Subtitle — gig details or tour info
+    String subtitle = '';
+    if (junctionGigs.isNotEmpty) {
+      subtitle = junctionGigs.map((jg) {
+        final g = jg['gigs'] as Map<String, dynamic>?;
+        if (g == null) return '';
+        final venue = g['venue_name'] as String? ?? '';
+        final city = g['city'] as String? ?? '';
+        final d = g['date_from'] as String?;
+        final dateStr = d != null ? DateFormat('dd.MM').format(DateTime.parse(d)) : '';
+        return '$dateStr ${[venue, city].where((s) => s.isNotEmpty).join(' · ')}'.trim();
+      }).where((s) => s.isNotEmpty).join('  |  ');
+    } else if (gig != null) {
+      final gigVenue = gig['venue_name'] as String? ?? '';
+      final gigCity = gig['city'] as String? ?? '';
+      subtitle = [gigVenue, gigCity].where((s) => s.isNotEmpty).join(' · ');
+    } else if (tourName.isNotEmpty) {
+      subtitle = '$tourName${artist.isNotEmpty ? ' · $artist' : ''}';
+    }
 
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
@@ -238,8 +521,10 @@ class _BusRequestCard extends StatelessWidget {
         border: Border.all(
           color: isPending
               ? Colors.orange.withOpacity(0.4)
-              : CssTheme.outline,
-          width: isPending ? 2 : 1,
+              : isAwaitingConfirm
+                  ? Colors.amber.withOpacity(0.4)
+                  : CssTheme.outline,
+          width: isPending || isAwaitingConfirm ? 2 : 1,
         ),
       ),
       child: Column(
@@ -258,9 +543,9 @@ class _BusRequestCard extends StatelessWidget {
                         fontSize: 16,
                       ),
                     ),
-                    if (tourName.isNotEmpty)
+                    if (subtitle.isNotEmpty)
                       Text(
-                        '$tourName${artist.isNotEmpty ? ' · $artist' : ''}',
+                        subtitle,
                         style:
                             const TextStyle(color: CssTheme.textMuted),
                       ),
@@ -277,7 +562,7 @@ class _BusRequestCard extends StatelessWidget {
             children: [
               _InfoChip(
                 icon: Icons.route,
-                label: '$fromCity → $toCity',
+                label: routeLabel,
               ),
               _InfoChip(
                 icon: Icons.calendar_today,
@@ -287,6 +572,16 @@ class _BusRequestCard extends StatelessWidget {
                 _InfoChip(
                   icon: Icons.people,
                   label: '$pax passengers',
+                ),
+              if (busCount != null && busCount > 1)
+                _InfoChip(
+                  icon: Icons.directions_bus,
+                  label: '${busCount}x nightliner',
+                ),
+              if (trailer)
+                _InfoChip(
+                  icon: Icons.rv_hookup,
+                  label: 'Trailer',
                 ),
               if (createdAt != null)
                 _InfoChip(
@@ -314,13 +609,57 @@ class _BusRequestCard extends StatelessWidget {
               ),
             ),
           ],
+          // Availability section
+          if (dateFrom.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            _loadingAvailability
+                ? const Row(
+                    children: [
+                      SizedBox(
+                        width: 14, height: 14,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      ),
+                      SizedBox(width: 8),
+                      Text('Checking availability...', style: TextStyle(fontSize: 12, color: CssTheme.textMuted)),
+                    ],
+                  )
+                : _availability != null
+                    ? Wrap(
+                        spacing: 6,
+                        runSpacing: 4,
+                        children: _availability!.entries.map((e) {
+                          final available = e.value;
+                          return Chip(
+                            label: Text(
+                              e.key,
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: available ? Colors.green.shade800 : Colors.red.shade800,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            backgroundColor: available
+                                ? Colors.green.withOpacity(0.12)
+                                : Colors.red.withOpacity(0.12),
+                            side: BorderSide(
+                              color: available
+                                  ? Colors.green.withOpacity(0.3)
+                                  : Colors.red.withOpacity(0.3),
+                            ),
+                            visualDensity: VisualDensity.compact,
+                            materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          );
+                        }).toList(),
+                      )
+                    : const SizedBox.shrink(),
+          ],
           if (isPending) ...[
             const SizedBox(height: 12),
             Row(
               mainAxisAlignment: MainAxisAlignment.end,
               children: [
                 OutlinedButton.icon(
-                  onPressed: onReject,
+                  onPressed: widget.onReject,
                   icon: const Icon(Icons.close, size: 16),
                   label: const Text('Reject'),
                   style: OutlinedButton.styleFrom(
@@ -330,9 +669,72 @@ class _BusRequestCard extends StatelessWidget {
                 ),
                 const SizedBox(width: 10),
                 FilledButton.icon(
-                  onPressed: onCreateOffer,
+                  onPressed: widget.onCreateOffer,
                   icon: const Icon(Icons.add_circle_outline, size: 16),
                   label: const Text('Create offer'),
+                ),
+              ],
+            ),
+          ],
+          if (status == 'accepted_by_client') ...[
+            const SizedBox(height: 12),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                OutlinedButton.icon(
+                  onPressed: widget.onDecline,
+                  icon: const Icon(Icons.close, size: 16),
+                  label: const Text('Avslå'),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: Colors.red,
+                    side: const BorderSide(color: Colors.red),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                FilledButton.icon(
+                  onPressed: widget.onAccept,
+                  icon: const Icon(Icons.check, size: 16),
+                  label: const Text('Bekreft'),
+                  style: FilledButton.styleFrom(backgroundColor: Colors.green),
+                ),
+              ],
+            ),
+          ],
+          // Archive button for terminal statuses (not in archive view)
+          if (!widget.isArchiveView &&
+              ['quoted', 'accepted', 'confirmed', 'rejected', 'declined', 'cancelled'].contains(status)) ...[
+            const SizedBox(height: 12),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                OutlinedButton.icon(
+                  onPressed: widget.onArchive,
+                  icon: const Icon(Icons.archive_outlined, size: 16),
+                  label: const Text('Archive'),
+                ),
+              ],
+            ),
+          ],
+          // Restore + Delete buttons in archive view
+          if (widget.isArchiveView) ...[
+            const SizedBox(height: 12),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                OutlinedButton.icon(
+                  onPressed: widget.onRestore,
+                  icon: const Icon(Icons.unarchive_outlined, size: 16),
+                  label: const Text('Restore'),
+                ),
+                const SizedBox(width: 10),
+                OutlinedButton.icon(
+                  onPressed: widget.onDelete,
+                  icon: const Icon(Icons.delete_forever, size: 16),
+                  label: const Text('Delete permanently'),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: Colors.red,
+                    side: const BorderSide(color: Colors.red),
+                  ),
                 ),
               ],
             ),
@@ -349,6 +751,30 @@ class _BusRequestCard extends StatelessWidget {
     } catch (_) {
       return date;
     }
+  }
+}
+
+class _BadgeChip extends StatelessWidget {
+  final int count;
+  const _BadgeChip({required this.count});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+      decoration: BoxDecoration(
+        color: Colors.red,
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Text(
+        '$count',
+        style: const TextStyle(
+          color: Colors.white,
+          fontSize: 11,
+          fontWeight: FontWeight.w800,
+        ),
+      ),
+    );
   }
 }
 
@@ -383,8 +809,13 @@ class _StatusBadge extends StatelessWidget {
     final colors = {
       'pending': Colors.orange,
       'quoted': Colors.blue,
+      'offer_sent': Colors.teal,
+      'accepted_by_client': Colors.amber,
       'accepted': Colors.green,
+      'confirmed': Colors.green,
+      'declined': Colors.red,
       'rejected': Colors.red,
+      'cancelled': Colors.red,
     };
     final color = colors[status] ?? Colors.grey;
     return Container(

@@ -1,6 +1,10 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
+import 'package:printing/printing.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../state/active_company.dart';
@@ -21,6 +25,7 @@ class _MgmtDashboardPageState extends State<MgmtDashboardPage> {
   String? get _companyId => activeCompanyNotifier.value?.id;
   bool _showTours = true;
   bool _showBusRequests = true;
+  bool _showArchivedBusRequests = false;
 
   // Combined upcoming events: management_shows (tour-based) + gigs
   List<Map<String, dynamic>> _upcomingEvents = [];
@@ -138,13 +143,35 @@ class _MgmtDashboardPageState extends State<MgmtDashboardPage> {
 
       // Pending bus requests
       if (_showBusRequests) {
-        final pending = await _sb
+        final baseQuery = _sb
             .from('bus_requests')
             .select('*, management_tours(name, artist)')
-            .eq('company_id', _companyId!)
-            .eq('status', 'pending')
-            .order('created_at', ascending: false);
-        _pendingBusRequests = List<Map<String, dynamic>>.from(pending);
+            .eq('company_id', _companyId!);
+        final pending = _showArchivedBusRequests
+            ? await baseQuery
+                .eq('archived_mgmt', true)
+                .order('created_at', ascending: false)
+            : await baseQuery
+                .eq('archived_mgmt', false)
+                .inFilter('status', ['pending', 'offer_sent', 'accepted_by_client', 'accepted', 'confirmed', 'declined', 'cancelled'])
+                .order('created_at', ascending: false);
+        final rows = List<Map<String, dynamic>>.from(pending);
+
+        // Look up pdf_path from offers table for rows that have an offer
+        for (final r in rows) {
+          final offerId = r['offer_id'] as String?;
+          if (offerId != null) {
+            try {
+              final offer = await _sb
+                  .from('offers')
+                  .select('pdf_path')
+                  .eq('id', offerId)
+                  .maybeSingle();
+              r['_pdf_path'] = offer?['pdf_path'] as String?;
+            } catch (_) {}
+          }
+        }
+        _pendingBusRequests = rows;
       } else {
         _pendingBusRequests = [];
       }
@@ -233,17 +260,42 @@ class _MgmtDashboardPageState extends State<MgmtDashboardPage> {
                   if (_showBusRequests) ...[
                     const SizedBox(height: 24),
 
-                    // Pending bus requests
+                    // Bus requests
                     _SectionHeader(
-                      title: 'Pending Bus Requests',
+                      title: _showArchivedBusRequests
+                          ? 'Archived Bus Requests'
+                          : 'Bus Requests',
                       count: _pendingBusRequests.length,
+                      action: IconButton(
+                        icon: Icon(
+                          _showArchivedBusRequests
+                              ? Icons.inbox
+                              : Icons.archive_outlined,
+                          size: 20,
+                        ),
+                        tooltip: _showArchivedBusRequests
+                            ? 'Show active'
+                            : 'Show archived',
+                        onPressed: () {
+                          setState(() => _showArchivedBusRequests =
+                              !_showArchivedBusRequests);
+                          _load();
+                        },
+                      ),
                     ),
                     const SizedBox(height: 12),
                     if (_pendingBusRequests.isEmpty)
-                      _EmptyCard(message: 'No pending bus requests')
+                      _EmptyCard(
+                        message: _showArchivedBusRequests
+                            ? 'No archived bus requests'
+                            : 'No bus requests',
+                      )
                     else
-                      ..._pendingBusRequests
-                          .map((r) => _BusRequestCard(request: r)),
+                      ..._pendingBusRequests.map((r) => _BusRequestCard(
+                            request: r,
+                            onReload: _load,
+                            isArchiveView: _showArchivedBusRequests,
+                          )),
                   ],
 
                   const SizedBox(height: 24),
@@ -514,7 +566,153 @@ class _TourCard extends StatelessWidget {
 
 class _BusRequestCard extends StatelessWidget {
   final Map<String, dynamic> request;
-  const _BusRequestCard({required this.request});
+  final VoidCallback onReload;
+  final bool isArchiveView;
+  const _BusRequestCard({
+    required this.request,
+    required this.onReload,
+    this.isArchiveView = false,
+  });
+
+  Future<void> _approve(BuildContext context) async {
+    final id = request['id'] as String;
+    await Supabase.instance.client
+        .from('bus_requests')
+        .update({'status': 'accepted_by_client'}).eq('id', id);
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Godkjenning sendt')),
+      );
+    }
+    onReload();
+  }
+
+  Future<void> _decline(BuildContext context) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Avslå tilbud?'),
+        content: const Text('Er du sikker på at du vil avslå dette tilbudet?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Avbryt'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            child: const Text('Avslå'),
+          ),
+        ],
+      ),
+    );
+    if (confirm != true) return;
+    final id = request['id'] as String;
+    await Supabase.instance.client
+        .from('bus_requests')
+        .update({'status': 'declined'}).eq('id', id);
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Tilbud avslått')),
+      );
+    }
+    onReload();
+  }
+
+  Future<void> _cancel(BuildContext context) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Avlys bussforespørsel?'),
+        content: const Text('Er du sikker på at du vil avlyse denne forespørselen?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Avbryt'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: FilledButton.styleFrom(backgroundColor: Colors.orange),
+            child: const Text('Avlys'),
+          ),
+        ],
+      ),
+    );
+    if (confirm != true) return;
+    final id = request['id'] as String;
+    await Supabase.instance.client
+        .from('bus_requests')
+        .update({'status': 'cancelled'}).eq('id', id);
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Forespørsel avlyst')),
+      );
+    }
+    onReload();
+  }
+
+  Future<void> _archive(BuildContext context) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Arkiver forespørsel?'),
+        content: const Text('Forespørselen flyttes til arkivet.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Avbryt'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Arkiver'),
+          ),
+        ],
+      ),
+    );
+    if (confirm != true) return;
+    final id = request['id'] as String;
+    await Supabase.instance.client
+        .from('bus_requests')
+        .update({'archived_mgmt': true}).eq('id', id);
+    onReload();
+  }
+
+  Future<void> _restore(BuildContext context) async {
+    final id = request['id'] as String;
+    await Supabase.instance.client
+        .from('bus_requests')
+        .update({'archived_mgmt': false}).eq('id', id);
+    onReload();
+  }
+
+  Future<void> _permanentlyDelete(BuildContext context) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Slett permanent?'),
+        content: const Text(
+            'Denne forespørselen slettes permanent. Handlingen kan ikke angres.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Avbryt'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            child: const Text('Slett permanent'),
+          ),
+        ],
+      ),
+    );
+    if (confirm != true) return;
+    final id = request['id'] as String;
+    await Supabase.instance.client
+        .from('bus_requests')
+        .delete()
+        .eq('id', id);
+    onReload();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -526,6 +724,8 @@ class _BusRequestCard extends StatelessWidget {
     final status = request['status'] as String? ?? 'pending';
     final tour = request['management_tours'] as Map<String, dynamic>?;
     final tourName = tour?['name'] as String? ?? '';
+
+    final pdfPath = request['_pdf_path'] as String?;
 
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
@@ -560,6 +760,107 @@ class _BusRequestCard extends StatelessWidget {
               ],
             ),
           ),
+          if (pdfPath != null) ...[
+            TextButton.icon(
+              onPressed: () {
+                final url = Supabase.instance.client.storage
+                    .from('offer-pdfs')
+                    .getPublicUrl(pdfPath);
+                showDialog<void>(
+                  context: context,
+                  builder: (_) => _PdfViewDialog(pdfUrl: url),
+                );
+              },
+              icon: const Icon(Icons.picture_as_pdf, size: 16),
+              label: const Text('Se tilbud'),
+            ),
+            const SizedBox(width: 8),
+          ],
+          if (status == 'offer_sent') ...[
+            FilledButton.icon(
+              onPressed: () => _approve(context),
+              icon: const Icon(Icons.check, size: 16),
+              label: const Text('Godkjenn'),
+              style: FilledButton.styleFrom(backgroundColor: Colors.green),
+            ),
+            const SizedBox(width: 8),
+            OutlinedButton.icon(
+              onPressed: () => _decline(context),
+              icon: const Icon(Icons.close, size: 16),
+              label: const Text('Avslå'),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: Colors.red,
+                side: const BorderSide(color: Colors.red),
+              ),
+            ),
+            const SizedBox(width: 8),
+          ],
+          if (status == 'accepted_by_client') ...[
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              decoration: BoxDecoration(
+                color: Colors.amber.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(999),
+                border: Border.all(color: Colors.amber.withValues(alpha: 0.3)),
+              ),
+              child: const Text(
+                'Venter på bekreftelse',
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                  color: Colors.amber,
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+          ],
+          // Cancel button for active statuses (pending, offer_sent, accepted_by_client, confirmed)
+          if (!isArchiveView &&
+              ['pending', 'offer_sent', 'accepted_by_client', 'confirmed'].contains(status)) ...[
+            OutlinedButton.icon(
+              onPressed: () => _cancel(context),
+              icon: const Icon(Icons.cancel_outlined, size: 16),
+              label: const Text('Avlys'),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: Colors.orange,
+                side: const BorderSide(color: Colors.orange),
+              ),
+            ),
+            const SizedBox(width: 8),
+          ],
+          // Archive button for terminal statuses (active view)
+          if (!isArchiveView &&
+              ['accepted', 'confirmed', 'declined', 'cancelled'].contains(status)) ...[
+            const SizedBox(width: 8),
+            IconButton(
+              onPressed: () => _archive(context),
+              icon: const Icon(Icons.archive_outlined, size: 18),
+              tooltip: 'Arkiver',
+              style: IconButton.styleFrom(foregroundColor: CssTheme.textMuted),
+            ),
+          ],
+          // Restore + Delete buttons (archive view)
+          if (isArchiveView) ...[
+            const SizedBox(width: 8),
+            OutlinedButton.icon(
+              onPressed: () => _restore(context),
+              icon: const Icon(Icons.unarchive_outlined, size: 16),
+              label: const Text('Gjenopprett'),
+            ),
+            const SizedBox(width: 8),
+            OutlinedButton.icon(
+              onPressed: () => _permanentlyDelete(context),
+              icon: const Icon(Icons.delete_forever, size: 16),
+              label: const Text('Slett permanent'),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: Colors.red,
+                side: const BorderSide(color: Colors.red),
+              ),
+            ),
+          ],
+          if (!isArchiveView) ...[
+            const SizedBox(width: 8),
+          ],
           _StatusBadge(status: status),
         ],
       ),
@@ -582,7 +883,10 @@ class _StatusBadge extends StatelessWidget {
       'hold': Colors.orange,
       'pending': Colors.orange,
       'quoted': Colors.blue,
+      'offer_sent': Colors.teal,
+      'accepted_by_client': Colors.amber,
       'accepted': Colors.green,
+      'declined': Colors.red,
       'rejected': Colors.red,
     };
 
@@ -601,6 +905,121 @@ class _StatusBadge extends StatelessWidget {
           fontSize: 12,
           fontWeight: FontWeight.w700,
           color: color,
+        ),
+      ),
+    );
+  }
+}
+
+// ============================================================
+// PDF VIEW DIALOG
+// ============================================================
+
+class _PdfViewDialog extends StatefulWidget {
+  final String pdfUrl;
+  const _PdfViewDialog({required this.pdfUrl});
+
+  @override
+  State<_PdfViewDialog> createState() => _PdfViewDialogState();
+}
+
+class _PdfViewDialogState extends State<_PdfViewDialog> {
+  Uint8List? _pdfBytes;
+  bool _loading = true;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadPdf();
+  }
+
+  Future<void> _loadPdf() async {
+    try {
+      final res = await http.get(Uri.parse(widget.pdfUrl));
+      if (res.statusCode != 200) throw Exception('HTTP ${res.statusCode}');
+      setState(() {
+        _pdfBytes = res.bodyBytes;
+        _loading = false;
+      });
+    } catch (e) {
+      setState(() {
+        _error = e.toString();
+        _loading = false;
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final size = MediaQuery.of(context).size;
+    return Dialog(
+      child: SizedBox(
+        width: size.width * 0.9,
+        height: size.height * 0.9,
+        child: Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.all(8),
+              child: Row(
+                children: [
+                  const SizedBox(width: 8),
+                  const Icon(Icons.picture_as_pdf, color: Colors.red),
+                  const SizedBox(width: 8),
+                  const Expanded(
+                    child: Text(
+                      'Tilbud',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.close),
+                    onPressed: () => Navigator.of(context).pop(),
+                  ),
+                ],
+              ),
+            ),
+            const Divider(height: 1),
+            Expanded(
+              child: _loading
+                  ? const Center(child: CircularProgressIndicator())
+                  : _error != null
+                      ? Center(
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Icon(Icons.error_outline,
+                                  color: Colors.red, size: 48),
+                              const SizedBox(height: 12),
+                              Text('Kunne ikke laste PDF: $_error'),
+                              const SizedBox(height: 12),
+                              FilledButton(
+                                onPressed: () {
+                                  setState(() {
+                                    _loading = true;
+                                    _error = null;
+                                    _pdfBytes = null;
+                                  });
+                                  _loadPdf();
+                                },
+                                child: const Text('Prøv igjen'),
+                              ),
+                            ],
+                          ),
+                        )
+                      : PdfPreview(
+                          build: (_) async => _pdfBytes!,
+                          canChangePageFormat: false,
+                          canChangeOrientation: false,
+                          allowPrinting: true,
+                          allowSharing: true,
+                          maxPageWidth: 800,
+                        ),
+            ),
+          ],
         ),
       ),
     );

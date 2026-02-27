@@ -641,7 +641,8 @@ class _SideNavState extends State<_SideNav> {
       final res = await _supabase
           .from('bus_requests')
           .select('id')
-          .eq('status', 'pending');
+          .inFilter('status', ['pending', 'accepted_by_client', 'cancelled'])
+          .eq('archived_css', false);
       if (mounted) setState(() => _pendingBusRequests = (res as List).length);
     } catch (e) {
       debugPrint('Bus requests badge error: $e');

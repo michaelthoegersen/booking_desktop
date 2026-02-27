@@ -44,7 +44,40 @@ class NewOfferPage extends StatefulWidget {
   /// ✅ Hvis du sender inn offerId -> åpner den eksisterende draft
   final String? offerId;
 
-  const NewOfferPage({super.key, this.offerId});
+  // Bus request prefill parameters
+  final String? prefillCompany;
+  final String? prefillContact;
+  final String? prefillPhone;
+  final String? prefillEmail;
+  final String? prefillProduction;
+  final String? prefillFromCity;
+  final String? prefillToCity;
+  final String? prefillDateFrom;
+  final String? prefillDateTo;
+  final String? prefillStops; // comma-separated intermediate cities
+  final String? busRequestId;
+  final int? prefillPax;
+  final int? prefillBusCount;
+  final bool? prefillTrailer;
+
+  const NewOfferPage({
+    super.key,
+    this.offerId,
+    this.prefillCompany,
+    this.prefillContact,
+    this.prefillPhone,
+    this.prefillEmail,
+    this.prefillProduction,
+    this.prefillFromCity,
+    this.prefillToCity,
+    this.prefillDateFrom,
+    this.prefillDateTo,
+    this.prefillStops,
+    this.busRequestId,
+    this.prefillPax,
+    this.prefillBusCount,
+    this.prefillTrailer,
+  });
 
   @override
   State<NewOfferPage> createState() => _NewOfferPageState();
@@ -742,6 +775,9 @@ const allBuses = [
 
   String? _draftId;
 
+  /// Resolved bus request ID — set from widget param or reverse-lookup on load
+  String? _busRequestId;
+
   bool _loadingDraft = false;
 
   /// True while this page is mid-save so we ignore our own draftSaved event
@@ -794,12 +830,18 @@ const allBuses = [
       }
     });
 
+    _busRequestId = widget.busRequestId;
+
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       final id = widget.offerId?.trim();
 
       if (id != null && id.isNotEmpty) {
         await _loadDraft(id);
       } else {
+        // Apply bus request prefill if present
+        if (widget.prefillCompany != null) {
+          _applyBusRequestPrefill();
+        }
         await _recalcKm();
       }
     });
@@ -817,6 +859,127 @@ const allBuses = [
 
   void _markDirty() {
     NewOfferPage.hasUnsavedChanges = true;
+  }
+
+  // ===================================================
+  // BUS REQUEST PREFILL
+  // ===================================================
+
+  void _applyBusRequestPrefill() {
+    offer.company = widget.prefillCompany ?? '';
+    offer.production = widget.prefillProduction ?? '';
+
+    companyCtrl.text = offer.company;
+    productionCtrl.text = offer.production;
+
+    // Prefill round 0 with route/dates
+    final r0 = offer.rounds[0];
+    r0.startLocation = widget.prefillFromCity ?? '';
+    startLocCtrl.text = r0.startLocation;
+
+    // Build intermediate stops list
+    final stops = (widget.prefillStops ?? '')
+        .split(',')
+        .map((s) => s.trim())
+        .where((s) => s.isNotEmpty)
+        .toList();
+
+    // Generate entries: one per stop on its gig date, then return day after last stop
+    // Route: fromCity (startLocation) → stop1 → stop2 → toCity (extra day)
+    if (widget.prefillDateFrom != null) {
+      final from = DateTime.tryParse(widget.prefillDateFrom!);
+      if (from != null) {
+        r0.entries.clear();
+
+        // Each stop gets one day starting from dateFrom
+        for (int i = 0; i < stops.length; i++) {
+          r0.entries.add(RoundEntry(
+            date: from.add(Duration(days: i)),
+            location: stops[i],
+            extra: '',
+          ));
+        }
+
+        // Add return day (day after last stop) with toCity
+        if ((widget.prefillToCity ?? '').isNotEmpty) {
+          r0.entries.add(RoundEntry(
+            date: from.add(Duration(days: stops.isEmpty ? 1 : stops.length)),
+            location: widget.prefillToCity!,
+            extra: '',
+          ));
+        }
+
+        _syncRoundControllers();
+      }
+    }
+
+    // --- Auto-select bustype, busCount, trailer ---
+    final pax = widget.prefillPax;
+    final reqBusCount = widget.prefillBusCount;
+    final wantTrailer = widget.prefillTrailer ?? false;
+
+    if (pax != null && pax > 0) {
+      BusType chosenType;
+      int chosenCount;
+
+      if (reqBusCount != null && reqBusCount > 0) {
+        // Customer specified bus count — derive type from pax/busCount
+        chosenCount = reqBusCount;
+        final perBus = (pax / chosenCount).ceil();
+        chosenType = _busTypeForCapacity(perBus);
+      } else {
+        // No bus count — find optimal config
+        final config = _optimalBusConfig(pax);
+        chosenType = config.$1;
+        chosenCount = config.$2;
+      }
+
+      offer.busType = chosenType;
+      offer.busCount = chosenCount;
+
+      // Expand busSlots/trailerSlots for all rounds
+      for (final r in offer.rounds) {
+        while (r.busSlots.length < chosenCount) {
+          r.busSlots.add(null);
+        }
+        while (r.trailerSlots.length < chosenCount) {
+          r.trailerSlots.add(false);
+        }
+        // Set trailer on all buses if requested
+        if (wantTrailer) {
+          r.trailer = true;
+          for (int i = 0; i < r.trailerSlots.length; i++) {
+            r.trailerSlots[i] = true;
+          }
+        }
+      }
+    }
+
+    if (mounted) setState(() {});
+  }
+
+  /// Map pax-per-bus capacity to BusType
+  BusType _busTypeForCapacity(int perBus) {
+    if (perBus <= 12) return BusType.sleeper12;
+    if (perBus <= 14) return BusType.sleeper14;
+    if (perBus <= 16) return BusType.sleeper16;
+    if (perBus <= 18) return BusType.sleeper18;
+    return BusType.conference;
+  }
+
+  /// Find the smallest sleeper type that keeps busCount <= 4, fallback conference
+  (BusType, int) _optimalBusConfig(int pax) {
+    const sleeperCaps = [
+      (12, BusType.sleeper12),
+      (14, BusType.sleeper14),
+      (16, BusType.sleeper16),
+      (18, BusType.sleeper18),
+    ];
+    for (final (cap, type) in sleeperCaps) {
+      final count = (pax / cap).ceil();
+      if (count <= 4) return (type, count);
+    }
+    return (BusType.conference, 1);
   }
 
   // ===================================================
@@ -994,6 +1157,20 @@ dst.entries
 
       _syncRoundControllers();
     });
+
+    // Reverse-lookup: check if a bus_request points to this offer
+    if (_busRequestId == null) {
+      try {
+        final br = await sb
+            .from('bus_requests')
+            .select('id')
+            .eq('offer_id', id)
+            .maybeSingle();
+        if (br != null) {
+          _busRequestId = br['id'] as String;
+        }
+      } catch (_) {}
+    }
 
     // ⭐ VIKTIG — oppdater preview model
     CurrentOfferStore.set(offer);
@@ -1876,6 +2053,18 @@ offer.rounds[i].bus =
 
     _draftId = id;
 
+    // Link bus request to this offer if created from a bus request
+    if (_busRequestId != null) {
+      try {
+        await sb.from('bus_requests').update({
+          'offer_id': id,
+          'status': 'quoted',
+        }).eq('id', _busRequestId!);
+      } catch (e) {
+        debugPrint('Failed to link bus request: $e');
+      }
+    }
+
     // ----------------------------------------
     // Reload from DB (SOURCE OF TRUTH)
     // ----------------------------------------
@@ -2189,6 +2378,28 @@ Future<void> _sendOffer() async {
     }
 
     if (!mounted) return;
+
+    // Bus request offers: deliver in-app (no email dialog)
+    if (_busRequestId != null) {
+      if (_draftId?.isNotEmpty == true) {
+        try {
+          await Supabase.instance.client.from('bus_requests').update({
+            'offer_id': _draftId,
+            'status': 'offer_sent',
+          }).eq('id', _busRequestId!);
+        } catch (e) {
+          debugPrint('Failed to update bus request status: $e');
+        }
+      }
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Tilbud sendt til ${offer.company} i appen'),
+          backgroundColor: Colors.teal,
+        ),
+      );
+      return;
+    }
 
     await showDialog<void>(
       context: context,
@@ -4710,18 +4921,45 @@ void didUpdateWidget(covariant _LeftOfferCard oldWidget) {
     if (!mounted) return;
 
     setState(() {
-      final c = _contacts.firstWhere(
+      // Try matching contact by name
+      var c = _contacts.firstWhere(
         (e) => e['name'] == widget.offer.contact,
         orElse: () => {},
       );
+      _contactId = c['id']?.toString();
 
+      // Auto-select if only one contact and no match found
+      if (_contactId == null && _contacts.length == 1) {
+        c = _contacts.first;
+        _contactId = c['id']?.toString();
+        widget.offer.contact = c['name'] ?? '';
+        widget.offer.phone = c['phone'] ?? '';
+        widget.offer.email = c['email'] ?? '';
+
+        final page =
+            context.findAncestorStateOfType<_NewOfferPageState>();
+        page?.contactCtrl.text = widget.offer.contact;
+        page?.phoneCtrl.text = widget.offer.phone;
+        page?.emailCtrl.text = widget.offer.email;
+      }
+
+      // Try matching production by name
       final p = _productions.firstWhere(
         (e) => e['name'] == widget.offer.production,
         orElse: () => {},
       );
-
-      _contactId = c['id']?.toString();
       _productionId = p['id']?.toString();
+
+      // Auto-select if only one production and no match found
+      if (_productionId == null && _productions.length == 1) {
+        final prod = _productions.first;
+        _productionId = prod['id']?.toString();
+        widget.offer.production = prod['name'] ?? '';
+
+        final page =
+            context.findAncestorStateOfType<_NewOfferPageState>();
+        page?.productionCtrl.text = widget.offer.production;
+      }
     });
   }
 

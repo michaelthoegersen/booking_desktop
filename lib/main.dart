@@ -240,8 +240,25 @@ class BookingApp extends StatelessWidget {
             GoRoute(
               path: "/new",
               builder: (context, state) {
-                final id = state.uri.queryParameters['id'];
-                return NewOfferPage(offerId: id);
+                final qp = state.uri.queryParameters;
+                final id = qp['id'];
+                return NewOfferPage(
+                  offerId: id,
+                  prefillCompany: qp['company'],
+                  prefillContact: qp['contact'],
+                  prefillPhone: qp['phone'],
+                  prefillEmail: qp['email'],
+                  prefillProduction: qp['production'],
+                  prefillFromCity: qp['fromCity'],
+                  prefillToCity: qp['toCity'],
+                  prefillDateFrom: qp['dateFrom'],
+                  prefillDateTo: qp['dateTo'],
+                  prefillStops: qp['stops'],
+                  busRequestId: qp['busRequestId'],
+                  prefillPax: int.tryParse(qp['pax'] ?? ''),
+                  prefillBusCount: int.tryParse(qp['busCount'] ?? ''),
+                  prefillTrailer: qp['trailer'] == 'true',
+                );
               },
             ),
 

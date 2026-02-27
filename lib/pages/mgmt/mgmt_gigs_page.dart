@@ -24,6 +24,10 @@ class _MgmtGigsPageState extends State<MgmtGigsPage> {
   String _search = '';
   String _statusFilter = 'all';
 
+  // Multi-select for bus booking
+  bool _selectionMode = false;
+  final Set<String> _selectedGigIds = {};
+
   static const _statuses = ['all', 'upcoming', 'confirmed', 'invoiced'];
 
   @override
@@ -153,6 +157,267 @@ class _MgmtGigsPageState extends State<MgmtGigsPage> {
     }
   }
 
+  void _toggleGigSelection(String gigId) {
+    setState(() {
+      if (_selectedGigIds.contains(gigId)) {
+        _selectedGigIds.remove(gigId);
+        if (_selectedGigIds.isEmpty) _selectionMode = false;
+      } else {
+        _selectedGigIds.add(gigId);
+      }
+    });
+  }
+
+  Future<void> _openBookNightlinerDialog() async {
+    if (_selectedGigIds.isEmpty || _companyId == null) return;
+
+    // Sort selected gigs by date
+    final selectedGigs = _gigs
+        .where((g) => _selectedGigIds.contains(g['id'] as String))
+        .where((g) => (g['type'] as String? ?? 'gig') != 'rehearsal')
+        .toList()
+      ..sort((a, b) {
+        final da = a['date_from'] as String? ?? '';
+        final db = b['date_from'] as String? ?? '';
+        return da.compareTo(db);
+      });
+
+    if (selectedGigs.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Ingen gyldige gigs valgt (øvelser ekskludert)')),
+      );
+      return;
+    }
+
+    final fromCityCtrl = TextEditingController();
+    final toCityCtrl = TextEditingController();
+    final notesCtrl = TextEditingController();
+    final paxCtrl = TextEditingController();
+    bool trailer = false;
+    int busCount = 1;
+
+    // Build route preview
+    String buildRoutePreview(String from, String to) {
+      final stops = selectedGigs
+          .map((g) => g['city'] as String? ?? '')
+          .where((c) => c.isNotEmpty)
+          .toList();
+      final parts = <String>[
+        if (from.isNotEmpty) from,
+        ...stops,
+        if (to.isNotEmpty) to,
+      ];
+      return parts.join(' → ');
+    }
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setS) => AlertDialog(
+          title: Text('Book Nightliner (${selectedGigs.length} gig${selectedGigs.length > 1 ? 's' : ''})'),
+          content: SizedBox(
+            width: 500,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // Selected gigs summary
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: CssTheme.surface2,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: selectedGigs.map((g) {
+                      final venue = g['venue_name'] as String? ?? '';
+                      final city = g['city'] as String? ?? '';
+                      final dateFrom = g['date_from'] as String?;
+                      final label = [venue, city].where((s) => s.isNotEmpty).join(' · ');
+                      final dateLabel = dateFrom != null
+                          ? DateFormat('dd.MM.yyyy').format(DateTime.parse(dateFrom))
+                          : '';
+                      return Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 2),
+                        child: Text(
+                          '$dateLabel — $label',
+                          style: const TextStyle(fontSize: 13),
+                        ),
+                      );
+                    }).toList(),
+                  ),
+                ),
+                const SizedBox(height: 14),
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: fromCityCtrl,
+                        decoration: const InputDecoration(labelText: 'From city'),
+                        onChanged: (_) => setS(() {}),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: TextField(
+                        controller: toCityCtrl,
+                        decoration: const InputDecoration(labelText: 'To city'),
+                        onChanged: (_) => setS(() {}),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                // Route preview
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: Colors.blue.withOpacity(0.06),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.blue.withOpacity(0.2)),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.route, size: 16, color: Colors.blue),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          buildRoutePreview(fromCityCtrl.text.trim(), toCityCtrl.text.trim()),
+                          style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Row(
+                  children: [
+                    SizedBox(
+                      width: 100,
+                      child: DropdownButtonFormField<int>(
+                        value: busCount,
+                        decoration: const InputDecoration(labelText: 'Busser'),
+                        items: List.generate(4, (i) => DropdownMenuItem(
+                          value: i + 1,
+                          child: Text('${i + 1}'),
+                        )),
+                        onChanged: (v) {
+                          if (v != null) setS(() => busCount = v);
+                        },
+                      ),
+                    ),
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: TextField(
+                        controller: paxCtrl,
+                        keyboardType: TextInputType.number,
+                        decoration: const InputDecoration(
+                          labelText: 'Passengers',
+                          suffixText: 'pax',
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                CheckboxListTile(
+                  value: trailer,
+                  onChanged: (v) => setS(() => trailer = v ?? false),
+                  title: const Text('Trailer'),
+                  contentPadding: EdgeInsets.zero,
+                  controlAffinity: ListTileControlAffinity.leading,
+                  dense: true,
+                ),
+                const SizedBox(height: 6),
+                TextField(
+                  controller: notesCtrl,
+                  maxLines: 3,
+                  decoration: const InputDecoration(labelText: 'Notes'),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton.icon(
+              icon: const Icon(Icons.send, size: 16),
+              onPressed: () => Navigator.pop(ctx, true),
+              label: const Text('Send Request'),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (confirmed != true || !mounted) return;
+
+    try {
+      // Compute overall date range across all selected gigs
+      final allDatesFrom = selectedGigs
+          .map((g) => g['date_from'] as String?)
+          .whereType<String>()
+          .toList()..sort();
+      final allDatesTo = selectedGigs
+          .map((g) => (g['date_to'] as String?) ?? (g['date_from'] as String?))
+          .whereType<String>()
+          .toList()..sort();
+
+      final overallFrom = allDatesFrom.isNotEmpty ? allDatesFrom.first : null;
+      final overallTo = allDatesTo.isNotEmpty ? allDatesTo.last : overallFrom;
+
+      // Insert ONE bus_request for the whole route
+      final inserted = await _sb.from('bus_requests').insert({
+        'company_id': _companyId,
+        'date_from': overallFrom,
+        'date_to': overallTo,
+        'from_city': fromCityCtrl.text.trim(),
+        'to_city': toCityCtrl.text.trim(),
+        'pax': int.tryParse(paxCtrl.text.trim()),
+        'trailer': trailer,
+        'bus_count': busCount,
+        'notes': notesCtrl.text.trim(),
+        'status': 'pending',
+      }).select('id').single();
+
+      final busRequestId = inserted['id'] as String;
+
+      // Link all gigs via junction table
+      for (int i = 0; i < selectedGigs.length; i++) {
+        await _sb.from('bus_request_gigs').insert({
+          'bus_request_id': busRequestId,
+          'gig_id': selectedGigs[i]['id'],
+          'sort_order': i,
+        });
+      }
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Nightliner request sent: ${buildRoutePreview(fromCityCtrl.text.trim(), toCityCtrl.text.trim())}',
+            ),
+          ),
+        );
+        setState(() {
+          _selectionMode = false;
+          _selectedGigIds.clear();
+        });
+      }
+    } catch (e) {
+      debugPrint('Bus request error: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e')),
+        );
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Padding(
@@ -181,6 +446,20 @@ class _MgmtGigsPageState extends State<MgmtGigsPage> {
                 ),
               ),
               const SizedBox(width: 12),
+              OutlinedButton.icon(
+                onPressed: () {
+                  setState(() {
+                    _selectionMode = !_selectionMode;
+                    if (!_selectionMode) _selectedGigIds.clear();
+                  });
+                },
+                icon: Icon(
+                  _selectionMode ? Icons.close : Icons.directions_bus,
+                  size: 18,
+                ),
+                label: Text(_selectionMode ? 'Avbryt' : 'Book Nightliner'),
+              ),
+              const SizedBox(width: 8),
               FilledButton.icon(
                 onPressed: _openNewGigDialog,
                 icon: const Icon(Icons.add),
@@ -226,16 +505,50 @@ class _MgmtGigsPageState extends State<MgmtGigsPage> {
                           style: const TextStyle(color: CssTheme.textMuted),
                         ),
                       )
-                    : ListView.builder(
-                        itemCount: _filtered.length,
-                        itemBuilder: (context, i) {
-                          final gig = _filtered[i];
-                          return _GigRow(
-                            gig: gig,
-                            onTap: () => context.go('/m/gigs/${gig['id']}'),
-                            onDelete: () => _confirmDelete(gig),
-                          );
-                        },
+                    : Column(
+                        children: [
+                          if (_selectionMode && _selectedGigIds.isNotEmpty)
+                            Padding(
+                              padding: const EdgeInsets.only(bottom: 10),
+                              child: Row(
+                                children: [
+                                  Text(
+                                    '${_selectedGigIds.length} gig(s) valgt',
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.w700,
+                                      color: CssTheme.textMuted,
+                                    ),
+                                  ),
+                                  const Spacer(),
+                                  FilledButton.icon(
+                                    onPressed: _openBookNightlinerDialog,
+                                    icon: const Icon(Icons.send, size: 16),
+                                    label: const Text('Send forespørsel'),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          Expanded(
+                            child: ListView.builder(
+                              itemCount: _filtered.length,
+                              itemBuilder: (context, i) {
+                                final gig = _filtered[i];
+                                final gigId = gig['id'] as String;
+                                final isRehearsal = (gig['type'] as String? ?? 'gig') == 'rehearsal';
+                                return _GigRow(
+                                  gig: gig,
+                                  onTap: _selectionMode && !isRehearsal
+                                      ? () => _toggleGigSelection(gigId)
+                                      : () => context.go('/m/gigs/$gigId'),
+                                  onDelete: () => _confirmDelete(gig),
+                                  selectionMode: _selectionMode,
+                                  selected: _selectedGigIds.contains(gigId),
+                                  onSelect: isRehearsal ? null : () => _toggleGigSelection(gigId),
+                                );
+                              },
+                            ),
+                          ),
+                        ],
                       ),
           ),
         ],
@@ -1150,8 +1463,18 @@ class _GigRow extends StatelessWidget {
   final Map<String, dynamic> gig;
   final VoidCallback onTap;
   final VoidCallback onDelete;
+  final bool selectionMode;
+  final bool selected;
+  final VoidCallback? onSelect;
 
-  const _GigRow({required this.gig, required this.onTap, required this.onDelete});
+  const _GigRow({
+    required this.gig,
+    required this.onTap,
+    required this.onDelete,
+    this.selectionMode = false,
+    this.selected = false,
+    this.onSelect,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -1197,6 +1520,13 @@ class _GigRow extends StatelessWidget {
         ),
         child: Row(
           children: [
+            if (selectionMode) ...[
+              Checkbox(
+                value: selected,
+                onChanged: onSelect != null ? (_) => onSelect!() : null,
+              ),
+              const SizedBox(width: 4),
+            ],
             SizedBox(
               width: 120,
               child: Text(
