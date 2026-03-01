@@ -5,7 +5,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
-	<string>Booking Desktop</string>
+	<string>TourFlow</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -13,7 +13,7 @@
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
-	<string>booking_desktop</string>
+	<string>TourFlow</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
@@ -41,6 +41,14 @@
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>TourFlow trenger tilgang til bildebiblioteket for å laste opp bilder.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>TourFlow trenger tilgang til kameraet for å ta bilder.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>TourFlow trenger tilgang til mikrofonen for lydopptak.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>TourFlow bruker posisjonen din for ruteberegning.</string>
 	<key>CADisableMinimumFrameDurationOnPhone</key>
 	<true/>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
