@@ -1,8 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../../services/brreg_service.dart';
 import '../../state/active_company.dart';
 import '../../ui/css_theme.dart';
 import '../../widgets/new_company_dialog.dart';
@@ -103,16 +106,52 @@ class _MgmtGigsPageState extends State<MgmtGigsPage> {
   Future<void> _openNewGigDialog() async {
     if (_companyId == null) return;
 
-    final gigId = await showDialog<String>(
+    // Ask user: Gig or Øvelse?
+    final type = await showDialog<String>(
       context: context,
-      barrierDismissible: false,
-      builder: (_) => _NewGigDialog(managementCompanyId: _companyId!),
+      builder: (ctx) => AlertDialog(
+        title: const Text('Ny hendelse'),
+        content: const Text('Hva vil du opprette?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Avbryt'),
+          ),
+          FilledButton.icon(
+            icon: const Icon(Icons.piano, size: 16),
+            label: const Text('Øvelse'),
+            onPressed: () => Navigator.pop(ctx, 'rehearsal'),
+          ),
+          FilledButton.icon(
+            icon: const Icon(Icons.music_note, size: 16),
+            label: const Text('Gig'),
+            onPressed: () => Navigator.pop(ctx, 'gig'),
+          ),
+        ],
+      ),
     );
 
-    if (gigId != null && mounted) {
-      context.go('/m/gigs/$gigId');
+    if (type == null || !mounted) return;
+
+    if (type == 'gig') {
+      // Gig → open the offer page (creates both gig + gig_offer)
+      context.go('/m/offers/new');
     } else {
-      await _load();
+      // Øvelse → open the existing dialog with type locked to rehearsal
+      final gigId = await showDialog<String>(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => _NewGigDialog(
+          managementCompanyId: _companyId!,
+          forceType: 'rehearsal',
+        ),
+      );
+
+      if (gigId != null && mounted) {
+        context.go('/m/gigs/$gigId');
+      } else {
+        await _load();
+      }
     }
   }
 
@@ -254,7 +293,7 @@ class _MgmtGigsPageState extends State<MgmtGigsPage> {
                     Expanded(
                       child: TextField(
                         controller: fromCityCtrl,
-                        decoration: const InputDecoration(labelText: 'From city'),
+                        decoration: const InputDecoration(labelText: 'Fra by'),
                         onChanged: (_) => setS(() {}),
                       ),
                     ),
@@ -262,7 +301,7 @@ class _MgmtGigsPageState extends State<MgmtGigsPage> {
                     Expanded(
                       child: TextField(
                         controller: toCityCtrl,
-                        decoration: const InputDecoration(labelText: 'To city'),
+                        decoration: const InputDecoration(labelText: 'Til by'),
                         onChanged: (_) => setS(() {}),
                       ),
                     ),
@@ -314,7 +353,7 @@ class _MgmtGigsPageState extends State<MgmtGigsPage> {
                         controller: paxCtrl,
                         keyboardType: TextInputType.number,
                         decoration: const InputDecoration(
-                          labelText: 'Passengers',
+                          labelText: 'Passasjerer',
                           suffixText: 'pax',
                         ),
                       ),
@@ -334,7 +373,7 @@ class _MgmtGigsPageState extends State<MgmtGigsPage> {
                 TextField(
                   controller: notesCtrl,
                   maxLines: 3,
-                  decoration: const InputDecoration(labelText: 'Notes'),
+                  decoration: const InputDecoration(labelText: 'Notater'),
                 ),
               ],
             ),
@@ -342,12 +381,12 @@ class _MgmtGigsPageState extends State<MgmtGigsPage> {
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Cancel'),
+              child: const Text('Avbryt'),
             ),
             FilledButton.icon(
               icon: const Icon(Icons.send, size: 16),
               onPressed: () => Navigator.pop(ctx, true),
-              label: const Text('Send Request'),
+              label: const Text('Send forespørsel'),
             ),
           ],
         ),
@@ -399,7 +438,7 @@ class _MgmtGigsPageState extends State<MgmtGigsPage> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              'Nightliner request sent: ${buildRoutePreview(fromCityCtrl.text.trim(), toCityCtrl.text.trim())}',
+              'Nightliner-forespørsel sendt: ${buildRoutePreview(fromCityCtrl.text.trim(), toCityCtrl.text.trim())}',
             ),
           ),
         );
@@ -412,7 +451,7 @@ class _MgmtGigsPageState extends State<MgmtGigsPage> {
       debugPrint('Bus request error: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e')),
+          SnackBar(content: Text('Feil: $e')),
         );
       }
     }
@@ -438,7 +477,7 @@ class _MgmtGigsPageState extends State<MgmtGigsPage> {
                 child: TextField(
                   controller: _searchCtrl,
                   decoration: const InputDecoration(
-                    hintText: 'Search gigs…',
+                    hintText: 'Søk i gigs…',
                     prefixIcon: Icon(Icons.search),
                     isDense: true,
                   ),
@@ -477,7 +516,12 @@ class _MgmtGigsPageState extends State<MgmtGigsPage> {
               return Padding(
                 padding: const EdgeInsets.only(right: 8),
                 child: ChoiceChip(
-                  label: Text(s == 'all' ? 'All' : _capitalize(s)),
+                  label: Text(const {
+                    'all': 'Alle',
+                    'upcoming': 'Kommende',
+                    'confirmed': 'Bekreftet',
+                    'invoiced': 'Fakturert',
+                  }[s] ?? _capitalize(s)),
                   selected: selected,
                   onSelected: (_) => setState(() => _statusFilter = s),
                   selectedColor: Colors.black,
@@ -500,8 +544,8 @@ class _MgmtGigsPageState extends State<MgmtGigsPage> {
                     ? Center(
                         child: Text(
                           _search.isNotEmpty || _statusFilter != 'all'
-                              ? 'No gigs match your filter'
-                              : 'No gigs yet. Create your first gig!',
+                              ? 'Ingen gigs matcher filteret'
+                              : 'Ingen gigs ennå. Opprett din første gig!',
                           style: const TextStyle(color: CssTheme.textMuted),
                         ),
                       )
@@ -566,8 +610,9 @@ class _MgmtGigsPageState extends State<MgmtGigsPage> {
 
 class _NewGigDialog extends StatefulWidget {
   final String managementCompanyId;
+  final String? forceType;
 
-  const _NewGigDialog({required this.managementCompanyId});
+  const _NewGigDialog({required this.managementCompanyId, this.forceType});
 
   @override
   State<_NewGigDialog> createState() => _NewGigDialogState();
@@ -638,6 +683,7 @@ class _NewGigDialogState extends State<_NewGigDialog> {
   @override
   void initState() {
     super.initState();
+    if (widget.forceType != null) _type = widget.forceType!;
     _loadCompanies();
     _loadShowTypes();
   }
@@ -723,6 +769,12 @@ class _NewGigDialogState extends State<_NewGigDialog> {
         _emailCtrl.clear();
       }
     });
+
+    // Reload companies list if this is a newly created company (e.g. from Brreg)
+    final id = company['id'] as String?;
+    if (id != null && !_companies.any((c) => c['id'] == id)) {
+      _loadCompanies();
+    }
   }
 
   void _clearCompany() {
@@ -856,17 +908,19 @@ class _NewGigDialogState extends State<_NewGigDialog> {
               ),
               const SizedBox(height: 12),
 
-              // Type toggle
-              SegmentedButton<String>(
-                segments: const [
-                  ButtonSegment(value: 'gig', label: Text('Gig'), icon: Icon(Icons.music_note, size: 16)),
-                  ButtonSegment(value: 'rehearsal', label: Text('Øvelse'), icon: Icon(Icons.piano, size: 16)),
-                ],
-                selected: {_type},
-                onSelectionChanged: (v) => setState(() => _type = v.first),
-                style: const ButtonStyle(visualDensity: VisualDensity.compact),
-              ),
-              const SizedBox(height: 16),
+              // Type toggle (hidden when type is forced)
+              if (widget.forceType == null) ...[
+                SegmentedButton<String>(
+                  segments: const [
+                    ButtonSegment(value: 'gig', label: Text('Gig'), icon: Icon(Icons.music_note, size: 16)),
+                    ButtonSegment(value: 'rehearsal', label: Text('Øvelse'), icon: Icon(Icons.piano, size: 16)),
+                  ],
+                  selected: {_type},
+                  onSelectionChanged: (v) => setState(() => _type = v.first),
+                  style: const ButtonStyle(visualDensity: VisualDensity.compact),
+                ),
+                const SizedBox(height: 16),
+              ],
 
               // Scrollable content
               Flexible(
@@ -926,7 +980,13 @@ class _NewGigDialogState extends State<_NewGigDialog> {
                                       'completed', 'cancelled']
                                   .map((s) => DropdownMenuItem(
                                         value: s,
-                                        child: Text(s),
+                                        child: Text(const {
+                                          'inquiry': 'Forespørsel',
+                                          'confirmed': 'Bekreftet',
+                                          'invoiced': 'Fakturert',
+                                          'completed': 'Fullført',
+                                          'cancelled': 'Avlyst',
+                                        }[s] ?? s),
                                       ))
                                   .toList(),
                               onChanged: (v) =>
@@ -940,8 +1000,8 @@ class _NewGigDialogState extends State<_NewGigDialog> {
                       // ── LOCATION ────────────────────────────────────────
                       _sec('Spillested'),
                       _row([
-                        _tf(_venueCtrl, 'Venue', flex: 2),
-                        _tf(_cityCtrl, 'City'),
+                        _tf(_venueCtrl, 'Spillested', flex: 2),
+                        _tf(_cityCtrl, 'By'),
                         _tf(_countryCtrl, 'Land', flex: 0, width: 80),
                       ]),
                       const SizedBox(height: 8),
@@ -957,6 +1017,7 @@ class _NewGigDialogState extends State<_NewGigDialog> {
                         onSelected: _applyCompany,
                         onClear: _clearCompany,
                         onNewCompany: _openNewCompany,
+                        ownerCompanyId: widget.managementCompanyId,
                       ),
                       if (_contacts.length > 1) ...[
                         const SizedBox(height: 8),
@@ -1045,25 +1106,25 @@ class _NewGigDialogState extends State<_NewGigDialog> {
                       if (_type == 'rehearsal') ...[
                       _sec('Timeplan'),
                       _row([
-                        _tf(_meetingTimeCtrl, 'Fra (HH:mm)'),
-                        _tf(_getOutTimeCtrl, 'Til (HH:mm)'),
+                        _tf(_meetingTimeCtrl, 'Fra'),
+                        _tf(_getOutTimeCtrl, 'Til'),
                       ]),
                       ],
 
                       if (_type != 'rehearsal') ...[
                       _sec('Timeplan'),
                       _row([
-                        _tf(_meetingTimeCtrl, 'Oppmøte (HH:mm)'),
-                        _tf(_getInTimeCtrl, 'Get-in (HH:mm)'),
+                        _tf(_meetingTimeCtrl, 'Oppmøte'),
+                        _tf(_getInTimeCtrl, 'Get-in'),
                       ]),
                       const SizedBox(height: 8),
                       _row([
-                        _tf(_rehearsalTimeCtrl, 'Prøver (HH:mm)'),
-                        _tf(_performanceTimeCtrl, 'Opptreden (HH:mm)'),
+                        _tf(_rehearsalTimeCtrl, 'Prøver'),
+                        _tf(_performanceTimeCtrl, 'Opptreden'),
                       ]),
                       const SizedBox(height: 8),
                       _row([
-                        _tf(_getOutTimeCtrl, 'Get-out (HH:mm)'),
+                        _tf(_getOutTimeCtrl, 'Get-out'),
                         const Spacer(),
                       ]),
                       const SizedBox(height: 8),
@@ -1253,6 +1314,7 @@ class _CustomerPicker extends StatelessWidget {
   final ValueChanged<Map<String, dynamic>> onSelected;
   final VoidCallback onClear;
   final VoidCallback onNewCompany;
+  final String? ownerCompanyId;
 
   const _CustomerPicker({
     required this.companies,
@@ -1261,12 +1323,16 @@ class _CustomerPicker extends StatelessWidget {
     required this.onSelected,
     required this.onClear,
     required this.onNewCompany,
+    this.ownerCompanyId,
   });
 
   Future<void> _openPicker(BuildContext context) async {
     final result = await showDialog<Map<String, dynamic>>(
       context: context,
-      builder: (_) => _CustomerPickerDialog(companies: companies),
+      builder: (_) => _CustomerPickerDialog(
+        companies: companies,
+        ownerCompanyId: ownerCompanyId,
+      ),
     );
     if (result != null) onSelected(result);
   }
@@ -1367,21 +1433,103 @@ class _CustomerPicker extends StatelessWidget {
 
 class _CustomerPickerDialog extends StatefulWidget {
   final List<Map<String, dynamic>> companies;
+  final String? ownerCompanyId;
 
-  const _CustomerPickerDialog({required this.companies});
+  const _CustomerPickerDialog({
+    required this.companies,
+    this.ownerCompanyId,
+  });
 
   @override
   State<_CustomerPickerDialog> createState() => _CustomerPickerDialogState();
 }
 
-class _CustomerPickerDialogState extends State<_CustomerPickerDialog> {
+class _CustomerPickerDialogState extends State<_CustomerPickerDialog>
+    with SingleTickerProviderStateMixin {
+  late final TabController _tabCtrl;
   final _searchCtrl = TextEditingController();
   String _query = '';
 
+  // Brreg
+  final _brregCtrl = TextEditingController();
+  Timer? _brregDebounce;
+  List<BrregCompany> _brregResults = [];
+  bool _brregSearching = false;
+  bool _brregCreating = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _tabCtrl = TabController(length: 2, vsync: this);
+  }
+
   @override
   void dispose() {
+    _tabCtrl.dispose();
     _searchCtrl.dispose();
+    _brregCtrl.dispose();
+    _brregDebounce?.cancel();
     super.dispose();
+  }
+
+  void _onBrregSearch(String query) {
+    _brregDebounce?.cancel();
+    if (query.trim().isEmpty) {
+      setState(() => _brregResults = []);
+      return;
+    }
+    _brregDebounce = Timer(const Duration(milliseconds: 400), () async {
+      setState(() => _brregSearching = true);
+      try {
+        final cleaned = query.replaceAll(RegExp(r'\s'), '');
+        if (RegExp(r'^\d{9}$').hasMatch(cleaned)) {
+          final result = await BrregService.lookup(cleaned);
+          if (mounted) {
+            setState(() {
+              _brregResults = result != null ? [result] : [];
+              _brregSearching = false;
+            });
+          }
+        } else {
+          final results = await BrregService.search(query);
+          if (mounted) {
+            setState(() {
+              _brregResults = results;
+              _brregSearching = false;
+            });
+          }
+        }
+      } catch (_) {
+        if (mounted) setState(() => _brregSearching = false);
+      }
+    });
+  }
+
+  Future<void> _selectBrreg(BrregCompany c) async {
+    setState(() => _brregCreating = true);
+    try {
+      final sb = Supabase.instance.client;
+      final inserted = await sb.from('companies').insert({
+        'name': c.name,
+        'org_nr': c.orgNr,
+        'address': c.address,
+        'postal_code': c.postalCode,
+        'city': c.city,
+        'country': c.country,
+        if (widget.ownerCompanyId != null)
+          'owner_company_id': widget.ownerCompanyId,
+      }).select().single();
+
+      if (mounted) Navigator.pop(context, inserted);
+    } catch (e) {
+      debugPrint('Brreg create company error: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Kunne ikke opprette: $e')),
+        );
+        setState(() => _brregCreating = false);
+      }
+    }
   }
 
   @override
@@ -1391,56 +1539,145 @@ class _CustomerPickerDialogState extends State<_CustomerPickerDialog> {
         : widget.companies.where((c) {
             final name = (c['name'] as String? ?? '').toLowerCase();
             final city = (c['city'] as String? ?? '').toLowerCase();
+            final orgNr = (c['org_nr'] as String? ?? '').toLowerCase();
             final q = _query.toLowerCase();
-            return name.contains(q) || city.contains(q);
+            return name.contains(q) || city.contains(q) || orgNr.contains(q);
           }).toList();
 
     return AlertDialog(
       title: const Text('Velg kunde'),
       contentPadding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
       content: SizedBox(
-        width: 480,
-        height: 420,
+        width: 520,
+        height: 460,
         child: Column(
           children: [
-            TextField(
-              controller: _searchCtrl,
-              autofocus: true,
-              decoration: const InputDecoration(
-                hintText: 'Søk på navn eller by…',
-                prefixIcon: Icon(Icons.search),
-              ),
-              onChanged: (v) => setState(() => _query = v),
+            TabBar(
+              controller: _tabCtrl,
+              tabs: const [
+                Tab(text: 'Eksisterende'),
+                Tab(text: 'Søk i Brreg'),
+              ],
             ),
             const SizedBox(height: 8),
             Expanded(
-              child: filtered.isEmpty
-                  ? const Center(
-                      child: Text('Ingen treff',
-                          style: TextStyle(color: CssTheme.textMuted)))
-                  : ListView.builder(
-                      itemCount: filtered.length,
-                      itemBuilder: (ctx, i) {
-                        final c = filtered[i];
-                        final name = c['name'] as String? ?? '';
-                        final city = c['city'] as String?;
-                        return ListTile(
-                          dense: true,
-                          leading: const Icon(Icons.business_outlined,
-                              size: 18),
-                          title: Text(name,
-                              style: const TextStyle(
-                                  fontWeight: FontWeight.w700)),
-                          subtitle: city != null
-                              ? Text(city,
-                                  style: const TextStyle(
-                                      fontSize: 12,
-                                      color: CssTheme.textMuted))
+              child: TabBarView(
+                controller: _tabCtrl,
+                children: [
+                  // ── Tab 1: existing companies ──
+                  Column(
+                    children: [
+                      TextField(
+                        controller: _searchCtrl,
+                        autofocus: true,
+                        decoration: const InputDecoration(
+                          hintText: 'Søk på navn eller by…',
+                          prefixIcon: Icon(Icons.search),
+                        ),
+                        onChanged: (v) => setState(() => _query = v),
+                      ),
+                      const SizedBox(height: 8),
+                      Expanded(
+                        child: filtered.isEmpty
+                            ? const Center(
+                                child: Text('Ingen treff',
+                                    style: TextStyle(
+                                        color: CssTheme.textMuted)))
+                            : ListView.builder(
+                                itemCount: filtered.length,
+                                itemBuilder: (ctx, i) {
+                                  final c = filtered[i];
+                                  final name =
+                                      c['name'] as String? ?? '';
+                                  final city = c['city'] as String?;
+                                  return ListTile(
+                                    dense: true,
+                                    leading: const Icon(
+                                        Icons.business_outlined,
+                                        size: 18),
+                                    title: Text(name,
+                                        style: const TextStyle(
+                                            fontWeight:
+                                                FontWeight.w700)),
+                                    subtitle: city != null
+                                        ? Text(city,
+                                            style: const TextStyle(
+                                                fontSize: 12,
+                                                color: CssTheme
+                                                    .textMuted))
+                                        : null,
+                                    onTap: () =>
+                                        Navigator.pop(ctx, c),
+                                  );
+                                },
+                              ),
+                      ),
+                    ],
+                  ),
+
+                  // ── Tab 2: Brreg search ──
+                  Column(
+                    children: [
+                      TextField(
+                        controller: _brregCtrl,
+                        decoration: InputDecoration(
+                          hintText: 'Firmanavn eller org.nr…',
+                          prefixIcon: const Icon(Icons.search),
+                          suffixIcon: _brregSearching
+                              ? const Padding(
+                                  padding: EdgeInsets.all(12),
+                                  child: SizedBox(
+                                    width: 18,
+                                    height: 18,
+                                    child: CircularProgressIndicator(
+                                        strokeWidth: 2),
+                                  ),
+                                )
                               : null,
-                          onTap: () => Navigator.pop(ctx, c),
-                        );
-                      },
-                    ),
+                        ),
+                        onChanged: _onBrregSearch,
+                      ),
+                      const SizedBox(height: 8),
+                      if (_brregCreating)
+                        const Expanded(
+                          child: Center(
+                              child: CircularProgressIndicator()),
+                        )
+                      else
+                        Expanded(
+                          child: _brregResults.isEmpty
+                              ? Center(
+                                  child: Text(
+                                    _brregCtrl.text.isEmpty
+                                        ? 'Søk etter bedrift i Enhetsregisteret'
+                                        : 'Ingen treff',
+                                    style: const TextStyle(
+                                        color: CssTheme.textMuted),
+                                  ),
+                                )
+                              : ListView.builder(
+                                  itemCount: _brregResults.length,
+                                  itemBuilder: (ctx, i) {
+                                    final c = _brregResults[i];
+                                    return ListTile(
+                                      dense: true,
+                                      leading: const Icon(
+                                          Icons.language, size: 18),
+                                      title: Text(c.name,
+                                          style: const TextStyle(
+                                              fontWeight:
+                                                  FontWeight.w700)),
+                                      subtitle: Text(
+                                          '${c.orgNr}  ·  ${c.city ?? ''}'),
+                                      onTap: () => _selectBrreg(c),
+                                    );
+                                  },
+                                ),
+                        ),
+                    ],
+                  ),
+                ],
+              ),
             ),
           ],
         ),
@@ -1575,7 +1812,22 @@ class _GigRow extends StatelessWidget {
                 ],
               ),
             ),
-            if (type == 'rehearsal') ...[
+            if (status == 'cancelled') ...[
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: Colors.red.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(999),
+                  border: Border.all(color: Colors.red.withValues(alpha: 0.3)),
+                ),
+                child: const Text(
+                  'Avlyst',
+                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: Colors.red),
+                ),
+              ),
+              const SizedBox(width: 8),
+            ],
+            if (type == 'rehearsal' && status != 'cancelled') ...[
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 decoration: BoxDecoration(
@@ -1590,7 +1842,7 @@ class _GigRow extends StatelessWidget {
               ),
               const SizedBox(width: 8),
             ],
-            if (type != 'rehearsal')
+            if (type != 'rehearsal' && status != 'cancelled')
               _GigStatusBadge(status: status),
             PopupMenuButton<String>(
               icon: const Icon(Icons.more_vert, color: CssTheme.textMuted),
@@ -1634,11 +1886,11 @@ class _GigStatusBadge extends StatelessWidget {
   };
 
   static const _labels = {
-    'inquiry': 'Inquiry',
-    'confirmed': 'Confirmed',
-    'cancelled': 'Cancelled',
-    'invoiced': 'Invoiced',
-    'completed': 'Completed',
+    'inquiry': 'Forespørsel',
+    'confirmed': 'Bekreftet',
+    'cancelled': 'Avlyst',
+    'invoiced': 'Fakturert',
+    'completed': 'Fullført',
   };
 
   @override

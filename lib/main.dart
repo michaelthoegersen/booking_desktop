@@ -31,9 +31,14 @@ import 'pages/mgmt/mgmt_gig_detail_page.dart';
 import 'pages/mgmt/mgmt_people_page.dart';
 import 'pages/mgmt/mgmt_messages_page.dart';
 import 'pages/mgmt/mgmt_settings_page.dart';
+import 'pages/mgmt/mgmt_gig_offers_page.dart';
+import 'pages/mgmt/gig_offer_page.dart';
 
 import 'pages/crew/crew_gigs_page.dart';
 import 'pages/crew/crew_gig_detail_page.dart';
+
+import 'contacts/contacts_screen.dart';
+import 'contacts/dm_inbox_screen.dart';
 
 import 'state/active_company.dart';
 import 'state/settings_store.dart';
@@ -336,6 +341,12 @@ class BookingApp extends StatelessWidget {
               builder: (context, state) => const BusRequestsPage(),
             ),
 
+            // ---------------- DM INBOX ----------------
+            GoRoute(
+              path: "/dm-inbox",
+              builder: (context, state) => const DmInboxScreen(),
+            ),
+
             // ---------------- GOOGLE TEST ----------------
             GoRoute(
               path: "/google-test",
@@ -377,12 +388,32 @@ class BookingApp extends StatelessWidget {
               builder: (_, __) => const MgmtPeoplePage(),
             ),
             GoRoute(
+              path: '/m/contacts',
+              builder: (_, __) => const ContactsScreen(),
+            ),
+            GoRoute(
               path: '/m/messages',
               builder: (_, __) => const MgmtMessagesPage(),
             ),
             GoRoute(
               path: '/m/settings',
               builder: (_, __) => const MgmtSettingsPage(),
+            ),
+            GoRoute(
+              path: '/m/offers',
+              builder: (_, __) => const MgmtGigOffersPage(),
+            ),
+            GoRoute(
+              path: '/m/offers/new',
+              builder: (_, s) => GigOfferPage(
+                gigId: s.uri.queryParameters['gigId'],
+              ),
+            ),
+            GoRoute(
+              path: '/m/offers/:id',
+              builder: (_, s) => GigOfferPage(
+                offerId: s.pathParameters['id']!,
+              ),
             ),
           ],
         ),

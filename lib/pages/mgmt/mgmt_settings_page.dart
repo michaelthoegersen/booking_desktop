@@ -51,13 +51,13 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
             .maybeSingle();
         _company = company;
         _showTours = company?['show_tours'] != false;
-        _showBusRequests = company?['show_bus_requests'] != false;
+        _showBusRequests = company?['show_bus_requests_mgmt'] != false;
         _emitFlags();
 
         // Load other members in the same company
         final members = await _sb
             .from('profiles')
-            .select('id, name, email, role')
+            .select('id, name, email, role, section')
             .eq('company_id', _companyId!);
         _members = List<Map<String, dynamic>>.from(members);
 
@@ -78,7 +78,7 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
   void _emitFlags() {
     companyFlagsNotifier.value = {
       'show_tours': _showTours,
-      'show_bus_requests': _showBusRequests,
+      'show_bus_requests_mgmt': _showBusRequests,
     };
   }
 
@@ -91,16 +91,196 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
           .eq('id', _companyId!);
       setState(() {
         if (column == 'show_tours') _showTours = value;
-        if (column == 'show_bus_requests') _showBusRequests = value;
+        if (column == 'show_bus_requests_mgmt') _showBusRequests = value;
       });
       _emitFlags();
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+          SnackBar(content: Text('Feil: $e'), backgroundColor: Colors.red),
         );
       }
     }
+  }
+
+  void _showEditMemberDialog(
+    String memberId, String name, String email, String role, String? section,
+  ) {
+    final nameCtrl = TextEditingController(text: name);
+    final emailCtrl = TextEditingController(text: email);
+    final phoneCtrl = TextEditingController();
+    const validRoles = {'admin', 'gruppeleder_skarp', 'gruppeleder_bass', 'bruker'};
+    String selectedRole = validRoles.contains(role) ? role : 'admin';
+    String? selectedSection = section;
+
+    // Load phone separately
+    _sb.from('profiles').select('phone').eq('id', memberId).maybeSingle().then(
+      (res) {
+        phoneCtrl.text = (res?['phone'] ?? '').toString();
+      },
+    );
+
+    showDialog(
+      context: context,
+      builder: (ctx) {
+        bool saving = false;
+        return StatefulBuilder(
+          builder: (ctx, setDialogState) {
+            return AlertDialog(
+              title: const Text('Rediger medlem'),
+              content: SizedBox(
+                width: 400,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    TextField(
+                      controller: nameCtrl,
+                      decoration: const InputDecoration(
+                        labelText: 'Navn',
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: emailCtrl,
+                      decoration: const InputDecoration(
+                        labelText: 'E-post',
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: phoneCtrl,
+                      decoration: const InputDecoration(
+                        labelText: 'Telefon',
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    DropdownButtonFormField<String>(
+                      initialValue: selectedRole,
+                      decoration: const InputDecoration(
+                        labelText: 'Rolle',
+                        border: OutlineInputBorder(),
+                      ),
+                      items: const [
+                        DropdownMenuItem(value: 'admin', child: Text('Admin')),
+                        DropdownMenuItem(
+                            value: 'gruppeleder_skarp', child: Text('Gruppeleder Skarp')),
+                        DropdownMenuItem(
+                            value: 'gruppeleder_bass', child: Text('Gruppeleder Bass')),
+                        DropdownMenuItem(
+                            value: 'bruker', child: Text('Bruker')),
+                      ],
+                      onChanged: (v) {
+                        if (v != null) {
+                          setDialogState(() => selectedRole = v);
+                        }
+                      },
+                    ),
+                    const SizedBox(height: 12),
+                    DropdownButtonFormField<String?>(
+                      value: selectedSection,
+                      decoration: const InputDecoration(
+                        labelText: 'Seksjon',
+                        border: OutlineInputBorder(),
+                      ),
+                      items: const [
+                        DropdownMenuItem(value: null, child: Text('Ingen seksjon')),
+                        DropdownMenuItem(value: 'skarp', child: Text('Skarp')),
+                        DropdownMenuItem(value: 'bass', child: Text('Bass')),
+                      ],
+                      onChanged: (v) {
+                        setDialogState(() => selectedSection = v);
+                      },
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx),
+                  child: const Text('Avbryt'),
+                ),
+                FilledButton(
+                  onPressed: saving
+                      ? null
+                      : () async {
+                          setDialogState(() => saving = true);
+                          try {
+                            await _sb.from('profiles').update({
+                              'name': nameCtrl.text.trim(),
+                              'email': emailCtrl.text.trim(),
+                              'phone': phoneCtrl.text.trim(),
+                              'role': selectedRole,
+                              'section': selectedSection,
+                            }).eq('id', memberId);
+                            if (ctx.mounted) Navigator.pop(ctx);
+                            _load();
+                          } catch (e) {
+                            setDialogState(() => saving = false);
+                            if (ctx.mounted) {
+                              ScaffoldMessenger.of(ctx).showSnackBar(
+                                SnackBar(content: Text('Feil: $e')),
+                              );
+                            }
+                          }
+                        },
+                  child: saving
+                      ? const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2, color: Colors.white),
+                        )
+                      : const Text('Lagre'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
+  void _confirmRemoveMember(String memberId, String name) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Fjern medlem'),
+        content: Text('Er du sikker på at du vil fjerne $name fra teamet?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Avbryt'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () async {
+              Navigator.pop(ctx);
+              try {
+                await _sb
+                    .from('company_members')
+                    .delete()
+                    .eq('user_id', memberId);
+                await _sb
+                    .from('profiles')
+                    .update({'company_id': null})
+                    .eq('id', memberId);
+                _load();
+              } catch (e) {
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('Feil: $e')),
+                  );
+                }
+              }
+            },
+            child: const Text('Fjern'),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _openInviteUserDialog() async {
@@ -112,7 +292,7 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setS) => AlertDialog(
-          title: const Text('Invite User'),
+          title: const Text('Inviter bruker'),
           content: SizedBox(
             width: 400,
             child: Column(
@@ -120,12 +300,12 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
               children: [
                 TextField(
                   controller: nameCtrl,
-                  decoration: const InputDecoration(labelText: 'Name'),
+                  decoration: const InputDecoration(labelText: 'Navn'),
                 ),
                 const SizedBox(height: 10),
                 TextField(
                   controller: emailCtrl,
-                  decoration: const InputDecoration(labelText: 'Email'),
+                  decoration: const InputDecoration(labelText: 'E-post'),
                 ),
                 const SizedBox(height: 10),
                 DropdownButtonFormField<String>(
@@ -134,7 +314,9 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
                   items: const [
                     DropdownMenuItem(value: 'admin', child: Text('Admin')),
                     DropdownMenuItem(
-                        value: 'gruppeleder', child: Text('Gruppeleder')),
+                        value: 'gruppeleder_skarp', child: Text('Gruppeleder Skarp')),
+                    DropdownMenuItem(
+                        value: 'gruppeleder_bass', child: Text('Gruppeleder Bass')),
                     DropdownMenuItem(value: 'bruker', child: Text('Bruker')),
                   ],
                   onChanged: (v) {
@@ -167,7 +349,7 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(ctx),
-              child: const Text('Cancel'),
+              child: const Text('Avbryt'),
             ),
             FilledButton(
               onPressed: () async {
@@ -192,7 +374,7 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
                   if (mounted) {
                     ScaffoldMessenger.of(context).showSnackBar(
                       const SnackBar(
-                          content: Text('User invited successfully')),
+                          content: Text('Bruker invitert')),
                     );
                   }
                 } catch (e) {
@@ -200,14 +382,14 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
                   if (mounted) {
                     ScaffoldMessenger.of(context).showSnackBar(
                       SnackBar(
-                        content: Text('Error: $e'),
+                        content: Text('Feil: $e'),
                         backgroundColor: Colors.red,
                       ),
                     );
                   }
                 }
               },
-              child: const Text('Invite'),
+              child: const Text('Inviter'),
             ),
           ],
         ),
@@ -228,14 +410,14 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    'Settings',
+                    'Innstillinger',
                     style: Theme.of(context).textTheme.headlineMedium,
                   ),
                   const SizedBox(height: 24),
 
                   // Company info
                   Text(
-                    'Company',
+                    'Selskap',
                     style: Theme.of(context).textTheme.titleMedium?.copyWith(
                           fontWeight: FontWeight.w900,
                         ),
@@ -251,7 +433,7 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
                     ),
                     child: _company == null
                         ? const Text(
-                            'No company linked to your account.',
+                            'Ingen selskap koblet til kontoen din.',
                             style: TextStyle(color: CssTheme.textMuted),
                           )
                         : Column(
@@ -286,7 +468,7 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
                   Row(
                     children: [
                       Text(
-                        'Team Members',
+                        'Teammedlemmer',
                         style: Theme.of(context)
                             .textTheme
                             .titleMedium
@@ -296,7 +478,7 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
                       FilledButton.icon(
                         onPressed: _openInviteUserDialog,
                         icon: const Icon(Icons.person_add),
-                        label: const Text('Invite user'),
+                        label: const Text('Inviter bruker'),
                       ),
                     ],
                   ),
@@ -310,12 +492,19 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
                         border: Border.all(color: cs.outlineVariant),
                       ),
                       child: const Text(
-                        'No team members yet.',
+                        'Ingen teammedlemmer ennå.',
                         style: TextStyle(color: CssTheme.textMuted),
                       ),
                     )
                   else
-                    ...(_members.map((m) => Container(
+                    ...(_members.map((m) {
+                      final memberId = m['id'] as String;
+                      final memberName = m['name'] as String? ?? '';
+                      final memberEmail = m['email'] as String? ?? '';
+                      final memberRole = m['role'] as String? ?? 'bruker';
+                      final memberSection = m['section'] as String?;
+
+                      return Container(
                           margin: const EdgeInsets.only(bottom: 8),
                           padding: const EdgeInsets.all(14),
                           decoration: BoxDecoration(
@@ -328,8 +517,9 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
                               CircleAvatar(
                                 backgroundColor: Colors.black,
                                 child: Text(
-                                  (m['name'] as String? ?? '?')[0]
-                                      .toUpperCase(),
+                                  memberName.isNotEmpty
+                                      ? memberName[0].toUpperCase()
+                                      : '?',
                                   style: const TextStyle(color: Colors.white),
                                 ),
                               ),
@@ -339,28 +529,53 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
                                     Text(
-                                      m['name'] as String? ?? '',
+                                      memberName,
                                       style: const TextStyle(
                                           fontWeight: FontWeight.w900),
                                     ),
                                     Text(
-                                      m['email'] as String? ?? '',
+                                      memberEmail,
                                       style: const TextStyle(
                                           color: CssTheme.textMuted),
                                     ),
                                   ],
                                 ),
                               ),
+                              if (memberSection != null)
+                                Builder(builder: (_) {
+                                  final isBass = memberSection == 'bass';
+                                  return Container(
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 8, vertical: 3),
+                                    decoration: BoxDecoration(
+                                      color: isBass
+                                          ? Colors.teal.shade50
+                                          : Colors.purple.shade50,
+                                      borderRadius: BorderRadius.circular(999),
+                                    ),
+                                    child: Text(
+                                      isBass ? 'Bass' : 'Skarp',
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        color: isBass
+                                            ? Colors.teal.shade700
+                                            : Colors.purple.shade700,
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                    ),
+                                  );
+                                }),
+                              if (memberSection != null)
+                                const SizedBox(width: 6),
                               Builder(builder: (_) {
-                                final role =
-                                    m['role'] as String? ?? 'bruker';
                                 final Color bg;
                                 final Color fg;
-                                switch (role) {
+                                switch (memberRole) {
                                   case 'admin':
                                     bg = Colors.red.shade50;
                                     fg = Colors.red.shade700;
-                                  case 'gruppeleder':
+                                  case 'gruppeleder_skarp':
+                                  case 'gruppeleder_bass':
                                     bg = Colors.orange.shade50;
                                     fg = Colors.orange.shade700;
                                   default:
@@ -375,7 +590,7 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
                                     borderRadius: BorderRadius.circular(999),
                                   ),
                                   child: Text(
-                                    role,
+                                    memberRole,
                                     style: TextStyle(
                                       fontSize: 12,
                                       color: fg,
@@ -384,9 +599,26 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
                                   ),
                                 );
                               }),
+                              const SizedBox(width: 8),
+                              IconButton(
+                                tooltip: 'Rediger',
+                                icon: const Icon(Icons.edit_outlined, size: 20),
+                                onPressed: () => _showEditMemberDialog(
+                                  memberId, memberName, memberEmail, memberRole, memberSection,
+                                ),
+                              ),
+                              IconButton(
+                                tooltip: 'Fjern',
+                                icon: const Icon(Icons.delete_outline,
+                                    size: 20, color: Colors.red),
+                                onPressed: () => _confirmRemoveMember(
+                                  memberId, memberName,
+                                ),
+                              ),
                             ],
                           ),
-                        ))),
+                        );
+                    })),
 
                   const SizedBox(height: 24),
 
@@ -394,7 +626,7 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
                   Row(
                     children: [
                       Text(
-                        'Show Types',
+                        'Show-typer',
                         style: Theme.of(context)
                             .textTheme
                             .titleMedium
@@ -404,7 +636,7 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
                       FilledButton.icon(
                         onPressed: _showAddShowTypeDialog,
                         icon: const Icon(Icons.add),
-                        label: const Text('Add show type'),
+                        label: const Text('Legg til show-type'),
                       ),
                     ],
                   ),
@@ -419,7 +651,7 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
                         border: Border.all(color: cs.outlineVariant),
                       ),
                       child: const Text(
-                        'No show types yet.',
+                        'Ingen show-typer ennå.',
                         style: TextStyle(color: CssTheme.textMuted),
                       ),
                     )
@@ -458,14 +690,14 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
                               TextButton(
                                 onPressed: () =>
                                     _showEditShowTypeDialog(st),
-                                child: const Text('Edit'),
+                                child: const Text('Rediger'),
                               ),
                               TextButton(
                                 onPressed: () =>
                                     _showDeleteShowTypeDialog(st),
                                 style: TextButton.styleFrom(
                                     foregroundColor: Colors.red),
-                                child: const Text('Delete'),
+                                child: const Text('Slett'),
                               ),
                             ],
                           ),
@@ -475,7 +707,7 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
 
                   // Features
                   Text(
-                    'Features',
+                    'Funksjoner',
                     style: Theme.of(context)
                         .textTheme
                         .titleMedium
@@ -493,18 +725,18 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
                     child: Column(
                       children: [
                         SwitchListTile(
-                          title: const Text('Tours'),
-                          subtitle: const Text('Show tours in the sidebar'),
+                          title: const Text('Turnéer'),
+                          subtitle: const Text('Vis turnéer i sidemenyen'),
                           value: _showTours,
                           onChanged: (v) => _toggleFlag('show_tours', v),
                         ),
                         SwitchListTile(
-                          title: const Text('Bus Requests'),
+                          title: const Text('Bussforespørsler'),
                           subtitle:
-                              const Text('Show bus requests in the sidebar'),
+                              const Text('Vis bussforespørsler på dashboardet'),
                           value: _showBusRequests,
                           onChanged: (v) =>
-                              _toggleFlag('show_bus_requests', v),
+                              _toggleFlag('show_bus_requests_mgmt', v),
                         ),
                       ],
                     ),
@@ -514,7 +746,7 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
 
                   // Change password
                   Text(
-                    'Account',
+                    'Konto',
                     style: Theme.of(context).textTheme.titleMedium?.copyWith(
                           fontWeight: FontWeight.w900,
                         ),
@@ -523,7 +755,7 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
                   OutlinedButton.icon(
                     onPressed: _openChangePasswordDialog,
                     icon: const Icon(Icons.lock_reset),
-                    label: const Text('Change password'),
+                    label: const Text('Endre passord'),
                   ),
                 ],
               ),
@@ -548,7 +780,7 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
     await showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Add Show Type'),
+        title: const Text('Legg til show-type'),
         content: SizedBox(
           width: 400,
           child: Column(
@@ -556,7 +788,7 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
             children: [
               TextField(
                 controller: nameCtrl,
-                decoration: const InputDecoration(labelText: 'Name'),
+                decoration: const InputDecoration(labelText: 'Navn'),
               ),
               const SizedBox(height: 10),
               Row(
@@ -566,7 +798,7 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
                       controller: drummersCtrl,
                       keyboardType: TextInputType.number,
                       decoration:
-                          const InputDecoration(labelText: 'Drummers'),
+                          const InputDecoration(labelText: 'Trommeslagere'),
                     ),
                   ),
                   const SizedBox(width: 10),
@@ -575,7 +807,7 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
                       controller: dancersCtrl,
                       keyboardType: TextInputType.number,
                       decoration:
-                          const InputDecoration(labelText: 'Dancers'),
+                          const InputDecoration(labelText: 'Dansere'),
                     ),
                   ),
                   const SizedBox(width: 10),
@@ -584,7 +816,7 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
                       controller: othersCtrl,
                       keyboardType: TextInputType.number,
                       decoration:
-                          const InputDecoration(labelText: 'Others'),
+                          const InputDecoration(labelText: 'Andre'),
                     ),
                   ),
                 ],
@@ -593,7 +825,7 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
               TextField(
                 controller: priceCtrl,
                 keyboardType: TextInputType.number,
-                decoration: const InputDecoration(labelText: 'Price (kr)'),
+                decoration: const InputDecoration(labelText: 'Pris (kr)'),
               ),
             ],
           ),
@@ -601,7 +833,7 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancel'),
+            child: const Text('Avbryt'),
           ),
           FilledButton(
             onPressed: () async {
@@ -623,13 +855,13 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
                 if (mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
-                        content: Text('Error: $e'),
+                        content: Text('Feil: $e'),
                         backgroundColor: Colors.red),
                   );
                 }
               }
             },
-            child: const Text('Add'),
+            child: const Text('Legg til'),
           ),
         ],
       ),
@@ -651,7 +883,7 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
     await showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Edit Show Type'),
+        title: const Text('Rediger show-type'),
         content: SizedBox(
           width: 400,
           child: Column(
@@ -659,7 +891,7 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
             children: [
               TextField(
                 controller: nameCtrl,
-                decoration: const InputDecoration(labelText: 'Name'),
+                decoration: const InputDecoration(labelText: 'Navn'),
               ),
               const SizedBox(height: 10),
               Row(
@@ -669,7 +901,7 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
                       controller: drummersCtrl,
                       keyboardType: TextInputType.number,
                       decoration:
-                          const InputDecoration(labelText: 'Drummers'),
+                          const InputDecoration(labelText: 'Trommeslagere'),
                     ),
                   ),
                   const SizedBox(width: 10),
@@ -678,7 +910,7 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
                       controller: dancersCtrl,
                       keyboardType: TextInputType.number,
                       decoration:
-                          const InputDecoration(labelText: 'Dancers'),
+                          const InputDecoration(labelText: 'Dansere'),
                     ),
                   ),
                   const SizedBox(width: 10),
@@ -687,7 +919,7 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
                       controller: othersCtrl,
                       keyboardType: TextInputType.number,
                       decoration:
-                          const InputDecoration(labelText: 'Others'),
+                          const InputDecoration(labelText: 'Andre'),
                     ),
                   ),
                 ],
@@ -696,7 +928,7 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
               TextField(
                 controller: priceCtrl,
                 keyboardType: TextInputType.number,
-                decoration: const InputDecoration(labelText: 'Price (kr)'),
+                decoration: const InputDecoration(labelText: 'Pris (kr)'),
               ),
             ],
           ),
@@ -704,7 +936,7 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancel'),
+            child: const Text('Avbryt'),
           ),
           FilledButton(
             onPressed: () async {
@@ -726,13 +958,13 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
                 if (mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
-                        content: Text('Error: $e'),
+                        content: Text('Feil: $e'),
                         backgroundColor: Colors.red),
                   );
                 }
               }
             },
-            child: const Text('Save'),
+            child: const Text('Lagre'),
           ),
         ],
       ),
@@ -743,18 +975,18 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Delete Show Type'),
+        title: const Text('Slett show-type'),
         content: Text(
-            'Are you sure you want to delete "${showType['name']}"?'),
+            'Er du sikker på at du vil slette "${showType['name']}"?'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancel'),
+            child: const Text('Avbryt'),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(ctx, true),
             style: FilledButton.styleFrom(backgroundColor: Colors.red),
-            child: const Text('Delete'),
+            child: const Text('Slett'),
           ),
         ],
       ),
@@ -769,7 +1001,7 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+          SnackBar(content: Text('Feil: $e'), backgroundColor: Colors.red),
         );
       }
     }
@@ -785,7 +1017,7 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
         builder: (ctx, setS) {
           bool loading = false;
           return AlertDialog(
-            title: const Text('Change Password'),
+            title: const Text('Endre passord'),
             content: SizedBox(
               width: 400,
               child: Column(
@@ -795,14 +1027,14 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
                     controller: passCtrl,
                     obscureText: true,
                     decoration:
-                        const InputDecoration(labelText: 'New password'),
+                        const InputDecoration(labelText: 'Nytt passord'),
                   ),
                   const SizedBox(height: 10),
                   TextField(
                     controller: confirmCtrl,
                     obscureText: true,
                     decoration:
-                        const InputDecoration(labelText: 'Confirm password'),
+                        const InputDecoration(labelText: 'Bekreft passord'),
                   ),
                 ],
               ),
@@ -810,7 +1042,7 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
             actions: [
               TextButton(
                 onPressed: () => Navigator.pop(ctx),
-                child: const Text('Cancel'),
+                child: const Text('Avbryt'),
               ),
               FilledButton(
                 onPressed: loading
@@ -821,7 +1053,7 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
                         if (p1.isEmpty || p1 != p2) {
                           ScaffoldMessenger.of(ctx).showSnackBar(
                             const SnackBar(
-                              content: Text('Passwords do not match'),
+                              content: Text('Passordene stemmer ikke overens'),
                               backgroundColor: Colors.red,
                             ),
                           );
@@ -835,13 +1067,13 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
                           if (mounted) {
                             ScaffoldMessenger.of(context).showSnackBar(
                               const SnackBar(
-                                  content: Text('Password updated')),
+                                  content: Text('Passord oppdatert')),
                             );
                           }
                         } catch (e) {
                           ScaffoldMessenger.of(ctx).showSnackBar(
                             SnackBar(
-                              content: Text('Error: $e'),
+                              content: Text('Feil: $e'),
                               backgroundColor: Colors.red,
                             ),
                           );
@@ -854,7 +1086,7 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
                         height: 18,
                         child: CircularProgressIndicator(strokeWidth: 2),
                       )
-                    : const Text('Update'),
+                    : const Text('Oppdater'),
               ),
             ],
           );

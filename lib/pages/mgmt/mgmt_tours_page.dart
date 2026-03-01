@@ -121,7 +121,7 @@ class _MgmtToursPageState extends State<MgmtToursPage> {
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setS) => AlertDialog(
-          title: const Text('New Tour'),
+          title: const Text('Ny turné'),
           content: SizedBox(
             width: 440,
             child: Column(
@@ -129,7 +129,7 @@ class _MgmtToursPageState extends State<MgmtToursPage> {
               children: [
                 TextField(
                   controller: nameCtrl,
-                  decoration: const InputDecoration(labelText: 'Tour name'),
+                  decoration: const InputDecoration(labelText: 'Turnénavn'),
                 ),
                 const SizedBox(height: 10),
                 TextField(
@@ -141,7 +141,12 @@ class _MgmtToursPageState extends State<MgmtToursPage> {
                   value: status,
                   decoration: const InputDecoration(labelText: 'Status'),
                   items: ['planning', 'active', 'completed', 'cancelled']
-                      .map((s) => DropdownMenuItem(value: s, child: Text(s)))
+                      .map((s) => DropdownMenuItem(value: s, child: Text(const {
+                        'planning': 'Planlegger',
+                        'active': 'Aktiv',
+                        'completed': 'Fullført',
+                        'cancelled': 'Avlyst',
+                      }[s] ?? s)))
                       .toList(),
                   onChanged: (v) => setS(() => status = v ?? 'planning'),
                 ),
@@ -153,7 +158,7 @@ class _MgmtToursPageState extends State<MgmtToursPage> {
                         icon: const Icon(Icons.calendar_today, size: 16),
                         label: Text(startDate != null
                             ? DateFormat('dd.MM.yyyy').format(startDate!)
-                            : 'Start date'),
+                            : 'Startdato'),
                         onPressed: () async {
                           final d = await showDatePicker(
                             context: ctx,
@@ -171,7 +176,7 @@ class _MgmtToursPageState extends State<MgmtToursPage> {
                         icon: const Icon(Icons.calendar_today, size: 16),
                         label: Text(endDate != null
                             ? DateFormat('dd.MM.yyyy').format(endDate!)
-                            : 'End date'),
+                            : 'Sluttdato'),
                         onPressed: () async {
                           final d = await showDatePicker(
                             context: ctx,
@@ -191,7 +196,7 @@ class _MgmtToursPageState extends State<MgmtToursPage> {
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(ctx),
-              child: const Text('Cancel'),
+              child: const Text('Avbryt'),
             ),
             FilledButton(
               onPressed: () async {
@@ -218,7 +223,7 @@ class _MgmtToursPageState extends State<MgmtToursPage> {
                   debugPrint('Create tour error: $e');
                 }
               },
-              child: const Text('Create'),
+              child: const Text('Opprett'),
             ),
           ],
         ),
@@ -236,7 +241,7 @@ class _MgmtToursPageState extends State<MgmtToursPage> {
           Row(
             children: [
               Text(
-                'Tours',
+                'Turnéer',
                 style: Theme.of(context).textTheme.headlineMedium,
               ),
               const Spacer(),
@@ -245,7 +250,7 @@ class _MgmtToursPageState extends State<MgmtToursPage> {
                 child: TextField(
                   controller: _searchCtrl,
                   decoration: const InputDecoration(
-                    hintText: 'Search tours…',
+                    hintText: 'Søk i turnéer…',
                     prefixIcon: Icon(Icons.search),
                     isDense: true,
                   ),
@@ -256,7 +261,7 @@ class _MgmtToursPageState extends State<MgmtToursPage> {
               FilledButton.icon(
                 onPressed: _openNewTourDialog,
                 icon: const Icon(Icons.add),
-                label: const Text('New tour'),
+                label: const Text('Ny turné'),
               ),
             ],
           ),
@@ -268,8 +273,8 @@ class _MgmtToursPageState extends State<MgmtToursPage> {
                     ? Center(
                         child: Text(
                           _search.isNotEmpty
-                              ? 'No tours match your search'
-                              : 'No tours yet. Create your first tour!',
+                              ? 'Ingen turnéer matcher søket'
+                              : 'Ingen turnéer ennå. Opprett din første turné!',
                           style: const TextStyle(color: CssTheme.textMuted),
                         ),
                       )
@@ -313,7 +318,7 @@ class _TourRow extends StatelessWidget {
           '${DateFormat('dd.MM.yyyy').format(DateTime.parse(start))} – ${DateFormat('dd.MM.yyyy').format(DateTime.parse(end))}';
     } else if (start != null) {
       dateRange =
-          'From ${DateFormat('dd.MM.yyyy').format(DateTime.parse(start))}';
+          'Fra ${DateFormat('dd.MM.yyyy').format(DateTime.parse(start))}';
     }
 
     return GestureDetector(
@@ -393,6 +398,12 @@ class _StatusBadge extends StatelessWidget {
       'completed': Colors.grey,
       'cancelled': Colors.red,
     };
+    final labels = {
+      'planning': 'Planlegger',
+      'active': 'Aktiv',
+      'completed': 'Fullført',
+      'cancelled': 'Avlyst',
+    };
     final color = colors[status] ?? Colors.grey;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
@@ -402,7 +413,7 @@ class _StatusBadge extends StatelessWidget {
         border: Border.all(color: color.withOpacity(0.3)),
       ),
       child: Text(
-        status,
+        labels[status] ?? status,
         style: TextStyle(
           fontSize: 12,
           fontWeight: FontWeight.w700,

@@ -95,7 +95,7 @@ class _MgmtTourDetailPageState extends State<MgmtTourDetailPage>
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setS) => AlertDialog(
-          title: const Text('Add Show'),
+          title: const Text('Legg til show'),
           content: SizedBox(
             width: 440,
             child: Column(
@@ -105,7 +105,7 @@ class _MgmtTourDetailPageState extends State<MgmtTourDetailPage>
                   icon: const Icon(Icons.calendar_today, size: 16),
                   label: Text(date != null
                       ? DateFormat('dd.MM.yyyy').format(date!)
-                      : 'Select date *'),
+                      : 'Velg dato *'),
                   onPressed: () async {
                     final d = await showDatePicker(
                       context: ctx,
@@ -119,24 +119,24 @@ class _MgmtTourDetailPageState extends State<MgmtTourDetailPage>
                 const SizedBox(height: 10),
                 TextField(
                   controller: venueCtrl,
-                  decoration: const InputDecoration(labelText: 'Venue'),
+                  decoration: const InputDecoration(labelText: 'Spillested'),
                 ),
                 const SizedBox(height: 10),
                 TextField(
                   controller: cityCtrl,
-                  decoration: const InputDecoration(labelText: 'City'),
+                  decoration: const InputDecoration(labelText: 'By'),
                 ),
                 const SizedBox(height: 10),
                 TextField(
                   controller: countryCtrl,
-                  decoration: const InputDecoration(labelText: 'Country'),
+                  decoration: const InputDecoration(labelText: 'Land'),
                 ),
                 const SizedBox(height: 10),
                 DropdownButtonFormField<String>(
                   value: status,
                   decoration: const InputDecoration(labelText: 'Status'),
                   items: ['confirmed', 'hold', 'cancelled']
-                      .map((s) => DropdownMenuItem(value: s, child: Text(s)))
+                      .map((s) => DropdownMenuItem(value: s, child: Text(_StatusBadge._statusLabels[s] ?? s)))
                       .toList(),
                   onChanged: (v) => setS(() => status = v ?? 'confirmed'),
                 ),
@@ -146,7 +146,7 @@ class _MgmtTourDetailPageState extends State<MgmtTourDetailPage>
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(ctx),
-              child: const Text('Cancel'),
+              child: const Text('Avbryt'),
             ),
             FilledButton(
               onPressed: () async {
@@ -166,7 +166,7 @@ class _MgmtTourDetailPageState extends State<MgmtTourDetailPage>
                   debugPrint('Add show error: $e');
                 }
               },
-              child: const Text('Add'),
+              child: const Text('Legg til'),
             ),
           ],
         ),
@@ -178,16 +178,16 @@ class _MgmtTourDetailPageState extends State<MgmtTourDetailPage>
     final confirm = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Delete show?'),
-        content: const Text('This action cannot be undone.'),
+        title: const Text('Slett show?'),
+        content: const Text('Handlingen kan ikke angres.'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancel'),
+            child: const Text('Avbryt'),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Delete'),
+            child: const Text('Slett'),
           ),
         ],
       ),
@@ -211,7 +211,7 @@ class _MgmtTourDetailPageState extends State<MgmtTourDetailPage>
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setS) => AlertDialog(
-          title: const Text('Request Bus'),
+          title: const Text('Bestill buss'),
           content: SizedBox(
             width: 460,
             child: Column(
@@ -224,7 +224,7 @@ class _MgmtTourDetailPageState extends State<MgmtTourDetailPage>
                         icon: const Icon(Icons.calendar_today, size: 16),
                         label: Text(dateFrom != null
                             ? DateFormat('dd.MM.yyyy').format(dateFrom!)
-                            : 'From date *'),
+                            : 'Fra dato *'),
                         onPressed: () async {
                           final d = await showDatePicker(
                             context: ctx,
@@ -244,7 +244,7 @@ class _MgmtTourDetailPageState extends State<MgmtTourDetailPage>
                         icon: const Icon(Icons.calendar_today, size: 16),
                         label: Text(dateTo != null
                             ? DateFormat('dd.MM.yyyy').format(dateTo!)
-                            : 'To date *'),
+                            : 'Til dato *'),
                         onPressed: () async {
                           final d = await showDatePicker(
                             context: ctx,
@@ -261,19 +261,19 @@ class _MgmtTourDetailPageState extends State<MgmtTourDetailPage>
                 const SizedBox(height: 10),
                 TextField(
                   controller: fromCityCtrl,
-                  decoration: const InputDecoration(labelText: 'From city'),
+                  decoration: const InputDecoration(labelText: 'Fra by'),
                 ),
                 const SizedBox(height: 10),
                 TextField(
                   controller: toCityCtrl,
-                  decoration: const InputDecoration(labelText: 'To city'),
+                  decoration: const InputDecoration(labelText: 'Til by'),
                 ),
                 const SizedBox(height: 10),
                 TextField(
                   controller: paxCtrl,
                   keyboardType: TextInputType.number,
                   decoration: const InputDecoration(
-                    labelText: 'Passengers',
+                    labelText: 'Passasjerer',
                     suffixText: 'pax',
                   ),
                 ),
@@ -281,7 +281,7 @@ class _MgmtTourDetailPageState extends State<MgmtTourDetailPage>
                 TextField(
                   controller: notesCtrl,
                   maxLines: 3,
-                  decoration: const InputDecoration(labelText: 'Notes'),
+                  decoration: const InputDecoration(labelText: 'Notater'),
                 ),
               ],
             ),
@@ -289,7 +289,7 @@ class _MgmtTourDetailPageState extends State<MgmtTourDetailPage>
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(ctx),
-              child: const Text('Cancel'),
+              child: const Text('Avbryt'),
             ),
             FilledButton(
               onPressed: () async {
@@ -310,14 +310,14 @@ class _MgmtTourDetailPageState extends State<MgmtTourDetailPage>
                   if (ctx.mounted) Navigator.pop(ctx);
                   if (mounted) {
                     ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Bus request sent!')),
+                      const SnackBar(content: Text('Bussforespørsel sendt!')),
                     );
                   }
                 } catch (e) {
                   debugPrint('Bus request error: $e');
                 }
               },
-              child: const Text('Send Request'),
+              child: const Text('Send forespørsel'),
             ),
           ],
         ),
@@ -338,7 +338,7 @@ class _MgmtTourDetailPageState extends State<MgmtTourDetailPage>
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setS) => AlertDialog(
-          title: const Text('Add Itinerary Entry'),
+          title: const Text('Legg til reiseplan'),
           content: SizedBox(
             width: 440,
             child: Column(
@@ -351,7 +351,7 @@ class _MgmtTourDetailPageState extends State<MgmtTourDetailPage>
                         icon: const Icon(Icons.calendar_today, size: 16),
                         label: Text(date != null
                             ? DateFormat('dd.MM.yyyy').format(date!)
-                            : 'Date *'),
+                            : 'Dato *'),
                         onPressed: () async {
                           final d = await showDatePicker(
                             context: ctx,
@@ -369,7 +369,7 @@ class _MgmtTourDetailPageState extends State<MgmtTourDetailPage>
                         icon: const Icon(Icons.access_time, size: 16),
                         label: Text(time != null
                             ? time!.format(ctx)
-                            : 'Time (optional)'),
+                            : 'Tid (valgfritt)'),
                         onPressed: () async {
                           final t = await showTimePicker(
                             context: ctx,
@@ -403,12 +403,12 @@ class _MgmtTourDetailPageState extends State<MgmtTourDetailPage>
                 TextField(
                   controller: descCtrl,
                   decoration:
-                      const InputDecoration(labelText: 'Description *'),
+                      const InputDecoration(labelText: 'Beskrivelse *'),
                 ),
                 const SizedBox(height: 10),
                 TextField(
                   controller: locationCtrl,
-                  decoration: const InputDecoration(labelText: 'Location'),
+                  decoration: const InputDecoration(labelText: 'Sted'),
                 ),
               ],
             ),
@@ -416,7 +416,7 @@ class _MgmtTourDetailPageState extends State<MgmtTourDetailPage>
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(ctx),
-              child: const Text('Cancel'),
+              child: const Text('Avbryt'),
             ),
             FilledButton(
               onPressed: () async {
@@ -438,7 +438,7 @@ class _MgmtTourDetailPageState extends State<MgmtTourDetailPage>
                   debugPrint('Add itinerary error: $e');
                 }
               },
-              child: const Text('Add'),
+              child: const Text('Legg til'),
             ),
           ],
         ),
@@ -459,7 +459,7 @@ class _MgmtTourDetailPageState extends State<MgmtTourDetailPage>
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setS) => AlertDialog(
-          title: const Text('Add Team Member'),
+          title: const Text('Legg til teammedlem'),
           content: SizedBox(
             width: 440,
             child: Column(
@@ -467,12 +467,12 @@ class _MgmtTourDetailPageState extends State<MgmtTourDetailPage>
               children: [
                 TextField(
                   controller: nameCtrl,
-                  decoration: const InputDecoration(labelText: 'Name *'),
+                  decoration: const InputDecoration(labelText: 'Navn *'),
                 ),
                 const SizedBox(height: 10),
                 DropdownButtonFormField<String>(
                   value: role,
-                  decoration: const InputDecoration(labelText: 'Role'),
+                  decoration: const InputDecoration(labelText: 'Rolle'),
                   items: [
                     'artist',
                     'tour_manager',
@@ -488,17 +488,17 @@ class _MgmtTourDetailPageState extends State<MgmtTourDetailPage>
                 const SizedBox(height: 10),
                 TextField(
                   controller: emailCtrl,
-                  decoration: const InputDecoration(labelText: 'Email'),
+                  decoration: const InputDecoration(labelText: 'E-post'),
                 ),
                 const SizedBox(height: 10),
                 TextField(
                   controller: phoneCtrl,
-                  decoration: const InputDecoration(labelText: 'Phone'),
+                  decoration: const InputDecoration(labelText: 'Telefon'),
                 ),
                 const SizedBox(height: 10),
                 TextField(
                   controller: notesCtrl,
-                  decoration: const InputDecoration(labelText: 'Notes'),
+                  decoration: const InputDecoration(labelText: 'Notater'),
                 ),
               ],
             ),
@@ -506,7 +506,7 @@ class _MgmtTourDetailPageState extends State<MgmtTourDetailPage>
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(ctx),
-              child: const Text('Cancel'),
+              child: const Text('Avbryt'),
             ),
             FilledButton(
               onPressed: () async {
@@ -526,7 +526,7 @@ class _MgmtTourDetailPageState extends State<MgmtTourDetailPage>
                   debugPrint('Add team member error: $e');
                 }
               },
-              child: const Text('Add'),
+              child: const Text('Legg til'),
             ),
           ],
         ),
@@ -554,7 +554,7 @@ class _MgmtTourDetailPageState extends State<MgmtTourDetailPage>
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setS) => AlertDialog(
-          title: const Text('Edit Tour Info'),
+          title: const Text('Rediger turnéinfo'),
           content: SizedBox(
             width: 440,
             child: SingleChildScrollView(
@@ -563,7 +563,7 @@ class _MgmtTourDetailPageState extends State<MgmtTourDetailPage>
                 children: [
                   TextField(
                     controller: nameCtrl,
-                    decoration: const InputDecoration(labelText: 'Tour name'),
+                    decoration: const InputDecoration(labelText: 'Turnénavn'),
                   ),
                   const SizedBox(height: 10),
                   TextField(
@@ -575,7 +575,7 @@ class _MgmtTourDetailPageState extends State<MgmtTourDetailPage>
                     value: status,
                     decoration: const InputDecoration(labelText: 'Status'),
                     items: ['planning', 'active', 'completed', 'cancelled']
-                        .map((s) => DropdownMenuItem(value: s, child: Text(s)))
+                        .map((s) => DropdownMenuItem(value: s, child: Text(_StatusBadge._statusLabels[s] ?? s)))
                         .toList(),
                     onChanged: (v) => setS(() => status = v ?? 'planning'),
                   ),
@@ -587,7 +587,7 @@ class _MgmtTourDetailPageState extends State<MgmtTourDetailPage>
                           icon: const Icon(Icons.calendar_today, size: 16),
                           label: Text(start != null
                               ? DateFormat('dd.MM.yyyy').format(start!)
-                              : 'Start date'),
+                              : 'Startdato'),
                           onPressed: () async {
                             final d = await showDatePicker(
                               context: ctx,
@@ -605,7 +605,7 @@ class _MgmtTourDetailPageState extends State<MgmtTourDetailPage>
                           icon: const Icon(Icons.calendar_today, size: 16),
                           label: Text(end != null
                               ? DateFormat('dd.MM.yyyy').format(end!)
-                              : 'End date'),
+                              : 'Sluttdato'),
                           onPressed: () async {
                             final d = await showDatePicker(
                               context: ctx,
@@ -623,7 +623,7 @@ class _MgmtTourDetailPageState extends State<MgmtTourDetailPage>
                   TextField(
                     controller: notesCtrl,
                     maxLines: 4,
-                    decoration: const InputDecoration(labelText: 'Notes'),
+                    decoration: const InputDecoration(labelText: 'Notater'),
                   ),
                 ],
               ),
@@ -632,7 +632,7 @@ class _MgmtTourDetailPageState extends State<MgmtTourDetailPage>
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(ctx),
-              child: const Text('Cancel'),
+              child: const Text('Avbryt'),
             ),
             FilledButton(
               onPressed: () async {
@@ -654,7 +654,7 @@ class _MgmtTourDetailPageState extends State<MgmtTourDetailPage>
                   debugPrint('Edit tour error: $e');
                 }
               },
-              child: const Text('Save'),
+              child: const Text('Lagre'),
             ),
           ],
         ),
@@ -714,7 +714,7 @@ class _MgmtTourDetailPageState extends State<MgmtTourDetailPage>
     }
 
     if (_tour == null) {
-      return const Center(child: Text('Tour not found'));
+      return const Center(child: Text('Turné ikke funnet'));
     }
 
     return Padding(
@@ -768,7 +768,7 @@ class _MgmtTourDetailPageState extends State<MgmtTourDetailPage>
             labelStyle: const TextStyle(fontWeight: FontWeight.w900),
             tabs: const [
               Tab(text: 'Shows'),
-              Tab(text: 'Itinerary'),
+              Tab(text: 'Reiseplan'),
               Tab(text: 'Team'),
               Tab(text: 'Info'),
             ],
@@ -830,7 +830,7 @@ class _ShowsTab extends StatelessWidget {
             FilledButton.icon(
               onPressed: onAdd,
               icon: const Icon(Icons.add),
-              label: const Text('Add show'),
+              label: const Text('Legg til show'),
             ),
           ],
         ),
@@ -839,7 +839,7 @@ class _ShowsTab extends StatelessWidget {
           child: shows.isEmpty
               ? const Center(
                   child: Text(
-                    'No shows yet',
+                    'Ingen shows ennå',
                     style: TextStyle(color: CssTheme.textMuted),
                   ),
                 )
@@ -939,7 +939,7 @@ class _ShowRow extends StatelessWidget {
             TextButton.icon(
               onPressed: onBookBus,
               icon: const Icon(Icons.directions_bus, size: 16),
-              label: const Text('Book bus'),
+              label: const Text('Bestill buss'),
             )
           else
             const Padding(
@@ -949,7 +949,7 @@ class _ShowRow extends StatelessWidget {
                   Icon(Icons.check_circle, color: Colors.green, size: 16),
                   SizedBox(width: 4),
                   Text(
-                    'Bus requested',
+                    'Buss bestilt',
                     style: TextStyle(color: Colors.green, fontSize: 12),
                   ),
                 ],
@@ -995,7 +995,7 @@ class _ItineraryTab extends StatelessWidget {
             FilledButton.icon(
               onPressed: onAdd,
               icon: const Icon(Icons.add),
-              label: const Text('Add entry'),
+              label: const Text('Legg til'),
             ),
           ],
         ),
@@ -1004,7 +1004,7 @@ class _ItineraryTab extends StatelessWidget {
           child: itinerary.isEmpty
               ? const Center(
                   child: Text(
-                    'No itinerary entries yet',
+                    'Ingen reiseplan ennå',
                     style: TextStyle(color: CssTheme.textMuted),
                   ),
                 )
@@ -1147,7 +1147,7 @@ class _TeamTab extends StatelessWidget {
             FilledButton.icon(
               onPressed: onAdd,
               icon: const Icon(Icons.person_add),
-              label: const Text('Add member'),
+              label: const Text('Legg til medlem'),
             ),
           ],
         ),
@@ -1156,7 +1156,7 @@ class _TeamTab extends StatelessWidget {
           child: team.isEmpty
               ? const Center(
                   child: Text(
-                    'No team members yet',
+                    'Ingen teammedlemmer ennå',
                     style: TextStyle(color: CssTheme.textMuted),
                   ),
                 )
@@ -1256,7 +1256,7 @@ class _InfoTab extends StatelessWidget {
               FilledButton.icon(
                 onPressed: onEdit,
                 icon: const Icon(Icons.edit),
-                label: const Text('Edit'),
+                label: const Text('Rediger'),
               ),
             ],
           ),
@@ -1272,23 +1272,23 @@ class _InfoTab extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                _InfoRow(label: 'Tour name', value: tour['name'] as String? ?? ''),
+                _InfoRow(label: 'Turnénavn', value: tour['name'] as String? ?? ''),
                 _InfoRow(label: 'Artist', value: tour['artist'] as String? ?? ''),
-                _InfoRow(label: 'Status', value: tour['status'] as String? ?? ''),
+                _InfoRow(label: 'Status', value: _StatusBadge._statusLabels[tour['status'] as String? ?? ''] ?? (tour['status'] as String? ?? '')),
                 if (start != null)
                   _InfoRow(
-                    label: 'Start date',
+                    label: 'Startdato',
                     value: DateFormat('dd.MM.yyyy').format(DateTime.parse(start)),
                   ),
                 if (end != null)
                   _InfoRow(
-                    label: 'End date',
+                    label: 'Sluttdato',
                     value: DateFormat('dd.MM.yyyy').format(DateTime.parse(end)),
                   ),
                 if (notes.isNotEmpty) ...[
                   const Divider(height: 24),
                   const Text(
-                    'Notes',
+                    'Notater',
                     style: TextStyle(
                       fontWeight: FontWeight.w700,
                       color: CssTheme.textMuted,
@@ -1301,7 +1301,7 @@ class _InfoTab extends StatelessWidget {
                 if (createdAt != null) ...[
                   const Divider(height: 24),
                   Text(
-                    'Created ${DateFormat('dd.MM.yyyy').format(DateTime.parse(createdAt))}',
+                    'Opprettet ${DateFormat('dd.MM.yyyy').format(DateTime.parse(createdAt))}',
                     style: const TextStyle(
                       fontSize: 12,
                       color: CssTheme.textMuted,
@@ -1351,6 +1351,15 @@ class _StatusBadge extends StatelessWidget {
   final String status;
   const _StatusBadge({required this.status});
 
+  static const _statusLabels = {
+    'planning': 'Planlegger',
+    'active': 'Aktiv',
+    'completed': 'Fullført',
+    'cancelled': 'Avlyst',
+    'confirmed': 'Bekreftet',
+    'hold': 'Hold',
+  };
+
   @override
   Widget build(BuildContext context) {
     final colors = {
@@ -1362,6 +1371,7 @@ class _StatusBadge extends StatelessWidget {
       'hold': Colors.orange,
     };
     final color = colors[status] ?? Colors.grey;
+    final label = _statusLabels[status] ?? status;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
       decoration: BoxDecoration(
@@ -1370,7 +1380,7 @@ class _StatusBadge extends StatelessWidget {
         border: Border.all(color: color.withOpacity(0.3)),
       ),
       child: Text(
-        status,
+        label,
         style: TextStyle(
           fontSize: 12,
           fontWeight: FontWeight.w700,

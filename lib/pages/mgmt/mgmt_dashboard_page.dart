@@ -69,11 +69,11 @@ class _MgmtDashboardPageState extends State<MgmtDashboardPage> {
       // Load feature flags
       final company = await _sb
           .from('companies')
-          .select('show_tours, show_bus_requests')
+          .select('show_tours, show_bus_requests_mgmt')
           .eq('id', _companyId!)
           .maybeSingle();
       _showTours = company?['show_tours'] != false;
-      _showBusRequests = company?['show_bus_requests'] != false;
+      _showBusRequests = company?['show_bus_requests_mgmt'] != false;
 
       final now = DateTime.now();
       final in30 = now.add(const Duration(days: 30));
@@ -109,11 +109,10 @@ class _MgmtDashboardPageState extends State<MgmtDashboardPage> {
       // Upcoming gigs in next 30 days
       final gigsRaw = await _sb
           .from('gigs')
-          .select('id, date_from, date_to, venue_name, city, status, type, customer_firma, customer_name')
+          .select('id, date_from, date_to, venue_name, city, status, type, customer_firma, customer_name, cancellation_reason')
           .eq('company_id', _companyId!)
           .gte('date_from', fmt.format(now))
           .lte('date_from', fmt.format(in30))
-          .neq('status', 'cancelled')
           .order('date_from');
       final List<Map<String, dynamic>> gigEvents = [];
       for (final g in (gigsRaw as List)) {
@@ -186,10 +185,10 @@ class _MgmtDashboardPageState extends State<MgmtDashboardPage> {
   Widget build(BuildContext context) {
     final hour = DateTime.now().hour;
     final greeting = hour < 12
-        ? 'Good morning'
+        ? 'God morgen'
         : hour < 18
-            ? 'Good afternoon'
-            : 'Good evening';
+            ? 'God ettermiddag'
+            : 'God kveld';
 
     return Padding(
       padding: const EdgeInsets.all(18),
@@ -214,17 +213,17 @@ class _MgmtDashboardPageState extends State<MgmtDashboardPage> {
 
                   // Upcoming events (tour shows + gigs)
                   _SectionHeader(
-                    title: 'Upcoming Events',
-                    subtitle: 'Next 30 days',
+                    title: 'Kommende hendelser',
+                    subtitle: 'Neste 30 dager',
                     count: _upcomingEvents.length,
                     action: TextButton(
                       onPressed: () => context.go('/m/gigs'),
-                      child: const Text('View gigs'),
+                      child: const Text('Se gigs'),
                     ),
                   ),
                   const SizedBox(height: 12),
                   if (_upcomingEvents.isEmpty)
-                    _EmptyCard(message: 'No upcoming events in the next 30 days')
+                    _EmptyCard(message: 'Ingen kommende hendelser de neste 30 dagene')
                   else
                     ..._upcomingEvents.map((event) => _EventCard(event: event)),
 
@@ -233,16 +232,16 @@ class _MgmtDashboardPageState extends State<MgmtDashboardPage> {
 
                     // Active tours
                     _SectionHeader(
-                      title: 'Active Tours',
+                      title: 'Aktive turnéer',
                       count: _activeTours.length,
                       action: TextButton(
                         onPressed: () => context.go('/m/tours'),
-                        child: const Text('View all'),
+                        child: const Text('Se alle'),
                       ),
                     ),
                     const SizedBox(height: 12),
                     if (_activeTours.isEmpty)
-                      _EmptyCard(message: 'No active tours')
+                      _EmptyCard(message: 'Ingen aktive turnéer')
                     else
                       Wrap(
                         spacing: 12,
@@ -263,8 +262,8 @@ class _MgmtDashboardPageState extends State<MgmtDashboardPage> {
                     // Bus requests
                     _SectionHeader(
                       title: _showArchivedBusRequests
-                          ? 'Archived Bus Requests'
-                          : 'Bus Requests',
+                          ? 'Arkiverte bussforespørsler'
+                          : 'Bussforespørsler',
                       count: _pendingBusRequests.length,
                       action: IconButton(
                         icon: Icon(
@@ -274,8 +273,8 @@ class _MgmtDashboardPageState extends State<MgmtDashboardPage> {
                           size: 20,
                         ),
                         tooltip: _showArchivedBusRequests
-                            ? 'Show active'
-                            : 'Show archived',
+                            ? 'Vis aktive'
+                            : 'Vis arkiverte',
                         onPressed: () {
                           setState(() => _showArchivedBusRequests =
                               !_showArchivedBusRequests);
@@ -287,8 +286,8 @@ class _MgmtDashboardPageState extends State<MgmtDashboardPage> {
                     if (_pendingBusRequests.isEmpty)
                       _EmptyCard(
                         message: _showArchivedBusRequests
-                            ? 'No archived bus requests'
-                            : 'No bus requests',
+                            ? 'Ingen arkiverte bussforespørsler'
+                            : 'Ingen bussforespørsler',
                       )
                     else
                       ..._pendingBusRequests.map((r) => _BusRequestCard(
@@ -432,6 +431,8 @@ class _EventCard extends StatelessWidget {
 
     // Type badge
     final gigType = isGig ? (event['type'] as String? ?? 'gig') : null;
+    final isCancelled = status == 'cancelled';
+    final cancellationReason = event['cancellation_reason'] as String?;
 
     return GestureDetector(
       onTap: isGig ? () => context.go('/m/gigs/${event['id']}') : null,
@@ -441,7 +442,7 @@ class _EventCard extends StatelessWidget {
         decoration: BoxDecoration(
           color: CssTheme.surface,
           borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: CssTheme.outline),
+          border: Border.all(color: isCancelled ? Colors.red.withValues(alpha: 0.3) : CssTheme.outline),
         ),
         child: Row(
           children: [
@@ -465,9 +466,11 @@ class _EventCard extends StatelessWidget {
                     dateStr != null
                         ? DateFormat('d').format(DateTime.parse(dateStr))
                         : '',
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 24,
                       fontWeight: FontWeight.w900,
+                      decoration: isCancelled ? TextDecoration.lineThrough : null,
+                      color: isCancelled ? CssTheme.textMuted : null,
                     ),
                   ),
                 ],
@@ -480,18 +483,42 @@ class _EventCard extends StatelessWidget {
                 children: [
                   Text(
                     title,
-                    style: const TextStyle(fontWeight: FontWeight.w900),
+                    style: TextStyle(
+                      fontWeight: FontWeight.w900,
+                      decoration: isCancelled ? TextDecoration.lineThrough : null,
+                      color: isCancelled ? CssTheme.textMuted : null,
+                    ),
                   ),
                   if (subtitle.isNotEmpty)
                     Text(
                       subtitle,
                       style: const TextStyle(color: CssTheme.textMuted),
                     ),
+                  if (isCancelled && cancellationReason != null && cancellationReason.isNotEmpty)
+                    Text(
+                      cancellationReason,
+                      style: const TextStyle(
+                        color: Colors.red,
+                        fontSize: 12,
+                        fontStyle: FontStyle.italic,
+                      ),
+                    ),
                 ],
               ),
             ),
-            // Type badge for gigs
-            if (gigType == 'rehearsal') ...[
+            // Cancelled badge (replaces type/status badges)
+            if (isCancelled) ...[
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  color: Colors.red.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(999),
+                  border: Border.all(color: Colors.red.withValues(alpha: 0.3)),
+                ),
+                child: const Text('Avlyst',
+                    style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Colors.red)),
+              ),
+            ] else if (gigType == 'rehearsal') ...[
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                 decoration: BoxDecoration(
@@ -516,7 +543,7 @@ class _EventCard extends StatelessWidget {
               ),
               const SizedBox(width: 8),
             ],
-            if (gigType != 'rehearsal')
+            if (!isCancelled && gigType != 'rehearsal')
               _StatusBadge(status: status),
           ],
         ),
@@ -889,6 +916,21 @@ class _StatusBadge extends StatelessWidget {
       'declined': Colors.red,
       'rejected': Colors.red,
     };
+    final labels = {
+      'planning': 'Planlegger',
+      'active': 'Aktiv',
+      'completed': 'Fullført',
+      'cancelled': 'Avlyst',
+      'confirmed': 'Bekreftet',
+      'hold': 'På vent',
+      'pending': 'Venter',
+      'quoted': 'Tilbudt',
+      'offer_sent': 'Tilbud sendt',
+      'accepted_by_client': 'Godkjent',
+      'accepted': 'Akseptert',
+      'declined': 'Avslått',
+      'rejected': 'Avvist',
+    };
 
     final color = colors[status] ?? Colors.grey;
 
@@ -900,7 +942,7 @@ class _StatusBadge extends StatelessWidget {
         border: Border.all(color: color.withOpacity(0.3)),
       ),
       child: Text(
-        status,
+        labels[status] ?? status,
         style: TextStyle(
           fontSize: 12,
           fontWeight: FontWeight.w700,

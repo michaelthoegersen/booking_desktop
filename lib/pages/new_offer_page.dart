@@ -22,6 +22,7 @@ import '../services/pdf_tour_parser.dart';
 import '../widgets/route_popup_dialog.dart';
 import 'package:flutter/foundation.dart';
 import '../services/bus_availability_service.dart';
+import 'bus_requests_page.dart' show busRequestsBadgeNotifier;
 import '../services/invoice_service.dart';
 import '../services/invoice_pdf_service.dart';
 import '../services/email_service.dart';
@@ -2060,6 +2061,8 @@ offer.rounds[i].bus =
           'offer_id': id,
           'status': 'quoted',
         }).eq('id', _busRequestId!);
+        // Trigger sidebar badge refresh
+        busRequestsBadgeNotifier.value++;
       } catch (e) {
         debugPrint('Failed to link bus request: $e');
       }
@@ -2387,6 +2390,8 @@ Future<void> _sendOffer() async {
             'offer_id': _draftId,
             'status': 'offer_sent',
           }).eq('id', _busRequestId!);
+          // Trigger sidebar badge refresh
+          busRequestsBadgeNotifier.value++;
         } catch (e) {
           debugPrint('Failed to update bus request status: $e');
         }

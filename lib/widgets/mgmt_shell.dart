@@ -113,7 +113,7 @@ class _MgmtTopBarState extends State<_MgmtTopBar> {
 
     // Multiple companies — show dropdown
     return PopupMenuButton<String>(
-      tooltip: 'Switch company',
+      tooltip: 'Bytt selskap',
       onSelected: (id) {
         activeCompanyNotifier.switchTo(id);
         final company = activeCompanyNotifier.value;
@@ -199,7 +199,7 @@ class _MgmtTopBarState extends State<_MgmtTopBar> {
                   style: TextStyle(fontSize: 16, color: Colors.white70),
                 ),
                 TextSpan(
-                  text: 'Management',
+                  text: 'Administrasjon',
                   style: TextStyle(
                     fontSize: 14,
                     fontWeight: FontWeight.w500,
@@ -213,7 +213,7 @@ class _MgmtTopBarState extends State<_MgmtTopBar> {
           _buildCompanySwitcher(),
           const Spacer(),
           PopupMenuButton<String>(
-            tooltip: "Account",
+            tooltip: "Konto",
             onSelected: (value) async {
               if (value == 'logout') {
                 await Supabase.instance.client.auth.signOut();
@@ -227,7 +227,7 @@ class _MgmtTopBarState extends State<_MgmtTopBar> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     const Text(
-                      "Signed in as",
+                      "Logget inn som",
                       style: TextStyle(fontSize: 11, color: Colors.grey),
                     ),
                     const SizedBox(height: 4),
@@ -245,7 +245,7 @@ class _MgmtTopBarState extends State<_MgmtTopBar> {
                   children: [
                     Icon(Icons.logout, size: 18),
                     SizedBox(width: 8),
-                    Text('Log out'),
+                    Text('Logg ut'),
                   ],
                 ),
               ),
@@ -422,7 +422,7 @@ class _MgmtSideNavState extends State<_MgmtSideNav> {
                     if (_showTours)
                       _MgmtNavItem(
                         icon: Icons.map_rounded,
-                        label: 'Tours',
+                        label: 'Turnéer',
                         route: '/m/tours',
                       ),
                     _MgmtNavItem(
@@ -432,12 +432,22 @@ class _MgmtSideNavState extends State<_MgmtSideNav> {
                     ),
                     _MgmtNavItem(
                       icon: Icons.people_rounded,
-                      label: 'People',
+                      label: 'Personer',
                       route: '/m/people',
                     ),
                     _MgmtNavItem(
+                      icon: Icons.contacts_rounded,
+                      label: 'Kontakter',
+                      route: '/m/contacts',
+                    ),
+                    _MgmtNavItem(
+                      icon: Icons.request_quote_rounded,
+                      label: 'Tilbud',
+                      route: '/m/offers',
+                    ),
+                    _MgmtNavItem(
                       icon: Icons.chat_bubble_outline_rounded,
-                      label: 'Messages',
+                      label: 'Meldinger',
                       route: '/m/messages',
                       badge: _unreadMessages,
                     ),
@@ -450,7 +460,7 @@ class _MgmtSideNavState extends State<_MgmtSideNav> {
 
             _MgmtNavItem(
               icon: Icons.settings,
-              label: 'Settings',
+              label: 'Innstillinger',
               route: '/m/settings',
             ),
           ],

@@ -30,7 +30,11 @@ class _MgmtGigDetailPageState extends State<MgmtGigDetailPage>
 
   List<Map<String, dynamic>> _shows = [];
   List<Map<String, dynamic>> _showTypes = [];
-  List<Map<String, dynamic>> _companyMembers = []; // {user_id, name, status}
+  List<Map<String, dynamic>> _companyMembers = []; // {user_id, name, status, section}
+  String? _linkedOfferId; // gig_offer linked to this gig
+  List<Map<String, dynamic>> _lineup = [];
+  Set<String> _selectedSkarp = {};
+  Set<String> _selectedBass = {};
 
 
   @override
@@ -84,8 +88,36 @@ class _MgmtGigDetailPageState extends State<MgmtGigDetailPage>
       if (companyId != null) {
         final members = await _sb
             .from('profiles')
-            .select('id, name, role')
+            .select('id, name, role, section')
             .eq('company_id', companyId);
+
+        // Auto-set all members to "available" for rehearsals
+        final isRehearsal = (_gig?['type'] as String?) == 'rehearsal';
+        if (isRehearsal) {
+          final existing = await _sb
+              .from('gig_availability')
+              .select('user_id')
+              .eq('gig_id', widget.gigId);
+          final existingIds = (existing as List)
+              .map((e) => e['user_id'] as String)
+              .toSet();
+          final toInsert = (members as List)
+              .map((m) => m['id'] as String)
+              .where((uid) => !existingIds.contains(uid))
+              .toList();
+          if (toInsert.isNotEmpty) {
+            await _sb.from('gig_availability').insert(
+              toInsert
+                  .map((uid) => {
+                        'gig_id': widget.gigId,
+                        'user_id': uid,
+                        'status': 'available',
+                        'updated_at': DateTime.now().toIso8601String(),
+                      })
+                  .toList(),
+            );
+          }
+        }
 
         final avail = await _sb
             .from('gig_availability')
@@ -102,16 +134,101 @@ class _MgmtGigDetailPageState extends State<MgmtGigDetailPage>
             'user_id': uid,
             'name': m['name'] as String? ?? '',
             'role': m['role'] as String? ?? 'bruker',
+            'section': m['section'] as String?,
             'status': availMap[uid] ?? 'pending',
           };
         }).toList();
         _companyMembers.sort((a, b) =>
             (a['name'] as String).compareTo(b['name'] as String));
+
+        // Load lineup
+        final lineupData = await _sb
+            .from('gig_lineup')
+            .select('user_id, section')
+            .eq('gig_id', widget.gigId);
+        _lineup = List<Map<String, dynamic>>.from(lineupData);
+        _selectedSkarp = {};
+        _selectedBass = {};
+        for (final l in _lineup) {
+          if (l['section'] == 'skarp') {
+            _selectedSkarp.add(l['user_id'] as String);
+          } else if (l['section'] == 'bass') {
+            _selectedBass.add(l['user_id'] as String);
+          }
+        }
       }
+
+      // Check for linked gig offer
+      final offerRow = await _sb
+          .from('gig_offers')
+          .select('id')
+          .eq('gig_id', widget.gigId)
+          .maybeSingle();
+      _linkedOfferId = offerRow?['id'] as String?;
     } catch (e) {
       debugPrint('Gig detail load error: $e');
     }
     if (mounted) setState(() => _loading = false);
+  }
+
+  // -------------------------------------------------------------------------
+  // LINEUP HELPERS
+  // -------------------------------------------------------------------------
+
+  void _toggleLineupMember(String userId, String section) {
+    setState(() {
+      final set = section == 'skarp' ? _selectedSkarp : _selectedBass;
+      if (set.contains(userId)) {
+        set.remove(userId);
+      } else {
+        set.add(userId);
+      }
+    });
+  }
+
+  Future<void> _saveLineup(String section) async {
+    final selected = section == 'skarp' ? _selectedSkarp : _selectedBass;
+    // Delete existing lineup for this section
+    await _sb
+        .from('gig_lineup')
+        .delete()
+        .eq('gig_id', widget.gigId)
+        .eq('section', section);
+    // Insert new
+    if (selected.isNotEmpty) {
+      await _sb.from('gig_lineup').insert(
+        selected
+            .map((uid) => {
+                  'gig_id': widget.gigId,
+                  'user_id': uid,
+                  'section': section,
+                })
+            .toList(),
+      );
+    }
+  }
+
+  Future<void> _saveAndToggleLock(String section) async {
+    try {
+      // Save lineup first
+      await _saveLineup(section);
+      // Toggle lock
+      final field = section == 'skarp'
+          ? 'lineup_locked_skarp'
+          : 'lineup_locked_bass';
+      final currentlyLocked = _gig?[field] == true;
+      await _sb
+          .from('gigs')
+          .update({field: !currentlyLocked})
+          .eq('id', widget.gigId);
+      await _load();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Feil: $e'), backgroundColor: Colors.red),
+        );
+      }
+    }
   }
 
   // -------------------------------------------------------------------------
@@ -135,347 +252,176 @@ class _MgmtGigDetailPageState extends State<MgmtGigDetailPage>
   double get _total => _showsTotal + _inearPrice + _transportPrice + _extraPrice;
 
   // -------------------------------------------------------------------------
-  // EDIT GIG INFO DIALOG
+  // EDIT REHEARSAL
   // -------------------------------------------------------------------------
 
-  Future<void> _editGigInfo() async {
-    if (_gig == null) return;
+  Future<void> _editRehearsal() async {
+    final g = _gig;
+    if (g == null) return;
 
-    DateTime? dateFrom = _gig!['date_from'] != null
-        ? DateTime.parse(_gig!['date_from'])
-        : null;
-    DateTime? dateTo = _gig!['date_to'] != null
-        ? DateTime.parse(_gig!['date_to'])
-        : null;
+    final venueCtrl = TextEditingController(text: g['venue_name'] ?? '');
+    final cityCtrl = TextEditingController(text: g['city'] ?? '');
+    final countryCtrl = TextEditingController(text: g['country'] ?? 'NO');
+    final responsibleCtrl = TextEditingController(text: g['responsible'] ?? '');
+    final fromTimeCtrl = TextEditingController(text: g['meeting_time'] ?? '');
+    final toTimeCtrl = TextEditingController(text: g['get_out_time'] ?? '');
+    final notesCtrl = TextEditingController(text: g['notes_for_contract'] ?? '');
+    var dateFrom = g['date_from'] != null ? DateTime.tryParse(g['date_from']) : null;
+    var dateTo = g['date_to'] != null ? DateTime.tryParse(g['date_to']) : null;
+    final df = DateFormat('dd.MM.yyyy');
 
-    final c = <String, TextEditingController>{
-      'venue': TextEditingController(text: _gig!['venue_name'] ?? ''),
-      'city': TextEditingController(text: _gig!['city'] ?? ''),
-      'country': TextEditingController(text: _gig!['country'] ?? 'NO'),
-      'firma': TextEditingController(text: _gig!['customer_firma'] ?? ''),
-      'custName': TextEditingController(text: _gig!['customer_name'] ?? ''),
-      'phone': TextEditingController(text: _gig!['customer_phone'] ?? ''),
-      'email': TextEditingController(text: _gig!['customer_email'] ?? ''),
-      'orgNr': TextEditingController(text: _gig!['customer_org_nr'] ?? ''),
-      'address': TextEditingController(text: _gig!['customer_address'] ?? ''),
-      'responsible': TextEditingController(text: _gig!['responsible'] ?? ''),
-      'showDesc': TextEditingController(text: _gig!['show_desc'] ?? ''),
-      'meetingTime': TextEditingController(text: _gig!['meeting_time'] ?? ''),
-      'getInTime': TextEditingController(text: _gig!['get_in_time'] ?? ''),
-      'rehearsalTime': TextEditingController(text: _gig!['rehearsal_time'] ?? ''),
-      'performanceTime': TextEditingController(text: _gig!['performance_time'] ?? ''),
-      'getOutTime': TextEditingController(text: _gig!['get_out_time'] ?? ''),
-      'meetingNotes': TextEditingController(text: _gig!['meeting_notes'] ?? ''),
-      'stageShape': TextEditingController(text: _gig!['stage_shape'] ?? ''),
-      'stageSize': TextEditingController(text: _gig!['stage_size'] ?? ''),
-      'stageNotes': TextEditingController(text: _gig!['stage_notes'] ?? ''),
-      'inearPrice': TextEditingController(
-          text: _gig!['inear_price']?.toString() ?? '7000'),
-      'transportKm': TextEditingController(
-          text: _gig!['transport_km']?.toString() ?? ''),
-      'transportPrice': TextEditingController(
-          text: _gig!['transport_price']?.toString() ?? ''),
-      'extraDesc': TextEditingController(text: _gig!['extra_desc'] ?? ''),
-      'extraPrice': TextEditingController(
-          text: _gig!['extra_price']?.toString() ?? ''),
-      'notesForContract': TextEditingController(
-          text: _gig!['notes_for_contract'] ?? ''),
-      'infoFromOrganizer': TextEditingController(
-          text: _gig!['info_from_organizer'] ?? ''),
-    };
-
-    bool inearFromUs = _gig!['inear_from_us'] == true;
-    bool playbackFromUs = _gig!['playback_from_us'] != false;
-    bool invoiceOnEhf = _gig!['invoice_on_ehf'] == true;
-    String status = _gig!['status'] as String? ?? 'inquiry';
-    final isRehearsal = (_gig!['type'] as String? ?? 'gig') == 'rehearsal';
-
-    await showDialog(
+    final saved = await showDialog<bool>(
       context: context,
       builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setS) => AlertDialog(
-          title: Text(isRehearsal ? 'Rediger øvelse' : 'Edit Gig Info'),
-          content: SizedBox(
-            width: 640,
-            height: 600,
-            child: SingleChildScrollView(
+        builder: (ctx, setS) => Dialog(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 480),
+            child: Padding(
+              padding: const EdgeInsets.all(24),
               child: Column(
+                mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Dates
-                  const _SectionHeader('Dates'),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: OutlinedButton.icon(
-                          icon: const Icon(Icons.calendar_today, size: 16),
-                          label: Text(dateFrom != null
-                              ? DateFormat('dd.MM.yyyy').format(dateFrom!)
-                              : 'Date from *'),
-                          onPressed: () async {
-                            final d = await showDatePicker(
-                              context: ctx,
-                              initialDate: dateFrom ?? DateTime.now(),
-                              firstDate: DateTime(2020),
-                              lastDate: DateTime(2035),
-                            );
-                            if (d != null) setS(() => dateFrom = d);
-                          },
-                        ),
+                  const Text('Rediger øvelse',
+                      style: TextStyle(fontSize: 20, fontWeight: FontWeight.w900)),
+                  const SizedBox(height: 16),
+                  Flexible(
+                    child: SingleChildScrollView(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          // Dates
+                          Row(children: [
+                            Expanded(
+                              child: OutlinedButton.icon(
+                                icon: const Icon(Icons.calendar_today, size: 16),
+                                label: Text(dateFrom != null ? df.format(dateFrom!) : 'Dato fra'),
+                                onPressed: () async {
+                                  final d = await showDatePicker(
+                                    context: ctx,
+                                    initialDate: dateFrom ?? DateTime.now(),
+                                    firstDate: DateTime(2020),
+                                    lastDate: DateTime(2035),
+                                  );
+                                  if (d != null) setS(() => dateFrom = d);
+                                },
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: OutlinedButton.icon(
+                                icon: const Icon(Icons.calendar_today, size: 16),
+                                label: Text(dateTo != null ? df.format(dateTo!) : 'Dato til'),
+                                onPressed: () async {
+                                  final d = await showDatePicker(
+                                    context: ctx,
+                                    initialDate: dateFrom ?? DateTime.now(),
+                                    firstDate: DateTime(2020),
+                                    lastDate: DateTime(2035),
+                                  );
+                                  if (d != null) setS(() => dateTo = d);
+                                },
+                              ),
+                            ),
+                          ]),
+                          const SizedBox(height: 12),
+                          // Location
+                          Row(children: [
+                            Expanded(flex: 2, child: TextField(
+                              controller: venueCtrl,
+                              decoration: const InputDecoration(labelText: 'Sted', isDense: true),
+                            )),
+                            const SizedBox(width: 8),
+                            Expanded(child: TextField(
+                              controller: cityCtrl,
+                              decoration: const InputDecoration(labelText: 'By', isDense: true),
+                            )),
+                            const SizedBox(width: 8),
+                            SizedBox(width: 70, child: TextField(
+                              controller: countryCtrl,
+                              decoration: const InputDecoration(labelText: 'Land', isDense: true),
+                            )),
+                          ]),
+                          const SizedBox(height: 12),
+                          TextField(
+                            controller: responsibleCtrl,
+                            decoration: const InputDecoration(labelText: 'Ansvarlig', isDense: true),
+                          ),
+                          const SizedBox(height: 12),
+                          // Times
+                          Row(children: [
+                            Expanded(child: TextField(
+                              controller: fromTimeCtrl,
+                              decoration: const InputDecoration(labelText: 'Fra', isDense: true),
+                            )),
+                            const SizedBox(width: 8),
+                            Expanded(child: TextField(
+                              controller: toTimeCtrl,
+                              decoration: const InputDecoration(labelText: 'Til', isDense: true),
+                            )),
+                          ]),
+                          const SizedBox(height: 12),
+                          // Notes
+                          TextField(
+                            controller: notesCtrl,
+                            decoration: const InputDecoration(
+                              labelText: 'Dette skal vi gjøre på øvelsen',
+                              isDense: true,
+                            ),
+                            maxLines: 3,
+                          ),
+                        ],
                       ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: OutlinedButton.icon(
-                          icon: const Icon(Icons.calendar_today, size: 16),
-                          label: Text(dateTo != null
-                              ? DateFormat('dd.MM.yyyy').format(dateTo!)
-                              : 'Date to'),
-                          onPressed: () async {
-                            final d = await showDatePicker(
-                              context: ctx,
-                              initialDate: dateFrom ?? DateTime.now(),
-                              firstDate: DateTime(2020),
-                              lastDate: DateTime(2035),
-                            );
-                            if (d != null) setS(() => dateTo = d);
-                          },
-                        ),
-                      ),
-                    ],
+                    ),
                   ),
-                  const SizedBox(height: 12),
-
-                  // Status + responsible (gig only)
-                  if (!isRehearsal)
-                  Row(
-                    children: [
-                      Expanded(
-                        child: DropdownButtonFormField<String>(
-                          value: status,
-                          decoration: const InputDecoration(labelText: 'Status'),
-                          items: ['inquiry', 'confirmed', 'invoiced', 'completed', 'cancelled']
-                              .map((s) => DropdownMenuItem(value: s, child: Text(s)))
-                              .toList(),
-                          onChanged: (v) => setS(() => status = v ?? status),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(child: _tf(c['responsible']!, 'Responsible')),
-                    ],
-                  ),
-                  if (isRehearsal)
-                    _tf(c['responsible']!, 'Ansvarlig'),
-
-                  // Venue / City / Country
-                  const _SectionHeader('Location'),
-                  _tf(c['venue']!, 'Venue'),
-                  const SizedBox(height: 8),
-                  Row(
-                    children: [
-                      Expanded(child: _tf(c['city']!, 'City')),
-                      const SizedBox(width: 8),
-                      SizedBox(width: 100, child: _tf(c['country']!, 'Country')),
-                    ],
-                  ),
-
-                  if (!isRehearsal) ...[
-                  // Customer
-                  const _SectionHeader('Customer'),
-                  _tf(c['firma']!, 'Firma / Company'),
-                  const SizedBox(height: 8),
-                  Row(
-                    children: [
-                      Expanded(child: _tf(c['custName']!, 'Contact name')),
-                      const SizedBox(width: 8),
-                      Expanded(child: _tf(c['phone']!, 'Phone')),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  Row(
-                    children: [
-                      Expanded(child: _tf(c['email']!, 'Email')),
-                      const SizedBox(width: 8),
-                      Expanded(child: _tf(c['orgNr']!, 'Org.nr')),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  _tf(c['address']!, 'Address'),
-                  const SizedBox(height: 8),
-                  SwitchListTile(
-                    title: const Text('Invoice on EHF'),
-                    value: invoiceOnEhf,
-                    onChanged: (v) => setS(() => invoiceOnEhf = v),
-                    contentPadding: EdgeInsets.zero,
-                    dense: true,
-                  ),
-
-                  // Show desc
-                  const _SectionHeader('Show Description'),
-                  _tf(c['showDesc']!, 'Show description', maxLines: 2),
-                  ],
-
-                  // Schedule
-                  if (isRehearsal) ...[
-                  const _SectionHeader('Timeplan'),
-                  Row(
-                    children: [
-                      Expanded(child: _tf(c['meetingTime']!, 'Fra (HH:mm)')),
-                      const SizedBox(width: 8),
-                      Expanded(child: _tf(c['getOutTime']!, 'Til (HH:mm)')),
-                    ],
-                  ),
-                  ],
-
-                  if (!isRehearsal) ...[
-                  const _SectionHeader('Schedule'),
-                  Row(
-                    children: [
-                      Expanded(child: _tf(c['meetingTime']!, 'Oppmøte (HH:mm)')),
-                      const SizedBox(width: 8),
-                      Expanded(child: _tf(c['getInTime']!, 'Get-in (HH:mm)')),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  Row(
-                    children: [
-                      Expanded(child: _tf(c['rehearsalTime']!, 'Prøver (HH:mm)')),
-                      const SizedBox(width: 8),
-                      Expanded(child: _tf(c['performanceTime']!, 'Opptreden (HH:mm)')),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  _tf(c['getOutTime']!, 'Get-out (HH:mm)'),
-                  const SizedBox(height: 8),
-                  _tf(c['meetingNotes']!, 'Oppmøtenotat', maxLines: 2),
-
-                  // Stage
-                  const _SectionHeader('Stage'),
-                  Row(
-                    children: [
-                      Expanded(child: _tf(c['stageShape']!, 'Stage shape')),
-                      const SizedBox(width: 8),
-                      Expanded(child: _tf(c['stageSize']!, 'Stage size')),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  _tf(c['stageNotes']!, 'Stage notes', maxLines: 2),
-
-                  // Tech
-                  const _SectionHeader('Teknikk'),
-                  SwitchListTile(
-                    title: const Text('In-ear fra oss'),
-                    value: inearFromUs,
-                    onChanged: (v) => setS(() => inearFromUs = v),
-                    contentPadding: EdgeInsets.zero,
-                    dense: true,
-                  ),
-                  if (inearFromUs)
-                    _tf(c['inearPrice']!, 'In-ear pris (kr)',
-                        keyboardType: TextInputType.number),
-                  SwitchListTile(
-                    title: const Text('Playback fra oss'),
-                    value: playbackFromUs,
-                    onChanged: (v) => setS(() => playbackFromUs = v),
-                    contentPadding: EdgeInsets.zero,
-                    dense: true,
-                  ),
-
-                  // Transport
-                  const _SectionHeader('Transport'),
-                  Row(
-                    children: [
-                      Expanded(
-                          child: _tf(c['transportKm']!, 'Km',
-                              keyboardType: TextInputType.number)),
-                      const SizedBox(width: 8),
-                      Expanded(
-                          child: _tf(c['transportPrice']!, 'Transport pris (kr)',
-                              keyboardType: TextInputType.number)),
-                    ],
-                  ),
-
-                  // Extra
-                  const _SectionHeader('Extra'),
-                  _tf(c['extraDesc']!, 'Extra beskrivelse'),
-                  const SizedBox(height: 8),
-                  _tf(c['extraPrice']!, 'Extra pris (kr)',
-                      keyboardType: TextInputType.number),
-
-                  // Notes
-                  const _SectionHeader('Notes'),
-                  _tf(c['notesForContract']!, 'Notes for contract', maxLines: 3),
-                  const SizedBox(height: 8),
-                  _tf(c['infoFromOrganizer']!, 'Info from organizer', maxLines: 3),
-                  ],
-
-                  // Rehearsal notes
-                  if (isRehearsal) ...[
-                  const _SectionHeader('Notat'),
-                  _tf(c['notesForContract']!, 'Dette skal vi gjøre på øvelsen', maxLines: 3),
-                  ],
+                  const SizedBox(height: 20),
+                  Row(children: [
+                    Expanded(child: OutlinedButton(
+                      onPressed: () => Navigator.pop(ctx, false),
+                      child: const Text('Avbryt'),
+                    )),
+                    const SizedBox(width: 12),
+                    Expanded(child: FilledButton(
+                      onPressed: () => Navigator.pop(ctx, true),
+                      child: const Text('Lagre'),
+                    )),
+                  ]),
                 ],
               ),
             ),
           ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('Cancel'),
-            ),
-            FilledButton(
-              onPressed: () async {
-                if (dateFrom == null) return;
-                try {
-                  final df = DateFormat('yyyy-MM-dd');
-                  await _sb.from('gigs').update({
-                    'date_from': df.format(dateFrom!),
-                    'date_to': dateTo != null ? df.format(dateTo!) : null,
-                    'venue_name': c['venue']!.text.trim().orNull,
-                    'city': c['city']!.text.trim().orNull,
-                    'country': c['country']!.text.trim().orNull,
-                    'customer_firma': c['firma']!.text.trim().orNull,
-                    'customer_name': c['custName']!.text.trim().orNull,
-                    'customer_phone': c['phone']!.text.trim().orNull,
-                    'customer_email': c['email']!.text.trim().orNull,
-                    'customer_org_nr': c['orgNr']!.text.trim().orNull,
-                    'customer_address': c['address']!.text.trim().orNull,
-                    'invoice_on_ehf': invoiceOnEhf,
-                    'responsible': c['responsible']!.text.trim().orNull,
-                    'show_desc': c['showDesc']!.text.trim().orNull,
-                    'meeting_time': c['meetingTime']!.text.trim().orNull,
-                    'get_in_time': c['getInTime']!.text.trim().orNull,
-                    'rehearsal_time': c['rehearsalTime']!.text.trim().orNull,
-                    'performance_time': c['performanceTime']!.text.trim().orNull,
-                    'get_out_time': c['getOutTime']!.text.trim().orNull,
-                    'meeting_notes': c['meetingNotes']!.text.trim().orNull,
-                    'stage_shape': c['stageShape']!.text.trim().orNull,
-                    'stage_size': c['stageSize']!.text.trim().orNull,
-                    'stage_notes': c['stageNotes']!.text.trim().orNull,
-                    'inear_from_us': inearFromUs,
-                    'playback_from_us': playbackFromUs,
-                    'inear_price': double.tryParse(c['inearPrice']!.text),
-                    'transport_km': int.tryParse(c['transportKm']!.text),
-                    'transport_price': double.tryParse(c['transportPrice']!.text),
-                    'extra_desc': c['extraDesc']!.text.trim().orNull,
-                    'extra_price': double.tryParse(c['extraPrice']!.text),
-                    'notes_for_contract': c['notesForContract']!.text.trim().orNull,
-                    'info_from_organizer': c['infoFromOrganizer']!.text.trim().orNull,
-                    'status': status,
-                    'updated_at': DateTime.now().toIso8601String(),
-                  }).eq('id', widget.gigId);
-
-                  if (ctx.mounted) Navigator.pop(ctx);
-                  await _load();
-                } catch (e) {
-                  debugPrint('Update gig error: $e');
-                }
-              },
-              child: const Text('Save'),
-            ),
-          ],
         ),
       ),
     );
+
+    if (saved != true || !mounted) return;
+
+    try {
+      final n = (String s) => s.trim().isEmpty ? null : s.trim();
+      await _sb.from('gigs').update({
+        'venue_name': n(venueCtrl.text),
+        'city': n(cityCtrl.text),
+        'country': n(countryCtrl.text),
+        'responsible': n(responsibleCtrl.text),
+        'meeting_time': n(fromTimeCtrl.text),
+        'get_out_time': n(toTimeCtrl.text),
+        'notes_for_contract': n(notesCtrl.text),
+        'date_from': dateFrom?.toIso8601String().substring(0, 10),
+        'date_to': dateTo?.toIso8601String().substring(0, 10),
+      }).eq('id', widget.gigId);
+      _load();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Feil: $e')),
+        );
+      }
+    }
+
+    for (final c in [venueCtrl, cityCtrl, countryCtrl, responsibleCtrl,
+                      fromTimeCtrl, toTimeCtrl, notesCtrl]) {
+      c.dispose();
+    }
   }
 
   // -------------------------------------------------------------------------
@@ -483,17 +429,18 @@ class _MgmtGigDetailPageState extends State<MgmtGigDetailPage>
   // -------------------------------------------------------------------------
 
   Future<void> _confirmDeleteGig() async {
+    final isRehearsal = (_gig?['type'] as String?) == 'rehearsal';
     final venue = _gig?['venue_name'] as String?;
     final dateFrom = _gig?['date_from'] as String?;
-    final label = venue?.isNotEmpty == true ? venue! : (dateFrom ?? 'denne gigen');
+    final label = venue?.isNotEmpty == true ? venue! : (dateFrom ?? (isRehearsal ? 'denne øvelsen' : 'denne gigen'));
 
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Slett gig'),
+        title: Text(isRehearsal ? 'Slett øvelse' : 'Slett gig'),
         content: Text(
           'Er du sikker på at du vil slette "$label"?\n\n'
-          'Alle shows og crew tilknyttet gigen vil også slettes.',
+          '${isRehearsal ? 'Øvelsen vil bli permanent slettet.' : 'Alle shows og crew tilknyttet gigen vil også slettes.'}',
         ),
         actions: [
           TextButton(
@@ -524,6 +471,79 @@ class _MgmtGigDetailPageState extends State<MgmtGigDetailPage>
   }
 
   // -------------------------------------------------------------------------
+  // CANCEL / REOPEN
+  // -------------------------------------------------------------------------
+
+  Future<void> _cancelRehearsal() async {
+    final reasonCtrl = TextEditingController();
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Merk som avlyst'),
+        content: SizedBox(
+          width: 400,
+          child: TextField(
+            controller: reasonCtrl,
+            decoration: const InputDecoration(
+              labelText: 'Grunn for avlysning',
+              hintText: 'Valgfritt',
+              isDense: true,
+            ),
+            maxLines: 2,
+            autofocus: true,
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Avbryt'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Merk som avlyst'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true || !mounted) return;
+
+    try {
+      final reason = reasonCtrl.text.trim().isEmpty ? null : reasonCtrl.text.trim();
+      await _sb.from('gigs').update({
+        'status': 'cancelled',
+        'cancellation_reason': reason,
+      }).eq('id', widget.gigId);
+      _load();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Feil: $e')),
+        );
+      }
+    }
+    reasonCtrl.dispose();
+  }
+
+  Future<void> _reopenRehearsal() async {
+    try {
+      await _sb.from('gigs').update({
+        'status': 'inquiry',
+        'cancellation_reason': null,
+      }).eq('id', widget.gigId);
+      _load();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Feil: $e')),
+        );
+      }
+    }
+  }
+
+  // -------------------------------------------------------------------------
   // SHOWS
   // -------------------------------------------------------------------------
 
@@ -538,14 +558,14 @@ class _MgmtGigDetailPageState extends State<MgmtGigDetailPage>
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setS) => AlertDialog(
-          title: const Text('Add Show'),
+          title: const Text('Legg til show'),
           content: SizedBox(
             width: 480,
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
                 DropdownButtonFormField<Map<String, dynamic>>(
-                  decoration: const InputDecoration(labelText: 'Show type'),
+                  decoration: const InputDecoration(labelText: 'Show-type'),
                   value: selectedType,
                   items: _showTypes
                       .map((t) => DropdownMenuItem(
@@ -586,7 +606,7 @@ class _MgmtGigDetailPageState extends State<MgmtGigDetailPage>
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(ctx),
-              child: const Text('Cancel'),
+              child: const Text('Avbryt'),
             ),
             FilledButton(
               onPressed: () async {
@@ -608,7 +628,7 @@ class _MgmtGigDetailPageState extends State<MgmtGigDetailPage>
                   debugPrint('Add show error: $e');
                 }
               },
-              child: const Text('Add'),
+              child: const Text('Legg til'),
             ),
           ],
         ),
@@ -662,7 +682,7 @@ class _MgmtGigDetailPageState extends State<MgmtGigDetailPage>
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancel'),
+            child: const Text('Avbryt'),
           ),
           FilledButton.icon(
             icon: const Icon(Icons.send),
@@ -704,7 +724,7 @@ class _MgmtGigDetailPageState extends State<MgmtGigDetailPage>
               } catch (e) {
                 if (mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('Sending failed: $e')),
+                    SnackBar(content: Text('Sending feilet: $e')),
                   );
                 }
               }
@@ -732,11 +752,11 @@ class _MgmtGigDetailPageState extends State<MgmtGigDetailPage>
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Text('Gig not found'),
+              const Text('Gig ikke funnet'),
               const SizedBox(height: 12),
               FilledButton(
                 onPressed: () => context.go('/m/gigs'),
-                child: const Text('Back to Gigs'),
+                child: const Text('Tilbake til gigs'),
               ),
             ],
           ),
@@ -766,6 +786,7 @@ class _MgmtGigDetailPageState extends State<MgmtGigDetailPage>
     final title = [venue, city].where((s) => s.isNotEmpty).join(' · ');
     final customerLine = [firma, custName].where((s) => s.isNotEmpty).join(' — ');
     final gigType = _gig?['type'] as String? ?? 'gig';
+    final cancellationReason = _gig?['cancellation_reason'] as String?;
 
     return Padding(
       padding: const EdgeInsets.all(18),
@@ -831,11 +852,38 @@ class _MgmtGigDetailPageState extends State<MgmtGigDetailPage>
                           fontSize: 13,
                         ),
                       ),
+                    if (status == 'cancelled' && cancellationReason != null && cancellationReason.isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 4),
+                        child: Text(
+                          cancellationReason,
+                          style: const TextStyle(
+                            color: Colors.red,
+                            fontSize: 13,
+                            fontStyle: FontStyle.italic,
+                          ),
+                        ),
+                      ),
                   ],
                 ),
               ),
               const SizedBox(width: 8),
-              if (gigType == 'rehearsal') ...[
+              if (status == 'cancelled') ...[
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: Colors.red.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(999),
+                    border: Border.all(color: Colors.red.withValues(alpha: 0.3)),
+                  ),
+                  child: const Text(
+                    'Avlyst',
+                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: Colors.red),
+                  ),
+                ),
+                const SizedBox(width: 8),
+              ],
+              if (gigType == 'rehearsal' && status != 'cancelled') ...[
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                   decoration: BoxDecoration(
@@ -850,33 +898,82 @@ class _MgmtGigDetailPageState extends State<MgmtGigDetailPage>
                 ),
                 const SizedBox(width: 8),
               ],
-              if (gigType != 'rehearsal')
+              if (gigType != 'rehearsal' && status != 'cancelled')
                 _GigStatusBadge(status: status),
+              if (gigType != 'rehearsal') ...[
+                const SizedBox(width: 8),
+                _linkedOfferId != null
+                    ? OutlinedButton.icon(
+                        icon: const Icon(Icons.request_quote_rounded, size: 16),
+                        label: const Text('Rediger tilbud'),
+                        onPressed: () => context.go('/m/offers/$_linkedOfferId'),
+                      )
+                    : FilledButton.icon(
+                        icon: const Icon(Icons.request_quote_rounded, size: 16),
+                        label: const Text('Opprett tilbud'),
+                        onPressed: () => context.go('/m/offers/new?gigId=${_gig!['id']}'),
+                      ),
+              ],
               PopupMenuButton<String>(
                 icon: const Icon(Icons.more_vert),
                 onSelected: (v) {
-                  if (v == 'edit') _editGigInfo();
+                  if (v == 'edit') {
+                    if (gigType == 'rehearsal') {
+                      _editRehearsal();
+                    } else if (_linkedOfferId != null) {
+                      context.go('/m/offers/$_linkedOfferId');
+                    } else {
+                      context.go('/m/offers/new?gigId=${widget.gigId}');
+                    }
+                  }
+                  if (v == 'cancel') _cancelRehearsal();
+                  if (v == 'reopen') _reopenRehearsal();
                   if (v == 'delete') _confirmDeleteGig();
                 },
                 itemBuilder: (_) => [
-                  const PopupMenuItem(
+                  PopupMenuItem(
                     value: 'edit',
                     child: Row(
                       children: [
-                        Icon(Icons.edit_outlined, size: 18),
-                        SizedBox(width: 8),
-                        Text('Rediger'),
+                        const Icon(Icons.edit_outlined, size: 18),
+                        const SizedBox(width: 8),
+                        Text(gigType == 'rehearsal' ? 'Rediger øvelse' : 'Rediger'),
                       ],
                     ),
                   ),
+                  if (status != 'cancelled')
+                    const PopupMenuItem(
+                      value: 'cancel',
+                      child: Row(
+                        children: [
+                          Icon(Icons.cancel_outlined, color: Colors.red, size: 18),
+                          SizedBox(width: 8),
+                          Text('Merk som avlyst', style: TextStyle(color: Colors.red)),
+                        ],
+                      ),
+                    ),
+                  if (status == 'cancelled')
+                    const PopupMenuItem(
+                      value: 'reopen',
+                      child: Row(
+                        children: [
+                          Icon(Icons.replay, color: Colors.green, size: 18),
+                          SizedBox(width: 8),
+                          Text('Gjenåpne', style: TextStyle(color: Colors.green)),
+                        ],
+                      ),
+                    ),
                   const PopupMenuDivider(),
-                  const PopupMenuItem(
+                  PopupMenuItem(
                     value: 'delete',
                     child: Row(
                       children: [
-                        Icon(Icons.delete_outline, color: Colors.red, size: 18),
-                        SizedBox(width: 8),
-                        Text('Slett gig', style: TextStyle(color: Colors.red)),
+                        const Icon(Icons.delete_outline, color: Colors.red, size: 18),
+                        const SizedBox(width: 8),
+                        Text(
+                          gigType == 'rehearsal' ? 'Slett øvelse' : 'Slett gig',
+                          style: const TextStyle(color: Colors.red),
+                        ),
                       ],
                     ),
                   ),
@@ -931,8 +1028,13 @@ class _MgmtGigDetailPageState extends State<MgmtGigDetailPage>
                               total: _total,
                             ),
                             const SizedBox(height: 12),
-                            _CrewTab(
+                            _CrewLineupTab(
                               companyMembers: _companyMembers,
+                              gig: _gig!,
+                              selectedSkarp: _selectedSkarp,
+                              selectedBass: _selectedBass,
+                              onToggleMember: _toggleLineupMember,
+                              onSaveAndLock: _saveAndToggleLock,
                             ),
                           ],
                         ),
@@ -953,14 +1055,6 @@ class _MgmtGigDetailPageState extends State<MgmtGigDetailPage>
 }
 
 // ===========================================================================
-// HELPER EXTENSION
-// ===========================================================================
-
-extension _StringOrNull on String {
-  String? get orNull => isEmpty ? null : this;
-}
-
-// ===========================================================================
 // SHARED HELPERS
 // ===========================================================================
 
@@ -976,27 +1070,6 @@ Widget _tf(
     keyboardType: keyboardType,
     decoration: InputDecoration(labelText: label),
   );
-}
-
-class _SectionHeader extends StatelessWidget {
-  final String title;
-  const _SectionHeader(this.title);
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(top: 16, bottom: 8),
-      child: Text(
-        title,
-        style: const TextStyle(
-          fontWeight: FontWeight.w900,
-          fontSize: 13,
-          color: CssTheme.textMuted,
-          letterSpacing: 0.5,
-        ),
-      ),
-    );
-  }
 }
 
 // ===========================================================================
@@ -1260,7 +1333,7 @@ class _ShowsPrisTabState extends State<_ShowsPrisTab> {
               FilledButton.icon(
                 onPressed: widget.onAddShow,
                 icon: const Icon(Icons.add, size: 18),
-                label: const Text('Add show'),
+                label: const Text('Legg til show'),
               ),
             ],
           ),
@@ -1268,7 +1341,7 @@ class _ShowsPrisTabState extends State<_ShowsPrisTab> {
 
           // Shows table
           if (widget.shows.isEmpty)
-            const Text('No shows added yet.',
+            const Text('Ingen shows lagt til ennå.',
                 style: TextStyle(color: CssTheme.textMuted))
           else
             Container(
@@ -1498,7 +1571,7 @@ class _ShowRowState extends State<_ShowRow> {
               icon: const Icon(Icons.delete_outline, size: 18),
               color: Colors.red,
               onPressed: widget.onDelete,
-              tooltip: 'Remove',
+              tooltip: 'Fjern',
             ),
           ),
         ],
@@ -1550,15 +1623,38 @@ class _PriceRow extends StatelessWidget {
 // TAB 3 — CREW
 // ===========================================================================
 
-class _CrewTab extends StatelessWidget {
+class _CrewLineupTab extends StatelessWidget {
   final List<Map<String, dynamic>> companyMembers;
+  final Map<String, dynamic> gig;
+  final Set<String> selectedSkarp;
+  final Set<String> selectedBass;
+  final void Function(String userId, String section) onToggleMember;
+  final Future<void> Function(String section) onSaveAndLock;
 
-  const _CrewTab({
+  const _CrewLineupTab({
     required this.companyMembers,
+    required this.gig,
+    required this.selectedSkarp,
+    required this.selectedBass,
+    required this.onToggleMember,
+    required this.onSaveAndLock,
   });
 
   @override
   Widget build(BuildContext context) {
+    final skarpMembers = companyMembers
+        .where((m) => m['section'] == 'skarp')
+        .toList();
+    final bassMembers = companyMembers
+        .where((m) => m['section'] == 'bass')
+        .toList();
+    final noSectionMembers = companyMembers
+        .where((m) => m['section'] == null || m['section'] == '')
+        .toList();
+
+    final lockedSkarp = gig['lineup_locked_skarp'] == true;
+    final lockedBass = gig['lineup_locked_bass'] == true;
+
     // Availability counts
     final availCount = companyMembers
         .where((m) => m['status'] == 'available')
@@ -1571,101 +1667,181 @@ class _CrewTab extends StatelessWidget {
         .length;
 
     return Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text('Tilgjengelighet',
-              style: Theme.of(context).textTheme.titleMedium),
-          const SizedBox(height: 8),
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('Lag', style: Theme.of(context).textTheme.titleMedium),
+        const SizedBox(height: 8),
 
-          if (companyMembers.isEmpty)
-            const Text('Ingen medlemmer lagt til ennå.',
-                style: TextStyle(color: CssTheme.textMuted))
-          else ...[
-            Row(
-              children: [
-                _availBadge(Icons.check_circle, Colors.green,
-                    '$availCount kan'),
-                const SizedBox(width: 12),
-                _availBadge(Icons.cancel, Colors.red,
-                    '$unavailCount kan ikke'),
-                const SizedBox(width: 12),
-                _availBadge(Icons.help_outline, Colors.grey,
-                    '$pendingCount ikke svart'),
-              ],
-            ),
-            const SizedBox(height: 12),
-            Container(
-              decoration: BoxDecoration(
-                border: Border.all(color: CssTheme.outline),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Column(
-                children: companyMembers.asMap().entries.map((entry) {
-                  final i = entry.key;
-                  final m = entry.value;
-                  final isLast = i == companyMembers.length - 1;
+        Row(
+          children: [
+            _availBadge(Icons.check_circle, Colors.green,
+                '$availCount kan'),
+            const SizedBox(width: 12),
+            _availBadge(Icons.cancel, Colors.red,
+                '$unavailCount kan ikke'),
+            const SizedBox(width: 12),
+            _availBadge(Icons.help_outline, Colors.grey,
+                '$pendingCount ikke svart'),
+          ],
+        ),
+        const SizedBox(height: 16),
 
-                  IconData statusIcon;
-                  Color statusColor;
-                  switch (m['status'] as String?) {
-                    case 'available':
-                      statusIcon = Icons.check_circle;
-                      statusColor = Colors.green;
-                      break;
-                    case 'unavailable':
-                      statusIcon = Icons.cancel;
-                      statusColor = Colors.red;
-                      break;
-                    default:
-                      statusIcon = Icons.help_outline;
-                      statusColor = Colors.grey;
-                  }
+        if (companyMembers.isEmpty)
+          const Text('Ingen medlemmer lagt til ennå.',
+              style: TextStyle(color: CssTheme.textMuted))
+        else ...[
+          // Skarp section
+          _buildSectionBlock(
+            context,
+            title: 'Skarp',
+            color: Colors.purple,
+            members: skarpMembers,
+            selected: selectedSkarp,
+            section: 'skarp',
+            locked: lockedSkarp,
+          ),
+          const SizedBox(height: 16),
 
-                  return Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 12, vertical: 10),
-                    decoration: BoxDecoration(
-                      border: isLast
-                          ? null
-                          : const Border(
-                              bottom:
-                                  BorderSide(color: CssTheme.outline)),
-                    ),
-                    child: Row(
-                      children: [
-                        CircleAvatar(
-                          radius: 16,
-                          backgroundColor: CssTheme.surface2,
-                          child: Text(
-                            (m['name'] as String? ?? '?').isNotEmpty
-                                ? (m['name'] as String)
-                                    .characters
-                                    .first
-                                    .toUpperCase()
-                                : '?',
-                            style: const TextStyle(
-                                fontWeight: FontWeight.w900,
-                                fontSize: 14),
-                          ),
-                        ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: Text(
-                            (m['name'] as String?) ?? 'Ukjent',
-                            style: const TextStyle(
-                                fontWeight: FontWeight.w700),
-                          ),
-                        ),
-                        Icon(statusIcon,
-                            color: statusColor, size: 22),
-                      ],
-                    ),
-                  );
-                }).toList(),
-              ),
+          // Bass section
+          _buildSectionBlock(
+            context,
+            title: 'Bass',
+            color: Colors.teal,
+            members: bassMembers,
+            selected: selectedBass,
+            section: 'bass',
+            locked: lockedBass,
+          ),
+
+          // No section
+          if (noSectionMembers.isNotEmpty) ...[
+            const SizedBox(height: 16),
+            _buildSectionBlock(
+              context,
+              title: 'Ingen seksjon',
+              color: Colors.grey,
+              members: noSectionMembers,
+              selected: const {},
+              section: '',
+              locked: false,
+              readOnly: true,
             ),
           ],
         ],
+      ],
+    );
+  }
+
+  Widget _buildSectionBlock(
+    BuildContext context, {
+    required String title,
+    required Color color,
+    required List<Map<String, dynamic>> members,
+    required Set<String> selected,
+    required String section,
+    required bool locked,
+    bool readOnly = false,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              decoration: BoxDecoration(
+                color: color.withOpacity(0.15),
+                borderRadius: BorderRadius.circular(99),
+              ),
+              child: Text(
+                title,
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w800,
+                  color: color,
+                ),
+              ),
+            ),
+            const Spacer(),
+            if (!readOnly && section.isNotEmpty)
+              FilledButton.icon(
+                onPressed: () => onSaveAndLock(section),
+                icon: Icon(locked ? Icons.lock_open : Icons.lock, size: 16),
+                label: Text(locked ? 'Lås opp' : 'Lås'),
+                style: FilledButton.styleFrom(
+                  backgroundColor: locked ? Colors.orange : color,
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                ),
+              ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        if (members.isEmpty)
+          Text('Ingen medlemmer i denne seksjonen.',
+              style: TextStyle(color: CssTheme.textMuted, fontSize: 13))
+        else
+          Container(
+            decoration: BoxDecoration(
+              border: Border.all(color: CssTheme.outline),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Column(
+              children: members.asMap().entries.map((entry) {
+                final i = entry.key;
+                final m = entry.value;
+                final isLast = i == members.length - 1;
+                final uid = m['user_id'] as String;
+
+                IconData statusIcon;
+                Color statusColor;
+                switch (m['status'] as String?) {
+                  case 'available':
+                    statusIcon = Icons.check_circle;
+                    statusColor = Colors.green;
+                    break;
+                  case 'unavailable':
+                    statusIcon = Icons.cancel;
+                    statusColor = Colors.red;
+                    break;
+                  default:
+                    statusIcon = Icons.help_outline;
+                    statusColor = Colors.grey;
+                }
+
+                return Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 12, vertical: 8),
+                  decoration: BoxDecoration(
+                    border: isLast
+                        ? null
+                        : const Border(
+                            bottom: BorderSide(color: CssTheme.outline)),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(statusIcon, color: statusColor, size: 20),
+                      const SizedBox(width: 8),
+                      if (!readOnly && section.isNotEmpty)
+                        Checkbox(
+                          value: selected.contains(uid),
+                          onChanged: locked
+                              ? null
+                              : (_) => onToggleMember(uid, section),
+                          activeColor: color,
+                        ),
+                      Expanded(
+                        child: Text(
+                          (m['name'] as String?) ?? 'Ukjent',
+                          style: const TextStyle(fontWeight: FontWeight.w700),
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              }).toList(),
+            ),
+          ),
+      ],
     );
   }
 
@@ -1835,11 +2011,11 @@ class _GigStatusBadge extends StatelessWidget {
       'completed': Colors.grey,
     };
     const labels = {
-      'inquiry': 'Inquiry',
-      'confirmed': 'Confirmed',
-      'cancelled': 'Cancelled',
-      'invoiced': 'Invoiced',
-      'completed': 'Completed',
+      'inquiry': 'Forespørsel',
+      'confirmed': 'Bekreftet',
+      'cancelled': 'Avlyst',
+      'invoiced': 'Fakturert',
+      'completed': 'Fullført',
     };
     final color = colors[status] ?? Colors.grey;
     return Container(

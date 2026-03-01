@@ -1,5 +1,9 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+
+import '../services/brreg_service.dart';
 
 class NewCompanyDialog extends StatefulWidget {
   /// When set, the created company is linked to this management company
@@ -41,8 +45,63 @@ class _NewCompanyDialogState extends State<NewCompanyDialog> {
 
   bool _saving = false;
 
+  // ── Brreg search ──
+  final _brregCtrl = TextEditingController();
+  Timer? _brregDebounce;
+  List<BrregCompany> _brregResults = [];
+  bool _brregSearching = false;
+
+  void _onBrregSearch(String query) {
+    _brregDebounce?.cancel();
+    if (query.trim().isEmpty) {
+      setState(() => _brregResults = []);
+      return;
+    }
+    _brregDebounce = Timer(const Duration(milliseconds: 400), () async {
+      setState(() => _brregSearching = true);
+      try {
+        // If it looks like an org number (9 digits), do a direct lookup
+        final cleaned = query.replaceAll(RegExp(r'\s'), '');
+        if (RegExp(r'^\d{9}$').hasMatch(cleaned)) {
+          final result = await BrregService.lookup(cleaned);
+          if (mounted) {
+            setState(() {
+              _brregResults = result != null ? [result] : [];
+              _brregSearching = false;
+            });
+          }
+        } else {
+          final results = await BrregService.search(query);
+          if (mounted) {
+            setState(() {
+              _brregResults = results;
+              _brregSearching = false;
+            });
+          }
+        }
+      } catch (_) {
+        if (mounted) setState(() => _brregSearching = false);
+      }
+    });
+  }
+
+  void _applyBrreg(BrregCompany c) {
+    setState(() {
+      _companyCtrl.text = c.name;
+      _orgNrCtrl.text = c.orgNr;
+      _addressCtrl.text = c.address ?? '';
+      _postalCodeCtrl.text = c.postalCode ?? '';
+      _cityCtrl.text = c.city ?? '';
+      _countryCtrl.text = c.country ?? '';
+      _brregResults = [];
+      _brregCtrl.clear();
+    });
+  }
+
   @override
   void dispose() {
+    _brregDebounce?.cancel();
+    _brregCtrl.dispose();
     _companyCtrl.dispose();
     _orgNrCtrl.dispose();
     _addressCtrl.dispose();
@@ -201,6 +260,54 @@ class _NewCompanyDialogState extends State<NewCompanyDialog> {
                     mainAxisSize: MainAxisSize.min,
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
+                      // ---------------- BRREG SEARCH
+                      TextField(
+                        controller: _brregCtrl,
+                        decoration: InputDecoration(
+                          labelText: "Søk i Brreg (navn eller org.nr)",
+                          prefixIcon: const Icon(Icons.search),
+                          suffixIcon: _brregSearching
+                              ? const Padding(
+                                  padding: EdgeInsets.all(12),
+                                  child: SizedBox(
+                                    width: 18,
+                                    height: 18,
+                                    child: CircularProgressIndicator(
+                                        strokeWidth: 2),
+                                  ),
+                                )
+                              : null,
+                        ),
+                        onChanged: _onBrregSearch,
+                      ),
+                      if (_brregResults.isNotEmpty)
+                        Container(
+                          constraints: const BoxConstraints(maxHeight: 180),
+                          margin: const EdgeInsets.only(bottom: 4),
+                          decoration: BoxDecoration(
+                            border: Border.all(color: Colors.grey.shade300),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: ListView.builder(
+                            shrinkWrap: true,
+                            itemCount: _brregResults.length,
+                            itemBuilder: (ctx, i) {
+                              final c = _brregResults[i];
+                              return ListTile(
+                                dense: true,
+                                title: Text(c.name,
+                                    style: const TextStyle(
+                                        fontWeight: FontWeight.w700)),
+                                subtitle: Text(
+                                    '${c.orgNr}  ·  ${c.city ?? ''}'),
+                                onTap: () => _applyBrreg(c),
+                              );
+                            },
+                          ),
+                        ),
+
+                      const SizedBox(height: 8),
+
                       // ---------------- COMPANY NAME
                       TextField(
                         controller: _companyCtrl,

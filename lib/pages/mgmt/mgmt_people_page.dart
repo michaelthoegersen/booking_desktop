@@ -71,12 +71,12 @@ class _MgmtPeoplePageState extends State<MgmtPeoplePage> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            'People',
+            'Personer',
             style: Theme.of(context).textTheme.headlineMedium,
           ),
           const SizedBox(height: 4),
           Text(
-            'All team members across your tours',
+            'Alle teammedlemmer på tvers av dine turnéer',
             style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                   color: CssTheme.textMuted,
                 ),
@@ -88,7 +88,7 @@ class _MgmtPeoplePageState extends State<MgmtPeoplePage> {
                 : _people.isEmpty
                     ? const Center(
                         child: Text(
-                          'No people yet. Add team members to your tours.',
+                          'Ingen personer ennå. Legg til teammedlemmer i turnéene dine.',
                           style: TextStyle(color: CssTheme.textMuted),
                         ),
                       )
