@@ -822,14 +822,15 @@ class _SideNavState extends State<_SideNav> {
                       overrideActiveRoute: widget.overrideActiveRoute,
                     ),
 
-                    _NavItem(
-                      icon: Icons.directions_bus_rounded,
-                      label: "Bus Requests",
-                      route: "/bus-requests",
-                      badge: _pendingBusRequests,
-                      onOpenInNewTab: widget.onOpenInNewTab,
-                      overrideActiveRoute: widget.overrideActiveRoute,
-                    ),
+                    if (Supabase.instance.client.auth.currentUser?.email == 'michael@nttas.com')
+                      _NavItem(
+                        icon: Icons.directions_bus_rounded,
+                        label: "Bus Requests",
+                        route: "/bus-requests",
+                        badge: _pendingBusRequests,
+                        onOpenInNewTab: widget.onOpenInNewTab,
+                        overrideActiveRoute: widget.overrideActiveRoute,
+                      ),
                   ],
                 ),
               ),

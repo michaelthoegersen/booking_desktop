@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../state/active_company.dart';
 import '../ui/css_theme.dart';
 
 // Status filter options
@@ -40,6 +41,9 @@ class _EconomyPageState extends State<EconomyPage> {
   List<int> _years = [];
   _StatusFilter _filter = _StatusFilter.confirmedAndInvoiced;
 
+  String? _creatorFilter; // null = "All"
+  List<Map<String, dynamic>> _creatorProfiles = []; // [{id, name}]
+
   // One entry per unique round_id (deduped)
   List<_Round> _rounds = [];
 
@@ -59,6 +63,39 @@ class _EconomyPageState extends State<EconomyPage> {
           .or('status.eq.invoiced,status.eq.Confirmed,status.eq.confirmed,status.eq.Inquiry,status.eq.manual')
           .not('pris', 'is', null)
           .order('dato', ascending: true);
+
+      // Fetch creator mapping: offers(id, created_by)
+      final offersData = await _supabase
+          .from('offers')
+          .select('id, created_by');
+      final draftToCreator = <String, String>{};
+      for (final o in offersData) {
+        final id = o['id'] as String?;
+        final createdBy = o['created_by'] as String?;
+        if (id != null && createdBy != null) {
+          draftToCreator[id] = createdBy;
+        }
+      }
+
+      // Fetch creator profiles
+      var creatorProfiles = <Map<String, dynamic>>[];
+      final companyId = activeCompanyNotifier.value?.id;
+      if (companyId != null) {
+        try {
+          final profilesData = await _supabase.rpc(
+            'get_company_member_profiles',
+            params: {'p_company_id': companyId},
+          );
+          creatorProfiles = (profilesData as List)
+              .map((p) => {
+                    'id': p['id'] as String,
+                    'name': (p['name'] as String?) ?? 'Unknown',
+                  })
+              .toList();
+        } catch (_) {
+          // RPC not available — skip creator filter
+        }
+      }
 
       // Two passes:
       // Pass 1 — count DAYS (all raw rows, one per date)
@@ -112,6 +149,7 @@ class _EconomyPageState extends State<EconomyPage> {
         final prisStr = r['pris'] as String?;
         final produksjon = (r['produksjon'] as String?)?.trim() ?? 'Unknown';
         final status = (r['status'] as String?) ?? '';
+        final draftId = (r['draft_id'] as String?)?.trim() ?? '';
 
         if (prisStr == null || prisStr.trim().isEmpty) continue;
         final pris = _parsePris(prisStr);
@@ -123,6 +161,7 @@ class _EconomyPageState extends State<EconomyPage> {
           produksjon: produksjon,
           status: status,
           days: daysByRound[key] ?? 1,
+          createdBy: draftToCreator[draftId] ?? '',
         ));
       }
 
@@ -137,6 +176,7 @@ class _EconomyPageState extends State<EconomyPage> {
       setState(() {
         _rounds = rounds;
         _years = years;
+        _creatorProfiles = creatorProfiles;
         _loading = false;
       });
     } catch (e) {
@@ -171,7 +211,10 @@ class _EconomyPageState extends State<EconomyPage> {
   }
 
   List<_Round> get _filtered => _rounds
-      .where((r) => r.dato.year == _selectedYear && _statusMatch(r))
+      .where((r) =>
+          r.dato.year == _selectedYear &&
+          _statusMatch(r) &&
+          (_creatorFilter == null || r.createdBy == _creatorFilter))
       .toList();
 
   List<_MonthData> get _monthlyData {
@@ -267,6 +310,30 @@ class _EconomyPageState extends State<EconomyPage> {
                           if (v != null) setState(() => _filter = v);
                         },
                       ),
+                      if (_creatorProfiles.isNotEmpty) ...[
+                        const SizedBox(width: 16),
+                        // Creator filter
+                        DropdownButton<String>(
+                          value: _creatorFilter ?? '__all__',
+                          underline: const SizedBox(),
+                          items: [
+                            const DropdownMenuItem(
+                              value: '__all__',
+                              child: Text('All creators'),
+                            ),
+                            ..._creatorProfiles.map((p) => DropdownMenuItem(
+                                  value: p['id'] as String,
+                                  child: Text(p['name'] as String),
+                                )),
+                          ],
+                          onChanged: (v) {
+                            setState(() {
+                              _creatorFilter =
+                                  (v == '__all__') ? null : v;
+                            });
+                          },
+                        ),
+                      ],
                       const Spacer(),
                       IconButton(
                         icon: const Icon(Icons.refresh),
@@ -612,12 +679,14 @@ class _Round {
   final String produksjon;
   final String status;
   final int days;
+  final String createdBy;
   const _Round(
       {required this.dato,
       required this.pris,
       required this.produksjon,
       required this.status,
-      required this.days});
+      required this.days,
+      this.createdBy = ''});
 }
 
 class _MonthData {
