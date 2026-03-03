@@ -8,6 +8,7 @@ import 'package:latlong2/latlong.dart';
 import 'package:http/http.dart' as http;
 import 'package:printing/printing.dart';
 import '../services/offer_storage_service.dart';
+import '../state/active_company.dart';
 import '../widgets/bus_map_widget.dart';
 import '../models/bus_position.dart';
 import '../data/city_coords.dart';
@@ -573,6 +574,77 @@ Future<void> _confirmDeleteDraft(
   }
 
   // ------------------------------------------------------------
+  // CHANGE CREATOR
+  // ------------------------------------------------------------
+
+  Future<void> _changeCreator(String offerId, String currentName) async {
+    final sb = Supabase.instance.client;
+    final companyId = activeCompanyNotifier.value?.id;
+    if (companyId == null) return;
+
+    final profilesRes = await sb.rpc(
+      'get_company_member_profiles',
+      params: {'p_company_id': companyId},
+    );
+
+    final profiles = (profilesRes as List).cast<Map<String, dynamic>>();
+
+    if (!mounted || profiles.isEmpty) return;
+
+    final picked = await showDialog<Map<String, dynamic>>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Change creator'),
+        content: SizedBox(
+          width: 320,
+          child: ListView.builder(
+            shrinkWrap: true,
+            itemCount: profiles.length,
+            itemBuilder: (_, i) {
+              final p = profiles[i];
+              final name = p['name']?.toString() ?? 'Unknown';
+              final isCurrent = name == currentName;
+              return ListTile(
+                title: Text(
+                  name,
+                  style: TextStyle(
+                    fontWeight: isCurrent ? FontWeight.bold : FontWeight.normal,
+                  ),
+                ),
+                trailing: isCurrent
+                    ? const Icon(Icons.check, color: Colors.green)
+                    : null,
+                onTap: () => Navigator.pop(ctx, p),
+              );
+            },
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
+        ],
+      ),
+    );
+
+    if (picked == null) return;
+
+    await sb
+        .from('offers')
+        .update({'created_by': picked['id']})
+        .eq('id', offerId);
+
+    _loadRecentOffers();
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Creator changed to ${picked['name']}')),
+      );
+    }
+  }
+
+  // ------------------------------------------------------------
   // BUS MAP WIDGET
   // ------------------------------------------------------------
 
@@ -930,13 +1002,29 @@ Widget build(BuildContext context) {
         ),
 
         // SUBTITLE
-        subtitle: Text(
-          "Created: $createdBy • Updated: $updatedBy\n"
-          "Last update: $updatedDate",
-
-          style: const TextStyle(
-            fontSize: 11,
-            color: Colors.black54,
+        subtitle: GestureDetector(
+          onTap: id.isEmpty
+              ? null
+              : () => _changeCreator(id, createdBy),
+          child: Text.rich(
+            TextSpan(
+              children: [
+                const TextSpan(text: 'Created: '),
+                TextSpan(
+                  text: createdBy,
+                  style: const TextStyle(
+                    decoration: TextDecoration.underline,
+                    decorationStyle: TextDecorationStyle.dotted,
+                  ),
+                ),
+                TextSpan(text: ' • Updated: $updatedBy\n'),
+                TextSpan(text: 'Last update: $updatedDate'),
+              ],
+            ),
+            style: const TextStyle(
+              fontSize: 11,
+              color: Colors.black54,
+            ),
           ),
         ),
 

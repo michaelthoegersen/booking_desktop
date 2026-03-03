@@ -40,23 +40,48 @@ class FerryResolver {
         .toList();
   }
 
+  // ---------------------------------------------------
+  // Bridge detection by name
+  // ---------------------------------------------------
+  static bool _isBridge(String name) {
+    final lower = name.toLowerCase();
+    return lower.contains('bro') || lower.contains('bridge');
+  }
+
   // ===================================================
-  // ✅ FERGE-RESOLVER – NAVN → PRIS
+  // ✅ FERGE-RESOLVER – NAVN → PRIS (legacy — returns combined)
   // ===================================================
-  ///
-  /// - Bruker KUN ferryPerLeg (fra routes_all.ferry_name)
-  /// - Matcher mot FerryDefinition.name
-  /// - Støtter flere ferger per leg
-  /// - Ingen legacy fallback
-  ///
   static double resolveTotalFerryCost({
     required List<FerryDefinition> ferries,
     required bool trailer,
     required List<String?> ferryPerLeg,
   }) {
-    double total = 0;
+    final r = resolveFerriesAndBridges(
+      ferries: ferries,
+      trailer: trailer,
+      ferryPerLeg: ferryPerLeg,
+    );
+    return r.ferryCost + r.bridgeCost;
+  }
 
-    _log('--- START FERRY RESOLVE ---');
+  // ===================================================
+  // ✅ FERGE+BRO RESOLVER – returnerer separate kostnader
+  // ===================================================
+  ///
+  /// - Bruker KUN ferryPerLeg (fra routes_all.ferry_name)
+  /// - Matcher mot FerryDefinition.name
+  /// - Skiller ferry fra bridge basert på navn (inneholder 'bro'/'bridge')
+  ///
+  static ({double ferryCost, double bridgeCost}) resolveFerriesAndBridges({
+    required List<FerryDefinition> ferries,
+    required bool trailer,
+    required List<String?> ferryPerLeg,
+    List<bool>? noBridgePerLeg,
+  }) {
+    double ferryTotal = 0;
+    double bridgeTotal = 0;
+
+    _log('--- START FERRY/BRIDGE RESOLVE ---');
     _log('Trailer: $trailer');
     _log('Ferries available: ${ferries.map((f) => f.name).join(', ')}');
     _log('Ferry per leg: $ferryPerLeg');
@@ -65,7 +90,7 @@ class FerryResolver {
       final raw = ferryPerLeg[i];
 
       if (raw == null || raw.trim().isEmpty) {
-        _log('[$i] Skip – no ferry');
+        _log('[$i] Skip – no ferry/bridge');
         continue;
       }
 
@@ -96,18 +121,27 @@ class FerryResolver {
                   ? ferry.trailerPrice!
                   : ferry.price;
 
-          total += price;
-          counted.add(ferry.name);
-
-          _log('[$i] ✅ MATCH: ${ferry.name}');
+          if (_isBridge(ferry.name)) {
+            if (noBridgePerLeg != null && i < noBridgePerLeg.length && noBridgePerLeg[i]) {
+              _log('[$i] ⛔ BRIDGE SKIPPED (no_bridge): ${ferry.name}');
+            } else {
+              bridgeTotal += price;
+              _log('[$i] ✅ BRIDGE MATCH: ${ferry.name}');
+            }
+          } else {
+            ferryTotal += price;
+            _log('[$i] ✅ FERRY MATCH: ${ferry.name}');
+          }
           _log('[$i]    Price added: $price');
+          counted.add(ferry.name);
         }
       }
     }
 
-    _log('TOTAL FERRY COST: $total');
-    _log('--- END FERRY RESOLVE ---');
+    _log('TOTAL FERRY COST: $ferryTotal');
+    _log('TOTAL BRIDGE COST: $bridgeTotal');
+    _log('--- END FERRY/BRIDGE RESOLVE ---');
 
-    return total;
+    return (ferryCost: ferryTotal, bridgeCost: bridgeTotal);
   }
 }

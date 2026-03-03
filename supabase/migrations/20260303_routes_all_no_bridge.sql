@@ -1,0 +1,1 @@
+ALTER TABLE routes_all ADD COLUMN no_bridge BOOLEAN DEFAULT FALSE;

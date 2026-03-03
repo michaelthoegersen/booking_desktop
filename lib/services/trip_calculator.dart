@@ -38,9 +38,18 @@ class TripCalculator {
     /// Per-leg flag: if true, this leg does NOT count as D.Drive
     List<bool>? noDDrivePerLeg,
 
+    /// Per-leg flag: if true, bridge cost is excluded for this leg
+    List<bool>? noBridgePerLeg,
+
     /// Km subject to toll — Swedish km are excluded (toll-free in Sweden).
     /// Defaults to totalKm when not provided.
     double? tollableKm,
+
+    /// Swedish km (toll-free) — stored in result for breakdown display
+    double sweKm = 0,
+
+    /// German km (toll-free) — stored in result for breakdown display
+    double deKm = 0,
   }) {
     // ✅ RIKTIG KILDE: dates er sannheten
     final int entryCount = dates.length;
@@ -156,17 +165,20 @@ class TripCalculator {
     _log('Trailer km cost: $trailerKmCost');
 
     // ----------------------------------------
-    // ✅ FERRY – KUN ferry_name
+    // ✅ FERRY + BRIDGE
     // ----------------------------------------
 
-    final double ferryCost =
-        FerryResolver.resolveTotalFerryCost(
-          ferries: ferries,
-          trailer: trailer,
-          ferryPerLeg: safeFerryPerLeg,
-        );
+    final ferryAndBridge = FerryResolver.resolveFerriesAndBridges(
+      ferries: ferries,
+      trailer: trailer,
+      ferryPerLeg: safeFerryPerLeg,
+      noBridgePerLeg: noBridgePerLeg,
+    );
+    final double ferryCost = ferryAndBridge.ferryCost;
+    final double bridgeCost = ferryAndBridge.bridgeCost;
 
     _log('FERRY COST: $ferryCost');
+    _log('BRIDGE COST: $bridgeCost');
 
     // ----------------------------------------
     // TOLL (midlertidig fast modell)
@@ -186,6 +198,7 @@ class TripCalculator {
         trailerDayCost +
         trailerKmCost +
         ferryCost +
+        bridgeCost +
         flightCost +
         tollCost;
 
@@ -205,7 +218,11 @@ class TripCalculator {
       trailerDayCost: trailerDayCost,
       trailerKmCost: trailerKmCost,
       ferryCost: ferryCost,
+      bridgeCost: bridgeCost,
       tollCost: tollCost,
+      sweKm: sweKm,
+      deKm: deKm,
+      tollableKm: tollableKm ?? totalKm,
       tollPerLeg: List<double>.from(tollPerLeg),
       legKm: List<double>.from(legKm),
       extraPerLeg: List<String>.from(extraPerLeg),
@@ -245,29 +262,23 @@ class TripCalculator {
     final startIdx = pickupEveningFirstDay ? 1 : 0;
     if (startIdx >= n) return (dDriveDays: 0, flightTickets: 0);
 
-    // Group km by calendar date; track whether ANY leg on that date is
-    // NOT marked noDDrive (a date only counts if at least one leg qualifies).
-    final kmByDate = <DateTime, double>{};
-    final hasNonNoDrive = <DateTime, bool>{};
+    // Check each individual leg against the threshold.
+    // A date qualifies for D.Drive if ANY single leg on that date
+    // exceeds the threshold and is not marked noDDrive.
+    final qualifyingDates = <DateTime>{};
 
     for (int i = startIdx; i < n; i++) {
       final d = DateTime(dates[i].year, dates[i].month, dates[i].day);
-      kmByDate[d] = (kmByDate[d] ?? 0.0) + legKm[i];
-      if (noDDrivePerLeg == null ||
-          i >= noDDrivePerLeg.length ||
-          !noDDrivePerLeg[i]) {
-        hasNonNoDrive[d] = true;
-      } else {
-        hasNonNoDrive.putIfAbsent(d, () => false);
+      final isExcluded = noDDrivePerLeg != null &&
+          i < noDDrivePerLeg.length &&
+          noDDrivePerLeg[i];
+      if (!isExcluded && legKm[i] > threshold) {
+        qualifyingDates.add(d);
       }
     }
 
     // Qualifying D.Drive dates
-    final ddDates = kmByDate.keys
-        .where((d) =>
-            (kmByDate[d] ?? 0) > threshold && (hasNonNoDrive[d] ?? false))
-        .toList()
-      ..sort();
+    final ddDates = qualifyingDates.toList()..sort();
 
     if (ddDates.isEmpty) return (dDriveDays: 0, flightTickets: 0);
 
@@ -343,7 +354,11 @@ class TripCalculator {
       trailerDayCost: 0,
       trailerKmCost: 0,
       ferryCost: 0,
+      bridgeCost: 0,
       tollCost: 0,
+      sweKm: 0,
+      deKm: 0,
+      tollableKm: 0,
       tollPerLeg: [],
       legKm: [],
       extraPerLeg: [],

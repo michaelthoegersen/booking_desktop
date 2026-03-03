@@ -178,6 +178,11 @@ class _NewOfferPageState extends State<NewOfferPage> {
   bool _editingTotal = false;
   final TextEditingController _overrideCtrl = TextEditingController();
 
+  // Per-round price overrides (double-tap to edit in Total Calculation)
+  final Map<int, double?> _roundOverrides = {};
+  int? _editingRoundIndex;
+  final TextEditingController _roundOverrideCtrl = TextEditingController();
+
   List<bool> _travelBefore = [];
 // ✅ MANGLER DISSE
   List<String> _locationSuggestions = [];
@@ -197,12 +202,14 @@ Map<int, double> _tollByIndex = {};
 Map<int, String> _extraByIndex = {};
 Map<int, Map<String, double>> _countryKmByIndex = {};
 Map<int, bool> _noDDriveByIndex = {};
+Map<int, bool> _noBridgeByIndex = {};
 // Indices whose km was merged into the preceding TRAVEL block
 Set<int> _travelMergedIndices = {};
 
 // Global caches (per route)
 final Map<String, double?> _distanceCache = {};
 final Map<String, bool> _noDDriveCache = {};
+final Map<String, bool> _noBridgeCache = {};
 final Map<String, double> _ferryCache = {};
 final Map<String, double> _tollCache = {};
 final Map<String, String> _extraCache = {};
@@ -276,6 +283,13 @@ final Map<String, Map<String, double>> _countryKmCache = {};
       b.writeln("Ferry: ${_nok(r.ferryCost)}");
     }
 
+    // ================= BRIDGE =================
+
+    if (r.bridgeCost > 0) {
+      b.writeln("");
+      b.writeln("Bridge: ${_nok(r.bridgeCost)}");
+    }
+
     // ================= FLIGHTS =================
 if (r.flightCost > 0) {
   b.writeln("");
@@ -285,8 +299,19 @@ if (r.flightCost > 0) {
     // ================= TOLL =================
 
     if (r.tollCost > 0) {
+      final totalDriven = r.includedKm + r.extraKm;
       b.writeln("");
-      b.writeln("Toll:  ${_nok(r.tollCost)}");
+      b.writeln("TOLL:");
+      b.writeln("  Total:    ${totalDriven.toStringAsFixed(0)} km");
+      if (r.sweKm > 0)
+        b.writeln("  Sweden:   -${r.sweKm.toStringAsFixed(0)} km (toll-free)");
+      if (r.deKm > 0)
+        b.writeln("  Germany:  -${r.deKm.toStringAsFixed(0)} km (toll-free)");
+      b.writeln(
+        "  Tollable: ${r.tollableKm.toStringAsFixed(0)} km"
+        " × ${s.tollKmRate.toStringAsFixed(2)}"
+        " = ${_nok(r.tollCost)}",
+      );
     }
 
     // ================= TOTAL =================
@@ -299,24 +324,33 @@ if (r.flightCost > 0) {
   }
 
   // ===================================================
-  // TOTAL BREAKDOWN (all rounds)
+  // TOTAL BREAKDOWN (all rounds) — returns Widget
   // ===================================================
 
-  String _buildTotalBreakdown(AppSettings s) {
+  Widget _buildTotalBreakdownWidget(AppSettings s) {
     final usedEntries = _roundCalcCache.entries
         .where((e) => offer.rounds[e.key].entries.isNotEmpty)
         .toList()
       ..sort((a, b) => a.key.compareTo(b.key));
 
-    if (usedEntries.isEmpty) return "No rounds calculated yet.";
+    if (usedEntries.isEmpty) {
+      return const Text("No rounds calculated yet.",
+          style: TextStyle(fontFamily: "monospace", fontWeight: FontWeight.w700));
+    }
 
-    final b = StringBuffer();
+    const monoStyle = TextStyle(
+      fontFamily: "monospace",
+      fontWeight: FontWeight.w700,
+    );
+
+    final widgets = <Widget>[];
 
     double totalDayCost      = 0;
     double totalExtraKmCost  = 0;
     double totalDDriveCost   = 0;
     double totalTrailerCost  = 0;
     double totalFerryCost    = 0;
+    double totalBridgeCost   = 0;
     double totalFlightCost   = 0;
     double totalTollCost     = 0;
     double grandTotal        = 0;
@@ -333,6 +367,7 @@ if (r.flightCost > 0) {
           .join(', ');
       final busLabel = buses.isNotEmpty ? buses : 'No bus';
 
+      final b = StringBuffer();
       b.writeln("ROUND ${ri + 1}  ($busLabel)");
       b.writeln("----------------------------");
 
@@ -363,43 +398,187 @@ if (r.flightCost > 0) {
       final trailerTotal = r.trailerDayCost + r.trailerKmCost;
       if (trailerTotal > 0) b.writeln("  Trailer:  ${_nok(trailerTotal)}");
       if (r.ferryCost   > 0) b.writeln("  Ferry:    ${_nok(r.ferryCost)}");
+      if (r.bridgeCost  > 0) b.writeln("  Bridge:   ${_nok(r.bridgeCost)}");
       if (r.flightCost  > 0) b.writeln("  Flights:  ${_nok(r.flightCost)}");
-      if (r.tollCost    > 0) b.writeln("  Toll:     ${_nok(r.tollCost)}");
+      if (r.tollCost > 0) {
+        final totalDriven = r.includedKm + r.extraKm;
+        b.writeln("  TOLL:");
+        b.writeln("    Total:    ${totalDriven.toStringAsFixed(0)} km");
+        if (r.sweKm > 0)
+          b.writeln("    Sweden:   -${r.sweKm.toStringAsFixed(0)} km (toll-free)");
+        if (r.deKm > 0)
+          b.writeln("    Germany:  -${r.deKm.toStringAsFixed(0)} km (toll-free)");
+        b.writeln(
+          "    Tollable: ${r.tollableKm.toStringAsFixed(0)} km"
+          " × ${s.tollKmRate.toStringAsFixed(2)}"
+          " = ${_nok(r.tollCost)}",
+        );
+      }
 
-      b.writeln("  Round total: ${_nok(r.totalCost)}");
-      b.writeln();
+      // Emit text block before the editable round total line
+      widgets.add(Text(b.toString().trimRight(), style: monoStyle));
+
+      // Editable round total line
+      final displayedRoundTotal = _roundOverrides[ri] ?? r.totalCost;
+      final hasRoundOverride = _roundOverrides.containsKey(ri) && _roundOverrides[ri] != null;
+      widgets.add(_buildEditableRoundTotal(
+        ri: ri,
+        calculatedValue: r.totalCost,
+        displayedValue: displayedRoundTotal,
+        hasOverride: hasRoundOverride,
+        fmt: _nok,
+      ));
+      widgets.add(const SizedBox(height: 8));
 
       totalDayCost     += r.dayCost;
       totalExtraKmCost += r.extraKmCost;
       totalDDriveCost  += r.dDriveCost;
       totalTrailerCost += trailerTotal;
       totalFerryCost   += r.ferryCost;
+      totalBridgeCost  += r.bridgeCost;
       totalFlightCost  += r.flightCost;
       totalTollCost    += r.tollCost;
-      grandTotal       += r.totalCost;
+      grandTotal       += _roundOverrides[ri] ?? r.totalCost;
     }
 
-    b.writeln("============================");
-    b.writeln("SUBTOTALS");
-    b.writeln("----------------------------");
-    if (totalDayCost     > 0) b.writeln("  Days:     ${_nok(totalDayCost)}");
-    if (totalExtraKmCost > 0) b.writeln("  Extra km: ${_nok(totalExtraKmCost)}");
-    if (totalDDriveCost  > 0) b.writeln("  D.Drive:  ${_nok(totalDDriveCost)}");
-    if (totalTrailerCost > 0) b.writeln("  Trailer:  ${_nok(totalTrailerCost)}");
-    if (totalFerryCost   > 0) b.writeln("  Ferry:    ${_nok(totalFerryCost)}");
-    if (totalFlightCost  > 0) b.writeln("  Flights:  ${_nok(totalFlightCost)}");
-    if (totalTollCost    > 0) b.writeln("  Toll:     ${_nok(totalTollCost)}");
-    b.writeln("----------------------------");
+    final footer = StringBuffer();
+    footer.writeln("============================");
+    footer.writeln("SUBTOTALS");
+    footer.writeln("----------------------------");
+    if (totalDayCost     > 0) footer.writeln("  Days:     ${_nok(totalDayCost)}");
+    if (totalExtraKmCost > 0) footer.writeln("  Extra km: ${_nok(totalExtraKmCost)}");
+    if (totalDDriveCost  > 0) footer.writeln("  D.Drive:  ${_nok(totalDDriveCost)}");
+    if (totalTrailerCost > 0) footer.writeln("  Trailer:  ${_nok(totalTrailerCost)}");
+    if (totalFerryCost   > 0) footer.writeln("  Ferry:    ${_nok(totalFerryCost)}");
+    if (totalBridgeCost  > 0) footer.writeln("  Bridge:   ${_nok(totalBridgeCost)}");
+    if (totalFlightCost  > 0) footer.writeln("  Flights:  ${_nok(totalFlightCost)}");
+    if (totalTollCost    > 0) footer.writeln("  Toll:     ${_nok(totalTollCost)}");
+    footer.writeln("----------------------------");
 
     if (_totalOverride != null) {
-      b.writeln("  Calculated: ${_nok(grandTotal)}");
-      b.writeln("  Override:   ${_nok(_totalOverride!)}");
-      b.writeln("GRAND TOTAL: ${_nok(_totalOverride!)}");
+      footer.writeln("  Calculated: ${_nok(grandTotal)}");
+      footer.writeln("  Override:   ${_nok(_totalOverride!)}");
+      footer.writeln("GRAND TOTAL: ${_nok(_totalOverride!)}");
     } else {
-      b.writeln("GRAND TOTAL: ${_nok(grandTotal)}");
+      footer.writeln("GRAND TOTAL: ${_nok(grandTotal)}");
     }
 
-    return b.toString();
+    widgets.add(Text(footer.toString().trimRight(), style: monoStyle));
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: widgets,
+    );
+  }
+
+  // ===================================================
+  // EDITABLE ROUND TOTAL (double-tap to override)
+  // ===================================================
+
+  Widget _buildEditableRoundTotal({
+    required int ri,
+    required double calculatedValue,
+    required double displayedValue,
+    required bool hasOverride,
+    required String Function(double) fmt,
+  }) {
+    const monoStyle = TextStyle(
+      fontFamily: "monospace",
+      fontWeight: FontWeight.w700,
+    );
+
+    if (_editingRoundIndex == ri) {
+      return Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Text("  Round total: ", style: monoStyle),
+          SizedBox(
+            width: 120,
+            height: 32,
+            child: TextField(
+              controller: _roundOverrideCtrl,
+              autofocus: true,
+              textAlign: TextAlign.right,
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              style: const TextStyle(
+                fontFamily: "monospace",
+                fontWeight: FontWeight.w900,
+                fontSize: 14,
+              ),
+              decoration: const InputDecoration(
+                contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                isDense: true,
+              ),
+              onSubmitted: (val) {
+                final trimmed = val.trim().replaceAll(',', '.');
+                final parsed = double.tryParse(trimmed);
+                setState(() {
+                  if (parsed != null) {
+                    _roundOverrides[ri] = parsed;
+                  } else {
+                    _roundOverrides.remove(ri);
+                  }
+                  _editingRoundIndex = null;
+                });
+              },
+              onTapOutside: (_) {
+                final trimmed = _roundOverrideCtrl.text.trim().replaceAll(',', '.');
+                final parsed = double.tryParse(trimmed);
+                setState(() {
+                  if (parsed != null) {
+                    _roundOverrides[ri] = parsed;
+                  } else {
+                    _roundOverrides.remove(ri);
+                  }
+                  _editingRoundIndex = null;
+                });
+              },
+            ),
+          ),
+        ],
+      );
+    }
+
+    return GestureDetector(
+      onDoubleTap: () {
+        _roundOverrideCtrl.text = hasOverride
+            ? displayedValue.toStringAsFixed(0)
+            : calculatedValue.toStringAsFixed(0);
+        setState(() => _editingRoundIndex = ri);
+      },
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                "  Round total: ${fmt(displayedValue)}",
+                style: monoStyle,
+              ),
+              const SizedBox(width: 4),
+              const Tooltip(
+                message: "Double-click to override",
+                child: Icon(Icons.edit, size: 13, color: Colors.grey),
+              ),
+            ],
+          ),
+          if (hasOverride)
+            Padding(
+              padding: const EdgeInsets.only(left: 16),
+              child: Text(
+                "Calculated: ${fmt(calculatedValue)}",
+                style: const TextStyle(
+                  fontFamily: "monospace",
+                  fontSize: 11,
+                  color: Colors.grey,
+                  fontStyle: FontStyle.italic,
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
   }
 
 // ---------------------------------------------------
@@ -1008,8 +1187,11 @@ const allBuses = [
   _tollCache.clear();
   _extraCache.clear();
   _countryKmCache.clear();
+  _noDDriveCache.clear();
+  _noBridgeCache.clear();
+  _ferryNameCache.clear();
 
-  debugPrint("🔥 Route cache cleared");
+  debugPrint("Route cache cleared");
 }
 
   DateTime _getNextAvailableDate() {
@@ -1155,6 +1337,10 @@ dst.entries
       _draftId = id;
       roundIndex = 0;
       _totalOverride = fresh.totalOverride;
+
+      // Load per-round overrides
+      _roundOverrides.clear();
+      _roundOverrides.addAll(fresh.roundOverrides);
 
       _syncRoundControllers();
     });
@@ -1355,13 +1541,12 @@ Future<void> _loadPlaceSuggestions(String query) async {
 
       const SizedBox(height: 10),
 
-      // ✅ NY: EXTRA
-TextField(
-  controller: extraCtrl,
-  decoration: const InputDecoration(
-    labelText: "Extra (ex: Ferry)",
-  ),
-),
+      TextField(
+        controller: extraCtrl,
+        decoration: const InputDecoration(
+          labelText: "Extra (ex: Ferry)",
+        ),
+      ),
     ],
   ),
 ),
@@ -1380,7 +1565,7 @@ TextField(
               final to = _norm(toCtrl.text);
               final km =
                   double.tryParse(kmCtrl.text.replaceAll(',', '.'));
-              final extra = extraCtrl.text.trim();    
+              final extra = extraCtrl.text.trim();
 
               if (from.isEmpty || to.isEmpty || km == null) {
                 ScaffoldMessenger.of(context).showSnackBar(
@@ -1625,9 +1810,8 @@ Map<String, double> _calculateForeignVat({
     if (rate <= 0 || km <= 0) return;
 
     final share = km / totalKm;
-    // Excel formula: (price/[100+rate])*rate = price * rate/(1+rate)
-    // Treats basePrice as gross (VAT-inclusive); extracts the VAT component.
-    final vat = basePrice * share * rate / (1 + rate);
+    // basePrice is excl VAT. VAT is added on top.
+    final vat = basePrice * share * rate;
 
     if (vat > 0) {
       result[country] = vat;
@@ -2033,12 +2217,13 @@ offer.rounds[i].bus =
     final statusBeforeSave = _savedStatus;
 
     offer.totalOverride = _totalOverride;
+    offer.roundOverrides = Map<int, double?>.from(_roundOverrides);
 
     // Compute total excl. VAT to persist (override takes priority)
     double calcTotal = 0;
     for (int i = 0; i < offer.rounds.length; i++) {
       final r = _roundCalcCache[i];
-      if (r != null) calcTotal += r.totalCost;
+      if (r != null) calcTotal += _roundOverrides[i] ?? r.totalCost;
     }
     final totalExclVat = _totalOverride ?? (calcTotal > 0 ? calcTotal : null);
 
@@ -2585,15 +2770,12 @@ Future<void> _scanPdf() async {
   debugPrint("LOOKUP: '$fromN' → '$toN'");
 
   // ===================================================
-  // CACHE HIT
+  // CACHE HIT — only return cached distance.
+  // Per-index maps are built by _recalcKm / _calcRound
+  // from the cache maps, NOT here. Writing here caused
+  // cross-round overwrites when _recalcAllRounds ran.
   // ===================================================
   if (_distanceCache.containsKey(key)) {
-    _ferryByIndex[index]     = _ferryCache[key] ?? 0.0;
-    _tollByIndex[index]      = _tollCache[key] ?? 0.0;
-    _extraByIndex[index]     = _extraCache[key] ?? '';
-    _ferryNameByIndex[index]= _ferryNameCache[key] ?? '';
-    _countryKmByIndex[index]= _countryKmCache[key] ?? {};
-    _noDDriveByIndex[index] = _noDDriveCache[key] ?? false;
     return _distanceCache[key];
   }
 
@@ -2613,12 +2795,8 @@ Future<void> _scanPdf() async {
       _extraCache[key]     = '';
       _ferryNameCache[key]= '';
       _countryKmCache[key]= {};
-
-      _ferryByIndex[index]     = 0.0;
-      _tollByIndex[index]      = 0.0;
-      _extraByIndex[index]     = '';
-      _ferryNameByIndex[index]= '';
-      _countryKmByIndex[index]= {};
+      _noDDriveCache[key] = false;
+      _noBridgeCache[key] = false;
 
       return null;
     }
@@ -2642,6 +2820,7 @@ Future<void> _scanPdf() async {
         (res['extra'] as String?)?.trim() ?? '';
 
     final noDDrive = (res['no_ddrive'] as bool?) ?? false;
+    final noBridge = (res['no_bridge'] as bool?) ?? false;
 
     // ===================================================
     // COUNTRY KM BREAKDOWN
@@ -2677,15 +2856,7 @@ Future<void> _scanPdf() async {
     _ferryNameCache[key] = ferryName;
     _countryKmCache[key] = countryKm;
     _noDDriveCache[key]  = noDDrive;
-
-    // ===================================================
-    // PER-INDEX WRITE (UI + CALC)
-    // ===================================================
-    _ferryByIndex[index]      = ferryPrice;
-    _tollByIndex[index]       = toll;
-    _extraByIndex[index]      = extra;
-    _ferryNameByIndex[index] = ferryName;
-    _countryKmByIndex[index] = countryKm;
+    _noBridgeCache[key]  = noBridge;
 
     debugPrint(
       "[ROUTE] $fromN → $toN | km=$km ferry='$ferryName' price=$ferryPrice",
@@ -2702,12 +2873,8 @@ Future<void> _scanPdf() async {
     _extraCache[key]      = '';
     _ferryNameCache[key] = '';
     _countryKmCache[key] = {};
-
-    _ferryByIndex[index]      = 0.0;
-    _tollByIndex[index]       = 0.0;
-    _extraByIndex[index]      = '';
-    _ferryNameByIndex[index] = '';
-    _countryKmByIndex[index] = {};
+    _noDDriveCache[key]  = false;
+    _noBridgeCache[key]  = false;
 
     return null;
   }
@@ -2735,6 +2902,7 @@ Future<void> _recalcKm() async {
       _ferryNameByIndex = {};
       _countryKmByIndex = {};
       _noDDriveByIndex = {};
+      _noBridgeByIndex = {};
       _travelBefore = [];
       _travelMergedIndices = {};
       _kmError = null;
@@ -2760,6 +2928,7 @@ Future<void> _recalcKm() async {
   final Map<int, String> ferryNameByIndex = {};
   final Map<int, Map<String, double>> countryKmByIndex = {};
   final Map<int, bool> noDDriveByIndex = {};
+  final Map<int, bool> noBridgeByIndex = {};
   final Set<int> travelMergedIndices = {};
 
   final List<bool> travelBefore =
@@ -2854,6 +3023,7 @@ Future<void> _recalcKm() async {
       _countryKmCache[key] ?? {},
     );
     final noDDrive = _noDDriveCache[key] ?? false;
+    final noBridge = _noBridgeCache[key] ?? false;
 
     // ===================================================
     // MERGE TRAVEL BLOCK
@@ -2866,6 +3036,7 @@ Future<void> _recalcKm() async {
       ferryNameByIndex[pendingTravelIndex] = ferryName;
       countryKmByIndex[pendingTravelIndex] = country;
       noDDriveByIndex[pendingTravelIndex] = noDDrive;
+      noBridgeByIndex[pendingTravelIndex] = noBridge;
 
       // null ut dagens leg
       kmByIndex[i] = 0;
@@ -2875,6 +3046,7 @@ Future<void> _recalcKm() async {
       ferryNameByIndex[i] = '';
       countryKmByIndex[i] = {};
       noDDriveByIndex[i] = false;
+      noBridgeByIndex[i] = false;
 
       travelBefore[pendingTravelIndex] = true;
       travelBefore[i] = true;
@@ -2895,6 +3067,7 @@ Future<void> _recalcKm() async {
     ferryNameByIndex[i] = ferryName;
     countryKmByIndex[i] = country;
     noDDriveByIndex[i] = noDDrive;
+    noBridgeByIndex[i] = noBridge;
 
     travelBefore[i] = inTravelBlock;
     inTravelBlock = false;
@@ -2923,6 +3096,7 @@ Future<void> _recalcKm() async {
     _ferryNameByIndex = ferryNameByIndex;
     _countryKmByIndex = countryKmByIndex;
     _noDDriveByIndex = noDDriveByIndex;
+    _noBridgeByIndex = noBridgeByIndex;
     _travelBefore = travelBefore;
     _travelMergedIndices = travelMergedIndices;
 
@@ -3256,6 +3430,10 @@ Future<RoundCalcResult> _calcRound(int ri) async {
   final Map<int, double> ferryByIndex = {};
   final Map<int, double> tollByIndex = {};
   final Map<int, String> extraByIndex = {};
+  final Map<int, String> ferryNameByIndex = {};
+  final Map<int, Map<String, double>> countryKmByIndex = {};
+  final Map<int, bool> noDDriveByIndex = {};
+  final Map<int, bool> noBridgeByIndex = {};
 
   final List<bool> travelBefore =
       List<bool>.filled(entries.length, false);
@@ -3287,7 +3465,7 @@ Future<RoundCalcResult> _calcRound(int ri) async {
       kmByIndex[i] = 0;
       ferryByIndex[i] = 0;
       tollByIndex[i] = 0;
-      _countryKmByIndex[i] = {};
+      countryKmByIndex[i] = {};
       pendingTravelIndex = null;
       seenTravel = false;
       travelBefore[i] = false;
@@ -3300,7 +3478,7 @@ Future<RoundCalcResult> _calcRound(int ri) async {
       ferryByIndex[i] = 0;
       tollByIndex[i] = 0;
       extraByIndex[i] = '';
-      _countryKmByIndex[i] = {};
+      countryKmByIndex[i] = {};
 
       if (pendingTravelIndex == null) {
         pendingTravelIndex = i;
@@ -3315,7 +3493,7 @@ Future<RoundCalcResult> _calcRound(int ri) async {
       kmByIndex[i] = 0;
       ferryByIndex[i] = 0;
       tollByIndex[i] = 0;
-      _countryKmByIndex[i] = {};
+      countryKmByIndex[i] = {};
       pendingTravelIndex = null;
       seenTravel = false;
       continue;
@@ -3333,6 +3511,10 @@ Future<RoundCalcResult> _calcRound(int ri) async {
     final ferry = _ferryCache[key] ?? 0.0;
     final toll  = _tollCache[key] ?? 0.0;
     final extra = _extraCache[key] ?? '';
+    final ferryName = _ferryNameCache[key] ?? '';
+    final country = Map<String, double>.from(_countryKmCache[key] ?? {});
+    final noDDrive = _noDDriveCache[key] ?? false;
+    final noBridge = _noBridgeCache[key] ?? false;
 
     debugPrint("ROUND $ri LEG $i");
     debugPrint("  $from → $toRaw");
@@ -3349,17 +3531,15 @@ Future<RoundCalcResult> _calcRound(int ri) async {
       tollByIndex[pendingTravelIndex] =
           (tollByIndex[pendingTravelIndex] ?? 0) + toll;
 
-      _ferryNameByIndex[pendingTravelIndex] =
-          _ferryNameCache[key] ?? ''; // 🔧 ENDRET (kun her brukes ferry_name)
-
-      // Move country km to the travel index (mirror _recalcKm behaviour)
-      _countryKmByIndex[pendingTravelIndex] =
-          Map<String, double>.from(_countryKmByIndex[i] ?? {});
+      ferryNameByIndex[pendingTravelIndex] = ferryName;
+      countryKmByIndex[pendingTravelIndex] = country;
+      noDDriveByIndex[pendingTravelIndex] = noDDrive;
+      noBridgeByIndex[pendingTravelIndex] = noBridge;
 
       kmByIndex[i] = 0;
       ferryByIndex[i] = 0;
       tollByIndex[i] = 0;
-      _countryKmByIndex[i] = {};
+      countryKmByIndex[i] = {};
 
       travelBefore[pendingTravelIndex] = true;
       travelBefore[i] = true;
@@ -3374,9 +3554,10 @@ Future<RoundCalcResult> _calcRound(int ri) async {
     ferryByIndex[i] = ferry;
     tollByIndex[i] = toll;
     extraByIndex[i] = extra;
-
-    // 🔧 ENDRET: ferry_name lagres også på normale legs
-    _ferryNameByIndex[i] = _ferryNameCache[key] ?? '';
+    ferryNameByIndex[i] = ferryName;
+    countryKmByIndex[i] = country;
+    noDDriveByIndex[i] = noDDrive;
+    noBridgeByIndex[i] = noBridge;
 
     if (seenTravel) {
       travelBefore[i] = true;
@@ -3419,7 +3600,7 @@ final safeTravel = List<bool>.generate(
 final safeFerryPerLeg = List<String?>.generate(
   len,
   (i) {
-    final name = _ferryNameByIndex[i];
+    final name = ferryNameByIndex[i];
     return (name != null && name.trim().isNotEmpty)
         ? name.trim()
         : null;
@@ -3428,7 +3609,12 @@ final safeFerryPerLeg = List<String?>.generate(
 
 final safeNoDDrive = List<bool>.generate(
   len,
-  (i) => _noDDriveByIndex[i] ?? false,
+  (i) => noDDriveByIndex[i] ?? false,
+);
+
+final safeNoBridge = List<bool>.generate(
+  len,
+  (i) => noBridgeByIndex[i] ?? false,
 );
 
   // Store ferry-per-leg on the round model so it can be used at save time
@@ -3441,12 +3627,12 @@ final safeNoDDrive = List<bool>.generate(
   // Both km_se/km_de = NULL and = 0 mean 0 km (no subtraction).
   // Only values > 0 reduce the tollable km.
   final totalSweKm = List.generate(len, (i) {
-    final seKm = _countryKmByIndex[i]?['SE'];
+    final seKm = countryKmByIndex[i]?['SE'];
     if (seKm != null && seKm > 0) return seKm;
     return 0.0;
   }).fold<double>(0.0, (a, b) => a + b);
   final totalDeKm = List.generate(len, (i) {
-    final deKm = _countryKmByIndex[i]?['DE'];
+    final deKm = countryKmByIndex[i]?['DE'];
     if (deKm != null && deKm > 0) return deKm;
     return 0.0;
   }).fold<double>(0.0, (a, b) => a + b);
@@ -3459,7 +3645,7 @@ final safeNoDDrive = List<bool>.generate(
 
     // Determine international allowances per leg from country km data
     final utlTrkt = List<int>.generate(len, (i) {
-      final cKm = _countryKmByIndex[i];
+      final cKm = countryKmByIndex[i];
       if (cKm == null || cKm.isEmpty) return 0;
       final hasIntl = cKm.entries.any(
         (e) => e.key.toUpperCase() != 'SE' && e.value > 0,
@@ -3528,13 +3714,15 @@ final safeNoDDrive = List<bool>.generate(
     );
     _sweCalcCache[ri] = scaledSweResult;
 
-    // Ferry: use FerryResolver (same as Norwegian) — consistent trailer pricing
-    final roundFerryCost =
-        FerryResolver.resolveTotalFerryCost(
-          ferries: SettingsStore.current.ferries,
-          trailer: round.trailer,
-          ferryPerLeg: safeFerryPerLeg,
-        ) * effectiveBusCount;
+    // Ferry + Bridge: use FerryResolver (same as Norwegian) — consistent trailer pricing
+    final ferryAndBridge = FerryResolver.resolveFerriesAndBridges(
+      ferries: SettingsStore.current.ferries,
+      trailer: round.trailer,
+      ferryPerLeg: safeFerryPerLeg,
+      noBridgePerLeg: safeNoBridge,
+    );
+    final roundFerryCost = ferryAndBridge.ferryCost * effectiveBusCount;
+    final roundBridgeCost = ferryAndBridge.bridgeCost * effectiveBusCount;
 
     // Toll: exclude Swedish and German km (toll-free)
     final roundTollCost = tollableKm * SettingsStore.current.tollKmRate * effectiveBusCount;
@@ -3555,15 +3743,19 @@ final safeNoDDrive = List<bool>.generate(
       extraPerLeg: safeExtra,
       hasTravelBefore: safeTravel,
       noDDrivePerLeg: safeNoDDrive,
+      sweKm: totalSweKm,
+      deKm: totalDeKm,
+      tollableKm: tollableKm,
       dayCost: 0,
       extraKmCost: 0,
       dDriveCost: ddCostScaled,
       trailerDayCost: 0,
       trailerKmCost: 0,
       ferryCost: roundFerryCost,
+      bridgeCost: roundBridgeCost,
       tollCost: roundTollCost,
       flightCost: 0,
-      totalCost: scaledTotal + roundFerryCost + roundTollCost,
+      totalCost: scaledTotal + roundFerryCost + roundBridgeCost + roundTollCost,
     );
     _roundCalcCache[ri] = minimal;
     return minimal;
@@ -3578,6 +3770,8 @@ final safeNoDDrive = List<bool>.generate(
     trailer: round.trailer,
     totalKm: totalKm,
     tollableKm: tollableKm, // excludes Swedish and German km (toll-free)
+    sweKm: totalSweKm,
+    deKm: totalDeKm,
     legKm: safeLegKm,
     ferries: SettingsStore.current.ferries,
     ferryPerLeg: safeFerryPerLeg, // 🔥 nå korrekt
@@ -3585,6 +3779,7 @@ final safeNoDDrive = List<bool>.generate(
     extraPerLeg: safeExtra,
     hasTravelBefore: safeTravel,
     noDDrivePerLeg: safeNoDDrive,
+    noBridgePerLeg: safeNoBridge,
   );
   // ⭐ MULTI BUS SUMMARY
 final busCount =
@@ -3606,6 +3801,10 @@ final scaled = RoundCalcResult(
   hasTravelBefore: result.hasTravelBefore,
   noDDrivePerLeg: result.noDDrivePerLeg,
 
+  sweKm: result.sweKm,
+  deKm: result.deKm,
+  tollableKm: result.tollableKm,
+
   // ---------- COSTS (scaled by buses) ----------
   dayCost: result.dayCost * busCount,
   extraKmCost: result.extraKmCost * busCount,
@@ -3615,6 +3814,7 @@ final scaled = RoundCalcResult(
   trailerKmCost: result.trailerKmCost * busCount,
 
   ferryCost: result.ferryCost * busCount,
+  bridgeCost: result.bridgeCost * busCount,
   tollCost: result.tollCost * busCount,
   flightCost: result.flightCost * busCount,
 
@@ -3691,24 +3891,60 @@ Future<String> _savePdfToFile(Uint8List bytes) async {
       b.writeln();
     }
 
+    // ================= BRIDGE (from Norwegian calc) =================
+    final norR = _roundCalcCache[ri];
+    if (norR != null && norR.bridgeCost > 0) {
+      b.writeln("Bridge: ${_sek(norR.bridgeCost)}");
+      b.writeln();
+    }
+
+    // ================= TOLL (from Norwegian calc) =================
+    if (norR != null && norR.tollCost > 0) {
+      final totalDriven = norR.includedKm + norR.extraKm;
+      // For Swedish model, use totalKm from legKm sum
+      final drivenKm = totalDriven > 0
+          ? totalDriven
+          : r.legKm.fold<double>(0, (a, b) => a + b);
+      b.writeln("TOLL:");
+      b.writeln("  Total:    ${drivenKm.toStringAsFixed(0)} km");
+      if (norR.sweKm > 0)
+        b.writeln("  Sweden:   -${norR.sweKm.toStringAsFixed(0)} km (toll-free)");
+      if (norR.deKm > 0)
+        b.writeln("  Germany:  -${norR.deKm.toStringAsFixed(0)} km (toll-free)");
+      b.writeln(
+        "  Tollable: ${norR.tollableKm.toStringAsFixed(0)} km"
+        " × ${SettingsStore.current.tollKmRate.toStringAsFixed(2)}"
+        " = ${_sek(norR.tollCost)}",
+      );
+      b.writeln();
+    }
+
     b.writeln("----------------------------");
     b.writeln("TOTAL: ${_sek(r.totalCost)}");
     return b.toString();
   }
 
   // ===================================================
-  // SWEDISH TOTAL BREAKDOWN (all rounds)
+  // SWEDISH TOTAL BREAKDOWN (all rounds) — returns Widget
   // ===================================================
 
-  String _buildSweTotalBreakdown() {
+  Widget _buildSweTotalBreakdownWidget() {
     final usedEntries = _sweCalcCache.entries
         .where((e) => offer.rounds[e.key].entries.isNotEmpty)
         .toList()
       ..sort((a, b) => a.key.compareTo(b.key));
 
-    if (usedEntries.isEmpty) return "No rounds calculated yet.";
+    if (usedEntries.isEmpty) {
+      return const Text("No rounds calculated yet.",
+          style: TextStyle(fontFamily: "monospace", fontWeight: FontWeight.w700));
+    }
 
-    final b = StringBuffer();
+    const monoStyle = TextStyle(
+      fontFamily: "monospace",
+      fontWeight: FontWeight.w700,
+    );
+
+    final widgets = <Widget>[];
     double grandTotal = 0;
 
     for (final entry in usedEntries) {
@@ -3725,8 +3961,10 @@ Future<String> _savePdfToFile(Uint8List bytes) async {
 
       final norR = _roundCalcCache[ri];
       final ferry = norR?.ferryCost ?? 0.0;
+      final bridge = norR?.bridgeCost ?? 0.0;
       final toll = norR?.tollCost ?? 0.0;
 
+      final b = StringBuffer();
       b.writeln("ROUND ${ri + 1}  ($busLabel)");
       b.writeln("----------------------------");
       b.writeln("  Vehicle/day: ${_sek(r.vehicleDagpris)}");
@@ -3754,16 +3992,54 @@ Future<String> _savePdfToFile(Uint8List bytes) async {
 
       b.writeln("  Swedish subtotal: ${_sek(r.totalCost)}");
       if (ferry > 0) b.writeln("  Ferry:           ${_sek(ferry)}");
-      if (toll > 0) b.writeln("  Toll:            ${_sek(toll)}");
-      final roundTotal = r.totalCost + ferry + toll;
-      b.writeln("  Round total: ${_sek(roundTotal)}");
-      b.writeln();
-      grandTotal += roundTotal;
+      if (bridge > 0) b.writeln("  Bridge:          ${_sek(bridge)}");
+      if (toll > 0 && norR != null) {
+        final drivenKm = r.legKm.fold<double>(0, (a, b) => a + b);
+        b.writeln("  TOLL:");
+        b.writeln("    Total:    ${drivenKm.toStringAsFixed(0)} km");
+        if (norR.sweKm > 0)
+          b.writeln("    Sweden:   -${norR.sweKm.toStringAsFixed(0)} km (toll-free)");
+        if (norR.deKm > 0)
+          b.writeln("    Germany:  -${norR.deKm.toStringAsFixed(0)} km (toll-free)");
+        b.writeln(
+          "    Tollable: ${norR.tollableKm.toStringAsFixed(0)} km"
+          " × ${SettingsStore.current.tollKmRate.toStringAsFixed(2)}"
+          " = ${_sek(toll)}",
+        );
+      } else if (toll > 0) {
+        b.writeln("  Toll:            ${_sek(toll)}");
+      }
+
+      final calculatedRoundTotal = r.totalCost + ferry + bridge + toll;
+
+      // Emit text block before the editable round total line
+      widgets.add(Text(b.toString().trimRight(), style: monoStyle));
+
+      // Editable round total line
+      final displayedRoundTotal = _roundOverrides[ri] ?? calculatedRoundTotal;
+      final hasRoundOverride = _roundOverrides.containsKey(ri) && _roundOverrides[ri] != null;
+      widgets.add(_buildEditableRoundTotal(
+        ri: ri,
+        calculatedValue: calculatedRoundTotal,
+        displayedValue: displayedRoundTotal,
+        hasOverride: hasRoundOverride,
+        fmt: _sek,
+      ));
+      widgets.add(const SizedBox(height: 8));
+
+      grandTotal += _roundOverrides[ri] ?? calculatedRoundTotal;
     }
 
-    b.writeln("============================");
-    b.writeln("GRAND TOTAL: ${_sek(grandTotal)}");
-    return b.toString();
+    final footer = StringBuffer();
+    footer.writeln("============================");
+    footer.writeln("GRAND TOTAL: ${_sek(grandTotal)}");
+
+    widgets.add(Text(footer.toString().trimRight(), style: monoStyle));
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: widgets,
+    );
   }
 
 // ------------------------------------------------------------
@@ -4032,6 +4308,7 @@ if (calc == null) {
 
 double allRoundsTotal = 0;
 double allRoundsFerry = 0;
+double allRoundsBridge = 0;
 double allRoundsToll = 0;
 
 if (offer.pricingModel == 'svensk') {
@@ -4039,10 +4316,14 @@ if (offer.pricingModel == 'svensk') {
     final sweR = _sweCalcCache[i];
     final norR = _roundCalcCache[i];
     if (sweR != null && offer.rounds[i].entries.isNotEmpty) {
-      allRoundsTotal += sweR.totalCost; // Swedish base (SEK)
+      final calculatedRoundTotal = sweR.totalCost
+          + (norR?.ferryCost ?? 0)
+          + (norR?.bridgeCost ?? 0)
+          + (norR?.tollCost ?? 0);
+      allRoundsTotal += _roundOverrides[i] ?? calculatedRoundTotal;
       if (norR != null) {
-        allRoundsTotal += norR.ferryCost + norR.tollCost;
         allRoundsFerry += norR.ferryCost;
+        allRoundsBridge += norR.bridgeCost;
         allRoundsToll += norR.tollCost;
       }
     }
@@ -4051,8 +4332,9 @@ if (offer.pricingModel == 'svensk') {
   for (int i = 0; i < offer.rounds.length; i++) {
     final r = _roundCalcCache[i];
     if (r != null) {
-      allRoundsTotal += r.totalCost;
+      allRoundsTotal += _roundOverrides[i] ?? r.totalCost;
       allRoundsFerry += r.ferryCost;
+      allRoundsBridge += r.bridgeCost;
       allRoundsToll += r.tollCost;
     }
   }
@@ -4063,7 +4345,7 @@ if (offer.pricingModel == 'svensk') {
 // =====================================================
 
 final basePrice =
-    allRoundsTotal - allRoundsFerry - allRoundsToll;
+    allRoundsTotal - allRoundsFerry - allRoundsBridge - allRoundsToll;
 
 final countryKm = _collectAllCountryKm();
 
@@ -4072,13 +4354,11 @@ final foreignVatMap = _calculateForeignVat(
   countryKm: countryKm,
 );
 
-// allRoundsTotal is the gross (VAT-inclusive) price.
-// VAT is extracted from it (not added on top).
-// "incl VAT" = the gross price; "excl VAT" = gross − extracted VAT.
+// allRoundsTotal is excl VAT. Foreign VAT is added on top.
 final _vatTotalForDisplay =
     foreignVatMap.values.fold(0.0, (a, b) => a + b);
-final totalIncVat = allRoundsTotal;                        // gross price
-final totalExVat  = allRoundsTotal - _vatTotalForDisplay;  // net of foreign VAT
+final totalExVat  = allRoundsTotal;                        // excl VAT
+final totalIncVat = allRoundsTotal + _vatTotalForDisplay;  // incl foreign VAT
 
 
           // ============ LEFT ============
@@ -4478,7 +4758,8 @@ Expanded(
                     (_noDDriveByIndex[i] != true) &&
                     (travelBefore ? km >= 1200 : km >= 600);
 
-                // Ferry/Bridge: show on Travel row, suppress on city row after Travel.
+                // Extra: show D.Drive prefix + extra column value as-is.
+                // On Travel row, look ahead to next city entry. Suppress on city row after Travel.
                 String rawExtra;
                 if (isTravel) {
                   rawExtra = _extraByIndex[i] ?? '';
@@ -4499,13 +4780,7 @@ Expanded(
 
                 final extraParts = <String>[];
                 if (hasDDrive) extraParts.add('D.Drive');
-                for (final p in rawExtra
-                    .split(RegExp(r'[,/]'))
-                    .map((s) => s.trim())
-                    .where((s) => s.isNotEmpty)) {
-                  if (p.toLowerCase().contains('ferry')) extraParts.add('Ferry');
-                  if (p.toLowerCase().contains('bridge')) extraParts.add('Bridge');
-                }
+                if (rawExtra.isNotEmpty) extraParts.add(rawExtra);
                 final String extraText = extraParts.join(' / ');
 
                 return Column(
@@ -4763,15 +5038,9 @@ Container(
       children: [
         Align(
           alignment: Alignment.centerLeft,
-          child: Text(
-            offer.pricingModel == 'svensk'
-                ? _buildSweTotalBreakdown()
-                : _buildTotalBreakdown(_effectiveSettings()),
-            style: const TextStyle(
-              fontFamily: "monospace",
-              fontWeight: FontWeight.w700,
-            ),
-          ),
+          child: offer.pricingModel == 'svensk'
+              ? _buildSweTotalBreakdownWidget()
+              : _buildTotalBreakdownWidget(_effectiveSettings()),
         ),
       ],
     ),
@@ -6035,6 +6304,7 @@ class _RoutesTableRow extends StatelessWidget {
       );
     });
   }
+
 }
 class _LocationAutoComplete extends StatelessWidget {
   final TextEditingController controller;

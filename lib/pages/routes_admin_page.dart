@@ -138,6 +138,12 @@ class _RoutesAdminPageState extends State<RoutesAdminPage> {
         double.tryParse(row['distance_total_km']?.toString() ?? '');
     final bool isLongRoute = (currentKm ?? 0) >= 600;
 
+    // Parse existing extra to pre-check Ferry/Bridge
+    final String existingExtra = (row['extra'] as String?)?.trim() ?? '';
+    final String extraLower = existingExtra.toLowerCase();
+    bool hasFerry = extraLower.contains('ferry');
+    bool hasBridge = extraLower.contains('bridge');
+
     final ok = await showDialog<bool>(
       context: context,
       barrierDismissible: false,
@@ -174,15 +180,31 @@ class _RoutesAdminPageState extends State<RoutesAdminPage> {
                           hintText: "e.g. Puttgarden–Rødby",
                         ),
                       ),
+                      const SizedBox(height: 8),
+                      CheckboxListTile(
+                        value: hasFerry,
+                        onChanged: (v) =>
+                            setLocalState(() => hasFerry = v ?? false),
+                        title: const Text("Ferry"),
+                        controlAffinity: ListTileControlAffinity.leading,
+                        contentPadding: EdgeInsets.zero,
+                      ),
+                      CheckboxListTile(
+                        value: hasBridge,
+                        onChanged: (v) =>
+                            setLocalState(() => hasBridge = v ?? false),
+                        title: const Text("Bridge"),
+                        controlAffinity: ListTileControlAffinity.leading,
+                        contentPadding: EdgeInsets.zero,
+                      ),
                       if (isLongRoute) ...[
-                        const SizedBox(height: 8),
                         CheckboxListTile(
                           value: noDDrive,
                           onChanged: (v) =>
                               setLocalState(() => noDDrive = v ?? false),
                           title: const Text("No D.Drive"),
                           subtitle: const Text(
-                            "Route km ≥ 600 but should not trigger D.Drive",
+                            "Route km >= 600 but should not trigger D.Drive",
                             style: TextStyle(fontSize: 12),
                           ),
                           controlAffinity: ListTileControlAffinity.leading,
@@ -247,6 +269,12 @@ class _RoutesAdminPageState extends State<RoutesAdminPage> {
 
     final km = double.tryParse(totalKmCtrl.text.replaceAll(',', '.'));
 
+    // Build extra from checkboxes
+    final extraParts = <String>[];
+    if (hasFerry) extraParts.add('Ferry');
+    if (hasBridge) extraParts.add('Bridge');
+    final extraValue = extraParts.join('/');
+
     await sb.from('routes_all').upsert(
       {
         'from_place': fromCtrl.text.trim(),
@@ -255,6 +283,7 @@ class _RoutesAdminPageState extends State<RoutesAdminPage> {
         'ferry_name': ferryCtrl.text.trim().isEmpty
             ? null
             : ferryCtrl.text.trim(),
+        'extra': extraValue,
         'no_ddrive': isLongRoute ? noDDrive : false,
         'km_se': parseKm(seCtrl.text),
         'km_dk': parseKm(dkCtrl.text),
@@ -505,6 +534,11 @@ class _RoutesAdminPageState extends State<RoutesAdminPage> {
                         : Colors.black,
                   ),
                 ),
+                if (((r['extra'] as String?)?.trim() ?? '').isNotEmpty)
+                  Text(
+                    "Extra: ${r['extra']}",
+                    style: const TextStyle(fontSize: 12),
+                  ),
                 const SizedBox(height: 6),
                 Wrap(
                   spacing: 8,

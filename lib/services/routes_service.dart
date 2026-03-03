@@ -38,6 +38,7 @@ class RoutesService {
       base_price:ferry_price,
       extra,
       no_ddrive,
+      no_bridge,
       km_se,
       km_dk,
       km_de,
