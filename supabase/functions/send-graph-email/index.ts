@@ -49,11 +49,12 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const { to, subject, body, attachment } = await req.json() as {
+    const { to, subject, body, attachment, attachments } = await req.json() as {
       to: string;
       subject: string;
       body: string;
       attachment?: { name: string; contentBytes: string };
+      attachments?: { name: string; contentBytes: string }[];
     };
 
     if (!to || !subject || !body) {
@@ -83,7 +84,14 @@ Deno.serve(async (req) => {
       toRecipients: recipients,
     };
 
-    if (attachment) {
+    if (attachments && attachments.length > 0) {
+      message['attachments'] = attachments.map((a) => ({
+        '@odata.type': '#microsoft.graph.fileAttachment',
+        name: a.name,
+        contentType: 'application/pdf',
+        contentBytes: a.contentBytes,
+      }));
+    } else if (attachment) {
       message['attachments'] = [
         {
           '@odata.type': '#microsoft.graph.fileAttachment',

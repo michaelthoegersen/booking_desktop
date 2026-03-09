@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import '../ui/web_svg_image.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../state/active_company.dart';
@@ -17,7 +18,6 @@ class CrewShell extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: CssTheme.bg,
       body: Row(
         children: [
           const _CrewSideNav(),
@@ -125,7 +125,7 @@ class _CrewTopBarState extends State<_CrewTopBar> {
             onSelected: (value) async {
               if (value == 'logout') {
                 await Supabase.instance.client.auth.signOut();
-                if (context.mounted) context.go('/login');
+                if (context.mounted) context.go('/portal');
               }
             },
             itemBuilder: (context) => [
@@ -199,11 +199,12 @@ class _CrewSideNav extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
     return Container(
       width: 260,
-      decoration: const BoxDecoration(
-        color: CssTheme.surface,
-        border: Border(right: BorderSide(color: CssTheme.outline)),
+      decoration: BoxDecoration(
+        color: cs.surfaceContainerLowest,
+        border: Border(right: BorderSide(color: cs.outlineVariant)),
       ),
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -212,23 +213,10 @@ class _CrewSideNav extends StatelessWidget {
             Padding(
               padding: const EdgeInsets.only(bottom: 20, top: 10),
               child: Center(
-                child: Image(
-                  image: const ResizeImage(
-                    AssetImage("assets/pdf/logos/TourFlowLogoComplete.png"),
-                    width: 500,
-                  ),
+                child: const WebSvgImage(
+                  svgAsset: 'pdf/logos/TourFlowLogoComplete.svg',
+                  width: 250,
                   height: 110,
-                  fit: BoxFit.contain,
-                  filterQuality: FilterQuality.medium,
-                  errorBuilder: (context, error, stack) {
-                    return const Text(
-                      "TourFlow",
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 24,
-                      ),
-                    );
-                  },
                 ),
               ),
             ),
@@ -236,6 +224,11 @@ class _CrewSideNav extends StatelessWidget {
               icon: Icons.music_note_rounded,
               label: 'Gigs',
               route: '/c',
+            ),
+            _CrewNavItem(
+              icon: Icons.folder_shared_outlined,
+              label: 'Noter',
+              route: '/c/notes',
             ),
           ],
         ),
@@ -275,9 +268,6 @@ class _CrewNavItem extends StatelessWidget {
         decoration: BoxDecoration(
           color: selected ? Colors.black : Colors.transparent,
           borderRadius: BorderRadius.circular(14),
-          border: Border.all(
-            color: selected ? Colors.black : CssTheme.outline,
-          ),
         ),
         child: Row(
           children: [

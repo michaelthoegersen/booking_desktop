@@ -1,4 +1,5 @@
 import '../supabase_clients.dart';
+import '../state/active_company.dart';
 
 class CalendarManualService {
   static SupabaseClient get sb => Supabase.instance.client;
@@ -32,6 +33,8 @@ class CalendarManualService {
         'tid': '',
         'pris': '',
         'contact': '',
+        if (activeCompanyNotifier.value != null)
+          'owner_company_id': activeCompanyNotifier.value!.id,
       });
     }
 

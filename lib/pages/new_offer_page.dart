@@ -38,6 +38,8 @@ import '../services/swe_calculator.dart';
 import '../services/ferry_resolver.dart';
 import 'package:flutter/foundation.dart';
 import '../platform/pdf_saver.dart';
+import '../utils/company_vehicles.dart';
+import '../state/active_company.dart';
 import '../utils/bus_utils.dart';
 // ignore: avoid_web_libraries_in_flutter
 
@@ -101,23 +103,12 @@ class _NewOfferPageState extends State<NewOfferPage> {
 
   Future<String?> _pickBusSimple() async {
 
-  const buses = [
-    "CSS_1034",
-    "CSS_1023",
-    "CSS_1008",
-    "YCR 682",
-    "ESW 337",
-    "WYN 802",
-    "RLC 29G",
-    "Rental 1 (Hasse)",
-    "Rental 2 (Rickard)",
-    "Conference",
-  ];
+  final buses = getVehicleConfig().all;
 
   return showDialog<String>(
     context: context,
     builder: (dialogCtx) => AlertDialog(
-      title: const Text("Select bus"),
+      title: Text("Select ${getVehicleConfig().label}"),
       content: SizedBox(
         width: 300,
         child: ListView(
@@ -125,7 +116,7 @@ class _NewOfferPageState extends State<NewOfferPage> {
           children: [
             ...buses.map((bus) {
               return ListTile(
-                leading: const Icon(Icons.directions_bus),
+                leading: Icon(getVehicleConfig().icon),
                 title: Text(fmtBus(bus)),
                 onTap: () => Navigator.pop(dialogCtx, bus),
               );
@@ -365,7 +356,7 @@ if (r.flightCost > 0) {
           .where((x) => x.isNotEmpty)
           .map(fmtBus)
           .join(', ');
-      final busLabel = buses.isNotEmpty ? buses : 'No bus';
+      final busLabel = buses.isNotEmpty ? buses : 'No ${getVehicleConfig().label}';
 
       final b = StringBuffer();
       b.writeln("ROUND ${ri + 1}  ($busLabel)");
@@ -667,18 +658,7 @@ Future<void> _recalcAllRounds() async {
 // 🔥 ENTERPRISE BUS SOURCE (same as Calendar)
 // =====================================================
 
-const allBuses = [
-  "CSS_1034",
-  "CSS_1023",
-  "CSS_1008",
-  "YCR 682",
-  "ESW 337",
-  "WYN 802",
-  "RLC 29G",
-  "Rental 1 (Hasse)",
-  "Rental 2 (Rickard)",
-  "Conference",
-];
+final allBuses = getVehicleConfig().all;
 
   final available =
       allBuses.where((b) => !busySet.contains(b)).toList();
@@ -692,7 +672,7 @@ const allBuses = [
   return showDialog<String>(
     context: context,
     builder: (dialogContext) => AlertDialog(
-      title: const Text("Select available bus"),
+      title: Text("Select available ${getVehicleConfig().label}"),
       content: SizedBox(
         width: 320,
         child: ListView(
@@ -701,12 +681,12 @@ const allBuses = [
             // Available buses
             ...available.map((bus) {
               return ListTile(
-                leading: const Icon(Icons.directions_bus),
+                leading: Icon(getVehicleConfig().icon),
                 title: Text(fmtBus(bus)),
                 onTap: () => Navigator.pop(dialogContext, bus),
               );
             }),
-            // Busy buses (greyed out, unselectable)
+            // Busy vehicles (greyed out, unselectable)
             if (busyList.isNotEmpty) ...[
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
@@ -724,7 +704,7 @@ const allBuses = [
                 return ListTile(
                   enabled: false,
                   leading: Icon(
-                    Icons.directions_bus,
+                    getVehicleConfig().icon,
                     color: Colors.grey.shade400,
                   ),
                   title: Text(
@@ -803,17 +783,7 @@ const allBuses = [
 
     if (!mounted) return null;
 
-    const allBuses = [
-      "CSS_1034",
-      "CSS_1023",
-      "CSS_1008",
-      "YCR 682",
-      "ESW 337",
-      "WYN 802",
-      "RLC 29G",
-      "Rental 1 (Hasse)",
-      "Rental 2 (Rickard)",
-    ];
+    final allBuses = getVehicleConfig().allExclConf;
 
     final available = allBuses.where((b) => !busySet.contains(b)).toList();
     final busyList = allBuses.where((b) => busySet.contains(b)).toList();
@@ -833,7 +803,7 @@ const allBuses = [
       builder: (dialogCtx) {
         final cs = Theme.of(dialogCtx).colorScheme;
         return AlertDialog(
-          title: Text("Bus ${slotIndex + 1} — all rounds"),
+          title: Text("${getVehicleConfig().labelCap} ${slotIndex + 1} — all rounds"),
           content: SizedBox(
             width: 320,
             child: ListView(
@@ -843,7 +813,7 @@ const allBuses = [
                   final isSuggested = bus == suggested;
                   return ListTile(
                     leading: Icon(
-                      Icons.directions_bus,
+                      getVehicleConfig().icon,
                       color: isSuggested ? cs.primary : null,
                     ),
                     title: Row(
@@ -892,7 +862,7 @@ const allBuses = [
                     (bus) => ListTile(
                       enabled: false,
                       leading: Icon(
-                        Icons.directions_bus,
+                        getVehicleConfig().icon,
                         color: Colors.grey.shade400,
                       ),
                       title: Text(
@@ -2454,6 +2424,11 @@ Future<void> _exportPdf() async {
     offer.phone = phoneCtrl.text.trim();
     offer.email = emailCtrl.text.trim();
   }
+
+  // Sync manual price overrides to offer object before PDF generation
+  offer.totalOverride = _totalOverride;
+  offer.roundOverrides = Map<int, double?>.from(_roundOverrides);
+
   try {
 
     // ===============================
@@ -2496,7 +2471,7 @@ for (int i = 0; i < offer.rounds.length; i++) {
             ? "UnknownProduction"
             : offer.production.trim();
         final safeProduction = _safeFolderName(production);
-        final todayStamp = DateFormat("yyyyMMdd").format(DateTime.now());
+        final todayStamp = DateFormat("yyyyMMdd_HHmmss").format(DateTime.now());
         final filename = "Offer Nightliner $safeProduction $todayStamp.pdf";
 
         final storagePath = await OfferStorageService.uploadPdf(
@@ -2536,6 +2511,10 @@ for (int i = 0; i < offer.rounds.length; i++) {
 // Send offer via email
 // ------------------------------------------------------------
 Future<void> _sendOffer() async {
+  // Sync manual price overrides to offer object before PDF generation
+  offer.totalOverride = _totalOverride;
+  offer.roundOverrides = Map<int, double?>.from(_roundOverrides);
+
   try {
     final Map<int, RoundCalcResult> roundCalc = {};
     for (int i = 0; i < offer.rounds.length; i++) {
@@ -2548,7 +2527,7 @@ Future<void> _sendOffer() async {
         ? "UnknownProduction"
         : offer.production.trim();
     final safeProduction = _safeFolderName(production);
-    final todayStamp = DateFormat("yyyyMMdd").format(DateTime.now());
+    final todayStamp = DateFormat("yyyyMMdd_HHmmss").format(DateTime.now());
     final filename = "Offer Nightliner $safeProduction $todayStamp.pdf";
 
     // Last opp til Supabase Storage
@@ -3122,8 +3101,8 @@ Future<void> _validateSelectedBus() async {
 
   if (availability[offer.bus] == false) {
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text("Selected bus is no longer available"),
+      SnackBar(
+        content: Text("Selected ${getVehicleConfig().label} is no longer available"),
       ),
     );
   }
@@ -3957,7 +3936,7 @@ Future<String> _savePdfToFile(Uint8List bytes) async {
           .where((x) => x.isNotEmpty)
           .map(fmtBus)
           .join(', ');
-      final busLabel = buses.isNotEmpty ? buses : 'No bus';
+      final busLabel = buses.isNotEmpty ? buses : 'No ${getVehicleConfig().label}';
 
       final norR = _roundCalcCache[ri];
       final ferry = norR?.ferryCost ?? 0.0;
@@ -4516,7 +4495,7 @@ final trailer =
                 Icon(
                   bus == "WAITING_LIST"
                       ? Icons.hourglass_top_outlined
-                      : Icons.directions_bus,
+                      : getVehicleConfig().icon,
                   size: 20,
                   color: bus == "WAITING_LIST"
                       ? Colors.orange.shade600
@@ -4525,7 +4504,7 @@ final trailer =
                 const SizedBox(width: 10),
 
                 Text(
-                  "Bus ${i + 1}:",
+                  "${getVehicleConfig().labelCap} ${i + 1}:",
                   style: const TextStyle(fontWeight: FontWeight.w700),
                 ),
 
@@ -4561,7 +4540,7 @@ final trailer =
                       child: Text(
                         bus == "WAITING_LIST"
                             ? "Waiting list"
-                            : (bus != null ? fmtBus(bus) : "Select bus"),
+                            : (bus != null ? fmtBus(bus) : "Select ${getVehicleConfig().label}"),
                         style: TextStyle(
                           color: bus == "WAITING_LIST"
                               ? Colors.orange.shade700
@@ -4947,6 +4926,7 @@ Container(
       const SizedBox(height: 12),
 
       // ================= PRICING MODEL TOGGLE =================
+      if (activeCompanyNotifier.value?.name != 'Moss Turbusser') ...[
       const Text(
         "Pricing model",
         style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
@@ -4967,6 +4947,7 @@ Container(
           await _recalcAllRounds();
         },
       ),
+      ],
 
       const SizedBox(height: 12),
 
@@ -6405,9 +6386,9 @@ class _BusSettingsCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
-            "Bus settings",
-            style: TextStyle(
+          Text(
+            "${getVehicleConfig().labelCap} settings",
+            style: const TextStyle(
               fontWeight: FontWeight.w900,
               fontSize: 13,
             ),
@@ -6422,16 +6403,16 @@ class _BusSettingsCard extends StatelessWidget {
               fontWeight: FontWeight.normal,
               color: cs.onSurface,
             ),
-            decoration: const InputDecoration(
-              labelText: "Buses",
-              prefixIcon: Icon(Icons.directions_bus),
+            decoration: InputDecoration(
+              labelText: getVehicleConfig().labelPluralCap,
+              prefixIcon: Icon(getVehicleConfig().icon),
             ),
             items: [1, 2, 3, 4]
                 .map(
                   (n) => DropdownMenuItem(
                     value: n,
                     child: Text(
-                      "$n bus${n > 1 ? "es" : ""}",
+                      "$n ${n > 1 ? getVehicleConfig().labelPlural : getVehicleConfig().label}",
                       style: TextStyle(
                         fontWeight: FontWeight.normal,
                         color: cs.onSurface,
@@ -6497,9 +6478,9 @@ class _BusSettingsCard extends StatelessWidget {
               fontWeight: FontWeight.normal,
               color: cs.onSurface,
             ),
-            decoration: const InputDecoration(
-              labelText: "Bus type",
-              prefixIcon: Icon(Icons.airline_seat_recline_extra),
+            decoration: InputDecoration(
+              labelText: "${getVehicleConfig().labelCap} type",
+              prefixIcon: const Icon(Icons.airline_seat_recline_extra),
             ),
             items: BusType.values
                 .map(
@@ -6585,13 +6566,13 @@ class _BusSettingsCard extends StatelessWidget {
                 child: Row(
                   children: [
                     Icon(
-                      Icons.directions_bus,
+                      getVehicleConfig().icon,
                       size: 18,
                       color: globalBus == null ? Colors.grey : null,
                     ),
                     const SizedBox(width: 8),
                     Text(
-                      "Bus ${i + 1}:",
+                      "${getVehicleConfig().labelCap} ${i + 1}:",
                       style: const TextStyle(
                         fontWeight: FontWeight.w700,
                       ),

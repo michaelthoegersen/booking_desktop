@@ -4,8 +4,11 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:http/http.dart' as http;
 
 class CountryService {
-  final _apiKey =
-      dotenv.env['GOOGLE_MAPS_API_KEY'] ?? '';
+  late final _apiKey = _safeApiKey();
+  static String _safeApiKey() {
+    try { return dotenv.env['GOOGLE_MAPS_API_KEY'] ?? ''; }
+    catch (_) { return ''; }
+  }
 
   Future<String> getCountry(
     double lat,

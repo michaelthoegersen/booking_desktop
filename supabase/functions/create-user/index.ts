@@ -42,9 +42,10 @@ Deno.serve(async (req) => {
     }
 
     // --- Parse body ---
-    const { name, email, role, company_id } = await req.json() as {
+    const { name, email, phone, role, company_id } = await req.json() as {
       name: string;
       email: string;
+      phone?: string;
       role?: string;
       company_id?: string;
     };
@@ -124,6 +125,10 @@ Deno.serve(async (req) => {
       role: userRole,
     };
 
+    if (phone) {
+      profileData['phone'] = phone;
+    }
+
     if (company_id) {
       profileData['company_id'] = company_id;
     }
@@ -166,7 +171,7 @@ Deno.serve(async (req) => {
             role: userRole,
             app_mode: (userRole === 'management' || userRole === 'admin')
               ? 'management'
-              : 'crew',
+              : 'css',
           }),
         },
       );

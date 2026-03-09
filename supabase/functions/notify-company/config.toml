@@ -1,0 +1,2 @@
+[functions.notify-company]
+verify_jwt = false

@@ -16,7 +16,15 @@ class RoundCalcResult {
   final double trailerKmCost;
 
   final double ferryCost;
+  final double bridgeCost;
   final double tollCost;
+
+  /// Swedish km (toll-free)
+  final double sweKm;
+  /// German km (toll-free)
+  final double deKm;
+  /// Km subject to toll (totalKm - sweKm - deKm)
+  final double tollableKm;
 
   final List<double> tollPerLeg;
   final List<double> legKm;
@@ -39,7 +47,11 @@ class RoundCalcResult {
     required this.trailerDayCost,
     required this.trailerKmCost,
     required this.ferryCost,
+    this.bridgeCost = 0,
     required this.tollCost,
+    this.sweKm = 0,
+    this.deKm = 0,
+    this.tollableKm = 0,
     required this.tollPerLeg,
     required this.legKm,
     required this.extraPerLeg,

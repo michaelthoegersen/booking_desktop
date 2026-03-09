@@ -16,9 +16,17 @@ class GoogleRoutesService {
   static const String _dartDefineKey =
       String.fromEnvironment('GOOGLE_MAPS_API_KEY');
 
-  final String _apiKey = _dartDefineKey.isNotEmpty
+  late final String _apiKey = _dartDefineKey.isNotEmpty
       ? _dartDefineKey
-      : (dotenv.env['GOOGLE_MAPS_API_KEY'] ?? '');
+      : _loadApiKey();
+
+  static String _loadApiKey() {
+    try {
+      return dotenv.env['GOOGLE_MAPS_API_KEY'] ?? '';
+    } catch (_) {
+      return '';
+    }
+  }
 
   // ============================================================
   // WEB: Nominatim geocoding + OSRM routing
@@ -36,6 +44,7 @@ class GoogleRoutesService {
 
     final res = await http.get(url, headers: {
       'Accept': 'application/json',
+      'User-Agent': 'TourFlow/1.0 (tourflow-booking)',
     }).timeout(const Duration(seconds: 10));
 
     if (res.statusCode != 200) {
@@ -80,7 +89,9 @@ class GoogleRoutesService {
     debugPrint('🚗 OSRM: $osrmUrl');
 
     final res = await http
-        .get(osrmUrl)
+        .get(osrmUrl, headers: {
+          'User-Agent': 'TourFlow/1.0 (tourflow-booking)',
+        })
         .timeout(const Duration(seconds: 30));
 
     if (res.statusCode != 200) {
@@ -132,7 +143,7 @@ class GoogleRoutesService {
   Future<Map<String, dynamic>> getRouteWithVia({
     required List<String> places,
   }) async {
-    // On web: use Nominatim + OSRM (no API key, proper CORS headers)
+    // Web: OSRM (no API key, CORS OK). Desktop: Google Routes API.
     if (kIsWeb) {
       return _getRouteWeb(places: places);
     }
@@ -196,6 +207,8 @@ class GoogleRoutesService {
               'X-Goog-FieldMask':
                   'routes.distanceMeters,'
                   'routes.legs.distanceMeters,'
+                  'routes.legs.steps.travelMode,'
+                  'routes.legs.steps.navigationInstruction,'
                   'routes.polyline.encodedPolyline',
             },
             body: jsonEncode(body),
@@ -313,9 +326,43 @@ class GoogleRoutesService {
         }
       }
 
+      // --------------------------------------------------
+      // DETECT FERRY STEPS
+      // --------------------------------------------------
+      bool hasFerrySteps = false;
+      final List<String> ferryNames = [];
+
+      final ferryLegs = route['legs'];
+      if (ferryLegs is List) {
+        for (final leg in ferryLegs) {
+          final steps = leg['steps'];
+          if (steps is! List) continue;
+          for (final step in steps) {
+            final maneuver =
+                (step['navigationInstruction']?['maneuver'] as String? ?? '')
+                    .toUpperCase();
+            final isFerry = maneuver == 'FERRY' ||
+                maneuver == 'FERRY_BOAT' ||
+                maneuver == 'FERRY_TRAIN' ||
+                step['travelMode'] == 'FERRY';
+            if (isFerry) {
+              hasFerrySteps = true;
+              final instr =
+                  step['navigationInstruction']?['instructions'] as String?;
+              if (instr != null && instr.isNotEmpty && !ferryNames.contains(instr)) {
+                ferryNames.add(instr);
+              }
+            }
+          }
+        }
+      }
+      debugPrint('⛴️ Ferry detection: hasFerry=$hasFerrySteps, names=$ferryNames');
+
       parsedRoutes.add({
         "distanceMeters": distanceMeters,
         "polyline": polyline,
+        "hasFerrySteps": hasFerrySteps,
+        "ferryNames": ferryNames,
       });
     }
 

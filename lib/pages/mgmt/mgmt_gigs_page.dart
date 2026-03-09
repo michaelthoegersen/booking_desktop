@@ -1,9 +1,12 @@
 import 'dart:async';
+import 'dart:math';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../services/brreg_service.dart';
 import '../../state/active_company.dart';
@@ -61,6 +64,7 @@ class _MgmtGigsPageState extends State<MgmtGigsPage> {
           .from('gigs')
           .select('*, gig_shows(show_name)')
           .eq('company_id', _companyId!)
+          .eq('archived', false)
           .order('date_from', ascending: true);
 
       _gigs = List<Map<String, dynamic>>.from(gigs);
@@ -209,6 +213,7 @@ class _MgmtGigsPageState extends State<MgmtGigsPage> {
 
   Future<void> _openBookNightlinerDialog() async {
     if (_selectedGigIds.isEmpty || _companyId == null) return;
+    final cs = Theme.of(context).colorScheme;
 
     // Sort selected gigs by date
     final selectedGigs = _gigs
@@ -264,7 +269,7 @@ class _MgmtGigsPageState extends State<MgmtGigsPage> {
                   width: double.infinity,
                   padding: const EdgeInsets.all(10),
                   decoration: BoxDecoration(
-                    color: CssTheme.surface2,
+                    color: cs.surfaceContainerLow,
                     borderRadius: BorderRadius.circular(8),
                   ),
                   child: Column(
@@ -457,8 +462,103 @@ class _MgmtGigsPageState extends State<MgmtGigsPage> {
     }
   }
 
+  Future<void> _showCalendarDialog() async {
+    if (_companyId == null) return;
+    final cs = Theme.of(context).colorScheme;
+
+    // Check if calendar_token already exists
+    final company = await _sb
+        .from('companies')
+        .select('calendar_token')
+        .eq('id', _companyId!)
+        .maybeSingle();
+
+    String? token = company?['calendar_token'] as String?;
+
+    // Generate token if missing
+    if (token == null || token.isEmpty) {
+      final rng = Random.secure();
+      token = List.generate(32, (_) => rng.nextInt(256).toRadixString(16).padLeft(2, '0')).join();
+      await _sb
+          .from('companies')
+          .update({'calendar_token': token})
+          .eq('id', _companyId!);
+    }
+
+    final calUrl =
+        'https://fqefvgqlrntwgschkugf.supabase.co/functions/v1/gig-calendar'
+        '?company_id=$_companyId&token=$token';
+    final webcalUrl = calUrl.replaceFirst('https://', 'webcal://');
+
+    if (!mounted) return;
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Kalender-abonnement'),
+        content: SizedBox(
+          width: 500,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Abonner på gig-kalenderen i din kalender-app. '
+                'Kalenderen oppdateres automatisk når gigs endres.',
+                style: TextStyle(fontSize: 13),
+              ),
+              const SizedBox(height: 16),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: cs.surfaceContainerLow,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: SelectableText(
+                  calUrl,
+                  style: const TextStyle(fontSize: 12, fontFamily: 'monospace'),
+                ),
+              ),
+              const SizedBox(height: 16),
+              Row(
+                children: [
+                  OutlinedButton.icon(
+                    icon: const Icon(Icons.copy, size: 16),
+                    label: const Text('Kopier URL'),
+                    onPressed: () {
+                      Clipboard.setData(ClipboardData(text: calUrl));
+                      ScaffoldMessenger.of(ctx).showSnackBar(
+                        const SnackBar(content: Text('URL kopiert til utklippstavle')),
+                      );
+                    },
+                  ),
+                  const SizedBox(width: 8),
+                  FilledButton.icon(
+                    icon: const Icon(Icons.calendar_month, size: 16),
+                    label: const Text('Åpne i kalender'),
+                    onPressed: () {
+                      launchUrl(Uri.parse(webcalUrl));
+                    },
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Lukk'),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
     return Padding(
       padding: const EdgeInsets.all(18),
       child: Column(
@@ -485,20 +585,27 @@ class _MgmtGigsPageState extends State<MgmtGigsPage> {
                 ),
               ),
               const SizedBox(width: 12),
-              OutlinedButton.icon(
-                onPressed: () {
-                  setState(() {
-                    _selectionMode = !_selectionMode;
-                    if (!_selectionMode) _selectedGigIds.clear();
-                  });
-                },
-                icon: Icon(
-                  _selectionMode ? Icons.close : Icons.directions_bus,
-                  size: 18,
+              if (Supabase.instance.client.auth.currentUser?.email == 'michael@nttas.com')
+                OutlinedButton.icon(
+                  onPressed: () {
+                    setState(() {
+                      _selectionMode = !_selectionMode;
+                      if (!_selectionMode) _selectedGigIds.clear();
+                    });
+                  },
+                  icon: Icon(
+                    _selectionMode ? Icons.close : Icons.directions_bus,
+                    size: 18,
+                  ),
+                  label: Text(_selectionMode ? 'Avbryt' : 'Book Nightliner'),
                 ),
-                label: Text(_selectionMode ? 'Avbryt' : 'Book Nightliner'),
-              ),
               const SizedBox(width: 8),
+              IconButton(
+                onPressed: _showCalendarDialog,
+                icon: const Icon(Icons.calendar_month),
+                tooltip: 'Kalender-abonnement',
+              ),
+              const SizedBox(width: 4),
               FilledButton.icon(
                 onPressed: _openNewGigDialog,
                 icon: const Icon(Icons.add),
@@ -526,7 +633,7 @@ class _MgmtGigsPageState extends State<MgmtGigsPage> {
                   onSelected: (_) => setState(() => _statusFilter = s),
                   selectedColor: Colors.black,
                   labelStyle: TextStyle(
-                    color: selected ? Colors.white : CssTheme.text,
+                    color: selected ? Colors.white : cs.onSurface,
                     fontWeight: FontWeight.w700,
                   ),
                 ),
@@ -546,7 +653,7 @@ class _MgmtGigsPageState extends State<MgmtGigsPage> {
                           _search.isNotEmpty || _statusFilter != 'all'
                               ? 'Ingen gigs matcher filteret'
                               : 'Ingen gigs ennå. Opprett din første gig!',
-                          style: const TextStyle(color: CssTheme.textMuted),
+                          style: TextStyle(color: cs.onSurfaceVariant),
                         ),
                       )
                     : Column(
@@ -558,9 +665,9 @@ class _MgmtGigsPageState extends State<MgmtGigsPage> {
                                 children: [
                                   Text(
                                     '${_selectedGigIds.length} gig(s) valgt',
-                                    style: const TextStyle(
+                                    style: TextStyle(
                                       fontWeight: FontWeight.w700,
-                                      color: CssTheme.textMuted,
+                                      color: cs.onSurfaceVariant,
                                     ),
                                   ),
                                   const Spacer(),
@@ -731,9 +838,12 @@ class _NewGigDialogState extends State<_NewGigDialog> {
 
   Future<void> _loadShowTypes() async {
     try {
+      final companyId = activeCompanyNotifier.value?.id;
+      if (companyId == null) return;
       final res = await _sb
           .from('show_types')
           .select('*')
+          .eq('company_id', companyId)
           .eq('active', true)
           .order('sort_order');
       if (mounted) setState(() {
@@ -877,6 +987,19 @@ class _NewGigDialogState extends State<_NewGigDialog> {
           'sort_order': 0,
         });
       }
+
+      // Notify crew about the new gig
+      try {
+        final venue = n(_venueCtrl.text) ?? '';
+        final date = df.format(_dateFrom!);
+        await _sb.functions.invoke('notify-company', body: {
+          'company_id': widget.managementCompanyId,
+          'title': 'Ny gig: $venue',
+          'body': '$date — $venue',
+          'exclude_user_id': _sb.auth.currentUser?.id,
+          'gig_id': gigId,
+        });
+      } catch (_) {}
 
       if (mounted) Navigator.of(context).pop(gigId);
     } catch (e) {
@@ -1244,15 +1367,16 @@ class _NewGigDialogState extends State<_NewGigDialog> {
 
   // ── Widget helpers ─────────────────────────────────────────────────────────
 
-  static Widget _sec(String label) {
+  Widget _sec(String label) {
+    final cs = Theme.of(context).colorScheme;
     return Padding(
       padding: const EdgeInsets.only(top: 16, bottom: 6),
       child: Text(
         label.toUpperCase(),
-        style: const TextStyle(
+        style: TextStyle(
           fontSize: 11,
           fontWeight: FontWeight.w900,
-          color: CssTheme.textMuted,
+          color: cs.onSurfaceVariant,
           letterSpacing: 1,
         ),
       ),
@@ -1339,6 +1463,7 @@ class _CustomerPicker extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
     final selected = selectedCompany;
     return Row(
       crossAxisAlignment: CrossAxisAlignment.center,
@@ -1350,7 +1475,7 @@ class _CustomerPicker extends StatelessWidget {
               padding:
                   const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
               decoration: BoxDecoration(
-                border: Border.all(color: CssTheme.outline),
+                border: Border.all(color: cs.outlineVariant),
                 borderRadius: BorderRadius.circular(8),
                 color: loading
                     ? Colors.black.withValues(alpha: 0.04)
@@ -1362,14 +1487,14 @@ class _CustomerPicker extends StatelessWidget {
                     Icons.business_outlined,
                     size: 18,
                     color: loading
-                        ? CssTheme.textMuted
+                        ? cs.onSurfaceVariant
                         : Theme.of(context).colorScheme.primary,
                   ),
                   const SizedBox(width: 10),
                   Expanded(
                     child: loading
-                        ? const Text('Laster kunder…',
-                            style: TextStyle(color: CssTheme.textMuted))
+                        ? Text('Laster kunder…',
+                            style: TextStyle(color: cs.onSurfaceVariant))
                         : selected != null
                             ? Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -1383,16 +1508,16 @@ class _CustomerPicker extends StatelessWidget {
                                   if ((selected['city'] as String?) != null)
                                     Text(
                                       selected['city'] as String,
-                                      style: const TextStyle(
+                                      style: TextStyle(
                                           fontSize: 12,
-                                          color: CssTheme.textMuted),
+                                          color: cs.onSurfaceVariant),
                                     ),
                                 ],
                               )
-                            : const Text(
+                            : Text(
                                 'Velg kunde…',
                                 style:
-                                    TextStyle(color: CssTheme.textMuted),
+                                    TextStyle(color: cs.onSurfaceVariant),
                               ),
                   ),
                   if (selected != null)
@@ -1402,8 +1527,8 @@ class _CustomerPicker extends StatelessWidget {
                       onPressed: onClear,
                     )
                   else
-                    const Icon(Icons.arrow_drop_down,
-                        color: CssTheme.textMuted),
+                    Icon(Icons.arrow_drop_down,
+                        color: cs.onSurfaceVariant),
                 ],
               ),
             ),
@@ -1534,6 +1659,7 @@ class _CustomerPickerDialogState extends State<_CustomerPickerDialog>
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
     final filtered = _query.isEmpty
         ? widget.companies
         : widget.companies.where((c) {
@@ -1579,10 +1705,10 @@ class _CustomerPickerDialogState extends State<_CustomerPickerDialog>
                       const SizedBox(height: 8),
                       Expanded(
                         child: filtered.isEmpty
-                            ? const Center(
+                            ? Center(
                                 child: Text('Ingen treff',
                                     style: TextStyle(
-                                        color: CssTheme.textMuted)))
+                                        color: cs.onSurfaceVariant)))
                             : ListView.builder(
                                 itemCount: filtered.length,
                                 itemBuilder: (ctx, i) {
@@ -1651,8 +1777,8 @@ class _CustomerPickerDialogState extends State<_CustomerPickerDialog>
                                     _brregCtrl.text.isEmpty
                                         ? 'Søk etter bedrift i Enhetsregisteret'
                                         : 'Ingen treff',
-                                    style: const TextStyle(
-                                        color: CssTheme.textMuted),
+                                    style: TextStyle(
+                                        color: cs.onSurfaceVariant),
                                   ),
                                 )
                               : ListView.builder(
@@ -1715,6 +1841,7 @@ class _GigRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
     final dateFrom = gig['date_from'] as String?;
     final dateTo = gig['date_to'] as String?;
     final venue = gig['venue_name'] as String? ?? '';
@@ -1751,9 +1878,9 @@ class _GigRow extends StatelessWidget {
         margin: const EdgeInsets.only(bottom: 8),
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
-          color: CssTheme.surface,
+          color: cs.surfaceContainerLowest,
           borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: CssTheme.outline),
+          border: Border.all(color: cs.outlineVariant),
         ),
         child: Row(
           children: [
@@ -1786,8 +1913,8 @@ class _GigRow extends StatelessWidget {
                     if (locationLine.isNotEmpty)
                       Text(
                         locationLine,
-                        style: const TextStyle(
-                            color: CssTheme.textMuted, fontSize: 13),
+                        style: TextStyle(
+                            color: cs.onSurfaceVariant, fontSize: 13),
                       ),
                   ] else ...[
                     if (locationLine.isNotEmpty)
@@ -1799,14 +1926,14 @@ class _GigRow extends StatelessWidget {
                     if (customerLine.isNotEmpty)
                       Text(
                         customerLine,
-                        style: const TextStyle(
-                            color: CssTheme.textMuted, fontSize: 13),
+                        style: TextStyle(
+                            color: cs.onSurfaceVariant, fontSize: 13),
                       ),
                     if (shows.isNotEmpty)
                       Text(
                         shows,
-                        style: const TextStyle(
-                            fontSize: 12, color: CssTheme.textMuted),
+                        style: TextStyle(
+                            fontSize: 12, color: cs.onSurfaceVariant),
                       ),
                   ],
                 ],
@@ -1845,7 +1972,7 @@ class _GigRow extends StatelessWidget {
             if (type != 'rehearsal' && status != 'cancelled')
               _GigStatusBadge(status: status),
             PopupMenuButton<String>(
-              icon: const Icon(Icons.more_vert, color: CssTheme.textMuted),
+              icon: Icon(Icons.more_vert, color: cs.onSurfaceVariant),
               onSelected: (v) {
                 if (v == 'delete') onDelete();
               },

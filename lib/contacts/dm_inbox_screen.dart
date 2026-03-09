@@ -3,6 +3,7 @@ import 'package:intl/intl.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../services/direct_chat_service.dart';
+import '../state/active_company.dart';
 import '../ui/css_theme.dart';
 import 'direct_chat_screen.dart';
 
@@ -20,22 +21,35 @@ class _DmInboxScreenState extends State<DmInboxScreen> {
   /// Cache: peerId → {name, avatar_url}
   final Map<String, Map<String, dynamic>> _profileCache = {};
 
+  @override
+  void initState() {
+    super.initState();
+    _preloadProfiles();
+  }
+
+  /// Pre-load all company member profiles via SECURITY DEFINER RPC
+  /// so individual profile lookups don't hit RLS restrictions.
+  Future<void> _preloadProfiles() async {
+    try {
+      final companyId = activeCompanyNotifier.value?.id;
+      if (companyId == null) return;
+      final rows = await _sb.rpc(
+        'get_company_member_profiles',
+        params: {'p_company_id': companyId},
+      );
+      for (final r in (rows as List)) {
+        final id = r['id'].toString();
+        _profileCache[id] = Map<String, dynamic>.from(r);
+      }
+    } catch (_) {}
+  }
+
   Future<Map<String, dynamic>> _getProfile(String peerId) async {
     if (_profileCache.containsKey(peerId)) return _profileCache[peerId]!;
-    try {
-      final res = await _sb
-          .from('profiles')
-          .select('id, name, avatar_url')
-          .eq('id', peerId)
-          .maybeSingle();
-      final profile = res ?? {'id': peerId, 'name': 'Unknown', 'avatar_url': null};
-      _profileCache[peerId] = profile;
-      return profile;
-    } catch (_) {
-      final fallback = {'id': peerId, 'name': 'Unknown', 'avatar_url': null};
-      _profileCache[peerId] = fallback;
-      return fallback;
-    }
+    // Fallback for peers outside company (edge case)
+    final fallback = {'id': peerId, 'name': 'Unknown', 'avatar_url': null};
+    _profileCache[peerId] = fallback;
+    return fallback;
   }
 
   @override

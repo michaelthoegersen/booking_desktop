@@ -1,11 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../services/direct_chat_service.dart';
 import '../../services/group_chat_service.dart';
 import '../../state/active_company.dart';
-import '../../ui/css_theme.dart';
+import '../../widgets/mention_helpers.dart';
 import '../../widgets/mgmt_shell.dart' show mgmtUnreadNotifier;
 
 class MgmtMessagesPage extends StatefulWidget {
@@ -54,6 +55,7 @@ class _MgmtMessagesPageState extends State<MgmtMessagesPage>
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
     return Row(
       children: [
         // Left panel: thread list with tabs
@@ -63,9 +65,9 @@ class _MgmtMessagesPageState extends State<MgmtMessagesPage>
             children: [
               // Tab bar
               Container(
-                decoration: const BoxDecoration(
+                decoration: BoxDecoration(
                   border:
-                      Border(bottom: BorderSide(color: CssTheme.outline)),
+                      Border(bottom: BorderSide(color: cs.outlineVariant)),
                 ),
                 child: TabBar(
                   controller: _tabCtrl,
@@ -167,6 +169,131 @@ class _ChatThreadListState extends State<_ChatThreadList> {
   String get _myId => _sb.auth.currentUser?.id ?? '';
 
   final Map<String, Map<String, dynamic>> _profileCache = {};
+
+  // Read cursors for unread badges
+  Map<String, DateTime> _dmCursors = {};
+  Map<String, DateTime> _groupCursors = {};
+  Map<String, int> _groupUnreads = {};
+
+  @override
+  void initState() {
+    super.initState();
+    _loadCursors();
+    mgmtUnreadNotifier.addListener(_loadCursors);
+  }
+
+  @override
+  void dispose() {
+    mgmtUnreadNotifier.removeListener(_loadCursors);
+    super.dispose();
+  }
+
+  Future<void> _loadCursors() async {
+    try {
+      final dmRes = await _sb
+          .from('dm_read_cursors')
+          .select('peer_id, last_read_at')
+          .eq('user_id', _myId);
+      _dmCursors = {};
+      for (final r in (dmRes as List)) {
+        _dmCursors[r['peer_id'] as String] =
+            DateTime.parse(r['last_read_at'] as String);
+      }
+
+      final groupRes = await _sb
+          .from('group_read_cursors')
+          .select('group_chat_id, last_read_at')
+          .eq('user_id', _myId);
+      _groupCursors = {};
+      for (final r in (groupRes as List)) {
+        _groupCursors[r['group_chat_id'] as String] =
+            DateTime.parse(r['last_read_at'] as String);
+      }
+
+      await _loadGroupUnreads();
+      if (mounted) setState(() {});
+    } catch (e) {
+      debugPrint('Load cursors error: $e');
+    }
+  }
+
+  Future<void> _loadGroupUnreads() async {
+    try {
+      final myGroups = await _sb
+          .from('group_chat_members')
+          .select('group_chat_id')
+          .eq('user_id', _myId);
+      final groupIds = (myGroups as List)
+          .map((r) => r['group_chat_id'] as String)
+          .toList();
+      if (groupIds.isEmpty) {
+        _groupUnreads = {};
+        return;
+      }
+
+      final msgs = await _sb
+          .from('group_chat_messages')
+          .select('group_chat_id, created_at')
+          .inFilter('group_chat_id', groupIds)
+          .neq('user_id', _myId)
+          .order('created_at', ascending: false)
+          .limit(500);
+
+      _groupUnreads = {};
+      for (final msg in (msgs as List)) {
+        final groupId = msg['group_chat_id'] as String;
+        final createdAt = DateTime.parse(msg['created_at'] as String);
+        final cursor = _groupCursors[groupId];
+        if (cursor == null || createdAt.isAfter(cursor)) {
+          _groupUnreads[groupId] = (_groupUnreads[groupId] ?? 0) + 1;
+        }
+      }
+    } catch (e) {
+      debugPrint('Load group unreads error: $e');
+    }
+  }
+
+  Future<void> _markDmRead(String peerId) async {
+    final now = DateTime.now().toUtc();
+    _dmCursors[peerId] = now;
+    setState(() {});
+    try {
+      await _sb.from('dm_read_cursors').upsert({
+        'user_id': _myId,
+        'peer_id': peerId,
+        'last_read_at': now.toIso8601String(),
+      });
+    } catch (e) {
+      debugPrint('Mark DM read error: $e');
+    }
+    mgmtUnreadNotifier.value++;
+  }
+
+  Future<void> _markGroupRead(String groupId) async {
+    final now = DateTime.now().toUtc();
+    _groupCursors[groupId] = now;
+    _groupUnreads.remove(groupId);
+    setState(() {});
+    try {
+      await _sb.from('group_read_cursors').upsert({
+        'user_id': _myId,
+        'group_chat_id': groupId,
+        'last_read_at': now.toIso8601String(),
+      });
+    } catch (e) {
+      debugPrint('Mark group read error: $e');
+    }
+    mgmtUnreadNotifier.value++;
+  }
+
+  void _handleSelect(String key) {
+    widget.onSelect(key);
+    if (key.startsWith('dm:')) {
+      _markDmRead(key.substring(3));
+    } else if (key.startsWith('group:')) {
+      _markGroupRead(key.substring(6));
+    }
+  }
 
   Future<Map<String, dynamic>> _getProfile(String peerId) async {
     if (_profileCache.containsKey(peerId)) return _profileCache[peerId]!;
@@ -481,17 +608,19 @@ class _ChatThreadListState extends State<_ChatThreadList> {
                   myId: _myId,
                   getProfile: _getProfile,
                   selectedKey: widget.selectedKey,
-                  onSelect: widget.onSelect,
+                  onSelect: _handleSelect,
                   onDeleteConversation:
                       isAdmin ? confirmDeleteDm : null,
+                  dmCursors: _dmCursors,
                 ),
 
                 // Groups
                 _GroupList(
                   selectedKey: widget.selectedKey,
-                  onSelect: widget.onSelect,
+                  onSelect: _handleSelect,
                   onDeleteGroup:
                       isAdmin ? confirmDeleteGroup : null,
+                  groupUnreads: _groupUnreads,
                 ),
               ],
             );
@@ -512,6 +641,7 @@ class _DmList extends StatelessWidget {
   final String? selectedKey;
   final void Function(String) onSelect;
   final void Function(String peerId)? onDeleteConversation;
+  final Map<String, DateTime> dmCursors;
 
   const _DmList({
     required this.myId,
@@ -519,6 +649,7 @@ class _DmList extends StatelessWidget {
     required this.selectedKey,
     required this.onSelect,
     this.onDeleteConversation,
+    this.dmCursors = const {},
   });
 
   @override
@@ -544,12 +675,20 @@ class _DmList extends StatelessWidget {
             final bTime = b['created_at'] as String? ?? '';
             return bTime.compareTo(aTime);
           });
-          return MapEntry(e.key, msgs.first);
+          // Calculate unread: messages from peer that are newer than cursor
+          final cursor = dmCursors[e.key];
+          final unread = msgs.where((m) {
+            if (m['sender_id'] == myId) return false;
+            if (cursor == null) return true;
+            final createdAt = DateTime.tryParse(m['created_at'] as String? ?? '');
+            return createdAt != null && createdAt.isAfter(cursor);
+          }).length;
+          return MapEntry(e.key, (msgs.first, unread));
         }).toList();
 
         conversations.sort((a, b) {
-          final aTime = a.value['created_at'] as String? ?? '';
-          final bTime = b.value['created_at'] as String? ?? '';
+          final aTime = a.value.$1['created_at'] as String? ?? '';
+          final bTime = b.value.$1['created_at'] as String? ?? '';
           return bTime.compareTo(aTime);
         });
 
@@ -570,7 +709,8 @@ class _DmList extends StatelessWidget {
               return _DmTile(
                 key: ValueKey(key),
                 peerId: entry.key,
-                lastMessage: entry.value,
+                lastMessage: entry.value.$1,
+                unreadCount: entry.value.$2,
                 myId: myId,
                 getProfile: getProfile,
                 isSelected: isSelected,
@@ -590,6 +730,7 @@ class _DmList extends StatelessWidget {
 class _DmTile extends StatefulWidget {
   final String peerId;
   final Map<String, dynamic> lastMessage;
+  final int unreadCount;
   final String myId;
   final Future<Map<String, dynamic>> Function(String) getProfile;
   final bool isSelected;
@@ -600,6 +741,7 @@ class _DmTile extends StatefulWidget {
     super.key,
     required this.peerId,
     required this.lastMessage,
+    this.unreadCount = 0,
     required this.myId,
     required this.getProfile,
     required this.isSelected,
@@ -687,12 +829,41 @@ class _DmTileState extends State<_DmTile> {
                 ],
               ),
             ),
-            if (timeStr != null)
-              Text(timeStr,
-                  style: TextStyle(
-                    fontSize: 11,
-                    color: widget.isSelected ? Colors.white54 : Colors.black38,
-                  )),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                if (timeStr != null)
+                  Text(timeStr,
+                      style: TextStyle(
+                        fontSize: 11,
+                        color:
+                            widget.isSelected ? Colors.white54 : Colors.black38,
+                      )),
+                if (widget.unreadCount > 0) ...[
+                  const SizedBox(height: 4),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 7, vertical: 3),
+                    decoration: BoxDecoration(
+                      color:
+                          widget.isSelected ? Colors.white : Colors.red,
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                    child: Text(
+                      widget.unreadCount > 99
+                          ? '99+'
+                          : '${widget.unreadCount}',
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w800,
+                        color:
+                            widget.isSelected ? Colors.red : Colors.white,
+                      ),
+                    ),
+                  ),
+                ],
+              ],
+            ),
           ],
         ),
       ),
@@ -723,11 +894,13 @@ class _GroupList extends StatelessWidget {
   final String? selectedKey;
   final void Function(String) onSelect;
   final void Function(String groupId)? onDeleteGroup;
+  final Map<String, int> groupUnreads;
 
   const _GroupList({
     required this.selectedKey,
     required this.onSelect,
     this.onDeleteGroup,
+    this.groupUnreads = const {},
   });
 
   @override
@@ -753,6 +926,7 @@ class _GroupList extends StatelessWidget {
               final groupId = g['id'] as String;
               final key = 'group:$groupId';
               final isSelected = selectedKey == key;
+              final unread = groupUnreads[groupId] ?? 0;
               return InkWell(
                 onTap: () => onSelect(key),
                 onSecondaryTapUp: onDeleteGroup == null
@@ -794,6 +968,23 @@ class _GroupList extends StatelessWidget {
                           ),
                         ),
                       ),
+                      if (unread > 0)
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 7, vertical: 3),
+                          decoration: BoxDecoration(
+                            color: isSelected ? Colors.white : Colors.red,
+                            borderRadius: BorderRadius.circular(999),
+                          ),
+                          child: Text(
+                            unread > 99 ? '99+' : '$unread',
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w800,
+                              color: isSelected ? Colors.red : Colors.white,
+                            ),
+                          ),
+                        ),
                     ],
                   ),
                 ),
@@ -818,17 +1009,20 @@ class _DmChatView extends StatefulWidget {
   State<_DmChatView> createState() => _DmChatViewState();
 }
 
-class _DmChatViewState extends State<_DmChatView> {
+class _DmChatViewState extends State<_DmChatView> with MentionMixin {
   final _sb = Supabase.instance.client;
   final _controller = TextEditingController();
   final _scrollController = ScrollController();
   bool _sending = false;
   String? _peerName;
   String? _senderName;
+  String? _editingMessageId;
+  Map<String, dynamic>? _replyTo;
 
   @override
   void initState() {
     super.initState();
+    _controller.addListener(() => onMentionTextChanged(_controller));
     _load();
   }
 
@@ -840,6 +1034,10 @@ class _DmChatViewState extends State<_DmChatView> {
         .maybeSingle();
     _peerName = peer?['name'] as String? ?? '';
     _senderName = await DirectChatService.getSenderName();
+    // In DM, the only mention candidate is the peer
+    initMentionCandidates([
+      MentionCandidate(id: widget.peerId, name: _peerName ?? ''),
+    ]);
     if (mounted) setState(() {});
   }
 
@@ -850,17 +1048,51 @@ class _DmChatViewState extends State<_DmChatView> {
     super.dispose();
   }
 
+  void _startEdit(Map<String, dynamic> msg) {
+    setState(() {
+      _editingMessageId = msg['id'] as String;
+      _replyTo = null;
+      _controller.text = msg['message'] as String? ?? '';
+    });
+  }
+
+  void _startReply(Map<String, dynamic> msg) {
+    setState(() {
+      _replyTo = msg;
+      _editingMessageId = null;
+      _controller.clear();
+    });
+  }
+
+  void _cancelEdit() {
+    setState(() { _editingMessageId = null; _controller.clear(); });
+  }
+
+  void _cancelReply() {
+    setState(() => _replyTo = null);
+  }
+
   Future<void> _send() async {
     final text = _controller.text.trim();
     if (text.isEmpty || _sending || _senderName == null) return;
     setState(() => _sending = true);
     _controller.clear();
     try {
-      await DirectChatService.sendMessage(
-        peerId: widget.peerId,
-        message: text,
-        senderName: _senderName!,
-      );
+      if (_editingMessageId != null) {
+        await DirectChatService.updateMessage(_editingMessageId!, text);
+        setState(() => _editingMessageId = null);
+      } else {
+        final mentions = List<String>.from(mentionedUserIds);
+        await DirectChatService.sendMessage(
+          peerId: widget.peerId,
+          message: text,
+          senderName: _senderName!,
+          replyToId: _replyTo?['id'] as String?,
+          mentionedUserIds: mentions.isNotEmpty ? mentions : null,
+        );
+        clearMentions();
+        setState(() => _replyTo = null);
+      }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context)
@@ -871,20 +1103,130 @@ class _DmChatViewState extends State<_DmChatView> {
     }
   }
 
-  void _scrollToBottom() {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_scrollController.hasClients) {
-        _scrollController.animateTo(
-          _scrollController.position.maxScrollExtent,
-          duration: const Duration(milliseconds: 300),
-          curve: Curves.easeOut,
+  Future<void> _showConvertToGroupDialog(BuildContext context) async {
+    final groupNameController = TextEditingController(text: _peerName ?? '');
+    final selectedIds = <String>{};
+    List<Map<String, dynamic>> contacts = [];
+
+    try {
+      final companyId = activeCompanyNotifier.value?.id;
+      if (companyId != null) {
+        final rows = await _sb.rpc(
+          'get_company_member_profiles',
+          params: {'p_company_id': companyId},
+        );
+        final myId = _sb.auth.currentUser?.id;
+        contacts = (rows as List)
+            .cast<Map<String, dynamic>>()
+            .where((r) => r['id'] != myId && r['id'] != widget.peerId)
+            .toList();
+      }
+    } catch (_) {}
+
+    if (!mounted) return;
+
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (ctx, setDialogState) {
+            return AlertDialog(
+              title: const Text('Opprett gruppe'),
+              content: SizedBox(
+                width: 350,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    TextField(
+                      controller: groupNameController,
+                      decoration: const InputDecoration(
+                        labelText: 'Gruppenavn',
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    if (contacts.isNotEmpty) ...[
+                      const Align(
+                        alignment: Alignment.centerLeft,
+                        child: Text('Legg til personer:',
+                            style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+                      ),
+                      const SizedBox(height: 8),
+                      ConstrainedBox(
+                        constraints: const BoxConstraints(maxHeight: 200),
+                        child: ListView.builder(
+                          shrinkWrap: true,
+                          itemCount: contacts.length,
+                          itemBuilder: (_, i) {
+                            final c = contacts[i];
+                            final id = c['id'] as String;
+                            final name = c['name'] as String? ?? '';
+                            return CheckboxListTile(
+                              value: selectedIds.contains(id),
+                              title: Text(name),
+                              dense: true,
+                              onChanged: (v) {
+                                setDialogState(() {
+                                  if (v == true) {
+                                    selectedIds.add(id);
+                                  } else {
+                                    selectedIds.remove(id);
+                                  }
+                                });
+                              },
+                            );
+                          },
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx, false),
+                  child: const Text('Avbryt'),
+                ),
+                FilledButton(
+                  onPressed: () => Navigator.pop(ctx, true),
+                  style: FilledButton.styleFrom(backgroundColor: Colors.black),
+                  child: const Text('Opprett'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+
+    if (result != true || !mounted) return;
+
+    final name = groupNameController.text.trim();
+    if (name.isEmpty) return;
+
+    try {
+      await DirectChatService.convertToGroup(
+        widget.peerId,
+        name,
+        selectedIds.toList(),
+      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Gruppe opprettet!')),
         );
       }
-    });
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Feil: $e')),
+        );
+      }
+    }
   }
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
     final myId = _sb.auth.currentUser?.id ?? '';
 
     return Column(
@@ -893,12 +1235,23 @@ class _DmChatViewState extends State<_DmChatView> {
         Container(
           width: double.infinity,
           padding: const EdgeInsets.fromLTRB(20, 12, 12, 12),
-          decoration: const BoxDecoration(
-            border: Border(bottom: BorderSide(color: CssTheme.outline)),
+          decoration: BoxDecoration(
+            border: Border(bottom: BorderSide(color: cs.outlineVariant)),
           ),
-          child: Text(
-            _peerName ?? '...',
-            style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16),
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  _peerName ?? '...',
+                  style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16),
+                ),
+              ),
+              IconButton(
+                icon: const Icon(Icons.person_add_rounded, size: 20),
+                tooltip: 'Legg til personer',
+                onPressed: () => _showConvertToGroupDialog(context),
+              ),
+            ],
           ),
         ),
 
@@ -908,7 +1261,6 @@ class _DmChatViewState extends State<_DmChatView> {
             stream: DirectChatService.streamMessages(widget.peerId),
             builder: (context, snapshot) {
               final messages = snapshot.data ?? [];
-              if (messages.isNotEmpty) _scrollToBottom();
               if (messages.isEmpty) {
                 return const Center(
                   child: Text('Ingen meldinger',
@@ -917,17 +1269,32 @@ class _DmChatViewState extends State<_DmChatView> {
               }
               return ListView.separated(
                 controller: _scrollController,
+                reverse: true,
                 padding: const EdgeInsets.all(20),
                 itemCount: messages.length,
                 separatorBuilder: (_, __) => const SizedBox(height: 8),
                 itemBuilder: (context, i) {
                   final msg = messages[i];
                   final isMine = msg['sender_id'] == myId;
+
+                  Map<String, dynamic>? replyMsg;
+                  final replyToId = msg['reply_to_id'];
+                  if (replyToId != null) {
+                    replyMsg = messages.cast<Map<String, dynamic>?>().firstWhere(
+                      (m) => m?['id'] == replyToId,
+                      orElse: () => null,
+                    );
+                  }
+
                   return _Bubble(
                     message: msg['message'] as String? ?? '',
                     senderName: msg['sender_name'] as String? ?? '',
                     isAdmin: isMine,
                     createdAt: msg['created_at'] as String?,
+                    editedAt: msg['edited_at'] as String?,
+                    replyMsg: replyMsg,
+                    onReply: () => _startReply(msg),
+                    onEdit: isMine ? () => _startEdit(msg) : null,
                   );
                 },
               );
@@ -935,11 +1302,21 @@ class _DmChatViewState extends State<_DmChatView> {
           ),
         ),
 
+        // Mention suggestions
+        MentionOverlay(
+          suggestions: mentionSuggestions,
+          onSelect: (c) => insertMention(_controller, c),
+        ),
+
         // Input
         _ChatInput(
           controller: _controller,
           sending: _sending,
           onSend: _send,
+          editingMessageId: _editingMessageId,
+          replyTo: _replyTo,
+          onCancelEdit: _cancelEdit,
+          onCancelReply: _cancelReply,
         ),
       ],
     );
@@ -958,17 +1335,20 @@ class _GroupChatView extends StatefulWidget {
   State<_GroupChatView> createState() => _GroupChatViewState();
 }
 
-class _GroupChatViewState extends State<_GroupChatView> {
+class _GroupChatViewState extends State<_GroupChatView> with MentionMixin {
   final _sb = Supabase.instance.client;
   final _controller = TextEditingController();
   final _scrollController = ScrollController();
   bool _sending = false;
   String? _senderName;
   String _groupName = '';
+  String? _editingMessageId;
+  Map<String, dynamic>? _replyTo;
 
   @override
   void initState() {
     super.initState();
+    _controller.addListener(() => onMentionTextChanged(_controller));
     _load();
   }
 
@@ -980,6 +1360,23 @@ class _GroupChatViewState extends State<_GroupChatView> {
         .eq('id', widget.groupId)
         .maybeSingle();
     _groupName = group?['name'] as String? ?? '';
+    // Load group members as mention candidates
+    try {
+      final members = await GroupChatService.getGroupMembers(widget.groupId);
+      final myId = _sb.auth.currentUser?.id;
+      final candidates = members
+          .where((m) => m['user_id'] != myId)
+          .map((m) {
+            final profile = m['profiles'] as Map<String, dynamic>?;
+            return MentionCandidate(
+              id: m['user_id'] as String,
+              name: profile?['name'] as String? ?? '',
+            );
+          })
+          .where((c) => c.name.isNotEmpty)
+          .toList();
+      initMentionCandidates(candidates);
+    } catch (_) {}
     if (mounted) setState(() {});
   }
 
@@ -990,17 +1387,51 @@ class _GroupChatViewState extends State<_GroupChatView> {
     super.dispose();
   }
 
+  void _startEdit(Map<String, dynamic> msg) {
+    setState(() {
+      _editingMessageId = msg['id'] as String;
+      _replyTo = null;
+      _controller.text = msg['message'] as String? ?? '';
+    });
+  }
+
+  void _startReply(Map<String, dynamic> msg) {
+    setState(() {
+      _replyTo = msg;
+      _editingMessageId = null;
+      _controller.clear();
+    });
+  }
+
+  void _cancelEdit() {
+    setState(() { _editingMessageId = null; _controller.clear(); });
+  }
+
+  void _cancelReply() {
+    setState(() => _replyTo = null);
+  }
+
   Future<void> _send() async {
     final text = _controller.text.trim();
     if (text.isEmpty || _sending || _senderName == null) return;
     setState(() => _sending = true);
     _controller.clear();
     try {
-      await GroupChatService.sendGroupMessage(
-        groupId: widget.groupId,
-        message: text,
-        senderName: _senderName!,
-      );
+      if (_editingMessageId != null) {
+        await GroupChatService.updateGroupMessage(_editingMessageId!, text);
+        setState(() => _editingMessageId = null);
+      } else {
+        final mentions = List<String>.from(mentionedUserIds);
+        await GroupChatService.sendGroupMessage(
+          groupId: widget.groupId,
+          message: text,
+          senderName: _senderName!,
+          replyToId: _replyTo?['id'] as String?,
+          mentionedUserIds: mentions.isNotEmpty ? mentions : null,
+        );
+        clearMentions();
+        setState(() => _replyTo = null);
+      }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context)
@@ -1011,20 +1442,9 @@ class _GroupChatViewState extends State<_GroupChatView> {
     }
   }
 
-  void _scrollToBottom() {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_scrollController.hasClients) {
-        _scrollController.animateTo(
-          _scrollController.position.maxScrollExtent,
-          duration: const Duration(milliseconds: 300),
-          curve: Curves.easeOut,
-        );
-      }
-    });
-  }
-
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
     final myId = _sb.auth.currentUser?.id ?? '';
 
     return Column(
@@ -1033,8 +1453,8 @@ class _GroupChatViewState extends State<_GroupChatView> {
         Container(
           width: double.infinity,
           padding: const EdgeInsets.fromLTRB(20, 12, 12, 12),
-          decoration: const BoxDecoration(
-            border: Border(bottom: BorderSide(color: CssTheme.outline)),
+          decoration: BoxDecoration(
+            border: Border(bottom: BorderSide(color: cs.outlineVariant)),
           ),
           child: Row(
             children: [
@@ -1055,7 +1475,6 @@ class _GroupChatViewState extends State<_GroupChatView> {
             stream: GroupChatService.streamGroupMessages(widget.groupId),
             builder: (context, snapshot) {
               final messages = snapshot.data ?? [];
-              if (messages.isNotEmpty) _scrollToBottom();
               if (messages.isEmpty) {
                 return const Center(
                   child: Text('Ingen meldinger',
@@ -1064,17 +1483,32 @@ class _GroupChatViewState extends State<_GroupChatView> {
               }
               return ListView.separated(
                 controller: _scrollController,
+                reverse: true,
                 padding: const EdgeInsets.all(20),
                 itemCount: messages.length,
                 separatorBuilder: (_, __) => const SizedBox(height: 8),
                 itemBuilder: (context, i) {
                   final msg = messages[i];
                   final isMine = msg['user_id'] == myId;
+
+                  Map<String, dynamic>? replyMsg;
+                  final replyToId = msg['reply_to_id'];
+                  if (replyToId != null) {
+                    replyMsg = messages.cast<Map<String, dynamic>?>().firstWhere(
+                      (m) => m?['id'] == replyToId,
+                      orElse: () => null,
+                    );
+                  }
+
                   return _Bubble(
                     message: msg['message'] as String? ?? '',
                     senderName: msg['sender_name'] as String? ?? '',
                     isAdmin: isMine,
                     createdAt: msg['created_at'] as String?,
+                    editedAt: msg['edited_at'] as String?,
+                    replyMsg: replyMsg,
+                    onReply: () => _startReply(msg),
+                    onEdit: isMine ? () => _startEdit(msg) : null,
                   );
                 },
               );
@@ -1082,11 +1516,21 @@ class _GroupChatViewState extends State<_GroupChatView> {
           ),
         ),
 
+        // Mention suggestions
+        MentionOverlay(
+          suggestions: mentionSuggestions,
+          onSelect: (c) => insertMention(_controller, c),
+        ),
+
         // Input
         _ChatInput(
           controller: _controller,
           sending: _sending,
           onSend: _send,
+          editingMessageId: _editingMessageId,
+          replyTo: _replyTo,
+          onCancelEdit: _cancelEdit,
+          onCancelReply: _cancelReply,
         ),
       ],
     );
@@ -1097,67 +1541,165 @@ class _GroupChatViewState extends State<_GroupChatView> {
 // Shared chat input bar
 // ===========================================================================
 
-class _ChatInput extends StatelessWidget {
+class _ChatInput extends StatefulWidget {
   final TextEditingController controller;
   final bool sending;
   final VoidCallback onSend;
+  final String? editingMessageId;
+  final Map<String, dynamic>? replyTo;
+  final VoidCallback? onCancelEdit;
+  final VoidCallback? onCancelReply;
 
   const _ChatInput({
     required this.controller,
     required this.sending,
     required this.onSend,
+    this.editingMessageId,
+    this.replyTo,
+    this.onCancelEdit,
+    this.onCancelReply,
   });
 
   @override
+  State<_ChatInput> createState() => _ChatInputState();
+}
+
+class _ChatInputState extends State<_ChatInput> {
+  final _focusNode = FocusNode();
+
+  @override
+  void initState() {
+    super.initState();
+    _focusNode.onKeyEvent = _handleKeyEvent;
+  }
+
+  @override
+  void dispose() {
+    _focusNode.dispose();
+    super.dispose();
+  }
+
+  KeyEventResult _handleKeyEvent(FocusNode node, KeyEvent event) {
+    if (event is KeyDownEvent &&
+        event.logicalKey == LogicalKeyboardKey.enter &&
+        !HardwareKeyboard.instance.isShiftPressed) {
+      widget.onSend();
+      return KeyEventResult.handled;
+    }
+    return KeyEventResult.ignored;
+  }
+
+  static String _truncate(String s, int max) =>
+      s.length <= max ? s : '${s.substring(0, max)}…';
+
+  @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: const BoxDecoration(
-        border: Border(top: BorderSide(color: CssTheme.outline)),
-      ),
-      child: Row(
-        children: [
-          Expanded(
-            child: TextField(
-              controller: controller,
-              onSubmitted: (_) => onSend(),
-              decoration: InputDecoration(
-                hintText: 'Skriv en melding…',
-                filled: true,
-                fillColor: const Color(0xFFF5F5F5),
-                contentPadding: const EdgeInsets.symmetric(
-                    horizontal: 16, vertical: 12),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  borderSide: BorderSide.none,
+    final cs = Theme.of(context).colorScheme;
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        // Reply preview bar
+        if (widget.replyTo != null)
+          Container(
+            padding: const EdgeInsets.fromLTRB(16, 8, 8, 0),
+            child: Row(
+              children: [
+                Container(width: 3, height: 36, decoration: BoxDecoration(
+                  color: Colors.black, borderRadius: BorderRadius.circular(2),
+                )),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(widget.replyTo!['sender_name'] as String? ?? '',
+                        style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 12)),
+                      Text(_truncate(widget.replyTo!['message'] as String? ?? '', 60),
+                        style: const TextStyle(fontSize: 12, color: Colors.black54),
+                        maxLines: 1, overflow: TextOverflow.ellipsis),
+                    ],
+                  ),
                 ),
-              ),
+                IconButton(icon: const Icon(Icons.close, size: 18),
+                  onPressed: widget.onCancelReply),
+              ],
             ),
           ),
-          const SizedBox(width: 10),
-          sending
-              ? const SizedBox(
-                  width: 44,
-                  height: 44,
-                  child: Padding(
-                    padding: EdgeInsets.all(10),
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  ),
-                )
-              : FilledButton.icon(
-                  onPressed: onSend,
-                  icon: const Icon(Icons.send_rounded, size: 18),
-                  label: const Text('Send'),
-                  style: FilledButton.styleFrom(
-                    backgroundColor: Colors.black,
-                    padding: const EdgeInsets.symmetric(
+
+        // Edit indicator
+        if (widget.editingMessageId != null)
+          Container(
+            padding: const EdgeInsets.fromLTRB(16, 8, 8, 0),
+            color: const Color(0xFFFFF9C4),
+            child: Row(
+              children: [
+                const Icon(Icons.edit, size: 16, color: Colors.black54),
+                const SizedBox(width: 8),
+                const Text('Redigerer melding', style: TextStyle(fontSize: 12, color: Colors.black54)),
+                const Spacer(),
+                IconButton(icon: const Icon(Icons.close, size: 18),
+                  onPressed: widget.onCancelEdit),
+              ],
+            ),
+          ),
+
+        Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            border: Border(top: BorderSide(color: cs.outlineVariant)),
+          ),
+          child: Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: widget.controller,
+                  focusNode: _focusNode,
+                  maxLines: 5,
+                  minLines: 1,
+                  keyboardType: TextInputType.multiline,
+                  textCapitalization: TextCapitalization.sentences,
+                  decoration: InputDecoration(
+                    hintText: 'Skriv en melding…',
+                    filled: true,
+                    fillColor: const Color(0xFFF5F5F5),
+                    contentPadding: const EdgeInsets.symmetric(
                         horizontal: 16, vertical: 12),
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12)),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: BorderSide.none,
+                    ),
                   ),
                 ),
-        ],
-      ),
+              ),
+              const SizedBox(width: 10),
+              widget.sending
+                  ? const SizedBox(
+                      width: 44, height: 44,
+                      child: Padding(
+                        padding: EdgeInsets.all(10),
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      ),
+                    )
+                  : FilledButton.icon(
+                      onPressed: widget.onSend,
+                      icon: Icon(
+                        widget.editingMessageId != null ? Icons.check_rounded : Icons.send_rounded,
+                        size: 18,
+                      ),
+                      label: Text(widget.editingMessageId != null ? 'Lagre' : 'Send'),
+                      style: FilledButton.styleFrom(
+                        backgroundColor: Colors.black,
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 16, vertical: 12),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12)),
+                      ),
+                    ),
+            ],
+          ),
+        ),
+      ],
     );
   }
 }
@@ -1175,6 +1717,7 @@ class _GigThreadList extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
     final sb = Supabase.instance.client;
 
     return StreamBuilder<List<Map<String, dynamic>>>(
@@ -1212,7 +1755,7 @@ class _GigThreadList extends StatelessWidget {
         return ListView.separated(
           itemCount: threads.length,
           separatorBuilder: (_, __) =>
-              const Divider(height: 1, color: CssTheme.outline),
+              Divider(height: 1, color: cs.outlineVariant),
           itemBuilder: (context, i) {
             final gigId = threads[i].key;
             final msgs = threads[i].value;
@@ -1392,6 +1935,8 @@ class _GigChatViewState extends State<_GigChatView> {
   final _scrollController = ScrollController();
   bool _sending = false;
   Map<String, dynamic>? _gig;
+  String? _editingMessageId;
+  Map<String, dynamic>? _replyTo;
 
   @override
   void initState() {
@@ -1415,21 +1960,75 @@ class _GigChatViewState extends State<_GigChatView> {
     super.dispose();
   }
 
+  void _startEdit(Map<String, dynamic> msg) {
+    setState(() {
+      _editingMessageId = msg['id'] as String;
+      _replyTo = null;
+      _controller.text = msg['message'] as String? ?? '';
+    });
+  }
+
+  void _startReply(Map<String, dynamic> msg) {
+    setState(() {
+      _replyTo = msg;
+      _editingMessageId = null;
+      _controller.clear();
+    });
+  }
+
+  void _cancelEdit() {
+    setState(() { _editingMessageId = null; _controller.clear(); });
+  }
+
+  void _cancelReply() {
+    setState(() => _replyTo = null);
+  }
+
   Future<void> _send() async {
     final text = _controller.text.trim();
     if (text.isEmpty || _sending) return;
     setState(() => _sending = true);
     _controller.clear();
     try {
-      final user = _sb.auth.currentUser;
-      final name = user?.userMetadata?['name'] as String? ?? 'Admin';
-      await _sb.from('gig_messages').insert({
-        'gig_id': widget.gigId,
-        'user_id': user?.id,
-        'sender_name': name,
-        'message': text,
-        'is_admin': true,
-      });
+      if (_editingMessageId != null) {
+        // Update gig message via Supabase directly (admin may not be user_id owner)
+        await _sb.from('gig_messages').update({
+          'message': text,
+          'edited_at': DateTime.now().toUtc().toIso8601String(),
+        }).eq('id', _editingMessageId!);
+        setState(() => _editingMessageId = null);
+      } else {
+        final user = _sb.auth.currentUser;
+        final name = user?.userMetadata?['name'] as String? ?? 'Admin';
+        await _sb.from('gig_messages').insert({
+          'gig_id': widget.gigId,
+          'user_id': user?.id,
+          'sender_name': name,
+          'message': text,
+          'is_admin': true,
+          if (_replyTo != null) 'reply_to_id': _replyTo!['id'],
+        });
+        setState(() => _replyTo = null);
+
+        // Push notification to gig participants
+        try {
+          final gig = await _sb
+              .from('gigs')
+              .select('company_id')
+              .eq('id', widget.gigId)
+              .maybeSingle();
+          if (gig != null) {
+            await _sb.functions.invoke('notify-chat', body: {
+              'type': 'gig',
+              'gig_id': widget.gigId,
+              'company_id': gig['company_id'],
+              'sender_id': user?.id,
+              'sender_name': name,
+              'message': text,
+            });
+          }
+        } catch (_) {}
+      }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context)
@@ -1440,20 +2039,9 @@ class _GigChatViewState extends State<_GigChatView> {
     }
   }
 
-  void _scrollToBottom() {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_scrollController.hasClients) {
-        _scrollController.animateTo(
-          _scrollController.position.maxScrollExtent,
-          duration: const Duration(milliseconds: 300),
-          curve: Curves.easeOut,
-        );
-      }
-    });
-  }
-
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
     final venueName = _gig?['venue_name'] as String? ?? '';
     final cityName = _gig?['city'] as String? ?? '';
     final venueParts = [venueName, cityName].where((s) => s.isNotEmpty);
@@ -1473,8 +2061,8 @@ class _GigChatViewState extends State<_GigChatView> {
         Container(
           width: double.infinity,
           padding: const EdgeInsets.fromLTRB(20, 12, 12, 12),
-          decoration: const BoxDecoration(
-            border: Border(bottom: BorderSide(color: CssTheme.outline)),
+          decoration: BoxDecoration(
+            border: Border(bottom: BorderSide(color: cs.outlineVariant)),
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -1498,26 +2086,42 @@ class _GigChatViewState extends State<_GigChatView> {
                 .order('created_at'),
             builder: (context, snapshot) {
               final messages = snapshot.data ?? [];
-              _scrollToBottom();
               if (messages.isEmpty) {
                 return const Center(
                   child: Text('Ingen meldinger',
                       style: TextStyle(color: Colors.black45)),
                 );
               }
+              final myId = _sb.auth.currentUser?.id ?? '';
               return ListView.separated(
                 controller: _scrollController,
+                reverse: true,
                 padding: const EdgeInsets.all(20),
                 itemCount: messages.length,
                 separatorBuilder: (_, __) => const SizedBox(height: 8),
                 itemBuilder: (context, i) {
                   final msg = messages[i];
                   final isAdmin = msg['is_admin'] == true;
+                  final isMine = msg['user_id'] == myId;
+
+                  Map<String, dynamic>? replyMsg;
+                  final replyToId = msg['reply_to_id'];
+                  if (replyToId != null) {
+                    replyMsg = messages.cast<Map<String, dynamic>?>().firstWhere(
+                      (m) => m?['id'] == replyToId,
+                      orElse: () => null,
+                    );
+                  }
+
                   return _Bubble(
                     message: msg['message'] as String? ?? '',
                     senderName: msg['sender_name'] as String? ?? '',
                     isAdmin: isAdmin,
                     createdAt: msg['created_at'] as String?,
+                    editedAt: msg['edited_at'] as String?,
+                    replyMsg: replyMsg,
+                    onReply: () => _startReply(msg),
+                    onEdit: isMine ? () => _startEdit(msg) : null,
                   );
                 },
               );
@@ -1528,6 +2132,10 @@ class _GigChatViewState extends State<_GigChatView> {
           controller: _controller,
           sending: _sending,
           onSend: _send,
+          editingMessageId: _editingMessageId,
+          replyTo: _replyTo,
+          onCancelEdit: _cancelEdit,
+          onCancelReply: _cancelReply,
         ),
       ],
     );
@@ -1543,12 +2151,20 @@ class _Bubble extends StatelessWidget {
   final String senderName;
   final bool isAdmin;
   final String? createdAt;
+  final String? editedAt;
+  final Map<String, dynamic>? replyMsg;
+  final VoidCallback? onReply;
+  final VoidCallback? onEdit;
 
   const _Bubble({
     required this.message,
     required this.senderName,
     required this.isAdmin,
     this.createdAt,
+    this.editedAt,
+    this.replyMsg,
+    this.onReply,
+    this.onEdit,
   });
 
   @override
@@ -1560,47 +2176,137 @@ class _Bubble extends StatelessWidget {
       alignment: isAdmin ? Alignment.centerRight : Alignment.centerLeft,
       child: ConstrainedBox(
         constraints: BoxConstraints(maxWidth: maxWidth),
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-          decoration: BoxDecoration(
-            color: isAdmin ? Colors.black : const Color(0xFFEEEEEE),
-            borderRadius: BorderRadius.only(
-              topLeft: const Radius.circular(16),
-              topRight: const Radius.circular(16),
-              bottomLeft: Radius.circular(isAdmin ? 16 : 4),
-              bottomRight: Radius.circular(isAdmin ? 4 : 16),
+        child: GestureDetector(
+          onLongPress: (onReply != null || onEdit != null) ? () => _showContextMenu(context) : null,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            decoration: BoxDecoration(
+              color: isAdmin ? Colors.black : const Color(0xFFEEEEEE),
+              borderRadius: BorderRadius.only(
+                topLeft: const Radius.circular(16),
+                topRight: const Radius.circular(16),
+                bottomLeft: Radius.circular(isAdmin ? 16 : 4),
+                bottomRight: Radius.circular(isAdmin ? 4 : 16),
+              ),
             ),
-          ),
-          child: Column(
-            crossAxisAlignment:
-                isAdmin ? CrossAxisAlignment.end : CrossAxisAlignment.start,
-            children: [
-              Text(senderName,
-                  style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w700,
-                    color: isAdmin ? Colors.white60 : Colors.black45,
-                  )),
-              const SizedBox(height: 3),
-              Text(message,
-                  style: TextStyle(
-                    fontSize: 14,
-                    color: isAdmin ? Colors.white : Colors.black87,
-                  )),
-              if (timeStr != null) ...[
-                const SizedBox(height: 3),
-                Text(timeStr,
+            child: Column(
+              crossAxisAlignment:
+                  isAdmin ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+              children: [
+                Text(senderName,
                     style: TextStyle(
                       fontSize: 11,
-                      color: isAdmin ? Colors.white38 : Colors.black38,
+                      fontWeight: FontWeight.w700,
+                      color: isAdmin ? Colors.white60 : Colors.black45,
                     )),
+                const SizedBox(height: 3),
+                // Reply quote
+                if (replyMsg != null) ...[
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    margin: const EdgeInsets.only(bottom: 6),
+                    decoration: BoxDecoration(
+                      color: isAdmin
+                          ? Colors.white.withValues(alpha: 0.12)
+                          : Colors.black.withValues(alpha: 0.06),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border(
+                        left: BorderSide(
+                          color: isAdmin ? Colors.white54 : Colors.black26,
+                          width: 3,
+                        ),
+                      ),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(replyMsg!['sender_name'] as String? ?? '',
+                          style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700,
+                            color: isAdmin ? Colors.white70 : Colors.black54)),
+                        Text(_truncate(replyMsg!['message'] as String? ?? '', 60),
+                          style: TextStyle(fontSize: 12,
+                            color: isAdmin ? Colors.white54 : Colors.black45),
+                          maxLines: 2, overflow: TextOverflow.ellipsis),
+                      ],
+                    ),
+                  ),
+                ],
+                Text.rich(
+                  TextSpan(
+                    children: buildMentionSpans(
+                      message,
+                      TextStyle(
+                        fontSize: 14,
+                        color: isAdmin ? Colors.white : Colors.black87,
+                      ),
+                    ),
+                    style: TextStyle(
+                      fontSize: 14,
+                      color: isAdmin ? Colors.white : Colors.black87,
+                    ),
+                  ),
+                ),
+                if (timeStr != null) ...[
+                  const SizedBox(height: 3),
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(timeStr,
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: isAdmin ? Colors.white38 : Colors.black38,
+                          )),
+                      if (editedAt != null) ...[
+                        const SizedBox(width: 4),
+                        Text('(redigert)',
+                          style: TextStyle(
+                            fontSize: 10,
+                            fontStyle: FontStyle.italic,
+                            color: isAdmin ? Colors.white38 : Colors.black38,
+                          )),
+                      ],
+                    ],
+                  ),
+                ],
               ],
-            ],
+            ),
           ),
         ),
       ),
     );
   }
+
+  void _showContextMenu(BuildContext context) {
+    final RenderBox box = context.findRenderObject() as RenderBox;
+    final offset = box.localToGlobal(Offset.zero);
+
+    showMenu<String>(
+      context: context,
+      position: RelativeRect.fromLTRB(
+        offset.dx, offset.dy - 50,
+        offset.dx + box.size.width, offset.dy,
+      ),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      items: [
+        if (onReply != null)
+          PopupMenuItem<String>(
+            value: 'reply',
+            child: Row(children: const [Icon(Icons.reply, size: 18), SizedBox(width: 8), Text('Svar')]),
+          ),
+        if (onEdit != null)
+          PopupMenuItem<String>(
+            value: 'edit',
+            child: Row(children: const [Icon(Icons.edit, size: 18), SizedBox(width: 8), Text('Rediger')]),
+          ),
+      ],
+    ).then((value) {
+      if (value == 'reply') onReply?.call();
+      if (value == 'edit') onEdit?.call();
+    });
+  }
+
+  static String _truncate(String s, int max) =>
+      s.length <= max ? s : '${s.substring(0, max)}…';
 
   String? _fmtTime(String? iso) {
     if (iso == null) return null;

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../state/active_company.dart';
 import '../ui/css_theme.dart';
 import 'direct_chat_screen.dart';
 
@@ -28,25 +29,17 @@ class _ContactsScreenState extends State<ContactsScreen> {
   Future<void> _load() async {
     setState(() => _loading = true);
     try {
-      // Get current user's company_id
-      final myProfile = await _sb
-          .from('profiles')
-          .select('company_id')
-          .eq('id', _myId)
-          .maybeSingle();
-      final companyId = myProfile?['company_id'];
-
+      final companyId = activeCompanyNotifier.value?.id;
       if (companyId == null) {
         _contacts = [];
       } else {
-        final res = await _sb
-            .from('profiles')
-            .select('id, name, phone, email, avatar_url')
-            .eq('company_id', companyId)
-            .order('name');
-        final all = List<Map<String, dynamic>>.from(res);
-        all.removeWhere((p) => p['id'] == _myId);
-        _contacts = all;
+        // SECURITY DEFINER-funksjon omgår RLS og returnerer alle felter
+        final memberRows = await _sb.rpc(
+          'get_company_member_profiles',
+          params: {'p_company_id': companyId},
+        );
+        _contacts = List<Map<String, dynamic>>.from(memberRows as List)
+          ..removeWhere((r) => r['id'].toString() == _myId);
       }
     } catch (e) {
       debugPrint('Contacts load error: $e');
@@ -212,13 +205,6 @@ class _ContactCard extends StatelessWidget {
             onPressed: () => _showEditDialog(context, peerId, name, phone, email),
           ),
 
-          // Delete button
-          IconButton(
-            tooltip: 'Fjern kontakt',
-            icon: const Icon(Icons.delete_outline, size: 20, color: Colors.red),
-            onPressed: () => _confirmDelete(context, peerId, name),
-          ),
-
           // Chat button
           IconButton(
             tooltip: 'Send melding',
@@ -246,7 +232,6 @@ class _ContactCard extends StatelessWidget {
     String phone,
     String email,
   ) {
-    final nameCtrl = TextEditingController(text: name);
     final phoneCtrl = TextEditingController(text: phone);
     final emailCtrl = TextEditingController(text: email);
 
@@ -258,20 +243,12 @@ class _ContactCard extends StatelessWidget {
         return StatefulBuilder(
           builder: (ctx, setDialogState) {
             return AlertDialog(
-              title: const Text('Rediger kontakt'),
+              title: Text(name),
               content: SizedBox(
                 width: 400,
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    TextField(
-                      controller: nameCtrl,
-                      decoration: const InputDecoration(
-                        labelText: 'Navn',
-                        border: OutlineInputBorder(),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
                     TextField(
                       controller: phoneCtrl,
                       decoration: const InputDecoration(
@@ -304,7 +281,6 @@ class _ContactCard extends StatelessWidget {
                             await Supabase.instance.client
                                 .from('profiles')
                                 .update({
-                              'name': nameCtrl.text.trim(),
                               'phone': phoneCtrl.text.trim(),
                               'email': emailCtrl.text.trim(),
                             }).eq('id', peerId);
@@ -336,48 +312,6 @@ class _ContactCard extends StatelessWidget {
           },
         );
       },
-    );
-  }
-
-  void _confirmDelete(BuildContext context, String peerId, String name) {
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Fjern kontakt'),
-        content: Text('Er du sikker på at du vil fjerne $name?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Avbryt'),
-          ),
-          FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: Colors.red),
-            onPressed: () async {
-              Navigator.pop(ctx);
-              try {
-                // Remove from company_members first
-                await Supabase.instance.client
-                    .from('company_members')
-                    .delete()
-                    .eq('user_id', peerId);
-                // Clear company_id from profile
-                await Supabase.instance.client
-                    .from('profiles')
-                    .update({'company_id': null})
-                    .eq('id', peerId);
-                onUpdated();
-              } catch (e) {
-                if (context.mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('Feil: $e')),
-                  );
-                }
-              }
-            },
-            child: const Text('Fjern'),
-          ),
-        ],
-      ),
     );
   }
 

@@ -183,6 +183,7 @@ class _MgmtDashboardPageState extends State<MgmtDashboardPage> {
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
     final hour = DateTime.now().hour;
     final greeting = hour < 12
         ? 'God morgen'
@@ -206,7 +207,7 @@ class _MgmtDashboardPageState extends State<MgmtDashboardPage> {
                   Text(
                     DateFormat('EEEE, MMMM d, yyyy').format(DateTime.now()),
                     style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          color: CssTheme.textMuted,
+                          color: cs.onSurfaceVariant,
                         ),
                   ),
                   const SizedBox(height: 24),
@@ -320,6 +321,7 @@ class _SectionHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
     return Row(
       children: [
         Text(
@@ -352,7 +354,7 @@ class _SectionHeader extends StatelessWidget {
           Text(
             subtitle!,
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: CssTheme.textMuted,
+                  color: cs.onSurfaceVariant,
                 ),
           ),
         ],
@@ -369,19 +371,20 @@ class _EmptyCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(16),
       margin: const EdgeInsets.only(bottom: 8),
       decoration: BoxDecoration(
-        color: CssTheme.surface,
+        color: cs.surfaceContainerLowest,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: CssTheme.outline),
+        border: Border.all(color: cs.outlineVariant),
       ),
       child: Text(
         message,
         style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-              color: CssTheme.textMuted,
+              color: cs.onSurfaceVariant,
             ),
       ),
     );
@@ -394,6 +397,7 @@ class _EventCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
     final source = event['_source'] as String? ?? 'tour_show';
     final isGig = source == 'gig';
 
@@ -440,9 +444,9 @@ class _EventCard extends StatelessWidget {
         margin: const EdgeInsets.only(bottom: 8),
         padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
-          color: CssTheme.surface,
+          color: cs.surfaceContainerLowest,
           borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: isCancelled ? Colors.red.withValues(alpha: 0.3) : CssTheme.outline),
+          border: Border.all(color: isCancelled ? Colors.red.withValues(alpha: 0.3) : cs.outlineVariant),
         ),
         child: Row(
           children: [
@@ -456,10 +460,10 @@ class _EventCard extends StatelessWidget {
                     dateStr != null
                         ? DateFormat('MMM').format(DateTime.parse(dateStr))
                         : '',
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 11,
                       fontWeight: FontWeight.w700,
-                      color: CssTheme.textMuted,
+                      color: cs.onSurfaceVariant,
                     ),
                   ),
                   Text(
@@ -470,7 +474,7 @@ class _EventCard extends StatelessWidget {
                       fontSize: 24,
                       fontWeight: FontWeight.w900,
                       decoration: isCancelled ? TextDecoration.lineThrough : null,
-                      color: isCancelled ? CssTheme.textMuted : null,
+                      color: isCancelled ? cs.onSurfaceVariant : null,
                     ),
                   ),
                 ],
@@ -486,13 +490,13 @@ class _EventCard extends StatelessWidget {
                     style: TextStyle(
                       fontWeight: FontWeight.w900,
                       decoration: isCancelled ? TextDecoration.lineThrough : null,
-                      color: isCancelled ? CssTheme.textMuted : null,
+                      color: isCancelled ? cs.onSurfaceVariant : null,
                     ),
                   ),
                   if (subtitle.isNotEmpty)
                     Text(
                       subtitle,
-                      style: const TextStyle(color: CssTheme.textMuted),
+                      style: TextStyle(color: cs.onSurfaceVariant),
                     ),
                   if (isCancelled && cancellationReason != null && cancellationReason.isNotEmpty)
                     Text(
@@ -560,15 +564,16 @@ class _TourCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
     return GestureDetector(
       onTap: onTap,
       child: Container(
         width: 240,
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
-          color: CssTheme.surface,
+          color: cs.surfaceContainerLowest,
           borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: CssTheme.outline),
+          border: Border.all(color: cs.outlineVariant),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -580,7 +585,7 @@ class _TourCard extends StatelessWidget {
             const SizedBox(height: 4),
             Text(
               tour['artist'] as String? ?? '',
-              style: const TextStyle(color: CssTheme.textMuted),
+              style: TextStyle(color: cs.onSurfaceVariant),
             ),
             const SizedBox(height: 8),
             _StatusBadge(status: tour['status'] as String? ?? 'planning'),
@@ -743,6 +748,7 @@ class _BusRequestCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
     final from = request['date_from'] as String? ?? '';
     final to = request['date_to'] as String? ?? '';
     final fromCity = request['from_city'] as String? ?? '';
@@ -758,9 +764,9 @@ class _BusRequestCard extends StatelessWidget {
       margin: const EdgeInsets.only(bottom: 8),
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: CssTheme.surface,
+        color: cs.surfaceContainerLowest,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: CssTheme.outline),
+        border: Border.all(color: cs.outlineVariant),
       ),
       child: Row(
         children: [
@@ -774,14 +780,14 @@ class _BusRequestCard extends StatelessWidget {
                 ),
                 Text(
                   '$from → $to${pax != null ? '  •  $pax pax' : ''}',
-                  style: const TextStyle(color: CssTheme.textMuted),
+                  style: TextStyle(color: cs.onSurfaceVariant),
                 ),
                 if (tourName.isNotEmpty)
                   Text(
                     tourName,
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 12,
-                      color: CssTheme.textMuted,
+                      color: cs.onSurfaceVariant,
                     ),
                   ),
               ],
@@ -863,7 +869,7 @@ class _BusRequestCard extends StatelessWidget {
               onPressed: () => _archive(context),
               icon: const Icon(Icons.archive_outlined, size: 18),
               tooltip: 'Arkiver',
-              style: IconButton.styleFrom(foregroundColor: CssTheme.textMuted),
+              style: IconButton.styleFrom(foregroundColor: cs.onSurfaceVariant),
             ),
           ],
           // Restore + Delete buttons (archive view)

@@ -1,3 +1,6 @@
+import 'dart:io';
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:pdf/pdf.dart';
@@ -13,65 +16,79 @@ class IntensjonsavtalePdfService {
   // AGREEMENT TEXT (from Excel template)
   // --------------------------------------------------------------------------
 
-  static const String _agreementText = '''
-AVTALEVILKÅR
+  static String _agreementText({
+    required String firma,
+    required String kontaktperson,
+    required String spillested,
+    required String tidsrom,
+  }) => '''Dette er en intensjonsavtale mellom Complete Drums og $firma v/ $kontaktperson, og forutsettes godkjent før Complete holder av dato eller begynner noen som helst form for forberedelser.
 
-1. Bindende bekreftelse
-Intensjonsavtalen er bindende fra datoen den er signert. Oppdragsgiver forplikter seg til å bekrefte eller avbestille oppdraget senest 61 dager før avreisedato. Etter 61 dager regnes avtalen som bindende og fakturerbar i henhold til punkt 2.
+Dersom intensjonsavtalen ikke er kansellert av noen parter senest 61 dager før oppdragsdato, blir den bindende for begge parter.
 
-2. Kansellering
-Ved kansellering 61–31 dager før oppdraget faktureres 50 % av avtalt honorar.
-Ved kansellering 30 dager eller mindre før oppdraget faktureres 100 % av avtalt honorar.
-Dersom oppdragsgiver avbestiller oppdraget mer enn 30 dager før arrangementet og Complete Drums bekrefter at de ikke er i stand til å fylle den ledige plassen, forbeholder Complete Drums seg retten til å fakturere fullt honorar.
+Det er kun oppdragsdatoen(e) nedenfor som holdes av. Dersom det er behov for prøver etc. må dette opplyses om og beregnes inn i denne avtalen før den godkjennes.
 
-3. Tilgjengelighetssjekk
-Complete Drums har 7 dager fra mottak av signert intensjonsavtale til å bekrefte tilgjengelighet for de aktuelle datoene.
+Begge parter, både Complete og $firma, kan avlyse bookingen tidligere enn 60 dager før oppdraget skulle finne sted, uten videre følger.
 
-4. Teknisk rider
-Oppdragsgiver er ansvarlig for å sørge for at teknisk rider fra Complete Drums er oppfylt til enhver tid. Avvik fra riderkrav skal avklares skriftlig senest 14 dager før arrangementet.
+Dersom $firma avlyser bookingen senere enn 60 dager før oppdraget skulle funnet sted, faktureres 50% av honoraret i oppreisning.
 
-5. Sceneareal
-Oppdragsgiver sørger for tilstrekkelig sceneareal i henhold til de spesifikasjoner som er avtalt. Planskisse over scene leveres av Complete Drums ved bekreftelse.
+Dersom $firma avlyser bookingen innen 30 dager før oppdraget skulle funnet sted, plikter $firma å betale ut honoraret i sin helhet.
 
-6. Get-in og prøvetid
-Oppdragsgiver sørger for tilgang til scenen for rigging og lydsjekk/prøver iht. den avtalte timeplan. Get-in til scene og prøvetid er obligatorisk og er inkludert i timeplan.
+Dersom Complete avlyser innenfor 60 dager før oppdraget skulle funnet sted, plikter Complete å være behjelpelig med å få på plass en tilfredsstillende erstatning.
 
-7. Betaling
-Faktura sendes etter gjennomført arrangement med 14 dagers betalingsfrist, med mindre annet er skriftlig avtalt.
+Dersom intensjonsavtalen godkjennes innenfor fristen på 60 dager, har Complete uansett 7 dager på seg til å kartlegge tilgjengeligheten, før bindingen blir gjeldende. Hører du ingenting, har vi en avtale.
 
-8. Gyldighet
-Denne intensjonsavtalen er gyldig i 14 dager fra utstedelsesdato. Dersom den ikke er signert og returnert innen fristen, bortfaller tilbudet.
-''';
+Vedlagt ligger raider(e) - Det som står om sceneareale må leses nøye.
+
+OBS! Complete har omgående behov for bekreftet Getin-tid, prøvetid og tid for opptreden, samt en planskisse med inntegninger og mål av sal, scene, scenetilkomster, bord, stoler, passasjer i salen og dører.
+NB! Alle opptredener registreres til Tono og $firma vil bli fakturert direkte av de.
+
+Spillested: $spillested
+Tidsrom vi holder av: $tidsrom''';
 
   // --------------------------------------------------------------------------
   // PUBLIC ENTRY POINT
   // --------------------------------------------------------------------------
 
-  static Future<Uint8List> generate({
+  /// Returns the main PDF bytes plus any rider PDF attachments.
+  static Future<({Uint8List mainPdf, List<({String filename, Uint8List bytes})> riders})> generate({
     required Map<String, dynamic> gig,
     required List<Map<String, dynamic>> shows,
   }) async {
     final pdf = pw.Document();
 
-    // Load fonts
-    pw.Font regularFont;
-    pw.Font boldFont;
-    try {
-      regularFont = pw.Font.ttf(
-          await rootBundle.load('assets/fonts/Calibri.ttf'));
-      boldFont = pw.Font.ttf(
-          await rootBundle.load('assets/fonts/CalibriBold.ttf'));
-    } catch (_) {
-      // Fallback to built-in fonts
-      regularFont = pw.Font.helvetica();
-      boldFont = pw.Font.helveticaBold();
+    // Helper: copy asset into a fresh buffer (web ByteData has offset issues)
+    Future<Uint8List> loadAssetBytes(String path) async {
+      final data = await rootBundle.load(path);
+      return Uint8List.fromList(
+          data.buffer.asUint8List(data.offsetInBytes, data.lengthInBytes));
     }
 
-    // Load logo
-    final logo = pw.MemoryImage(
-      (await rootBundle.load('assets/pdf/logos/CompleteDrumsWhite.png'))
-          .buffer.asUint8List(),
-    );
+    // On web, custom TTF fonts cause DataView offset errors during rendering,
+    // so fall back to built-in Helvetica.
+    pw.Font regularFont;
+    pw.Font boldFont;
+    if (kIsWeb) {
+      regularFont = pw.Font.helvetica();
+      boldFont = pw.Font.helveticaBold();
+    } else {
+      try {
+        regularFont = pw.Font.ttf(ByteData.view(
+            (await loadAssetBytes('assets/fonts/Calibri.ttf')).buffer));
+        boldFont = pw.Font.ttf(ByteData.view(
+            (await loadAssetBytes('assets/fonts/CalibriBold.ttf')).buffer));
+      } catch (_) {
+        regularFont = pw.Font.helvetica();
+        boldFont = pw.Font.helveticaBold();
+      }
+    }
+
+    pw.ImageProvider? logo;
+    try {
+      logo = pw.MemoryImage(
+          await loadAssetBytes('assets/pdf/logos/CompleteDrumsWhite.png'));
+    } catch (_) {
+      debugPrint('Could not load PDF logo');
+    }
 
     final nok = NumberFormat('#,##0', 'nb_NO');
 
@@ -85,13 +102,10 @@ Denne intensjonsavtalen er gyldig i 14 dager fra utstedelsesdato. Dersom den ikk
     final custName = gig['customer_name'] as String? ?? '';
     final custPhone = gig['customer_phone'] as String? ?? '';
     final custEmail = gig['customer_email'] as String? ?? '';
-    final getInTime = gig['get_in_time'] as String? ?? '';
-    final getOutTime = gig['get_out_time'] as String? ?? '';
     final performanceTime = gig['performance_time'] as String? ?? '';
     final inearFromUs = gig['inear_from_us'] == true;
     final inearPrice = (gig['inear_price'] as num?)?.toDouble() ?? 0;
     final transportPrice = (gig['transport_price'] as num?)?.toDouble() ?? 0;
-    final extraDesc = gig['extra_desc'] as String? ?? '';
     final extraPrice = (gig['extra_price'] as num?)?.toDouble() ?? 0;
     final notesForContract = gig['notes_for_contract'] as String? ?? '';
 
@@ -101,31 +115,26 @@ Denne intensjonsavtalen er gyldig i 14 dager fra utstedelsesdato. Dersom den ikk
     if (dateFrom != null) {
       final fromFmt = df.format(DateTime.parse(dateFrom));
       if (dateTo != null && dateTo != dateFrom) {
-        dateLabel = '$fromFmt – ${df.format(DateTime.parse(dateTo))}';
+        dateLabel = '$fromFmt - ${df.format(DateTime.parse(dateTo))}';
       } else {
         dateLabel = fromFmt;
       }
     }
 
-    // Time info
-    String timeLabel = '';
-    if (getInTime.isNotEmpty) timeLabel += 'Get-in: $getInTime';
-    if (performanceTime.isNotEmpty) {
-      if (timeLabel.isNotEmpty) timeLabel += '  |  ';
-      timeLabel += 'Opptreden: $performanceTime';
-    }
-    if (getOutTime.isNotEmpty) {
-      if (timeLabel.isNotEmpty) timeLabel += '  |  ';
-      timeLabel += 'Get-out: $getOutTime';
-    }
+    // Time info — use performance_time (the "Tidspunkt" field from the offer)
+    final timeLabel = performanceTime;
 
-    // Price calculations
-    final showsTotal = shows.fold<double>(
+    // Price calculations — include markup in all sub-totals
+    final showsRaw = shows.fold<double>(
         0, (s, sh) => s + ((sh['price'] as num?)?.toDouble() ?? 0));
-    final total = showsTotal +
+    final basePrice = showsRaw +
         (inearFromUs ? inearPrice : 0) +
-        transportPrice +
-        extraPrice;
+        transportPrice;
+    final total = basePrice + extraPrice;
+    final markupFactor = basePrice > 0 ? total / basePrice : 1.0;
+    final showsTotal = showsRaw * markupFactor;
+    final inearWithMarkup = inearPrice * markupFactor;
+    final transportWithMarkup = transportPrice * markupFactor;
 
     // Today's date
     final todayStr = df.format(DateTime.now());
@@ -137,7 +146,8 @@ Denne intensjonsavtalen er gyldig i 14 dager fra utstedelsesdato. Dersom den ikk
         build: (pw.Context ctx) {
           return [
             // ── HEADER ──────────────────────────────────────────────────
-            _buildHeader(boldFont, regularFont, logo),
+            if (logo != null)
+              _buildHeader(boldFont, regularFont, logo),
             pw.SizedBox(height: 20),
 
             // ── TITLE ───────────────────────────────────────────────────
@@ -189,7 +199,8 @@ Denne intensjonsavtalen er gyldig i 14 dager fra utstedelsesdato. Dersom den ikk
             pw.SizedBox(height: 12),
 
             // ── SHOWS TABLE ───────────────────────────────────────────────
-            _buildShowsTable(boldFont, regularFont, shows, nok),
+            _buildShowsTable(boldFont, regularFont, shows, nok,
+                markupFactor: markupFactor),
             pw.SizedBox(height: 12),
 
             // ── PRICE SUMMARY ─────────────────────────────────────────────
@@ -200,10 +211,8 @@ Denne intensjonsavtalen er gyldig i 14 dager fra utstedelsesdato. Dersom den ikk
               shows: shows,
               showsTotal: showsTotal,
               inearFromUs: inearFromUs,
-              inearPrice: inearPrice,
-              transportPrice: transportPrice,
-              extraDesc: extraDesc,
-              extraPrice: extraPrice,
+              inearPrice: inearWithMarkup,
+              transportPrice: transportWithMarkup,
               total: total,
             ),
             pw.SizedBox(height: 16),
@@ -225,7 +234,12 @@ Denne intensjonsavtalen er gyldig i 14 dager fra utstedelsesdato. Dersom den ikk
             pw.Divider(thickness: 0.5),
             pw.SizedBox(height: 10),
             pw.Text(
-              _agreementText,
+              _agreementText(
+                firma: firma,
+                kontaktperson: custName,
+                spillested: [venueName, city].where((s) => s.isNotEmpty).join(' - '),
+                tidsrom: '$dateLabel${performanceTime.isNotEmpty ? ' kl $performanceTime' : ''}',
+              ),
               style: pw.TextStyle(font: regularFont, fontSize: 8.5,
                   lineSpacing: 1.2),
             ),
@@ -234,7 +248,54 @@ Denne intensjonsavtalen er gyldig i 14 dager fra utstedelsesdato. Dersom den ikk
       ),
     );
 
-    return pdf.save();
+    final mainPdfBytes = await pdf.save();
+
+    // ── Collect rider PDFs as separate attachments ─────────────────────────
+    final riderAttachments = <({String filename, Uint8List bytes})>[];
+
+    if (!kIsWeb) {
+      final riderBase =
+          '/Users/michaelthogersen/Dropbox/Complete Dokumenter/4-Riders';
+      const riderMap = <String, String>{
+        'taikwho': 'TaikWho Rider 2026/TaikWho Teknisk Rider 2026.pdf',
+        'completeshow':
+            'CompleteShow Rider 2025/CompleteShow Teknisk Rider 2026.pdf',
+        'londonshow':
+            'LondonShow Rider 2025/LondonShow Teknisk Rider 2025.pdf',
+      };
+      const hospitalityFile = 'HOSPITALITY.pdf';
+
+      // Match show names to riders
+      final addedPaths = <String>{};
+      for (final show in shows) {
+        final name = (show['show_name'] as String? ?? '').toLowerCase();
+        for (final entry in riderMap.entries) {
+          if (name.contains(entry.key)) {
+            addedPaths.add('$riderBase/${entry.value}');
+          }
+        }
+      }
+      // Always add hospitality
+      addedPaths.add('$riderBase/$hospitalityFile');
+
+      for (final path in addedPaths) {
+        try {
+          final file = File(path);
+          if (await file.exists()) {
+            final bytes = await file.readAsBytes();
+            // Use just the filename, not the full path
+            final filename = path.split('/').last;
+            riderAttachments.add((filename: filename, bytes: bytes));
+          } else {
+            debugPrint('Rider not found: $path');
+          }
+        } catch (e) {
+          debugPrint('Error reading rider $path: $e');
+        }
+      }
+    }
+
+    return (mainPdf: mainPdfBytes, riders: riderAttachments);
   }
 
   // --------------------------------------------------------------------------
@@ -368,8 +429,9 @@ Denne intensjonsavtalen er gyldig i 14 dager fra utstedelsesdato. Dersom den ikk
     pw.Font bold,
     pw.Font regular,
     List<Map<String, dynamic>> shows,
-    NumberFormat nok,
-  ) {
+    NumberFormat nok, {
+    double markupFactor = 1.0,
+  }) {
     final headerStyle = pw.TextStyle(
         font: bold, fontSize: 9.5, color: PdfColors.white);
     final boldCell = pw.TextStyle(font: bold, fontSize: 10);
@@ -410,12 +472,15 @@ Denne intensjonsavtalen er gyldig i 14 dager fra utstedelsesdato. Dersom den ikk
               final show = entry.value;
               final isEven = i % 2 == 0;
               final bg = isEven ? rowBg : PdfColors.white;
-              final price = (show['price'] as num?)?.toDouble() ?? 0;
+              final price = ((show['price'] as num?)?.toDouble() ?? 0) * markupFactor;
+              final ekstra = show['ekstrainnslag'] as String? ?? '';
+              final label = ekstra.isNotEmpty
+                  ? '${show['show_name'] ?? ''}\n$ekstra'
+                  : show['show_name'] as String? ?? '';
               return pw.TableRow(
                 decoration: pw.BoxDecoration(color: bg),
                 children: [
-                  _cell(show['show_name'] as String? ?? '',
-                      boldCell, pw.Alignment.centerLeft),
+                  _cell(label, boldCell, pw.Alignment.centerLeft),
                   _cell('kr ${nok.format(price)}',
                       boldCell, pw.Alignment.centerRight),
                 ],
@@ -451,8 +516,6 @@ Denne intensjonsavtalen er gyldig i 14 dager fra utstedelsesdato. Dersom den ikk
     required bool inearFromUs,
     required double inearPrice,
     required double transportPrice,
-    required String extraDesc,
-    required double extraPrice,
     required double total,
   }) {
     final showLabel = shows.length == 1
@@ -463,8 +526,6 @@ Denne intensjonsavtalen er gyldig i 14 dager fra utstedelsesdato. Dersom den ikk
       if (inearFromUs && inearPrice > 0)
         _PriceLine('In-ear monitor', inearPrice),
       if (transportPrice > 0) _PriceLine('Transport', transportPrice),
-      if (extraPrice > 0)
-        _PriceLine(extraDesc.isNotEmpty ? extraDesc : 'Ekstra', extraPrice),
     ];
 
     return pw.Container(

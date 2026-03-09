@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../state/active_company.dart';
-import '../../ui/css_theme.dart';
 
 class MgmtPeoplePage extends StatefulWidget {
   const MgmtPeoplePage({super.key});
@@ -65,6 +64,7 @@ class _MgmtPeoplePageState extends State<MgmtPeoplePage> {
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
     return Padding(
       padding: const EdgeInsets.all(18),
       child: Column(
@@ -78,7 +78,7 @@ class _MgmtPeoplePageState extends State<MgmtPeoplePage> {
           Text(
             'Alle teammedlemmer på tvers av dine turnéer',
             style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: CssTheme.textMuted,
+                  color: cs.onSurfaceVariant,
                 ),
           ),
           const SizedBox(height: 18),
@@ -86,10 +86,10 @@ class _MgmtPeoplePageState extends State<MgmtPeoplePage> {
             child: _loading
                 ? const Center(child: CircularProgressIndicator())
                 : _people.isEmpty
-                    ? const Center(
+                    ? Center(
                         child: Text(
                           'Ingen personer ennå. Legg til teammedlemmer i turnéene dine.',
-                          style: TextStyle(color: CssTheme.textMuted),
+                          style: TextStyle(color: cs.onSurfaceVariant),
                         ),
                       )
                     : ListView.builder(
@@ -108,9 +108,9 @@ class _MgmtPeoplePageState extends State<MgmtPeoplePage> {
                             margin: const EdgeInsets.only(bottom: 8),
                             padding: const EdgeInsets.all(14),
                             decoration: BoxDecoration(
-                              color: CssTheme.surface,
+                              color: cs.surfaceContainerLowest,
                               borderRadius: BorderRadius.circular(14),
-                              border: Border.all(color: CssTheme.outline),
+                              border: Border.all(color: cs.outlineVariant),
                             ),
                             child: Row(
                               children: [
@@ -140,8 +140,8 @@ class _MgmtPeoplePageState extends State<MgmtPeoplePage> {
                                           role.replaceAll('_', ' '),
                                           if (tourName.isNotEmpty) tourName,
                                         ].join(' · '),
-                                        style: const TextStyle(
-                                            color: CssTheme.textMuted),
+                                        style: TextStyle(
+                                            color: cs.onSurfaceVariant),
                                       ),
                                       if (email.isNotEmpty ||
                                           phone.isNotEmpty)
@@ -149,9 +149,9 @@ class _MgmtPeoplePageState extends State<MgmtPeoplePage> {
                                           [email, phone]
                                               .where((s) => s.isNotEmpty)
                                               .join(' · '),
-                                          style: const TextStyle(
+                                          style: TextStyle(
                                             fontSize: 12,
-                                            color: CssTheme.textMuted,
+                                            color: cs.onSurfaceVariant,
                                           ),
                                         ),
                                     ],

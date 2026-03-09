@@ -11,8 +11,8 @@ import '../../services/brreg_service.dart';
 import '../../services/google_routes_service.dart';
 import '../../services/polyline_decoder.dart';
 import '../../services/toll_service.dart';
+import '../../services/tripletex_service.dart';
 import '../../state/active_company.dart';
-import '../../ui/css_theme.dart';
 import '../../widgets/new_company_dialog.dart';
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -63,6 +63,7 @@ class _GigOfferPageState extends State<GigOfferPage> {
   DateTime? _dateFrom;
   DateTime? _dateTo;
   String _gigStatus = 'inquiry';
+  DateTime? _invoicedAt;
   final _responsibleCtrl = TextEditingController();
 
   // ── Schedule ──────────────────────────────────────────────────────────────
@@ -126,6 +127,8 @@ class _GigOfferPageState extends State<GigOfferPage> {
   int _totalAppearances = 0;
 
   // _offerStatus removed — use _gigStatus for both gig and offer
+  int? _tripletexInvoiceId;
+  bool _sendingToTripletex = false;
 
   String? get _companyId => activeCompanyNotifier.value?.id;
 
@@ -176,9 +179,11 @@ class _GigOfferPageState extends State<GigOfferPage> {
   Future<void> _load() async {
     setState(() => _loading = true);
     try {
+      final companyId = activeCompanyNotifier.value?.id;
       final types = await _sb
           .from('show_types')
           .select('*')
+          .eq('company_id', companyId!)
           .eq('active', true)
           .order('sort_order');
       _showTypes = List<Map<String, dynamic>>.from(types);
@@ -202,9 +207,17 @@ class _GigOfferPageState extends State<GigOfferPage> {
         _inearPrice = _dbl(offer['inear_price'], 7000);
         _transportKm = (offer['transport_km'] as num?)?.toInt() ?? 0;
         _transportPricePerKm = _dbl(offer['transport_price_per_km'], 3.50);
-        _transportPrice = _transportKm * _transportPricePerKm;
+        // Use stored transport_price if available, otherwise calculate from km
+        final storedPrice = offer['transport_price'];
+        _transportPrice = storedPrice != null
+            ? _dbl(storedPrice, 0)
+            : _transportKm * _transportPricePerKm;
         _transportPriceCtrl.text = _nf.format(_transportPrice);
         _notesCtrl.text = offer['notes'] ?? '';
+        if (offer['invoiced_at'] != null) {
+          _invoicedAt = DateTime.tryParse(offer['invoiced_at'].toString());
+        }
+        _tripletexInvoiceId = (offer['tripletex_invoice_id'] as num?)?.toInt();
 
         // Load offer shows
         final rows = await _sb
@@ -243,6 +256,7 @@ class _GigOfferPageState extends State<GigOfferPage> {
               others: (m['others'] as num?)?.toInt() ?? 0,
               selected: true,
               sortOrder: (m['sort_order'] as num?)?.toInt() ?? 0,
+              ekstrainnslag: m['ekstrainnslag'] as String? ?? '',
             );
           }).toList();
         }
@@ -500,18 +514,7 @@ class _GigOfferPageState extends State<GigOfferPage> {
   void _recalc() {
     final selected = _shows.where((s) => s.selected).toList();
 
-    if (selected.isEmpty) {
-      _performerFees = 0;
-      _completeKonto = 0;
-      _bookingHonorar = 0;
-      _inearTotal = 0;
-      _transportTotal = 0;
-      _total = 0;
-      _totalPerformers = 0;
-      _totalAppearances = 0;
-      return;
-    }
-
+    // Calculate performer fees from selected shows (can be 0)
     int maxDrummers = 0, maxDancers = 0, maxOthers = 0;
     int sumDrummers = 0, sumDancers = 0, sumOthers = 0;
 
@@ -532,22 +535,21 @@ class _GigOfferPageState extends State<GigOfferPage> {
         (_totalAppearances - _totalPerformers) * _extraShowFee;
     _performerFees = firstShowFees + extraShowFees;
 
-    _completePct = _markupPct / 2;
-    _bookingPct = _markupPct / 2;
-
-    _completeKonto = _performerFees * _completePct;
-    _bookingHonorar = _performerFees * _bookingPct;
     _inearTotal = _inearIncluded ? _inearPrice : 0;
     // Privatbil sub-values (for display only)
     _transportTotal = _transportKm * _transportPricePerKm;
     final tollMultiplier = _routePersons * (_routeReturn ? 2 : 1);
     final tollBase = _tollStations.fold<double>(0, (s, t) => s + t.priceCar);
     _tollCost = tollBase * tollMultiplier;
-    _total = _performerFees +
-        _completeKonto +
-        _bookingHonorar +
-        _inearTotal +
-        _transportPrice;
+
+    // Markup is only applied to show/performer fees
+    _completePct = _markupPct / 2;
+    _bookingPct = _markupPct / 2;
+    _completeKonto = _performerFees * _completePct;
+    _bookingHonorar = _performerFees * _bookingPct;
+
+    _total = _performerFees + _completeKonto + _bookingHonorar +
+        _inearTotal + _transportPrice;
   }
 
   /// Update _transportPrice from privatbil calculator values
@@ -630,19 +632,34 @@ class _GigOfferPageState extends State<GigOfferPage> {
         final gigRes =
             await _sb.from('gigs').insert(gigData).select('id').single();
         _gigId = gigRes['id'] as String;
+
+        // Notify crew about the new gig
+        try {
+          final venue = n(_venueCtrl.text) ?? '';
+          final notifyRes = await _sb.functions.invoke('notify-company', body: {
+            'company_id': _companyId,
+            'title': 'Ny gig: $venue',
+            'body': '${_dateFrom != null ? DateFormat('dd.MM.yyyy').format(_dateFrom!) : ''} — $venue',
+            'exclude_user_id': _sb.auth.currentUser?.id,
+            'gig_id': _gigId,
+          });
+          debugPrint('notify-company response: status=${notifyRes.status} data=${notifyRes.data}');
+        } catch (e) {
+          debugPrint('notify-company error: $e');
+        }
       }
 
       // ── 2. Sync gig_shows ─────────────────────────────────────────────────
       await _sb.from('gig_shows').delete().eq('gig_id', _gigId!);
       final selectedShows = _shows.where((s) => s.selected).toList();
       if (selectedShows.isNotEmpty) {
-        final totalPerf = selectedShows.fold<int>(
-            0, (sum, s) => sum + s.drummers + s.dancers + s.others);
         final gigShowRows = selectedShows.asMap().entries.map((e) {
           final s = e.value;
           final showPerf = s.drummers + s.dancers + s.others;
-          final showPrice =
-              totalPerf > 0 ? (_performerFees * showPerf / totalPerf) : 0.0;
+          final isEkstra = s.showName.toLowerCase().contains('ekstrainnslag');
+          final showPrice = isEkstra
+              ? showPerf * _extraShowFee
+              : showPerf * _creoFeeMinimum;
           return {
             'gig_id': _gigId,
             'show_type_id': s.showTypeId,
@@ -652,6 +669,7 @@ class _GigOfferPageState extends State<GigOfferPage> {
             'others': s.others,
             'price': showPrice.round(),
             'sort_order': e.key,
+            'ekstrainnslag': s.ekstrainnslag.isNotEmpty ? s.ekstrainnslag : null,
           };
         }).toList();
         await _sb.from('gig_shows').insert(gigShowRows);
@@ -674,10 +692,19 @@ class _GigOfferPageState extends State<GigOfferPage> {
         'inear_price': _inearPrice,
         'transport_km': _transportKm,
         'transport_price_per_km': _transportPricePerKm,
+        'transport_price': _transportPrice > 0 ? _transportPrice : null,
         'status': _gigStatus,
         'notes': n(_notesCtrl.text),
         'updated_at': now,
       };
+
+      // Set invoiced_at when status changes to 'invoiced' for the first time
+      if (_gigStatus == 'invoiced' && _invoicedAt == null) {
+        final ts = DateTime.now().toUtc().toIso8601String();
+        offerData['invoiced_at'] = ts;
+        _invoicedAt = DateTime.now().toUtc();
+        debugPrint('>>> invoiced_at SET to $ts for offer $_offerId');
+      }
 
       if (_offerId != null) {
         await _sb.from('gig_offers').update(offerData).eq('id', _offerId!);
@@ -706,9 +733,47 @@ class _GigOfferPageState extends State<GigOfferPage> {
             'others': s.others,
             'selected': s.selected,
             'sort_order': e.key,
+            'ekstrainnslag': s.ekstrainnslag.isNotEmpty ? s.ekstrainnslag : null,
           };
         }).toList();
         await _sb.from('gig_offer_shows').insert(showRows);
+      }
+
+      // ── 5. Auto-save contact person ─────────────────────────────────────────
+      if (_selectedCompany != null && n(_nameCtrl.text) != null) {
+        try {
+          final companyId = _selectedCompany!['id'] as String;
+          final contactName = _nameCtrl.text.trim();
+          final contactPhone = n(_phoneCtrl.text);
+          final contactEmail = n(_emailCtrl.text);
+
+          final existing = await _sb
+              .from('contacts')
+              .select('id, name, phone, email')
+              .eq('company_id', companyId)
+              .ilike('name', contactName)
+              .maybeSingle();
+
+          if (existing == null) {
+            await _sb.from('contacts').insert({
+              'company_id': companyId,
+              'name': contactName,
+              'phone': contactPhone,
+              'email': contactEmail,
+            });
+          } else {
+            final changed = existing['phone'] != contactPhone ||
+                existing['email'] != contactEmail;
+            if (changed) {
+              await _sb.from('contacts').update({
+                'phone': contactPhone,
+                'email': contactEmail,
+              }).eq('id', existing['id']);
+            }
+          }
+        } catch (e) {
+          debugPrint('Auto-save contact error: $e');
+        }
       }
 
       if (mounted) {
@@ -781,6 +846,7 @@ class _GigOfferPageState extends State<GigOfferPage> {
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
     if (_loading) {
       return const Center(child: CircularProgressIndicator());
     }
@@ -798,13 +864,13 @@ class _GigOfferPageState extends State<GigOfferPage> {
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const Icon(Icons.arrow_back_ios,
-                    size: 13, color: CssTheme.textMuted),
+                Icon(Icons.arrow_back_ios,
+                    size: 13, color: cs.onSurfaceVariant),
                 const SizedBox(width: 2),
                 Text(
                   _gigId != null ? 'Tilbake til gig' : 'Tilbud',
-                  style: const TextStyle(
-                    color: CssTheme.textMuted,
+                  style: TextStyle(
+                    color: cs.onSurfaceVariant,
                     fontWeight: FontWeight.w700,
                     fontSize: 13,
                   ),
@@ -877,13 +943,14 @@ class _GigOfferPageState extends State<GigOfferPage> {
   // ────────────────────────────────────────────────────────────────────────────
 
   Widget _card({required String title, required Widget child}) {
+    final cs = Theme.of(context).colorScheme;
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        color: CssTheme.surface,
+        color: cs.surfaceContainerLowest,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: CssTheme.outline),
+        border: Border.all(color: cs.outlineVariant),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -970,6 +1037,8 @@ class _GigOfferPageState extends State<GigOfferPage> {
             ],
           ),
           const SizedBox(height: 8),
+          _tf(_performanceTimeCtrl, 'Tidspunkt'),
+          const SizedBox(height: 8),
           _row2(
             DropdownButtonFormField<String>(
               value: _gigStatus,
@@ -1054,23 +1123,24 @@ class _GigOfferPageState extends State<GigOfferPage> {
   // ────────────────────────────────────────────────────────────────────────────
 
   Widget _buildShowsCard() {
+    final cs = Theme.of(context).colorScheme;
     return _card(
       title: 'Shows',
       child: Column(
         children: [
           _tf(_showDescCtrl, 'Showbeskrivelse', maxLines: 2),
           const SizedBox(height: 12),
-          const Padding(
-            padding: EdgeInsets.only(bottom: 6),
+          Padding(
+            padding: const EdgeInsets.only(bottom: 6),
             child: Row(
               children: [
-                SizedBox(width: 36),
+                const SizedBox(width: 36),
                 Expanded(
                     child: Text('Show',
                         style: TextStyle(
                             fontSize: 11,
                             fontWeight: FontWeight.w700,
-                            color: CssTheme.textMuted))),
+                            color: cs.onSurfaceVariant))),
                 SizedBox(
                     width: 50,
                     child: Text('T',
@@ -1078,7 +1148,7 @@ class _GigOfferPageState extends State<GigOfferPage> {
                         style: TextStyle(
                             fontSize: 11,
                             fontWeight: FontWeight.w700,
-                            color: CssTheme.textMuted))),
+                            color: cs.onSurfaceVariant))),
                 SizedBox(
                     width: 50,
                     child: Text('D',
@@ -1086,7 +1156,7 @@ class _GigOfferPageState extends State<GigOfferPage> {
                         style: TextStyle(
                             fontSize: 11,
                             fontWeight: FontWeight.w700,
-                            color: CssTheme.textMuted))),
+                            color: cs.onSurfaceVariant))),
                 SizedBox(
                     width: 50,
                     child: Text('A',
@@ -1094,8 +1164,8 @@ class _GigOfferPageState extends State<GigOfferPage> {
                         style: TextStyle(
                             fontSize: 11,
                             fontWeight: FontWeight.w700,
-                            color: CssTheme.textMuted))),
-                SizedBox(width: 36),
+                            color: cs.onSurfaceVariant))),
+                const SizedBox(width: 36),
               ],
             ),
           ),
@@ -1116,68 +1186,89 @@ class _GigOfferPageState extends State<GigOfferPage> {
   }
 
   Widget _showRow(int index, _OfferShow s) {
+    final cs = Theme.of(context).colorScheme;
     return Padding(
       padding: const EdgeInsets.only(bottom: 4),
-      child: Row(
+      child: Column(
         children: [
-          SizedBox(
-            width: 36,
-            child: Checkbox(
-              value: s.selected,
-              onChanged: (v) {
-                setState(() {
-                  _shows[index].selected = v ?? false;
-                  _recalc();
-                });
-              },
+          Row(
+            children: [
+              SizedBox(
+                width: 36,
+                child: Checkbox(
+                  value: s.selected,
+                  onChanged: (v) {
+                    setState(() {
+                      _shows[index].selected = v ?? false;
+                      _recalc();
+                    });
+                  },
+                ),
+              ),
+              Expanded(
+                child: Text(s.showName,
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: s.selected ? cs.onSurface : cs.onSurfaceVariant,
+                      fontWeight:
+                          s.selected ? FontWeight.w600 : FontWeight.normal,
+                    )),
+              ),
+              _miniNumberField(
+                key: ValueKey('show_${index}_d'),
+                value: s.drummers,
+                onChanged: (v) {
+                  _shows[index].drummers = v;
+                  setState(() => _recalc());
+                },
+              ),
+              _miniNumberField(
+                key: ValueKey('show_${index}_da'),
+                value: s.dancers,
+                onChanged: (v) {
+                  _shows[index].dancers = v;
+                  setState(() => _recalc());
+                },
+              ),
+              _miniNumberField(
+                key: ValueKey('show_${index}_o'),
+                value: s.others,
+                onChanged: (v) {
+                  _shows[index].others = v;
+                  setState(() => _recalc());
+                },
+              ),
+              SizedBox(
+                width: 36,
+                child: IconButton(
+                  icon: Icon(Icons.close,
+                      size: 16, color: cs.onSurfaceVariant),
+                  onPressed: () {
+                    setState(() {
+                      _shows.removeAt(index);
+                      _recalc();
+                    });
+                  },
+                ),
+              ),
+            ],
+          ),
+          if (s.selected && s.showName.toLowerCase().contains('ekstrainnslag'))
+            Padding(
+              padding: const EdgeInsets.only(left: 36, bottom: 8),
+              child: TextField(
+                key: ValueKey('show_${index}_ekstra'),
+                controller: TextEditingController(text: s.ekstrainnslag),
+                style: const TextStyle(fontSize: 12),
+                decoration: const InputDecoration(
+                  labelText: 'Beskrivelse',
+                  isDense: true,
+                  contentPadding:
+                      EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                ),
+                onChanged: (v) => _shows[index].ekstrainnslag = v,
+              ),
             ),
-          ),
-          Expanded(
-            child: Text(s.showName,
-                style: TextStyle(
-                  fontSize: 13,
-                  color: s.selected ? CssTheme.text : CssTheme.textMuted,
-                  fontWeight:
-                      s.selected ? FontWeight.w600 : FontWeight.normal,
-                )),
-          ),
-          _miniNumberField(
-            key: ValueKey('show_${index}_d'),
-            value: s.drummers,
-            onChanged: (v) {
-              _shows[index].drummers = v;
-              setState(() => _recalc());
-            },
-          ),
-          _miniNumberField(
-            key: ValueKey('show_${index}_da'),
-            value: s.dancers,
-            onChanged: (v) {
-              _shows[index].dancers = v;
-              setState(() => _recalc());
-            },
-          ),
-          _miniNumberField(
-            key: ValueKey('show_${index}_o'),
-            value: s.others,
-            onChanged: (v) {
-              _shows[index].others = v;
-              setState(() => _recalc());
-            },
-          ),
-          SizedBox(
-            width: 36,
-            child: IconButton(
-              icon: const Icon(Icons.close,
-                  size: 16, color: CssTheme.textMuted),
-              onPressed: () {
-                setState(() {
-                  _shows.removeAt(index);
-                  _recalc();
-                });
-              },
-            ),
-          ),
         ],
       ),
     );
@@ -1211,6 +1302,7 @@ class _GigOfferPageState extends State<GigOfferPage> {
   // ────────────────────────────────────────────────────────────────────────────
 
   Widget _buildPriceParamsCard() {
+    final cs = Theme.of(context).colorScheme;
     return _card(
       title: 'Prisparametre',
       child: Column(
@@ -1236,9 +1328,9 @@ class _GigOfferPageState extends State<GigOfferPage> {
                   width: 140,
                   child: Row(
                     children: [
-                      const Text('In-Ear',
+                      Text('In-Ear',
                           style: TextStyle(
-                              fontSize: 13, color: CssTheme.textMuted)),
+                              fontSize: 13, color: cs.onSurfaceVariant)),
                       const SizedBox(width: 6),
                       SizedBox(
                         width: 24,
@@ -1287,10 +1379,10 @@ class _GigOfferPageState extends State<GigOfferPage> {
             padding: const EdgeInsets.only(top: 4, bottom: 4),
             child: Row(
               children: [
-                const SizedBox(
+                SizedBox(
                   width: 140,
                   child: Text('Transport',
-                      style: TextStyle(fontSize: 13, color: CssTheme.textMuted)),
+                      style: TextStyle(fontSize: 13, color: cs.onSurfaceVariant)),
                 ),
                 SizedBox(
                   width: 120,
@@ -1417,10 +1509,10 @@ class _GigOfferPageState extends State<GigOfferPage> {
             padding: const EdgeInsets.only(bottom: 8),
             child: Row(
               children: [
-                const SizedBox(
+                SizedBox(
                   width: 140,
                   child: Text('Km totalt',
-                      style: TextStyle(fontSize: 13, color: CssTheme.textMuted)),
+                      style: TextStyle(fontSize: 13, color: cs.onSurfaceVariant)),
                 ),
                 SizedBox(
                   width: 120,
@@ -1503,6 +1595,7 @@ class _GigOfferPageState extends State<GigOfferPage> {
   }
 
   Widget _rateChip(String label, double rate) {
+    final cs = Theme.of(context).colorScheme;
     final selected = (_transportPricePerKm - rate).abs() < 0.01;
     return GestureDetector(
       onTap: () {
@@ -1517,7 +1610,7 @@ class _GigOfferPageState extends State<GigOfferPage> {
           color: selected ? Colors.black : Colors.transparent,
           borderRadius: BorderRadius.circular(999),
           border: Border.all(
-              color: selected ? Colors.black : CssTheme.outline),
+              color: selected ? Colors.black : cs.outlineVariant),
         ),
         child: Text(
           label,
@@ -1534,6 +1627,7 @@ class _GigOfferPageState extends State<GigOfferPage> {
   Widget _paramRow(
       String label, double value, ValueChanged<double> onChanged,
       {bool integer = false}) {
+    final cs = Theme.of(context).colorScheme;
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
       child: Row(
@@ -1542,7 +1636,7 @@ class _GigOfferPageState extends State<GigOfferPage> {
             width: 140,
             child: Text(label,
                 style:
-                    const TextStyle(fontSize: 13, color: CssTheme.textMuted)),
+                    TextStyle(fontSize: 13, color: cs.onSurfaceVariant)),
           ),
           SizedBox(
             width: 120,
@@ -1572,6 +1666,7 @@ class _GigOfferPageState extends State<GigOfferPage> {
 
   Widget _paramRowPct(
       String label, double value, ValueChanged<double> onChanged) {
+    final cs = Theme.of(context).colorScheme;
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
       child: Row(
@@ -1580,7 +1675,7 @@ class _GigOfferPageState extends State<GigOfferPage> {
             width: 140,
             child: Text(label,
                 style:
-                    const TextStyle(fontSize: 13, color: CssTheme.textMuted)),
+                    TextStyle(fontSize: 13, color: cs.onSurfaceVariant)),
           ),
           SizedBox(
             width: 120,
@@ -1675,13 +1770,14 @@ class _GigOfferPageState extends State<GigOfferPage> {
   // ────────────────────────────────────────────────────────────────────────────
 
   Widget _buildCalcCard() {
+    final cs = Theme.of(context).colorScheme;
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        color: CssTheme.surface,
+        color: cs.surfaceContainerLowest,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: CssTheme.outline),
+        border: Border.all(color: cs.outlineVariant),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1706,8 +1802,8 @@ class _GigOfferPageState extends State<GigOfferPage> {
               padding: const EdgeInsets.only(bottom: 4),
               child: Text(
                 '${_tollStations.length} bom × ${_routePersons * (_routeReturn ? 2 : 1)}',
-                style: const TextStyle(
-                    fontSize: 11, color: CssTheme.textMuted),
+                style: TextStyle(
+                    fontSize: 11, color: cs.onSurfaceVariant),
               ),
             ),
           const Divider(height: 24),
@@ -1728,6 +1824,7 @@ class _GigOfferPageState extends State<GigOfferPage> {
   }
 
   Widget _calcRow(String label, String value) {
+    final cs = Theme.of(context).colorScheme;
     return Padding(
       padding: const EdgeInsets.only(bottom: 6),
       child: Row(
@@ -1735,7 +1832,7 @@ class _GigOfferPageState extends State<GigOfferPage> {
         children: [
           Text(label,
               style:
-                  const TextStyle(fontSize: 13, color: CssTheme.textMuted)),
+                  TextStyle(fontSize: 13, color: cs.onSurfaceVariant)),
           Text(value, style: const TextStyle(fontSize: 13)),
         ],
       ),
@@ -1743,6 +1840,7 @@ class _GigOfferPageState extends State<GigOfferPage> {
   }
 
   Widget _calcRowWithPct(String label, String value, double pct) {
+    final cs = Theme.of(context).colorScheme;
     final pctStr = '${(pct * 100).toStringAsFixed(1)}%';
     return Padding(
       padding: const EdgeInsets.only(bottom: 6),
@@ -1753,13 +1851,13 @@ class _GigOfferPageState extends State<GigOfferPage> {
             children: [
               Text(label,
                   style:
-                      const TextStyle(fontSize: 13, color: CssTheme.textMuted)),
+                      TextStyle(fontSize: 13, color: cs.onSurfaceVariant)),
               const SizedBox(width: 6),
               Text(pctStr,
-                  style: const TextStyle(
+                  style: TextStyle(
                       fontSize: 11,
                       fontStyle: FontStyle.italic,
-                      color: CssTheme.textMuted)),
+                      color: cs.onSurfaceVariant)),
             ],
           ),
           Text(value, style: const TextStyle(fontSize: 13)),
@@ -1769,17 +1867,266 @@ class _GigOfferPageState extends State<GigOfferPage> {
   }
 
   // ────────────────────────────────────────────────────────────────────────────
+  // SEND TO TRIPLETEX
+  // ────────────────────────────────────────────────────────────────────────────
+
+  Future<void> _sendToTripletex() async {
+    if (_companyId == null || _offerId == null) return;
+
+    // ── Step 1: Build preview data (no API calls that create anything) ──
+    _recalc();
+
+    final customerName = _firmaCtrl.text.trim();
+    if (customerName.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Fyll inn kundenavn først')),
+      );
+      return;
+    }
+
+    final selectedShows = _shows.where((s) => s.selected).toList();
+    final previewLines = <Map<String, dynamic>>[];
+
+    if (selectedShows.isNotEmpty && _totalPerformers > 0) {
+      for (final show in selectedShows) {
+        final performers = show.drummers + show.dancers + show.others;
+        if (performers <= 0) continue;
+        final showFee = (_performerFees * performers / _totalPerformers);
+        previewLines.add({
+          'description': show.showName,
+          'amount': showFee.roundToDouble(),
+        });
+      }
+    }
+
+    if (_transportPrice > 0) {
+      previewLines.add({
+        'description': 'Transport',
+        'amount': _transportPrice.roundToDouble(),
+      });
+    }
+
+    if (_inearIncluded && _inearTotal > 0) {
+      previewLines.add({
+        'description': 'In-ear monitors',
+        'amount': _inearTotal.roundToDouble(),
+      });
+    }
+
+    final markup = _completeKonto + _bookingHonorar;
+    if (markup > 0) {
+      previewLines.add({
+        'description': 'Honorar',
+        'amount': markup.roundToDouble(),
+      });
+    }
+
+    if (previewLines.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Ingen fakturalinjer å sende')),
+      );
+      return;
+    }
+
+    final previewTotal = previewLines.fold<double>(
+      0, (s, l) => s + (l['amount'] as double),
+    );
+
+    // ── Step 2: Show confirmation dialog ──
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Bekreft faktura til Tripletex'),
+        content: SizedBox(
+          width: 420,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Kunde: $customerName',
+                  style: const TextStyle(fontWeight: FontWeight.bold)),
+              if (_orgNrCtrl.text.trim().isNotEmpty)
+                Text('Org.nr: ${_orgNrCtrl.text.trim()}'),
+              if (_emailCtrl.text.trim().isNotEmpty)
+                Text('E-post: ${_emailCtrl.text.trim()}'),
+              const SizedBox(height: 16),
+              const Text('Fakturalinjer:',
+                  style: TextStyle(fontWeight: FontWeight.bold)),
+              const SizedBox(height: 8),
+              ...previewLines.map((l) => Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 2),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Expanded(child: Text(l['description'] as String)),
+                        Text('${_nf.format(l['amount'])} kr'),
+                      ],
+                    ),
+                  )),
+              const Divider(),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text('Totalt',
+                      style: TextStyle(fontWeight: FontWeight.bold)),
+                  Text('${_nf.format(previewTotal)} kr',
+                      style: const TextStyle(fontWeight: FontWeight.bold)),
+                ],
+              ),
+              const SizedBox(height: 16),
+              Text(
+                'Sendes som ${_invoiceOnEhf ? 'EHF' : 'e-post'} via Tripletex.',
+                style: TextStyle(
+                    fontSize: 12, color: Colors.grey.shade600),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Avbryt'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Send faktura'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+
+    // ── Step 3: Actually send ──
+    setState(() => _sendingToTripletex = true);
+    try {
+      // Find or create customer
+      final customer = await TripletexService.findOrCreateCustomer(
+        _companyId!,
+        name: customerName,
+        orgNr: _orgNrCtrl.text.trim(),
+        email: _emailCtrl.text.trim(),
+      );
+      final customerId = (customer['id'] as num).toInt();
+      final resolvedName = customer['name'] as String? ?? customerName;
+      debugPrint('Resolved customer: id=$customerId name=$resolvedName');
+
+      // Set invoiceSendMethod on the customer — EHF requires ELMA registration
+      var sendMethod = _invoiceOnEhf ? 'EHF' : 'EMAIL';
+      try {
+        await TripletexService.updateCustomer(_companyId!, customerId, {
+          'invoiceSendMethod': sendMethod,
+        });
+        debugPrint('Customer $customerId invoiceSendMethod set to $sendMethod');
+      } catch (e) {
+        if (sendMethod == 'EHF') {
+          debugPrint('EHF not available for customer, falling back to EMAIL: $e');
+          sendMethod = 'EMAIL';
+          await TripletexService.updateCustomer(_companyId!, customerId, {
+            'invoiceSendMethod': 'EMAIL',
+          });
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Kunden kan ikke motta EHF — sendes på e-post i stedet'),
+                backgroundColor: Colors.orange,
+              ),
+            );
+          }
+        } else {
+          rethrow;
+        }
+      }
+
+      // Build order lines
+      final orderLines = previewLines.map((l) => {
+        'description': l['description'],
+        'count': 1,
+        'unitPriceExcludingVatCurrency': l['amount'],
+      }).toList();
+
+      // Create order
+      final invoiceDate = DateFormat('yyyy-MM-dd').format(DateTime.now());
+
+      final order = await TripletexService.createOrder(_companyId!, {
+        'customer': {'id': customerId},
+        'orderDate': invoiceDate,
+        'deliveryDate': invoiceDate,
+        'invoicesDueIn': 14,
+        'orderLines': orderLines,
+      });
+
+      final orderId = (order['id'] as num).toInt();
+      debugPrint('Order created: $orderId');
+
+      // Create invoice from order (without sending yet)
+      final invoice = await TripletexService.invoiceOrder(
+        _companyId!,
+        orderId: orderId,
+        invoiceDate: invoiceDate,
+      );
+
+      final tripletexId = (invoice['id'] as num?)?.toInt() ??
+          (invoice['invoiceNumber'] as num?)?.toInt();
+
+      // Explicitly send via the resolved method (EHF or EMAIL)
+      if (tripletexId != null) {
+        debugPrint('Sending invoice $tripletexId as $sendMethod');
+        await TripletexService.sendInvoice(
+          _companyId!,
+          invoiceId: tripletexId,
+          sendType: sendMethod,
+          overrideEmail: sendMethod == 'EMAIL' ? _emailCtrl.text.trim() : null,
+        );
+      }
+
+      // Save tripletex_invoice_id + set status to invoiced
+      if (tripletexId != null) {
+        final now = DateTime.now().toUtc().toIso8601String();
+        await _sb.from('gig_offers').update({
+          'tripletex_invoice_id': tripletexId,
+          'status': 'invoiced',
+          if (_invoicedAt == null) 'invoiced_at': now,
+        }).eq('id', _offerId!);
+        if (_gigId != null) {
+          await _sb.from('gigs').update({'status': 'invoiced'}).eq('id', _gigId!);
+        }
+        setState(() {
+          _tripletexInvoiceId = tripletexId;
+          _gigStatus = 'invoiced';
+          _invoicedAt ??= DateTime.now().toUtc();
+        });
+      }
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Faktura opprettet og sendt (ID: $tripletexId)')),
+        );
+      }
+    } catch (e) {
+      debugPrint('Tripletex send error: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Feil: $e'), backgroundColor: Colors.red),
+        );
+      }
+    }
+    if (mounted) setState(() => _sendingToTripletex = false);
+  }
+
+  // ────────────────────────────────────────────────────────────────────────────
   // HANDLINGER (RIGHT)
   // ────────────────────────────────────────────────────────────────────────────
 
   Widget _buildActionsCard() {
+    final cs = Theme.of(context).colorScheme;
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        color: CssTheme.surface,
+        color: cs.surfaceContainerLowest,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: CssTheme.outline),
+        border: Border.all(color: cs.outlineVariant),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1804,6 +2151,46 @@ class _GigOfferPageState extends State<GigOfferPage> {
               icon: const Icon(Icons.open_in_new, size: 16),
               label: const Text('Åpne gig'),
             ),
+          ],
+          // Tripletex invoice button
+          if (_offerId != null &&
+              (_gigStatus == 'confirmed' || _gigStatus == 'invoiced')) ...[
+            const SizedBox(height: 12),
+            if (_tripletexInvoiceId != null)
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                decoration: BoxDecoration(
+                  color: Colors.green.shade50,
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: Colors.green.shade200),
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.check_circle, size: 16, color: Colors.green.shade700),
+                    const SizedBox(width: 8),
+                    Text(
+                      'Sendt til Tripletex (#$_tripletexInvoiceId)',
+                      style: TextStyle(
+                        fontWeight: FontWeight.w700,
+                        fontSize: 13,
+                        color: Colors.green.shade700,
+                      ),
+                    ),
+                  ],
+                ),
+              )
+            else
+              OutlinedButton.icon(
+                onPressed: _sendingToTripletex ? null : _sendToTripletex,
+                icon: _sendingToTripletex
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2))
+                    : const Icon(Icons.send, size: 16),
+                label: const Text('Send til Tripletex'),
+              ),
           ],
         ],
       ),
@@ -1847,6 +2234,7 @@ class _CustomerPicker extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
     final selected = selectedCompany;
     return Row(
       crossAxisAlignment: CrossAxisAlignment.center,
@@ -1858,7 +2246,7 @@ class _CustomerPicker extends StatelessWidget {
               padding:
                   const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
               decoration: BoxDecoration(
-                border: Border.all(color: CssTheme.outline),
+                border: Border.all(color: cs.outlineVariant),
                 borderRadius: BorderRadius.circular(8),
                 color: loading
                     ? Colors.black.withValues(alpha: 0.04)
@@ -1869,13 +2257,13 @@ class _CustomerPicker extends StatelessWidget {
                   Icon(Icons.business_outlined,
                       size: 18,
                       color: loading
-                          ? CssTheme.textMuted
+                          ? cs.onSurfaceVariant
                           : Theme.of(context).colorScheme.primary),
                   const SizedBox(width: 10),
                   Expanded(
                     child: loading
-                        ? const Text('Laster kunder…',
-                            style: TextStyle(color: CssTheme.textMuted))
+                        ? Text('Laster kunder…',
+                            style: TextStyle(color: cs.onSurfaceVariant))
                         : selected != null
                             ? Column(
                                 crossAxisAlignment:
@@ -1889,14 +2277,14 @@ class _CustomerPicker extends StatelessWidget {
                                   if ((selected['city'] as String?) !=
                                       null)
                                     Text(selected['city'] as String,
-                                        style: const TextStyle(
+                                        style: TextStyle(
                                             fontSize: 12,
-                                            color: CssTheme.textMuted)),
+                                            color: cs.onSurfaceVariant)),
                                 ],
                               )
-                            : const Text('Velg kunde…',
+                            : Text('Velg kunde…',
                                 style: TextStyle(
-                                    color: CssTheme.textMuted)),
+                                    color: cs.onSurfaceVariant)),
                   ),
                   if (selected != null)
                     IconButton(
@@ -1904,8 +2292,8 @@ class _CustomerPicker extends StatelessWidget {
                         tooltip: 'Fjern kunde',
                         onPressed: onClear)
                   else
-                    const Icon(Icons.arrow_drop_down,
-                        color: CssTheme.textMuted),
+                    Icon(Icons.arrow_drop_down,
+                        color: cs.onSurfaceVariant),
                 ],
               ),
             ),
@@ -2036,6 +2424,7 @@ class _CustomerPickerDialogState extends State<_CustomerPickerDialog>
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
     final filtered = _query.isEmpty
         ? widget.companies
         : widget.companies.where((c) {
@@ -2081,10 +2470,10 @@ class _CustomerPickerDialogState extends State<_CustomerPickerDialog>
                       const SizedBox(height: 8),
                       Expanded(
                         child: filtered.isEmpty
-                            ? const Center(
+                            ? Center(
                                 child: Text('Ingen treff',
                                     style: TextStyle(
-                                        color: CssTheme.textMuted)))
+                                        color: cs.onSurfaceVariant)))
                             : ListView.builder(
                                 itemCount: filtered.length,
                                 itemBuilder: (ctx, i) {
@@ -2101,10 +2490,10 @@ class _CustomerPickerDialogState extends State<_CustomerPickerDialog>
                                     subtitle: (c['city'] as String?) !=
                                             null
                                         ? Text(c['city'] as String,
-                                            style: const TextStyle(
+                                            style: TextStyle(
                                                 fontSize: 12,
                                                 color:
-                                                    CssTheme.textMuted))
+                                                    cs.onSurfaceVariant))
                                         : null,
                                     onTap: () =>
                                         Navigator.pop(ctx, c),
@@ -2151,8 +2540,8 @@ class _CustomerPickerDialogState extends State<_CustomerPickerDialog>
                                     _brregCtrl.text.isEmpty
                                         ? 'Søk etter bedrift i Enhetsregisteret'
                                         : 'Ingen treff',
-                                    style: const TextStyle(
-                                        color: CssTheme.textMuted),
+                                    style: TextStyle(
+                                        color: cs.onSurfaceVariant),
                                   ),
                                 )
                               : ListView.builder(
@@ -2205,6 +2594,7 @@ class _OfferShow {
   int others;
   bool selected;
   int sortOrder;
+  String ekstrainnslag;
 
   _OfferShow({
     this.id,
@@ -2215,6 +2605,7 @@ class _OfferShow {
     this.others = 0,
     this.selected = true,
     this.sortOrder = 0,
+    this.ekstrainnslag = '',
   });
 
   factory _OfferShow.fromMap(Map<String, dynamic> m) {
@@ -2227,6 +2618,7 @@ class _OfferShow {
       others: (m['others'] as num?)?.toInt() ?? 0,
       selected: m['selected'] == true,
       sortOrder: (m['sort_order'] as num?)?.toInt() ?? 0,
+      ekstrainnslag: m['ekstrainnslag'] as String? ?? '',
     );
   }
 }

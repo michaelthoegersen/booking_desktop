@@ -65,6 +65,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "2.13.0"
+  audio_session:
+    dependency: transitive
+    description:
+      name: audio_session
+      sha256: "2b7fff16a552486d078bfc09a8cde19f426dc6d6329262b684182597bec5b1ac"
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.1.25"
   barcode:
     dependency: transitive
     description:
@@ -154,7 +162,7 @@ packages:
     source: hosted
     version: "0.3.5+2"
   crypto:
-    dependency: transitive
+    dependency: "direct main"
     description:
       name: crypto
       sha256: c8ea0233063ba03258fbcf2ca4d6dadfefe14f02fab57702265467a19f27fadf
@@ -286,6 +294,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "2.1.0"
+  flutter_svg:
+    dependency: "direct main"
+    description:
+      name: flutter_svg
+      sha256: "87fbd7c534435b6c5d9d98b01e1fd527812b82e68ddd8bd35fc45ed0fa8f0a95"
+      url: "https://pub.dev"
+    source: hosted
+    version: "2.2.3"
   flutter_test:
     dependency: "direct dev"
     description: flutter
@@ -384,6 +400,30 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "4.9.0"
+  just_audio:
+    dependency: "direct main"
+    description:
+      name: just_audio
+      sha256: f978d5b4ccea08f267dae0232ec5405c1b05d3f3cd63f82097ea46c015d5c09e
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.9.46"
+  just_audio_platform_interface:
+    dependency: transitive
+    description:
+      name: just_audio_platform_interface
+      sha256: "2532c8d6702528824445921c5ff10548b518b13f808c2e34c2fd54793b999a6a"
+      url: "https://pub.dev"
+    source: hosted
+    version: "4.6.0"
+  just_audio_web:
+    dependency: transitive
+    description:
+      name: just_audio_web
+      sha256: "6ba8a2a7e87d57d32f0f7b42856ade3d6a9fbe0f1a11fabae0a4f00bb73f0663"
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.4.16"
   jwt_decode:
     dependency: transitive
     description:
@@ -845,6 +885,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "24.2.9"
+  synchronized:
+    dependency: transitive
+    description:
+      name: synchronized
+      sha256: c254ade258ec8282947a0acbbc90b9575b4f19673533ee46f2f6e9b3aeefd7c0
+      url: "https://pub.dev"
+    source: hosted
+    version: "3.4.0"
   term_glyph:
     dependency: transitive
     description:
@@ -941,6 +989,38 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "3.1.5"
+  uuid:
+    dependency: transitive
+    description:
+      name: uuid
+      sha256: "1fef9e8e11e2991bb773070d4656b7bd5d850967a2456cfc83cf47925ba79489"
+      url: "https://pub.dev"
+    source: hosted
+    version: "4.5.3"
+  vector_graphics:
+    dependency: transitive
+    description:
+      name: vector_graphics
+      sha256: a4f059dc26fc8295b5921376600a194c4ec7d55e72f2fe4c7d2831e103d461e6
+      url: "https://pub.dev"
+    source: hosted
+    version: "1.1.19"
+  vector_graphics_codec:
+    dependency: transitive
+    description:
+      name: vector_graphics_codec
+      sha256: "99fd9fbd34d9f9a32efd7b6a6aae14125d8237b10403b422a6a6dfeac2806146"
+      url: "https://pub.dev"
+    source: hosted
+    version: "1.1.13"
+  vector_graphics_compiler:
+    dependency: transitive
+    description:
+      name: vector_graphics_compiler
+      sha256: "5a88dd14c0954a5398af544651c7fb51b457a2a556949bfb25369b210ef73a74"
+      url: "https://pub.dev"
+    source: hosted
+    version: "1.2.0"
   vector_math:
     dependency: transitive
     description:
@@ -958,7 +1038,7 @@ packages:
     source: hosted
     version: "15.0.2"
   web:
-    dependency: transitive
+    dependency: "direct main"
     description:
       name: web
       sha256: "868d88a33d8a87b18ffc05f9f030ba328ffefba92d6c127917a2ba740f9cfe4a"

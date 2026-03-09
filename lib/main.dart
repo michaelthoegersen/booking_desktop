@@ -4,6 +4,8 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 
 import 'pages/login_page.dart';
+import 'pages/portal_selector_page.dart';
+import 'pages/artist_login_page.dart';
 import 'widgets/app_shell.dart';
 import 'widgets/mgmt_shell.dart';
 import 'widgets/crew_shell.dart';
@@ -33,9 +35,15 @@ import 'pages/mgmt/mgmt_messages_page.dart';
 import 'pages/mgmt/mgmt_settings_page.dart';
 import 'pages/mgmt/mgmt_gig_offers_page.dart';
 import 'pages/mgmt/gig_offer_page.dart';
+import 'pages/mgmt/mgmt_gig_hire_admin_page.dart';
+import 'pages/mgmt/mgmt_dropbox_page.dart';
+import 'pages/mgmt/mgmt_economy_page.dart';
 
 import 'pages/crew/crew_gigs_page.dart';
 import 'pages/crew/crew_gig_detail_page.dart';
+import 'pages/crew/crew_notes_page.dart';
+import 'pages/crew/crew_folder_browser_page.dart';
+import 'pages/crew/crew_audio_player_page.dart';
 
 import 'contacts/contacts_screen.dart';
 import 'contacts/dm_inbox_screen.dart';
@@ -173,9 +181,10 @@ class BookingApp extends StatelessWidget {
         final loggedIn = isLoggedIn;
         final path = state.matchedLocation;
 
-        if (!loggedIn && path != '/login') return '/login';
+        const publicPaths = ['/portal', '/login', '/login-artist'];
+        if (!loggedIn && !publicPaths.contains(path)) return '/portal';
 
-        if (loggedIn && path == '/login') {
+        if (loggedIn && publicPaths.contains(path)) {
           await _loadUserRole();
           final mode = activeCompanyNotifier.value?.appMode ?? 'css';
           if (mode == 'management') return '/m';
@@ -183,9 +192,13 @@ class BookingApp extends StatelessWidget {
           return '/';
         }
 
-        // If role not yet loaded but user is logged in, load it
+        // On app restart: if role not loaded, load and redirect to correct mode
         if (loggedIn && _cachedUserRole == null) {
           await _loadUserRole();
+          final mode = activeCompanyNotifier.value?.appMode;
+          if (mode == 'management' && !path.startsWith('/m')) return '/m';
+          if (mode == 'crew' && !path.startsWith('/c')) return '/c';
+          if (mode == 'css' && (path.startsWith('/m') || path.startsWith('/c'))) return '/';
         }
 
         return null;
@@ -222,10 +235,22 @@ class BookingApp extends StatelessWidget {
 
       routes: [
 
+        // ---------------- PORTAL SELECTOR ----------------
+        GoRoute(
+          path: "/portal",
+          builder: (context, state) => const PortalSelectorPage(),
+        ),
+
         // ---------------- LOGIN ----------------
         GoRoute(
           path: "/login",
           builder: (context, state) => const LoginPage(),
+        ),
+
+        // ---------------- ARTIST LOGIN ----------------
+        GoRoute(
+          path: "/login-artist",
+          builder: (context, state) => const ArtistLoginPage(),
         ),
 
         // ---------------- CSS APP SHELL ----------------
@@ -341,6 +366,12 @@ class BookingApp extends StatelessWidget {
               builder: (context, state) => const BusRequestsPage(),
             ),
 
+            // ---------------- CONTACTS ----------------
+            GoRoute(
+              path: "/contacts",
+              builder: (context, state) => const ContactsScreen(),
+            ),
+
             // ---------------- DM INBOX ----------------
             GoRoute(
               path: "/dm-inbox",
@@ -400,6 +431,10 @@ class BookingApp extends StatelessWidget {
               builder: (_, __) => const MgmtSettingsPage(),
             ),
             GoRoute(
+              path: '/m/gig-hire',
+              builder: (_, __) => const MgmtGigHireAdminPage(),
+            ),
+            GoRoute(
               path: '/m/offers',
               builder: (_, __) => const MgmtGigOffersPage(),
             ),
@@ -414,6 +449,14 @@ class BookingApp extends StatelessWidget {
               builder: (_, s) => GigOfferPage(
                 offerId: s.pathParameters['id']!,
               ),
+            ),
+            GoRoute(
+              path: '/m/dropbox',
+              builder: (_, __) => const MgmtDropboxPage(),
+            ),
+            GoRoute(
+              path: '/m/economy',
+              builder: (_, __) => const MgmtEconomyPage(),
             ),
           ],
         ),
@@ -431,6 +474,30 @@ class BookingApp extends StatelessWidget {
               builder: (_, s) => CrewGigDetailPage(
                 gigId: s.pathParameters['id']!,
               ),
+            ),
+            GoRoute(
+              path: '/c/notes',
+              builder: (_, __) => const CrewNotesPage(),
+            ),
+            GoRoute(
+              path: '/c/notes/folder',
+              builder: (_, s) {
+                final qp = s.uri.queryParameters;
+                return CrewFolderBrowserPage(
+                  folderPath: qp['path'] ?? '',
+                  folderName: qp['name'] ?? 'Filer',
+                );
+              },
+            ),
+            GoRoute(
+              path: '/c/notes/audio',
+              builder: (_, s) {
+                final qp = s.uri.queryParameters;
+                return CrewAudioPlayerPage(
+                  filePath: qp['path'] ?? '',
+                  fileName: qp['name'] ?? 'Audio',
+                );
+              },
             ),
           ],
         ),

@@ -115,6 +115,9 @@ class OfferDraft {
 OfferPricingOverride? pricingOverride;
   double? totalOverride;
 
+  /// Per-round price overrides (round index → overridden total)
+  Map<int, double?> roundOverrides;
+
   /// Pricing model: 'norsk' (Norwegian day-based) or 'svensk' (Swedish per-leg)
   String pricingModel;
 
@@ -137,8 +140,10 @@ OfferPricingOverride? pricingOverride;
     this.bus,
     this.pricingOverride,
     this.totalOverride,
+    Map<int, double?>? roundOverrides,
     this.pricingModel = 'norsk',
-  })  : rounds = List.generate(12, (_) => OfferRound()),
+  })  : roundOverrides = roundOverrides ?? {},
+        rounds = List.generate(12, (_) => OfferRound()),
         globalBusSlots = List.generate(4, (_) => null);
 
   // ------------------------------------------------------------
@@ -203,6 +208,9 @@ OfferPricingOverride? pricingOverride;
     // Pricing model ('norsk' / 'svensk')
     'pricingModel': pricingModel,
 
+    // Per-round price overrides
+    'roundOverrides': roundOverrides.map((k, v) => MapEntry(k.toString(), v)),
+
     'globalBusSlots': globalBusSlots,
     'rounds': rounds.map((r) => r.toJson()).toList(),
   };
@@ -240,6 +248,9 @@ OfferPricingOverride? pricingOverride;
 
     // Pricing model (backwards compatible — default 'norsk')
     pricingModel: (json['pricingModel'] as String?) ?? 'norsk',
+
+    // Per-round price overrides
+    roundOverrides: _parseRoundOverrides(json['roundOverrides']),
   );
 
   final rawRounds = (json['rounds'] as List?) ?? [];
@@ -261,6 +272,21 @@ OfferPricingOverride? pricingOverride;
 
   return draft;
 }
+  static Map<int, double?> _parseRoundOverrides(dynamic raw) {
+    if (raw == null || raw is! Map) return {};
+    final result = <int, double?>{};
+    for (final e in raw.entries) {
+      final key = int.tryParse(e.key.toString());
+      if (key == null) continue;
+      if (e.value == null) {
+        result[key] = null;
+      } else {
+        result[key] = (e.value as num).toDouble();
+      }
+    }
+    return result;
+  }
+
   static BusType _busTypeFromName(String name) {
     for (final t in BusType.values) {
       if (t.name == name) return t;

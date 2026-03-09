@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../services/offer_storage_service.dart';
+import '../state/active_company.dart';
 
 class ArchivePage extends StatefulWidget {
   const ArchivePage({super.key});
@@ -20,13 +21,17 @@ class _ArchivePageState extends State<ArchivePage> {
   void initState() {
     super.initState();
     _load();
+    activeCompanyNotifier.addListener(_onCompanyChanged);
     _searchCtrl.addListener(() {
       setState(() => _searchQuery = _searchCtrl.text.trim().toLowerCase());
     });
   }
 
+  void _onCompanyChanged() => _load();
+
   @override
   void dispose() {
+    activeCompanyNotifier.removeListener(_onCompanyChanged);
     _searchCtrl.dispose();
     super.dispose();
   }

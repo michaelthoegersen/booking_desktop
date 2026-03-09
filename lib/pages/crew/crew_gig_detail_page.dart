@@ -3,8 +3,6 @@ import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
-import '../../ui/css_theme.dart';
-
 class CrewGigDetailPage extends StatefulWidget {
   final String gigId;
 
@@ -20,7 +18,14 @@ class _CrewGigDetailPageState extends State<CrewGigDetailPage> {
   bool _loading = true;
   Map<String, dynamic>? _gig;
   String? _myStatus; // 'pending', 'available', 'unavailable'
+  String? _myRole;
   List<_MemberAvailability> _members = [];
+
+  // Per-show crew assignment (admin / gruppeleder only)
+  List<Map<String, dynamic>> _shows = [];
+  List<Map<String, dynamic>> _companyMembers = [];
+  Map<String, Set<String>> _selectedSkarpByShow = {};
+  Map<String, Set<String>> _selectedBassByShow = {};
 
   @override
   void initState() {
@@ -48,9 +53,20 @@ class _CrewGigDetailPageState extends State<CrewGigDetailPage> {
         members = List<Map<String, dynamic>>.from(
           await _sb
               .from('profiles')
-              .select('id, name, role')
+              .select('id, name, role, section')
               .eq('company_id', companyId),
         );
+      }
+
+      // Determine current user's role
+      _myRole = null;
+      if (uid != null) {
+        for (final m in members) {
+          if (m['id'] == uid) {
+            _myRole = m['role'] as String?;
+            break;
+          }
+        }
       }
 
       // 3. Availability for this gig
@@ -78,6 +94,53 @@ class _CrewGigDetailPageState extends State<CrewGigDetailPage> {
 
       _members = memberList;
       _myStatus = uid != null ? (availMap[uid] ?? 'pending') : 'pending';
+
+      // 5. Shows & lineup for crew assignment (admin / gruppeleder)
+      final isManager = _myRole == 'admin' ||
+          _myRole == 'gruppeleder_skarp' ||
+          _myRole == 'gruppeleder_bass';
+      if (isManager) {
+        final shows = await _sb
+            .from('gig_shows')
+            .select('*')
+            .eq('gig_id', widget.gigId)
+            .order('sort_order');
+        _shows = List<Map<String, dynamic>>.from(shows);
+
+        _companyMembers = members.map((m) {
+          final mUid = m['id'] as String;
+          return {
+            'user_id': mUid,
+            'name': m['name'] as String? ?? '',
+            'section': m['section'] as String?,
+            'status': availMap[mUid] ?? 'pending',
+          };
+        }).toList();
+        _companyMembers.sort((a, b) =>
+            (a['name'] as String).compareTo(b['name'] as String));
+
+        final lineupData = await _sb
+            .from('gig_lineup')
+            .select('user_id, section, show_id')
+            .eq('gig_id', widget.gigId);
+        _selectedSkarpByShow = {};
+        _selectedBassByShow = {};
+        for (final l in List<Map<String, dynamic>>.from(lineupData)) {
+          final showId = l['show_id'] as String? ?? '';
+          if (l['section'] == 'skarp') {
+            _selectedSkarpByShow.putIfAbsent(showId, () => {});
+            _selectedSkarpByShow[showId]!.add(l['user_id'] as String);
+          } else if (l['section'] == 'bass') {
+            _selectedBassByShow.putIfAbsent(showId, () => {});
+            _selectedBassByShow[showId]!.add(l['user_id'] as String);
+          }
+        }
+      } else {
+        _shows = [];
+        _companyMembers = [];
+        _selectedSkarpByShow = {};
+        _selectedBassByShow = {};
+      }
     } catch (e) {
       debugPrint('CrewGigDetail load error: $e');
     }
@@ -104,8 +167,92 @@ class _CrewGigDetailPageState extends State<CrewGigDetailPage> {
     }
   }
 
+  // ── Lineup helpers (admin / gruppeleder) ──
+
+  bool get _isManager =>
+      _myRole == 'admin' ||
+      _myRole == 'gruppeleder_skarp' ||
+      _myRole == 'gruppeleder_bass';
+
+  void _toggleLineupMember(String userId, String section, String showId) {
+    setState(() {
+      final map =
+          section == 'skarp' ? _selectedSkarpByShow : _selectedBassByShow;
+      map.putIfAbsent(showId, () => {});
+      final set = map[showId]!;
+      if (set.contains(userId)) {
+        set.remove(userId);
+      } else {
+        set.add(userId);
+      }
+    });
+  }
+
+  void _copyToAllShows(String fromShowId) {
+    setState(() {
+      final showIds = _shows.map((s) => s['id'] as String).toList();
+      for (final section in ['skarp', 'bass']) {
+        final map = section == 'skarp'
+            ? _selectedSkarpByShow
+            : _selectedBassByShow;
+        final source = Set<String>.from(map[fromShowId] ?? {});
+        for (final sid in showIds) {
+          map[sid] = Set<String>.from(source);
+        }
+      }
+    });
+  }
+
+  Future<void> _saveLineup(String section) async {
+    final map =
+        section == 'skarp' ? _selectedSkarpByShow : _selectedBassByShow;
+    await _sb
+        .from('gig_lineup')
+        .delete()
+        .eq('gig_id', widget.gigId)
+        .eq('section', section);
+    final rows = <Map<String, dynamic>>[];
+    for (final entry in map.entries) {
+      final showId = entry.key;
+      for (final uid in entry.value) {
+        rows.add({
+          'gig_id': widget.gigId,
+          'user_id': uid,
+          'section': section,
+          if (showId.isNotEmpty) 'show_id': showId,
+        });
+      }
+    }
+    if (rows.isNotEmpty) {
+      await _sb.from('gig_lineup').insert(rows);
+    }
+  }
+
+  Future<void> _saveAllLineup() async {
+    try {
+      await _saveLineup('skarp');
+      await _saveLineup('bass');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Lagret!'),
+            backgroundColor: Colors.green,
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Feil: $e'), backgroundColor: Colors.red),
+        );
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
     if (_loading) {
       return const Center(child: CircularProgressIndicator());
     }
@@ -155,16 +302,16 @@ class _CrewGigDetailPageState extends State<CrewGigDetailPage> {
           // Breadcrumb
           GestureDetector(
             onTap: () => context.go('/c'),
-            child: const Row(
+            child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
                 Icon(Icons.arrow_back_ios,
-                    size: 13, color: CssTheme.textMuted),
-                SizedBox(width: 2),
+                    size: 13, color: cs.onSurfaceVariant),
+                const SizedBox(width: 2),
                 Text(
                   'Gigs',
                   style: TextStyle(
-                    color: CssTheme.textMuted,
+                    color: cs.onSurfaceVariant,
                     fontWeight: FontWeight.w700,
                     fontSize: 13,
                   ),
@@ -192,7 +339,7 @@ class _CrewGigDetailPageState extends State<CrewGigDetailPage> {
                         style: Theme.of(context)
                             .textTheme
                             .bodyLarge
-                            ?.copyWith(color: CssTheme.textMuted),
+                            ?.copyWith(color: cs.onSurfaceVariant),
                       ),
                   ],
                 ),
@@ -228,20 +375,20 @@ class _CrewGigDetailPageState extends State<CrewGigDetailPage> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   // Times section
-                  _infoSection([
+                  _infoSection(cs, [
                     if (_gig!['meeting_time'] != null)
-                      _infoRow('Møtetid', _gig!['meeting_time']),
+                      _infoRow(cs, 'Møtetid', _gig!['meeting_time']),
                     if (_gig!['get_in_time'] != null)
-                      _infoRow('Get-in', _gig!['get_in_time']),
+                      _infoRow(cs, 'Get-in', _gig!['get_in_time']),
                     if (_gig!['rehearsal_time'] != null)
-                      _infoRow('Lydprøve', _gig!['rehearsal_time']),
+                      _infoRow(cs, 'Lydprøve', _gig!['rehearsal_time']),
                     if (_gig!['performance_time'] != null)
-                      _infoRow('Spilletid', _gig!['performance_time']),
+                      _infoRow(cs, 'Spilletid', _gig!['performance_time']),
                     if (_gig!['get_out_time'] != null)
-                      _infoRow('Get-out', _gig!['get_out_time']),
+                      _infoRow(cs, 'Get-out', _gig!['get_out_time']),
                     if (_gig!['meeting_notes'] != null &&
                         (_gig!['meeting_notes'] as String).isNotEmpty)
-                      _infoRow('Notater', _gig!['meeting_notes']),
+                      _infoRow(cs, 'Notater', _gig!['meeting_notes']),
                   ]),
 
                   const SizedBox(height: 24),
@@ -281,12 +428,12 @@ class _CrewGigDetailPageState extends State<CrewGigDetailPage> {
                       style: Theme.of(context).textTheme.titleMedium),
                   const SizedBox(height: 12),
                   if (_members.isEmpty)
-                    const Text('Ingen crew-medlemmer.',
-                        style: TextStyle(color: CssTheme.textMuted))
+                    Text('Ingen crew-medlemmer.',
+                        style: TextStyle(color: cs.onSurfaceVariant))
                   else
                     Container(
                       decoration: BoxDecoration(
-                        border: Border.all(color: CssTheme.outline),
+                        border: Border.all(color: cs.outlineVariant),
                         borderRadius: BorderRadius.circular(12),
                       ),
                       child: Column(
@@ -317,15 +464,15 @@ class _CrewGigDetailPageState extends State<CrewGigDetailPage> {
                             decoration: BoxDecoration(
                               border: isLast
                                   ? null
-                                  : const Border(
+                                  : Border(
                                       bottom: BorderSide(
-                                          color: CssTheme.outline)),
+                                          color: cs.outlineVariant)),
                             ),
                             child: Row(
                               children: [
                                 CircleAvatar(
                                   radius: 16,
-                                  backgroundColor: CssTheme.surface2,
+                                  backgroundColor: cs.surfaceContainerLow,
                                   child: Text(
                                     m.name.isNotEmpty
                                         ? m.name.characters.first
@@ -352,6 +499,32 @@ class _CrewGigDetailPageState extends State<CrewGigDetailPage> {
                         }).toList(),
                       ),
                     ),
+
+                  // ── Per-show crew assignment (admin / gruppeleder) ──
+                  if (_isManager && _shows.isNotEmpty) ...[
+                    const SizedBox(height: 24),
+                    Row(
+                      children: [
+                        Text('Sett opp crew per show',
+                            style: Theme.of(context).textTheme.titleMedium),
+                        const Spacer(),
+                        FilledButton.icon(
+                          onPressed: _saveAllLineup,
+                          icon: const Icon(Icons.save, size: 16),
+                          label: const Text('Lagre'),
+                          style: FilledButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 12, vertical: 8),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    for (final show in _shows) ...[
+                      _buildShowAssignment(context, show),
+                      const SizedBox(height: 14),
+                    ],
+                  ],
                 ],
               ),
             ),
@@ -361,7 +534,196 @@ class _CrewGigDetailPageState extends State<CrewGigDetailPage> {
     );
   }
 
-  Widget _infoSection(List<Widget> children) {
+  Widget _buildShowAssignment(
+      BuildContext context, Map<String, dynamic> show) {
+    final cs = Theme.of(context).colorScheme;
+    final showId = show['id'] as String;
+    final showName = show['show_name'] as String? ?? 'Show';
+
+    final skarpMembers =
+        _companyMembers.where((m) => m['section'] == 'skarp').toList();
+    final bassMembers =
+        _companyMembers.where((m) => m['section'] == 'bass').toList();
+    final skarpSelected = _selectedSkarpByShow[showId] ?? {};
+    final bassSelected = _selectedBassByShow[showId] ?? {};
+
+    final lockedSkarp = _gig?['lineup_locked_skarp'] == true;
+    final lockedBass = _gig?['lineup_locked_bass'] == true;
+    // gruppeleder_skarp can only edit skarp, gruppeleder_bass only bass
+    final canEditSkarp =
+        _myRole == 'admin' || _myRole == 'gruppeleder_skarp';
+    final canEditBass =
+        _myRole == 'admin' || _myRole == 'gruppeleder_bass';
+
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        border: Border.all(color: cs.outlineVariant),
+        borderRadius: BorderRadius.circular(14),
+        color: cs.surfaceContainerLowest,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Text(showName,
+                  style: const TextStyle(
+                      fontSize: 15, fontWeight: FontWeight.w900)),
+              const Spacer(),
+              if (_shows.length > 1)
+                GestureDetector(
+                  onTap: () => _copyToAllShows(showId),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.copy_all, size: 14, color: cs.onSurfaceVariant),
+                      const SizedBox(width: 4),
+                      Text('Kopier til alle',
+                          style: TextStyle(
+                              fontSize: 12, color: cs.onSurfaceVariant)),
+                    ],
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          _sectionLabel('Skarp', Colors.purple, skarpSelected.length),
+          const SizedBox(height: 6),
+          _buildMemberCheckList(
+            cs: cs,
+            members: skarpMembers,
+            selected: skarpSelected,
+            section: 'skarp',
+            showId: showId,
+            locked: lockedSkarp,
+            canEdit: canEditSkarp,
+          ),
+          const SizedBox(height: 12),
+          _sectionLabel('Bass', Colors.teal, bassSelected.length),
+          const SizedBox(height: 6),
+          _buildMemberCheckList(
+            cs: cs,
+            members: bassMembers,
+            selected: bassSelected,
+            section: 'bass',
+            showId: showId,
+            locked: lockedBass,
+            canEdit: canEditBass,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _sectionLabel(String title, Color color, int count) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.15),
+        borderRadius: BorderRadius.circular(99),
+      ),
+      child: Text(
+        '$title ($count valgt)',
+        style: TextStyle(
+          fontSize: 12,
+          fontWeight: FontWeight.w800,
+          color: color,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMemberCheckList({
+    required ColorScheme cs,
+    required List<Map<String, dynamic>> members,
+    required Set<String> selected,
+    required String section,
+    required String showId,
+    required bool locked,
+    required bool canEdit,
+  }) {
+    if (members.isEmpty) {
+      return Text('Ingen medlemmer.',
+          style: TextStyle(color: cs.onSurfaceVariant, fontSize: 12));
+    }
+    return Container(
+      decoration: BoxDecoration(
+        border: Border.all(color: cs.outlineVariant),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Column(
+        children: members.asMap().entries.map((entry) {
+          final i = entry.key;
+          final m = entry.value;
+          final isLast = i == members.length - 1;
+          final uid = m['user_id'] as String;
+
+          IconData statusIcon;
+          Color statusColor;
+          switch (m['status'] as String?) {
+            case 'available':
+              statusIcon = Icons.check_circle;
+              statusColor = Colors.green;
+              break;
+            case 'unavailable':
+              statusIcon = Icons.cancel;
+              statusColor = Colors.red;
+              break;
+            default:
+              statusIcon = Icons.help_outline;
+              statusColor = Colors.grey;
+          }
+
+          return GestureDetector(
+            onTap: (locked || !canEdit)
+                ? null
+                : () => _toggleLineupMember(uid, section, showId),
+            child: Container(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              decoration: BoxDecoration(
+                border: isLast
+                    ? null
+                    : Border(
+                        bottom: BorderSide(color: cs.outlineVariant)),
+              ),
+              child: Row(
+                children: [
+                  Icon(statusIcon, color: statusColor, size: 18),
+                  const SizedBox(width: 6),
+                  SizedBox(
+                    width: 22,
+                    height: 22,
+                    child: Checkbox(
+                      value: selected.contains(uid),
+                      onChanged: (locked || !canEdit)
+                          ? null
+                          : (_) =>
+                              _toggleLineupMember(uid, section, showId),
+                      materialTapTargetSize:
+                          MaterialTapTargetSize.shrinkWrap,
+                      visualDensity: VisualDensity.compact,
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      (m['name'] as String?) ?? 'Ukjent',
+                      style: const TextStyle(
+                          fontWeight: FontWeight.w700, fontSize: 13),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        }).toList(),
+      ),
+    );
+  }
+
+  Widget _infoSection(ColorScheme cs, List<Widget> children) {
     final filtered = children.whereType<Widget>().toList();
     if (filtered.isEmpty) return const SizedBox.shrink();
 
@@ -369,9 +731,9 @@ class _CrewGigDetailPageState extends State<CrewGigDetailPage> {
       width: double.infinity,
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: CssTheme.surface,
+        color: cs.surfaceContainerLowest,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: CssTheme.outline),
+        border: Border.all(color: cs.outlineVariant),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -380,7 +742,7 @@ class _CrewGigDetailPageState extends State<CrewGigDetailPage> {
     );
   }
 
-  Widget _infoRow(String label, String? value) {
+  Widget _infoRow(ColorScheme cs, String label, String? value) {
     if (value == null || value.isEmpty) return const SizedBox.shrink();
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
@@ -391,9 +753,9 @@ class _CrewGigDetailPageState extends State<CrewGigDetailPage> {
             width: 100,
             child: Text(
               label,
-              style: const TextStyle(
+              style: TextStyle(
                 fontWeight: FontWeight.w700,
-                color: CssTheme.textMuted,
+                color: cs.onSurfaceVariant,
                 fontSize: 13,
               ),
             ),
@@ -432,15 +794,16 @@ class _AvailButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
     return GestureDetector(
       onTap: onTap,
       child: Container(
         padding: const EdgeInsets.symmetric(vertical: 18),
         decoration: BoxDecoration(
-          color: selected ? color.withValues(alpha: 0.15) : CssTheme.surface,
+          color: selected ? color.withValues(alpha: 0.15) : cs.surfaceContainerLowest,
           borderRadius: BorderRadius.circular(14),
           border: Border.all(
-            color: selected ? color : CssTheme.outline,
+            color: selected ? color : cs.outlineVariant,
             width: selected ? 2 : 1,
           ),
         ),
@@ -453,7 +816,7 @@ class _AvailButton extends StatelessWidget {
               style: TextStyle(
                 fontWeight: FontWeight.w900,
                 fontSize: 16,
-                color: selected ? color : CssTheme.text,
+                color: selected ? color : cs.onSurface,
               ),
             ),
           ],

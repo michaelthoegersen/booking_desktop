@@ -53,18 +53,44 @@ class GroupChatService {
             .toList());
   }
 
+  /// Update own group message text.
+  static Future<void> updateGroupMessage(String messageId, String newText) async {
+    await _sb.from('group_chat_messages').update({
+      'message': newText,
+      'edited_at': DateTime.now().toUtc().toIso8601String(),
+    }).eq('id', messageId).eq('user_id', _sb.auth.currentUser!.id);
+  }
+
   /// Send melding til gruppe.
   static Future<void> sendGroupMessage({
     required String groupId,
     required String message,
     required String senderName,
+    String? replyToId,
+    List<String>? mentionedUserIds,
   }) async {
     await _sb.from('group_chat_messages').insert({
       'group_chat_id': groupId,
       'user_id': _sb.auth.currentUser!.id,
       'sender_name': senderName,
       'message': message,
+      if (replyToId != null) 'reply_to_id': replyToId,
+      if (mentionedUserIds != null && mentionedUserIds.isNotEmpty)
+        'mentioned_user_ids': mentionedUserIds,
     });
+
+    // Push notification to group members
+    try {
+      await _sb.functions.invoke('notify-chat', body: {
+        'type': 'group',
+        'group_id': groupId,
+        'sender_id': _sb.auth.currentUser!.id,
+        'sender_name': senderName,
+        'message': message,
+        if (mentionedUserIds != null && mentionedUserIds.isNotEmpty)
+          'mentioned_user_ids': mentionedUserIds,
+      });
+    } catch (_) {}
   }
 
   /// Hent medlemmer med profiler.

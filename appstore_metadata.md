@@ -40,7 +40,7 @@ https://tourflow-60890.web.app/support.html
 Appen krever innlogging. Bruk følgende demokonto for gjennomgang:
 
 E-post: review@tourflow.app
-Passord: (OPPRETT DENNE I SUPABASE AUTH)
+Passord: TourFlowReview2026
 
 Appen er et bookingverktøy for musikkbransjen. Etter innlogging kan du
 se dashboardet, opprette gigs, lage tilbud og navigere mellom seksjoner.

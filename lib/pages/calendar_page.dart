@@ -14,6 +14,8 @@ import '../services/email_service.dart';
 import '../services/round_summary_pdf_service.dart';
 import '../state/settings_store.dart';
 import '../utils/bus_utils.dart';
+import '../utils/company_vehicles.dart';
+import '../state/active_company.dart';
 
 // ============================================================
 // HELPERS
@@ -44,18 +46,7 @@ String fmtDb(DateTime d) {
   return DateFormat("yyyy-MM-dd").format(d);
 }
 
-final Map<String, String> busTypes = {
-  "CSS_1034": "12–18 bunks\n12 + Star room",
-  "CSS_1023": "12–14 sleeper",
-  "CSS_1008": "12 sleeper",
-  "YCR 682": "16-sleeper",
-  "ESW 337": "14-sleeper",
-  "WYN 802": "14-sleeper",
-  "RLC 29G": "16-sleeper",
-  "Rental 1 (Hasse)": "16-sleeper",
-  "Rental 2 (Rickard)": "16-sleeper",
-  "Conference": "20-50 seats",
-};
+Map<String, String> get busTypes => getVehicleConfig().types;
 // ============================================================
 // DRAG DATA
 // ============================================================
@@ -189,18 +180,7 @@ class _CalendarPageState extends State<CalendarPage> {
   List<Map<String, dynamic>> _waitingList = [];
   bool _wlExpanded = true;
 
-  final buses = [
-    "CSS_1034",
-    "CSS_1023",
-    "CSS_1008",
-    "YCR 682",
-    "ESW 337",
-    "WYN 802",
-    "RLC 29G",
-    "Rental 1 (Hasse)",
-    "Rental 2 (Rickard)",
-    "Conference",
-  ];
+  List<String> get buses => getVehicleConfig().all;
 
   // ============================================================
   // INIT
@@ -221,6 +201,9 @@ class _CalendarPageState extends State<CalendarPage> {
     // ✅ Synk vertikal scroll mellom buss-kolonne og kalender-kolonne
     _leftVScrollCtrl.addListener(_syncLeftToRight);
     _rightVScrollCtrl.addListener(_syncRightToLeft);
+
+    // ✅ Lytt på selskapsbytte
+    activeCompanyNotifier.addListener(_onCompanyChanged);
 
     // ✅ Lytt på auth-endringer
     _authSub = supabase.auth.onAuthStateChange.listen((data) {
@@ -253,8 +236,18 @@ class _CalendarPageState extends State<CalendarPage> {
     _vScrollSyncing = false;
   }
 
+  void _onCompanyChanged() {
+    if (isMonthView) {
+      loadMonth();
+    } else {
+      loadWeek();
+    }
+    _loadWaitingList();
+  }
+
   @override
   void dispose() {
+    activeCompanyNotifier.removeListener(_onCompanyChanged);
     _authSub.cancel();
     _hScrollCtrl.dispose();
     _leftVScrollCtrl.removeListener(_syncLeftToRight);
@@ -309,11 +302,16 @@ class _CalendarPageState extends State<CalendarPage> {
 
     try {
 
-      final res = await supabase
+      final cid = activeCompanyNotifier.value?.id;
+      var calQuery = supabase
           .from('samletdata')
           .select()
           .gte('dato', fmtDb(start))
           .lte('dato', fmtDb(end));
+      if (cid != null) {
+        calQuery = calQuery.eq('owner_company_id', cid);
+      }
+      final res = await calQuery;
 
       final rows = List<Map<String, dynamic>>.from(res);
 
@@ -2591,18 +2589,7 @@ Future<void> load() async {
     label: const Text("Copy to"),
     onPressed: () async {
 
-      final buses = [
-        "CSS_1034",
-        "CSS_1023",
-        "CSS_1008",
-        "YCR 682",
-        "ESW 337",
-        "WYN 802",
-        "RLC 29G",
-        "Rental 1 (Hasse)",
-        "Rental 2 (Rickard)",
-        "Conference",
-      ];
+      final buses = getVehicleConfig().all;
 
       final target = await showDialog<String>(
         context: context,
@@ -3291,6 +3278,8 @@ class _ManualBlockDialogState
           'draft_id': draftId,
           'status': 'manual',
           if (pris.isNotEmpty) 'pris': pris,
+          if (activeCompanyNotifier.value != null)
+            'owner_company_id': activeCompanyNotifier.value!.id,
         });
 
         d = d.add(const Duration(days: 1));
@@ -3729,6 +3718,8 @@ class _WaitingListAssignDialogState
             'contact': widget.item['contact'] ?? '',
             'status': _status,
             'manual_block': false,
+            if (activeCompanyNotifier.value != null)
+              'owner_company_id': activeCompanyNotifier.value!.id,
           });
           d = d.add(const Duration(days: 1));
         }

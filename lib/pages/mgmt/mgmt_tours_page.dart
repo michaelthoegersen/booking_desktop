@@ -4,7 +4,6 @@ import 'package:intl/intl.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../state/active_company.dart';
-import '../../ui/css_theme.dart';
 
 class MgmtToursPage extends StatefulWidget {
   const MgmtToursPage({super.key});
@@ -233,6 +232,7 @@ class _MgmtToursPageState extends State<MgmtToursPage> {
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
     return Padding(
       padding: const EdgeInsets.all(18),
       child: Column(
@@ -275,7 +275,7 @@ class _MgmtToursPageState extends State<MgmtToursPage> {
                           _search.isNotEmpty
                               ? 'Ingen turnéer matcher søket'
                               : 'Ingen turnéer ennå. Opprett din første turné!',
-                          style: const TextStyle(color: CssTheme.textMuted),
+                          style: TextStyle(color: cs.onSurfaceVariant),
                         ),
                       )
                     : ListView.builder(
@@ -306,6 +306,7 @@ class _TourRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
     final name = tour['name'] as String? ?? '';
     final artist = tour['artist'] as String? ?? '';
     final status = tour['status'] as String? ?? 'planning';
@@ -327,9 +328,9 @@ class _TourRow extends StatelessWidget {
         margin: const EdgeInsets.only(bottom: 8),
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
-          color: CssTheme.surface,
+          color: cs.surfaceContainerLowest,
           borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: CssTheme.outline),
+          border: Border.all(color: cs.outlineVariant),
         ),
         child: Row(
           children: [
@@ -346,14 +347,14 @@ class _TourRow extends StatelessWidget {
                   ),
                   Text(
                     artist,
-                    style: const TextStyle(color: CssTheme.textMuted),
+                    style: TextStyle(color: cs.onSurfaceVariant),
                   ),
                   if (dateRange.isNotEmpty)
                     Text(
                       dateRange,
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 12,
-                        color: CssTheme.textMuted,
+                        color: cs.onSurfaceVariant,
                       ),
                     ),
                 ],
@@ -362,7 +363,7 @@ class _TourRow extends StatelessWidget {
             _StatusBadge(status: status),
             const SizedBox(width: 4),
             PopupMenuButton<String>(
-              icon: const Icon(Icons.more_vert, color: CssTheme.textMuted),
+              icon: Icon(Icons.more_vert, color: cs.onSurfaceVariant),
               onSelected: (v) {
                 if (v == 'delete') onDelete();
               },

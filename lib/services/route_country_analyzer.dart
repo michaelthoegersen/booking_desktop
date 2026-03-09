@@ -1,5 +1,7 @@
 import 'dart:math';
 
+import 'package:flutter/foundation.dart';
+
 import 'country_service.dart';
 import 'polyline_decoder.dart';
 
@@ -7,10 +9,12 @@ class RouteCountryAnalyzer {
   final CountryService _countryService = CountryService();
 
   /// Hvor ofte vi sampler polyline (jo høyere = raskere, mindre presis)
-  static const int step = 100;
+  /// Web: larger step because Nominatim is rate-limited to 1 req/s
+  static const int step = kIsWeb ? 500 : 100;
 
   /// Maks samtidige API-kall (beskytter deg mot rate-limit)
-  static const int maxParallel = 8;
+  /// Web: sequential (Nominatim 1 req/s), desktop: parallel
+  static const int maxParallel = kIsWeb ? 1 : 8;
 
   /// Land vi faktisk bryr oss om
   static const Set<String> vatCountries = {

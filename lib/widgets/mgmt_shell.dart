@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import '../ui/web_svg_image.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../pages/mgmt/mgmt_settings_page.dart' show companyFlagsNotifier;
@@ -23,7 +24,6 @@ class MgmtShell extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: CssTheme.bg,
       body: Row(
         children: [
           const _MgmtSideNav(),
@@ -217,7 +217,7 @@ class _MgmtTopBarState extends State<_MgmtTopBar> {
             onSelected: (value) async {
               if (value == 'logout') {
                 await Supabase.instance.client.auth.signOut();
-                if (context.mounted) context.go('/login');
+                if (context.mounted) context.go('/portal');
               }
             },
             itemBuilder: (context) => [
@@ -314,6 +314,18 @@ class _MgmtSideNavState extends State<_MgmtSideNav> {
           table: 'gig_messages',
           callback: (_) => _loadUnreadMessages(),
         )
+        .onPostgresChanges(
+          event: PostgresChangeEvent.insert,
+          schema: 'public',
+          table: 'direct_messages',
+          callback: (_) => _loadUnreadMessages(),
+        )
+        .onPostgresChanges(
+          event: PostgresChangeEvent.insert,
+          schema: 'public',
+          table: 'group_chat_messages',
+          callback: (_) => _loadUnreadMessages(),
+        )
         .subscribe();
     _pollTimer = Timer.periodic(const Duration(seconds: 15), (_) {
       _loadUnreadMessages();
@@ -337,12 +349,80 @@ class _MgmtSideNavState extends State<_MgmtSideNav> {
 
   Future<void> _loadUnreadMessages() async {
     try {
-      final res = await _sb
+      final myId = _sb.auth.currentUser?.id;
+      if (myId == null) return;
+
+      // 1. Unread gig messages
+      final gigRes = await _sb
           .from('gig_messages')
           .select('id')
           .eq('is_admin', false)
           .or('read_by_admin.is.null,read_by_admin.eq.false');
-      if (mounted) setState(() => _unreadMessages = (res as List).length);
+      int total = (gigRes as List).length;
+
+      // 2. Unread DMs (messages to me, after my cursor per peer)
+      final dmCursors = await _sb
+          .from('dm_read_cursors')
+          .select('peer_id, last_read_at')
+          .eq('user_id', myId);
+      final dmCursorMap = <String, String>{};
+      for (final r in (dmCursors as List)) {
+        dmCursorMap[r['peer_id'] as String] = r['last_read_at'] as String;
+      }
+
+      final dmMessages = await _sb
+          .from('direct_messages')
+          .select('sender_id, created_at')
+          .eq('receiver_id', myId)
+          .order('created_at', ascending: false)
+          .limit(500);
+      for (final msg in (dmMessages as List)) {
+        final senderId = msg['sender_id'] as String;
+        final createdAt = msg['created_at'] as String;
+        final cursor = dmCursorMap[senderId];
+        if (cursor == null || createdAt.compareTo(cursor) > 0) {
+          total++;
+        }
+      }
+
+      // 3. Unread group messages
+      final myGroups = await _sb
+          .from('group_chat_members')
+          .select('group_chat_id')
+          .eq('user_id', myId);
+      final groupIds = (myGroups as List)
+          .map((r) => r['group_chat_id'] as String)
+          .toList();
+
+      if (groupIds.isNotEmpty) {
+        final groupCursors = await _sb
+            .from('group_read_cursors')
+            .select('group_chat_id, last_read_at')
+            .eq('user_id', myId);
+        final groupCursorMap = <String, String>{};
+        for (final r in (groupCursors as List)) {
+          groupCursorMap[r['group_chat_id'] as String] =
+              r['last_read_at'] as String;
+        }
+
+        final groupMsgs = await _sb
+            .from('group_chat_messages')
+            .select('group_chat_id, created_at')
+            .inFilter('group_chat_id', groupIds)
+            .neq('user_id', myId)
+            .order('created_at', ascending: false)
+            .limit(500);
+        for (final msg in (groupMsgs as List)) {
+          final groupId = msg['group_chat_id'] as String;
+          final createdAt = msg['created_at'] as String;
+          final cursor = groupCursorMap[groupId];
+          if (cursor == null || createdAt.compareTo(cursor) > 0) {
+            total++;
+          }
+        }
+      }
+
+      if (mounted) setState(() => _unreadMessages = total);
     } catch (e) {
       debugPrint('Mgmt chat badge error: $e');
     }
@@ -376,11 +456,12 @@ class _MgmtSideNavState extends State<_MgmtSideNav> {
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
     return Container(
       width: 260,
-      decoration: const BoxDecoration(
-        color: CssTheme.surface,
-        border: Border(right: BorderSide(color: CssTheme.outline)),
+      decoration: BoxDecoration(
+        color: cs.surfaceContainerLowest,
+        border: Border(right: BorderSide(color: cs.outlineVariant)),
       ),
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -389,23 +470,10 @@ class _MgmtSideNavState extends State<_MgmtSideNav> {
             Padding(
               padding: const EdgeInsets.only(bottom: 20, top: 10),
               child: Center(
-                child: Image(
-                  image: const ResizeImage(
-                    AssetImage("assets/pdf/logos/TourFlowLogoComplete.png"),
-                    width: 500,
-                  ),
+                child: const WebSvgImage(
+                  svgAsset: 'pdf/logos/TourFlowLogoComplete.svg',
+                  width: 250,
                   height: 110,
-                  fit: BoxFit.contain,
-                  filterQuality: FilterQuality.medium,
-                  errorBuilder: (context, error, stack) {
-                    return const Text(
-                      "TourFlow",
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 24,
-                      ),
-                    );
-                  },
                 ),
               ),
             ),
@@ -446,10 +514,25 @@ class _MgmtSideNavState extends State<_MgmtSideNav> {
                       route: '/m/offers',
                     ),
                     _MgmtNavItem(
+                      icon: Icons.receipt_long_rounded,
+                      label: 'Gigghyrer',
+                      route: '/m/gig-hire',
+                    ),
+                    _MgmtNavItem(
+                      icon: Icons.account_balance_rounded,
+                      label: 'Økonomi',
+                      route: '/m/economy',
+                    ),
+                    _MgmtNavItem(
                       icon: Icons.chat_bubble_outline_rounded,
                       label: 'Meldinger',
                       route: '/m/messages',
                       badge: _unreadMessages,
+                    ),
+                    _MgmtNavItem(
+                      icon: Icons.cloud_outlined,
+                      label: 'Dropbox',
+                      route: '/m/dropbox',
                     ),
                   ],
                 ),
@@ -504,9 +587,6 @@ class _MgmtNavItem extends StatelessWidget {
         decoration: BoxDecoration(
           color: selected ? Colors.black : Colors.transparent,
           borderRadius: BorderRadius.circular(14),
-          border: Border.all(
-            color: selected ? Colors.black : CssTheme.outline,
-          ),
         ),
         child: Row(
           children: [

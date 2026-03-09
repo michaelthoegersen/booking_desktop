@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../services/direct_chat_service.dart';
+import '../state/active_company.dart';
 import '../ui/css_theme.dart';
+import '../widgets/mention_helpers.dart';
 
 class DirectChatScreen extends StatefulWidget {
   final String peerId;
@@ -19,11 +22,19 @@ class DirectChatScreen extends StatefulWidget {
   State<DirectChatScreen> createState() => _DirectChatScreenState();
 }
 
-class _DirectChatScreenState extends State<DirectChatScreen> {
+class _DirectChatScreenState extends State<DirectChatScreen>
+    with MentionMixin {
   final _controller = TextEditingController();
   final _scrollController = ScrollController();
+  final _focusNode = FocusNode();
   bool _sending = false;
   String _senderName = '';
+
+  /// Edit state
+  String? _editingMessageId;
+
+  /// Reply state
+  Map<String, dynamic>? _replyTo;
 
   /// Cached reactions: messageId → list of reaction maps
   Map<String, List<Map<String, dynamic>>> _reactionsByMessage = {};
@@ -35,6 +46,22 @@ class _DirectChatScreenState extends State<DirectChatScreen> {
   void initState() {
     super.initState();
     _loadSenderName();
+    _focusNode.onKeyEvent = _handleKeyEvent;
+    _controller.addListener(() => onMentionTextChanged(_controller));
+    // In a DM, the only mention candidate is the peer
+    initMentionCandidates([
+      MentionCandidate(id: widget.peerId, name: widget.peerName),
+    ]);
+  }
+
+  KeyEventResult _handleKeyEvent(FocusNode node, KeyEvent event) {
+    if (event is KeyDownEvent &&
+        event.logicalKey == LogicalKeyboardKey.enter &&
+        !HardwareKeyboard.instance.isShiftPressed) {
+      _send();
+      return KeyEventResult.handled;
+    }
+    return KeyEventResult.ignored;
   }
 
   Future<void> _loadSenderName() async {
@@ -46,6 +73,7 @@ class _DirectChatScreenState extends State<DirectChatScreen> {
   void dispose() {
     _controller.dispose();
     _scrollController.dispose();
+    _focusNode.dispose();
     super.dispose();
   }
 
@@ -57,11 +85,21 @@ class _DirectChatScreenState extends State<DirectChatScreen> {
     _controller.clear();
 
     try {
-      await DirectChatService.sendMessage(
-        peerId: widget.peerId,
-        message: text,
-        senderName: _senderName,
-      );
+      if (_editingMessageId != null) {
+        await DirectChatService.updateMessage(_editingMessageId!, text);
+        setState(() => _editingMessageId = null);
+      } else {
+        final mentions = List<String>.from(mentionedUserIds);
+        await DirectChatService.sendMessage(
+          peerId: widget.peerId,
+          message: text,
+          senderName: _senderName,
+          replyToId: _replyTo?['id'] as String?,
+          mentionedUserIds: mentions.isNotEmpty ? mentions : null,
+        );
+        clearMentions();
+        setState(() => _replyTo = null);
+      }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -73,16 +111,33 @@ class _DirectChatScreenState extends State<DirectChatScreen> {
     }
   }
 
-  void _scrollToBottom() {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_scrollController.hasClients) {
-        _scrollController.animateTo(
-          _scrollController.position.maxScrollExtent,
-          duration: const Duration(milliseconds: 300),
-          curve: Curves.easeOut,
-        );
-      }
+  void _cancelEdit() {
+    setState(() {
+      _editingMessageId = null;
+      _controller.clear();
     });
+  }
+
+  void _cancelReply() {
+    setState(() => _replyTo = null);
+  }
+
+  void _startEdit(Map<String, dynamic> msg) {
+    setState(() {
+      _editingMessageId = msg['id'] as String;
+      _replyTo = null;
+      _controller.text = msg['message'] as String? ?? '';
+    });
+    _focusNode.requestFocus();
+  }
+
+  void _startReply(Map<String, dynamic> msg) {
+    setState(() {
+      _replyTo = msg;
+      _editingMessageId = null;
+      _controller.clear();
+    });
+    _focusNode.requestFocus();
   }
 
   void _updateReactionsStream(List<String> messageIds) {
@@ -130,12 +185,19 @@ class _DirectChatScreenState extends State<DirectChatScreen> {
                   ),
                 ),
                 const SizedBox(width: 12),
-                Text(
-                  widget.peerName,
-                  style: const TextStyle(
-                    fontWeight: FontWeight.w900,
-                    fontSize: 16,
+                Expanded(
+                  child: Text(
+                    widget.peerName,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w900,
+                      fontSize: 16,
+                    ),
                   ),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.person_add_rounded, size: 20),
+                  tooltip: 'Legg til personer',
+                  onPressed: () => _showConvertToGroupDialog(context),
                 ),
               ],
             ),
@@ -147,7 +209,6 @@ class _DirectChatScreenState extends State<DirectChatScreen> {
               stream: DirectChatService.streamMessages(widget.peerId),
               builder: (context, snapshot) {
                 final messages = snapshot.data ?? [];
-                _scrollToBottom();
 
                 if (messages.isEmpty) {
                   return const Center(
@@ -179,6 +240,7 @@ class _DirectChatScreenState extends State<DirectChatScreen> {
 
                     return ListView.separated(
                       controller: _scrollController,
+                      reverse: true,
                       padding: const EdgeInsets.all(20),
                       itemCount: messages.length,
                       separatorBuilder: (_, __) => const SizedBox(height: 8),
@@ -188,18 +250,32 @@ class _DirectChatScreenState extends State<DirectChatScreen> {
                         final isMine = msg['sender_id'] == _currentUserId;
                         final reactions = _reactionsByMessage[msgId] ?? [];
 
+                        // Find reply-to message
+                        Map<String, dynamic>? replyMsg;
+                        final replyToId = msg['reply_to_id'];
+                        if (replyToId != null) {
+                          replyMsg = messages.cast<Map<String, dynamic>?>().firstWhere(
+                            (m) => m?['id'] == replyToId,
+                            orElse: () => null,
+                          );
+                        }
+
                         return _Bubble(
                           messageId: msgId,
                           message: msg['message'] as String? ?? '',
                           senderName: msg['sender_name'] as String? ?? '',
                           isMine: isMine,
                           createdAt: msg['created_at'] as String?,
+                          editedAt: msg['edited_at'] as String?,
+                          replyMsg: replyMsg,
                           reactions: reactions,
                           currentUserId: _currentUserId,
                           onAddReaction: (emoji) =>
                               DirectChatService.addReaction(msgId, emoji),
                           onRemoveReaction: (emoji) =>
                               DirectChatService.removeReaction(msgId, emoji),
+                          onReply: () => _startReply(msg),
+                          onEdit: isMine ? () => _startEdit(msg) : null,
                         );
                       },
                     );
@@ -208,6 +284,82 @@ class _DirectChatScreenState extends State<DirectChatScreen> {
               },
             ),
           ),
+
+          // Mention suggestions
+          MentionOverlay(
+            suggestions: mentionSuggestions,
+            onSelect: (c) => insertMention(_controller, c),
+          ),
+
+          // Reply preview bar
+          if (_replyTo != null)
+            Container(
+              padding: const EdgeInsets.fromLTRB(16, 8, 8, 0),
+              color: Colors.white,
+              child: Row(
+                children: [
+                  Container(
+                    width: 3,
+                    height: 36,
+                    decoration: BoxDecoration(
+                      color: Colors.black,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          _replyTo!['sender_name'] as String? ?? '',
+                          style: const TextStyle(
+                            fontWeight: FontWeight.w700,
+                            fontSize: 12,
+                          ),
+                        ),
+                        Text(
+                          _truncate(_replyTo!['message'] as String? ?? '', 60),
+                          style: const TextStyle(
+                            fontSize: 12,
+                            color: Colors.black54,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.close, size: 18),
+                    onPressed: _cancelReply,
+                  ),
+                ],
+              ),
+            ),
+
+          // Edit indicator bar
+          if (_editingMessageId != null)
+            Container(
+              padding: const EdgeInsets.fromLTRB(16, 8, 8, 0),
+              color: const Color(0xFFFFF9C4),
+              child: Row(
+                children: [
+                  const Icon(Icons.edit, size: 16, color: Colors.black54),
+                  const SizedBox(width: 8),
+                  const Text(
+                    'Redigerer melding',
+                    style: TextStyle(fontSize: 12, color: Colors.black54),
+                  ),
+                  const Spacer(),
+                  IconButton(
+                    icon: const Icon(Icons.close, size: 18),
+                    onPressed: _cancelEdit,
+                  ),
+                ],
+              ),
+            ),
 
           // Input
           Container(
@@ -221,7 +373,11 @@ class _DirectChatScreenState extends State<DirectChatScreen> {
                 Expanded(
                   child: TextField(
                     controller: _controller,
-                    onSubmitted: (_) => _send(),
+                    focusNode: _focusNode,
+                    maxLines: 5,
+                    minLines: 1,
+                    keyboardType: TextInputType.multiline,
+                    textCapitalization: TextCapitalization.sentences,
                     decoration: InputDecoration(
                       hintText: 'Skriv en melding…',
                       filled: true,
@@ -249,8 +405,14 @@ class _DirectChatScreenState extends State<DirectChatScreen> {
                       )
                     : FilledButton.icon(
                         onPressed: _send,
-                        icon: const Icon(Icons.send_rounded, size: 18),
-                        label: const Text('Send'),
+                        icon: Icon(
+                          _editingMessageId != null
+                              ? Icons.check_rounded
+                              : Icons.send_rounded,
+                          size: 18,
+                        ),
+                        label: Text(
+                            _editingMessageId != null ? 'Lagre' : 'Send'),
                         style: FilledButton.styleFrom(
                           backgroundColor: Colors.black,
                           padding: const EdgeInsets.symmetric(
@@ -270,13 +432,138 @@ class _DirectChatScreenState extends State<DirectChatScreen> {
     );
   }
 
+  Future<void> _showConvertToGroupDialog(BuildContext context) async {
+    final groupNameController = TextEditingController(text: widget.peerName);
+    final selectedIds = <String>{};
+    List<Map<String, dynamic>> contacts = [];
+
+    try {
+      final companyId = activeCompanyNotifier.value?.id;
+      if (companyId != null) {
+        final rows = await Supabase.instance.client.rpc(
+          'get_company_member_profiles',
+          params: {'p_company_id': companyId},
+        );
+        final myId = Supabase.instance.client.auth.currentUser?.id;
+        contacts = (rows as List)
+            .cast<Map<String, dynamic>>()
+            .where((r) => r['id'] != myId && r['id'] != widget.peerId)
+            .toList();
+      }
+    } catch (_) {}
+
+    if (!mounted) return;
+
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (ctx, setDialogState) {
+            return AlertDialog(
+              title: const Text('Opprett gruppe'),
+              content: SizedBox(
+                width: 350,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    TextField(
+                      controller: groupNameController,
+                      decoration: const InputDecoration(
+                        labelText: 'Gruppenavn',
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    if (contacts.isNotEmpty) ...[
+                      const Align(
+                        alignment: Alignment.centerLeft,
+                        child: Text('Legg til personer:',
+                            style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+                      ),
+                      const SizedBox(height: 8),
+                      ConstrainedBox(
+                        constraints: const BoxConstraints(maxHeight: 200),
+                        child: ListView.builder(
+                          shrinkWrap: true,
+                          itemCount: contacts.length,
+                          itemBuilder: (_, i) {
+                            final c = contacts[i];
+                            final id = c['id'] as String;
+                            final name = c['name'] as String? ?? '';
+                            return CheckboxListTile(
+                              value: selectedIds.contains(id),
+                              title: Text(name),
+                              dense: true,
+                              onChanged: (v) {
+                                setDialogState(() {
+                                  if (v == true) {
+                                    selectedIds.add(id);
+                                  } else {
+                                    selectedIds.remove(id);
+                                  }
+                                });
+                              },
+                            );
+                          },
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx, false),
+                  child: const Text('Avbryt'),
+                ),
+                FilledButton(
+                  onPressed: () => Navigator.pop(ctx, true),
+                  style: FilledButton.styleFrom(backgroundColor: Colors.black),
+                  child: const Text('Opprett'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+
+    if (result != true || !mounted) return;
+
+    final name = groupNameController.text.trim();
+    if (name.isEmpty) return;
+
+    try {
+      await DirectChatService.convertToGroup(
+        widget.peerId,
+        name,
+        selectedIds.toList(),
+      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Gruppe opprettet!')),
+        );
+        Navigator.of(context).pop();
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Feil: $e')),
+        );
+      }
+    }
+  }
+
   String get _currentUserId {
     return Supabase.instance.client.auth.currentUser?.id ?? '';
   }
+
+  static String _truncate(String s, int max) =>
+      s.length <= max ? s : '${s.substring(0, max)}…';
 }
 
 // ---------------------------------------------------------------------------
-// Chat bubble with reactions
+// Chat bubble with reactions, reply quote, and edit label
 // ---------------------------------------------------------------------------
 
 class _Bubble extends StatelessWidget {
@@ -285,10 +572,14 @@ class _Bubble extends StatelessWidget {
   final String senderName;
   final bool isMine;
   final String? createdAt;
+  final String? editedAt;
+  final Map<String, dynamic>? replyMsg;
   final List<Map<String, dynamic>> reactions;
   final String currentUserId;
   final Future<void> Function(String emoji) onAddReaction;
   final Future<void> Function(String emoji) onRemoveReaction;
+  final VoidCallback onReply;
+  final VoidCallback? onEdit;
 
   const _Bubble({
     required this.messageId,
@@ -296,10 +587,14 @@ class _Bubble extends StatelessWidget {
     required this.senderName,
     required this.isMine,
     this.createdAt,
+    this.editedAt,
+    this.replyMsg,
     required this.reactions,
     required this.currentUserId,
     required this.onAddReaction,
     required this.onRemoveReaction,
+    required this.onReply,
+    this.onEdit,
   });
 
   static const _emojiOptions = ['👍', '❤️', '😂', '😮', '🙏', '🔥'];
@@ -329,7 +624,7 @@ class _Bubble extends StatelessWidget {
           children: [
             // Bubble
             GestureDetector(
-              onLongPress: () => _showEmojiPicker(context),
+              onLongPress: () => _showContextMenu(context),
               child: Container(
                 padding:
                     const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
@@ -355,21 +650,88 @@ class _Bubble extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(height: 3),
-                    Text(
-                      message,
-                      style: TextStyle(
-                        fontSize: 14,
-                        color: isMine ? Colors.white : Colors.black87,
+                    // Reply quote
+                    if (replyMsg != null) ...[
+                      Container(
+                        padding: const EdgeInsets.all(8),
+                        margin: const EdgeInsets.only(bottom: 6),
+                        decoration: BoxDecoration(
+                          color: isMine
+                              ? Colors.white.withValues(alpha: 0.12)
+                              : Colors.black.withValues(alpha: 0.06),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border(
+                            left: BorderSide(
+                              color: isMine ? Colors.white54 : Colors.black26,
+                              width: 3,
+                            ),
+                          ),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              replyMsg!['sender_name'] as String? ?? '',
+                              style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w700,
+                                color: isMine ? Colors.white70 : Colors.black54,
+                              ),
+                            ),
+                            Text(
+                              _truncate(
+                                  replyMsg!['message'] as String? ?? '', 60),
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: isMine ? Colors.white54 : Colors.black45,
+                              ),
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                    Text.rich(
+                      TextSpan(
+                        children: buildMentionSpans(
+                          message,
+                          TextStyle(
+                            fontSize: 14,
+                            color: isMine ? Colors.white : Colors.black87,
+                          ),
+                        ),
+                        style: TextStyle(
+                          fontSize: 14,
+                          color: isMine ? Colors.white : Colors.black87,
+                        ),
                       ),
                     ),
                     if (timeStr != null) ...[
                       const SizedBox(height: 3),
-                      Text(
-                        timeStr,
-                        style: TextStyle(
-                          fontSize: 11,
-                          color: isMine ? Colors.white38 : Colors.black38,
-                        ),
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            timeStr,
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: isMine ? Colors.white38 : Colors.black38,
+                            ),
+                          ),
+                          if (editedAt != null) ...[
+                            const SizedBox(width: 4),
+                            Text(
+                              '(redigert)',
+                              style: TextStyle(
+                                fontSize: 10,
+                                fontStyle: FontStyle.italic,
+                                color:
+                                    isMine ? Colors.white38 : Colors.black38,
+                              ),
+                            ),
+                          ],
+                        ],
                       ),
                     ],
                   ],
@@ -424,7 +786,7 @@ class _Bubble extends StatelessWidget {
     );
   }
 
-  void _showEmojiPicker(BuildContext context) {
+  void _showContextMenu(BuildContext context) {
     final RenderBox box = context.findRenderObject() as RenderBox;
     final offset = box.localToGlobal(Offset.zero);
 
@@ -459,9 +821,39 @@ class _Bubble extends StatelessWidget {
             }).toList(),
           ),
         ),
+        PopupMenuItem<String>(
+          value: 'reply',
+          child: Row(
+            children: const [
+              Icon(Icons.reply, size: 18),
+              SizedBox(width: 8),
+              Text('Svar'),
+            ],
+          ),
+        ),
+        if (onEdit != null)
+          PopupMenuItem<String>(
+            value: 'edit',
+            child: Row(
+              children: const [
+                Icon(Icons.edit, size: 18),
+                SizedBox(width: 8),
+                Text('Rediger'),
+              ],
+            ),
+          ),
       ],
-    );
+    ).then((value) {
+      if (value == 'reply') {
+        onReply();
+      } else if (value == 'edit' && onEdit != null) {
+        onEdit!();
+      }
+    });
   }
+
+  static String _truncate(String s, int max) =>
+      s.length <= max ? s : '${s.substring(0, max)}…';
 
   String? _fmtTime(String? iso) {
     if (iso == null) return null;

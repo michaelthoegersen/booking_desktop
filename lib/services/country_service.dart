@@ -8,9 +8,17 @@ class CountryService {
   static const String _dartDefineKey =
       String.fromEnvironment('GOOGLE_MAPS_API_KEY');
 
-  final String _apiKey = _dartDefineKey.isNotEmpty
+  late final String _apiKey = _dartDefineKey.isNotEmpty
       ? _dartDefineKey
-      : (dotenv.env['GOOGLE_MAPS_API_KEY'] ?? '');
+      : _loadApiKey();
+
+  static String _loadApiKey() {
+    try {
+      return dotenv.env['GOOGLE_MAPS_API_KEY'] ?? '';
+    } catch (_) {
+      return '';
+    }
+  }
 
   final Map<String, String> _cache = {};
 
@@ -68,29 +76,44 @@ class CountryService {
     return 'Unknown';
   }
 
+  /// Nominatim reverse geocode (free, CORS OK, 1 req/s)
+  static DateTime _lastNominatim = DateTime(2000);
+
   Future<String> _getCountryWeb(
     double lat,
     double lng,
     String cacheKey,
   ) async {
     try {
+      // Rate limit: 1 request per second (Nominatim policy)
+      final now = DateTime.now();
+      final diff = now.difference(_lastNominatim).inMilliseconds;
+      if (diff < 1100) {
+        await Future.delayed(Duration(milliseconds: 1100 - diff));
+      }
+      _lastNominatim = DateTime.now();
+
       final url = Uri.parse(
-        'https://api.bigdatacloud.net/data/reverse-geocode-client'
-        '?latitude=$lat&longitude=$lng&localityLanguage=en',
+        'https://nominatim.openstreetmap.org/reverse'
+        '?lat=$lat&lon=$lng&format=json&zoom=3',
       );
 
-      final res = await http
-          .get(url)
-          .timeout(const Duration(seconds: 8));
+      final res = await http.get(url, headers: {
+        'Accept': 'application/json',
+        'User-Agent': 'TourFlow/1.0 (tourflow-booking)',
+      }).timeout(const Duration(seconds: 8));
 
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body) as Map<String, dynamic>;
+        final address = data['address'] as Map<String, dynamic>?;
         final country =
-            (data['countryCode'] as String?)?.toUpperCase() ?? 'Unknown';
+            (address?['country_code'] as String?)?.toUpperCase() ?? 'Unknown';
         _cache[cacheKey] = country;
         return country;
       }
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('Country web lookup failed: $e');
+    }
 
     _cache[cacheKey] = 'Unknown';
     return 'Unknown';

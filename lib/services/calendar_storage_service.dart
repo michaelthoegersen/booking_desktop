@@ -1,4 +1,5 @@
 import '../supabase_clients.dart'; // der du definerer clients
+import '../state/active_company.dart';
 
 class CalendarStorageService {
 
@@ -28,6 +29,8 @@ class CalendarStorageService {
 
       'status': 'Draft',
       'kilde': bus,
+      if (activeCompanyNotifier.value != null)
+        'owner_company_id': activeCompanyNotifier.value!.id,
     });
   }
 }

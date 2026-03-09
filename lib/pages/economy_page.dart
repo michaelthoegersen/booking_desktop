@@ -51,18 +51,31 @@ class _EconomyPageState extends State<EconomyPage> {
   void initState() {
     super.initState();
     _load();
+    activeCompanyNotifier.addListener(_onCompanyChanged);
+  }
+
+  void _onCompanyChanged() => _load();
+
+  @override
+  void dispose() {
+    activeCompanyNotifier.removeListener(_onCompanyChanged);
+    super.dispose();
   }
 
   Future<void> _load() async {
     setState(() => _loading = true);
     try {
       // Fetch all statuses we care about
-      final data = await _supabase
+      final econCompanyId = activeCompanyNotifier.value?.id;
+      var econQuery = _supabase
           .from('samletdata')
           .select('round_id, draft_id, id, dato, pris, produksjon, status')
           .or('status.eq.invoiced,status.eq.Confirmed,status.eq.confirmed,status.eq.Inquiry,status.eq.manual')
-          .not('pris', 'is', null)
-          .order('dato', ascending: true);
+          .not('pris', 'is', null);
+      if (econCompanyId != null) {
+        econQuery = econQuery.eq('owner_company_id', econCompanyId);
+      }
+      final data = await econQuery.order('dato', ascending: true);
 
       // Fetch creator mapping: offers(id, created_by)
       final offersData = await _supabase
@@ -77,7 +90,7 @@ class _EconomyPageState extends State<EconomyPage> {
         }
       }
 
-      // Fetch creator profiles
+      // Fetch creator profiles (admin/management only — no drivers)
       var creatorProfiles = <Map<String, dynamic>>[];
       final companyId = activeCompanyNotifier.value?.id;
       if (companyId != null) {
@@ -87,13 +100,15 @@ class _EconomyPageState extends State<EconomyPage> {
             params: {'p_company_id': companyId},
           );
           creatorProfiles = (profilesData as List)
+              .where((p) =>
+                  p['role'] == 'admin' || p['role'] == 'management')
               .map((p) => {
                     'id': p['id'] as String,
                     'name': (p['name'] as String?) ?? 'Unknown',
                   })
               .toList();
         } catch (_) {
-          // RPC not available — skip creator filter
+          // Skip creator filter on error
         }
       }
 

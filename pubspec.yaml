@@ -38,6 +38,10 @@ dependencies:
   open_filex: ^4.3.2
   path_provider: ^2.1.2
   url_launcher: ^6.2.5
+  crypto: ^3.0.0
+  just_audio: ^0.9.0
+  flutter_svg: ^2.2.3
+  web: ^1.1.1
 
 
 # =============================================================
@@ -67,6 +71,7 @@ flutter_icons:
 
   ios:
     generate: true
+  remove_alpha_ios: true
 
   macos:
     generate: true
@@ -85,12 +90,23 @@ flutter:
   assets:
     - .env
 
+    # Portal logos
+    - assets/TourFlowLogin.png
+    - assets/LogoTourFlowArtist.png
+    - assets/LogoTourFlowArtist.svg
+    - assets/TourFlowLogoManagement.png
+    - assets/TourFlowLogoFront.png
+    - assets/TourFlowLogoFront.svg
+    - assets/ManagementTourFlow.svg
+
     # PDF logos
     - assets/pdf/logos/CSSLogo.png
     - assets/pdf/logos/Starcoachlogo.png
     - assets/pdf/logos/LOGOapp.png
     - assets/pdf/logos/TourFlowLogo.png
+    - assets/pdf/logos/TourFlowLogo.svg
     - assets/pdf/logos/TourFlowLogoComplete.png
+    - assets/pdf/logos/TourFlowLogoComplete.svg
     - assets/pdf/logos/CompleteDrumsWhite.png
 
     # Bus images

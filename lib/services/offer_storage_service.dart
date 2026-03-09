@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../models/offer_draft.dart';
+import '../state/active_company.dart';
 
 class OfferStorageService {
   static SupabaseClient get sb => Supabase.instance.client;
@@ -77,6 +78,10 @@ class OfferStorageService {
 
       'created_at': DateTime.now().toIso8601String(),
       'updated_at': DateTime.now().toIso8601String(),
+
+      // Company isolation
+      if (activeCompanyNotifier.value != null)
+        'owner_company_id': activeCompanyNotifier.value!.id,
     }).select('id').single();
 
     recentOffersRefresh.value++;
@@ -111,12 +116,17 @@ class OfferStorageService {
     final user = sb.auth.currentUser;
     if (user == null) return [];
 
-    final offersRes = await sb
+    final companyId = activeCompanyNotifier.value?.id;
+    var archiveQuery = sb
         .from('offers')
         .select(
           'id, production, company, created_at, updated_at, created_by, updated_by, payload, offer_json, pdf_path',
         )
-        .eq('archived', true)
+        .eq('archived', true);
+    if (companyId != null) {
+      archiveQuery = archiveQuery.eq('owner_company_id', companyId);
+    }
+    final offersRes = await archiveQuery
         .order('updated_at', ascending: false);
 
     final offers = (offersRes as List).cast<Map<String, dynamic>>();
@@ -177,13 +187,18 @@ class OfferStorageService {
   final user = sb.auth.currentUser;
   if (user == null) return [];
 
-  // 1. Hent offers
-  final offersRes = await sb
+  // 1. Hent offers (filtrert per selskap)
+  final companyId = activeCompanyNotifier.value?.id;
+  var query = sb
     .from('offers')
     .select(
       'id, production, company, created_at, updated_at, created_by, updated_by, payload, offer_json, pdf_path',
     )
-    .eq('archived', false)
+    .eq('archived', false);
+  if (companyId != null) {
+    query = query.eq('owner_company_id', companyId);
+  }
+  final offersRes = await query
     .order('updated_at', ascending: false)
     .limit(limit);
 
@@ -308,6 +323,7 @@ class OfferStorageService {
     'pricingOverride': offer.pricingOverride?.toJson(),
 
     'totalOverride': offer.totalOverride,
+    'roundOverrides': offer.roundOverrides.map((k, v) => MapEntry(k.toString(), v)),
 
     'rounds': offer.rounds.map((r) {
       return {
@@ -434,6 +450,18 @@ if (r['ferryPerLeg'] != null) {
 
   draft.totalOverride = (data['totalOverride'] as num?)?.toDouble();
 
+  // Per-round price overrides
+  if (data['roundOverrides'] != null && data['roundOverrides'] is Map) {
+    final raw = data['roundOverrides'] as Map;
+    draft.roundOverrides = {};
+    for (final e in raw.entries) {
+      final key = int.tryParse(e.key.toString());
+      if (key == null) continue;
+      if (e.value == null) continue;
+      draft.roundOverrides[key] = (e.value as num).toDouble();
+    }
+  }
+
   return draft;
 }
 
@@ -477,6 +505,8 @@ static Future<void> saveToSamletData({
       'contact': offer.contact,
       'status': offer.status,
       'kilde': kilde,
+      if (activeCompanyNotifier.value != null)
+        'owner_company_id': activeCompanyNotifier.value!.id,
     },
     onConflict: 'dato,kilde');
   }
@@ -520,8 +550,11 @@ static String _buildKjoretoy(OfferDraft offer) {
     await sb.from('offers').update({'pdf_path': pdfPath}).eq('id', offerId);
   }
 
-  static String getPdfUrl(String pdfPath) =>
-      sb.storage.from('offer-pdfs').getPublicUrl(pdfPath);
+  static String getPdfUrl(String pdfPath) {
+    final base = sb.storage.from('offer-pdfs').getPublicUrl(pdfPath);
+    // Cache-bust to always fetch the latest version
+    return '$base?t=${DateTime.now().millisecondsSinceEpoch}';
+  }
 
   // ============================================================
   // VERSION HISTORY

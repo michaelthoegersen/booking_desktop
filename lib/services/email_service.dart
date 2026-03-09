@@ -50,17 +50,35 @@ class EmailService {
     required Uint8List attachmentBytes,
     required String attachmentFilename,
   }) async {
-    final attachment = {
-      'name': attachmentFilename,
-      'contentBytes': base64Encode(attachmentBytes),
-    };
+    await sendEmailWithAttachments(
+      to: to,
+      subject: subject,
+      body: body,
+      attachments: [
+        (filename: attachmentFilename, bytes: attachmentBytes),
+      ],
+    );
+  }
+
+  static Future<void> sendEmailWithAttachments({
+    required String to,
+    required String subject,
+    required String body,
+    required List<({String filename, Uint8List bytes})> attachments,
+  }) async {
+    final attachmentList = attachments
+        .map((a) => {
+              'name': a.filename,
+              'contentBytes': base64Encode(a.bytes),
+            })
+        .toList();
     if (kIsWeb) {
       await _sendViaEdgeFunction(
-        to: to, subject: subject, body: body, attachment: attachment,
+        to: to, subject: subject, body: body, attachments: attachmentList,
       );
     } else {
       await _sendViaMicrosoftDirect(
-        to: to, subject: subject, body: body, attachment: attachment,
+        to: to, subject: subject, body: body, attachments: attachmentList,
       );
     }
   }
@@ -70,13 +88,18 @@ class EmailService {
     required String subject,
     required String body,
     Map<String, String>? attachment,
+    List<Map<String, String>>? attachments,
   }) async {
     final payload = <String, dynamic>{
       'to': to,
       'subject': subject,
       'body': body,
     };
-    if (attachment != null) payload['attachment'] = attachment;
+    if (attachments != null && attachments.isNotEmpty) {
+      payload['attachments'] = attachments;
+    } else if (attachment != null) {
+      payload['attachment'] = attachment;
+    }
 
     const _supabaseAnonKey =
         'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZxZWZ2Z3Fscm50d2dzY2hrdWdmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjkwNzQxMjAsImV4cCI6MjA4NDY1MDEyMH0.ZamQr1qQRuYnQcy-yKfOr0IZrRJxIb4SP8_USn9uMoU';
@@ -100,6 +123,7 @@ class EmailService {
     required String subject,
     required String body,
     Map<String, String>? attachment,
+    List<Map<String, String>>? attachments,
   }) async {
     final token = await _getAccessToken(
       tenantId: _tenantId,
@@ -125,15 +149,27 @@ class EmailService {
       'toRecipients': recipients,
     };
 
-    if (attachment != null) {
-      message['attachments'] = [
-        {
+    // Build attachment list (supports single or multiple)
+    final allAttachments = <Map<String, dynamic>>[];
+    if (attachments != null) {
+      for (final a in attachments) {
+        allAttachments.add({
           '@odata.type': '#microsoft.graph.fileAttachment',
-          'name': attachment['name'],
+          'name': a['name'],
           'contentType': 'application/pdf',
-          'contentBytes': attachment['contentBytes'],
-        }
-      ];
+          'contentBytes': a['contentBytes'],
+        });
+      }
+    } else if (attachment != null) {
+      allAttachments.add({
+        '@odata.type': '#microsoft.graph.fileAttachment',
+        'name': attachment['name'],
+        'contentType': 'application/pdf',
+        'contentBytes': attachment['contentBytes'],
+      });
+    }
+    if (allAttachments.isNotEmpty) {
+      message['attachments'] = allAttachments;
     }
 
     final res = await http.post(

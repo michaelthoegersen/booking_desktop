@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../state/active_company.dart';
-import '../../ui/css_theme.dart';
 
 /// Notifier so the sidebar can react to feature-flag changes without restart.
 final companyFlagsNotifier = ValueNotifier<Map<String, bool>>({});
@@ -24,6 +23,13 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
   List<Map<String, dynamic>> _showTypes = [];
   bool _showTours = true;
   bool _showBusRequests = true;
+  bool _membersExpanded = false;
+  bool _showTypesExpanded = false;
+
+  // Tripletex
+  final _ttConsumerCtrl = TextEditingController();
+  final _ttEmployeeCtrl = TextEditingController();
+  bool _ttSaving = false;
 
   @override
   void initState() {
@@ -35,6 +41,8 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
   @override
   void dispose() {
     activeCompanyNotifier.removeListener(_onCompanyChanged);
+    _ttConsumerCtrl.dispose();
+    _ttEmployeeCtrl.dispose();
     super.dispose();
   }
 
@@ -52,6 +60,8 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
         _company = company;
         _showTours = company?['show_tours'] != false;
         _showBusRequests = company?['show_bus_requests_mgmt'] != false;
+        _ttConsumerCtrl.text = company?['tripletex_consumer_token'] as String? ?? '';
+        _ttEmployeeCtrl.text = company?['tripletex_employee_token'] as String? ?? '';
         _emitFlags();
 
         // Load other members in the same company
@@ -397,6 +407,33 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
     );
   }
 
+  Future<void> _saveTripletexTokens() async {
+    if (_companyId == null) return;
+    setState(() => _ttSaving = true);
+    try {
+      await _sb.from('companies').update({
+        'tripletex_consumer_token': _ttConsumerCtrl.text.trim().isEmpty
+            ? null
+            : _ttConsumerCtrl.text.trim(),
+        'tripletex_employee_token': _ttEmployeeCtrl.text.trim().isEmpty
+            ? null
+            : _ttEmployeeCtrl.text.trim(),
+      }).eq('id', _companyId!);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Tripletex-tokens lagret')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Feil: $e'), backgroundColor: Colors.red),
+        );
+      }
+    }
+    if (mounted) setState(() => _ttSaving = false);
+  }
+
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
@@ -432,9 +469,9 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
                       border: Border.all(color: cs.outlineVariant),
                     ),
                     child: _company == null
-                        ? const Text(
+                        ? Text(
                             'Ingen selskap koblet til kontoen din.',
-                            style: TextStyle(color: CssTheme.textMuted),
+                            style: TextStyle(color: cs.onSurfaceVariant),
                           )
                         : Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
@@ -449,14 +486,14 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
                               if (_company!['email'] != null)
                                 Text(
                                   _company!['email'] as String,
-                                  style: const TextStyle(
-                                      color: CssTheme.textMuted),
+                                  style: TextStyle(
+                                      color: cs.onSurfaceVariant),
                                 ),
                               if (_company!['phone'] != null)
                                 Text(
                                   _company!['phone'] as String,
-                                  style: const TextStyle(
-                                      color: CssTheme.textMuted),
+                                  style: TextStyle(
+                                      color: cs.onSurfaceVariant),
                                 ),
                             ],
                           ),
@@ -465,23 +502,34 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
                   const SizedBox(height: 24),
 
                   // Team members
-                  Row(
-                    children: [
-                      Text(
-                        'Teammedlemmer',
-                        style: Theme.of(context)
-                            .textTheme
-                            .titleMedium
-                            ?.copyWith(fontWeight: FontWeight.w900),
-                      ),
-                      const Spacer(),
-                      FilledButton.icon(
-                        onPressed: _openInviteUserDialog,
-                        icon: const Icon(Icons.person_add),
-                        label: const Text('Inviter bruker'),
-                      ),
-                    ],
+                  InkWell(
+                    onTap: () => setState(() => _membersExpanded = !_membersExpanded),
+                    borderRadius: BorderRadius.circular(8),
+                    child: Row(
+                      children: [
+                        Icon(
+                          _membersExpanded ? Icons.expand_less : Icons.expand_more,
+                          size: 22,
+                        ),
+                        const SizedBox(width: 4),
+                        Text(
+                          'Teammedlemmer (${_members.length})',
+                          style: Theme.of(context)
+                              .textTheme
+                              .titleMedium
+                              ?.copyWith(fontWeight: FontWeight.w900),
+                        ),
+                        const Spacer(),
+                        if (_membersExpanded)
+                          FilledButton.icon(
+                            onPressed: _openInviteUserDialog,
+                            icon: const Icon(Icons.person_add),
+                            label: const Text('Inviter bruker'),
+                          ),
+                      ],
+                    ),
                   ),
+                  if (_membersExpanded) ...[
                   const SizedBox(height: 12),
                   if (_members.isEmpty)
                     Container(
@@ -491,9 +539,9 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
                         borderRadius: BorderRadius.circular(14),
                         border: Border.all(color: cs.outlineVariant),
                       ),
-                      child: const Text(
+                      child: Text(
                         'Ingen teammedlemmer ennå.',
-                        style: TextStyle(color: CssTheme.textMuted),
+                        style: TextStyle(color: cs.onSurfaceVariant),
                       ),
                     )
                   else
@@ -535,8 +583,8 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
                                     ),
                                     Text(
                                       memberEmail,
-                                      style: const TextStyle(
-                                          color: CssTheme.textMuted),
+                                      style: TextStyle(
+                                          color: cs.onSurfaceVariant),
                                     ),
                                   ],
                                 ),
@@ -619,27 +667,39 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
                           ),
                         );
                     })),
+                  ], // end _membersExpanded
 
                   const SizedBox(height: 24),
 
                   // Show Types
-                  Row(
-                    children: [
-                      Text(
-                        'Show-typer',
-                        style: Theme.of(context)
-                            .textTheme
-                            .titleMedium
-                            ?.copyWith(fontWeight: FontWeight.w900),
-                      ),
-                      const Spacer(),
-                      FilledButton.icon(
-                        onPressed: _showAddShowTypeDialog,
-                        icon: const Icon(Icons.add),
-                        label: const Text('Legg til show-type'),
-                      ),
-                    ],
+                  InkWell(
+                    onTap: () => setState(() => _showTypesExpanded = !_showTypesExpanded),
+                    borderRadius: BorderRadius.circular(8),
+                    child: Row(
+                      children: [
+                        Icon(
+                          _showTypesExpanded ? Icons.expand_less : Icons.expand_more,
+                          size: 22,
+                        ),
+                        const SizedBox(width: 4),
+                        Text(
+                          'Show-typer (${_showTypes.length})',
+                          style: Theme.of(context)
+                              .textTheme
+                              .titleMedium
+                              ?.copyWith(fontWeight: FontWeight.w900),
+                        ),
+                        const Spacer(),
+                        if (_showTypesExpanded)
+                          FilledButton.icon(
+                            onPressed: _showAddShowTypeDialog,
+                            icon: const Icon(Icons.add),
+                            label: const Text('Legg til show-type'),
+                          ),
+                      ],
+                    ),
                   ),
+                  if (_showTypesExpanded) ...[
                   const SizedBox(height: 12),
                   if (_showTypes.isEmpty)
                     Container(
@@ -650,9 +710,9 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
                         borderRadius: BorderRadius.circular(14),
                         border: Border.all(color: cs.outlineVariant),
                       ),
-                      child: const Text(
+                      child: Text(
                         'Ingen show-typer ennå.',
-                        style: TextStyle(color: CssTheme.textMuted),
+                        style: TextStyle(color: cs.onSurfaceVariant),
                       ),
                     )
                   else
@@ -681,8 +741,8 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
                                       '${st['dancers'] ?? 0} dansere · '
                                       '${st['others'] ?? 0} andre  ·  '
                                       '${_formatPrice(st['price'])} kr',
-                                      style: const TextStyle(
-                                          color: CssTheme.textMuted),
+                                      style: TextStyle(
+                                          color: cs.onSurfaceVariant),
                                     ),
                                   ],
                                 ),
@@ -702,7 +762,9 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
                             ],
                           ),
                         ))),
+                  ], // end _showTypesExpanded
 
+                  if (Supabase.instance.client.auth.currentUser?.email == 'michael@nttas.com') ...[
                   const SizedBox(height: 24),
 
                   // Features
@@ -741,6 +803,70 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
                       ],
                     ),
                   ),
+                  ],
+
+                  if (Supabase.instance.client.auth.currentUser?.email == 'michael@nttas.com') ...[
+                  const SizedBox(height: 24),
+
+                  // Tripletex integration
+                  Text(
+                    'Tripletex-integrasjon',
+                    style: Theme.of(context)
+                        .textTheme
+                        .titleMedium
+                        ?.copyWith(fontWeight: FontWeight.w900),
+                  ),
+                  const SizedBox(height: 12),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: cs.surfaceContainerLowest,
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(color: cs.outlineVariant),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Koble til Tripletex for fakturering og leverandørfakturaer.',
+                          style: TextStyle(color: cs.onSurfaceVariant),
+                        ),
+                        const SizedBox(height: 14),
+                        TextField(
+                          controller: _ttConsumerCtrl,
+                          obscureText: true,
+                          decoration: const InputDecoration(
+                            labelText: 'Consumer Token',
+                            border: OutlineInputBorder(),
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        TextField(
+                          controller: _ttEmployeeCtrl,
+                          obscureText: true,
+                          decoration: const InputDecoration(
+                            labelText: 'Employee Token',
+                            border: OutlineInputBorder(),
+                          ),
+                        ),
+                        const SizedBox(height: 14),
+                        FilledButton.icon(
+                          onPressed: _ttSaving ? null : _saveTripletexTokens,
+                          icon: _ttSaving
+                              ? const SizedBox(
+                                  width: 16,
+                                  height: 16,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2, color: Colors.white),
+                                )
+                              : const Icon(Icons.save, size: 18),
+                          label: const Text('Lagre tokens'),
+                        ),
+                      ],
+                    ),
+                  ),
+                  ],
 
                   const SizedBox(height: 24),
 

@@ -4,7 +4,11 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:flutter_polyline_points/flutter_polyline_points.dart';
 
 class DirectionsService {
-  static final String _apiKey = dotenv.env['GOOGLE_MAPS_API_KEY']!;
+  static late final String _apiKey = _safeApiKey();
+  static String _safeApiKey() {
+    try { return dotenv.env['GOOGLE_MAPS_API_KEY'] ?? ''; }
+    catch (_) { return ''; }
+  }
 
   static Future<List<_RouteOption>> getRoutes({
     required String from,

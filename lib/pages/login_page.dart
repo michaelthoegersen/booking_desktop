@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../ui/css_theme.dart';
+import '../ui/web_svg_image.dart';
+import '../state/active_company.dart';
 
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
@@ -36,12 +39,21 @@ class _LoginPageState extends State<LoginPage> {
         email: _emailCtrl.text.trim(),
         password: _passwordCtrl.text,
       );
+
+      // Check that user IS a CSS user
+      await activeCompanyNotifier.load();
+      final mode = activeCompanyNotifier.value?.appMode ?? 'css';
+      if (mode != 'css') {
+        await _sb.auth.signOut();
+        setState(() => _error = 'This account belongs to Artist. Please use the Artist portal.');
+        return;
+      }
     } on AuthException catch (e) {
       setState(() => _error = e.message);
     } catch (e) {
       setState(() => _error = "Login failed");
     } finally {
-      setState(() => _loading = false);
+      if (mounted) setState(() => _loading = false);
     }
   }
 
@@ -73,22 +85,10 @@ Widget build(BuildContext context) {
           children: [
 
             // ---------------- LOGO ----------------
-SizedBox(
-  height: 130, // 👈 større logo
-  child: Image.asset(
-    "assets/pdf/logos/TourFlowLogo.png",
-    fit: BoxFit.contain,
-
-    errorBuilder: (_, __, ___) {
-      return const Text(
-        "TourFlow",
-        style: TextStyle(
-          fontSize: 34,
-          fontWeight: FontWeight.w900,
-        ),
-      );
-    },
-  ),
+const WebSvgImage(
+  svgAsset: 'pdf/logos/TourFlowLogo.svg',
+  width: 300,
+  height: 130,
 ),
 
 const SizedBox(height: 16),
@@ -120,6 +120,7 @@ const SizedBox(height: 20),
             TextField(
               controller: _emailCtrl,
               keyboardType: TextInputType.emailAddress,
+              textInputAction: TextInputAction.next,
 
               decoration: const InputDecoration(
                 labelText: "Email",
@@ -134,6 +135,8 @@ const SizedBox(height: 20),
             TextField(
               controller: _passwordCtrl,
               obscureText: true,
+              textInputAction: TextInputAction.done,
+              onSubmitted: (_) => _loading ? null : _login(),
 
               decoration: const InputDecoration(
                 labelText: "Password",
@@ -200,6 +203,14 @@ const SizedBox(height: 20),
                         ),
                       ),
               ),
+            ),
+            const SizedBox(height: 20),
+
+            // ---------------- BACK ----------------
+            TextButton.icon(
+              onPressed: () => context.go('/portal'),
+              icon: const Icon(Icons.arrow_back),
+              label: const Text('Back'),
             ),
           ],
         ),

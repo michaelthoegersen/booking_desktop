@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:typed_data';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -108,6 +109,8 @@ class _DashboardPageState extends State<DashboardPage> {
     OfferStorageService.recentOffersRefresh
         .addListener(_onRecentRefresh);
 
+    activeCompanyNotifier.addListener(_onCompanyChanged);
+
     _searchCtrl.addListener(() {
       setState(() => _searchQuery = _searchCtrl.text.trim().toLowerCase());
     });
@@ -119,11 +122,18 @@ class _DashboardPageState extends State<DashboardPage> {
     OfferStorageService.recentOffersRefresh
         .removeListener(_onRecentRefresh);
 
+    activeCompanyNotifier.removeListener(_onCompanyChanged);
+
     _searchCtrl.dispose();
 
     super.dispose();
   }
 
+
+  void _onCompanyChanged() {
+    _loadRecentOffers();
+    _loadBusLocationsToday();
+  }
 
   void _onRecentRefresh() {
     _loadRecentOffers();
@@ -270,10 +280,15 @@ class _DashboardPageState extends State<DashboardPage> {
     final todayStr =
         "${today.year}-${today.month.toString().padLeft(2, '0')}-${today.day.toString().padLeft(2, '0')}";
 
-    final res = await sb
+    final companyId = activeCompanyNotifier.value?.id;
+    var samletQuery = sb
         .from('samletdata')
         .select('kilde, sted, dato, getin, produksjon')
-        .lte('dato', todayStr)
+        .lte('dato', todayStr);
+    if (companyId != null) {
+      samletQuery = samletQuery.eq('owner_company_id', companyId);
+    }
+    final res = await samletQuery
         .order('dato', ascending: false);
 
     final rows = List<Map<String, dynamic>>.from(res);
@@ -1002,29 +1017,28 @@ Widget build(BuildContext context) {
         ),
 
         // SUBTITLE
-        subtitle: GestureDetector(
-          onTap: id.isEmpty
-              ? null
-              : () => _changeCreator(id, createdBy),
-          child: Text.rich(
-            TextSpan(
-              children: [
-                const TextSpan(text: 'Created: '),
-                TextSpan(
-                  text: createdBy,
-                  style: const TextStyle(
-                    decoration: TextDecoration.underline,
-                    decorationStyle: TextDecorationStyle.dotted,
-                  ),
+        subtitle: Text.rich(
+          TextSpan(
+            children: [
+              const TextSpan(text: 'Created: '),
+              TextSpan(
+                text: createdBy,
+                style: const TextStyle(
+                  decoration: TextDecoration.underline,
+                  decorationStyle: TextDecorationStyle.dotted,
                 ),
-                TextSpan(text: ' • Updated: $updatedBy\n'),
-                TextSpan(text: 'Last update: $updatedDate'),
-              ],
-            ),
-            style: const TextStyle(
-              fontSize: 11,
-              color: Colors.black54,
-            ),
+                recognizer: id.isEmpty
+                    ? null
+                    : (TapGestureRecognizer()
+                        ..onTap = () => _changeCreator(id, createdBy)),
+              ),
+              TextSpan(text: ' • Updated: $updatedBy\n'),
+              TextSpan(text: 'Last update: $updatedDate'),
+            ],
+          ),
+          style: const TextStyle(
+            fontSize: 11,
+            color: Colors.black54,
           ),
         ),
 

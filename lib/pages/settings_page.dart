@@ -5,6 +5,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../models/swe_settings.dart';
 import '../services/km_se_updater.dart';
+import '../state/active_company.dart';
 import '../state/settings_store.dart';
 import '../pages/routes_admin_page.dart';
 
@@ -314,20 +315,26 @@ class _SettingsPageState extends State<SettingsPage> {
   Future<void> _openAddUserDialog() async {
     final emailCtrl = TextEditingController();
     final nameCtrl = TextEditingController();
-    String selectedRole = 'user';
+    final phoneCtrl = TextEditingController();
+    String selectedRole = 'driver';
     String? selectedCompanyId;
     List<Map<String, dynamic>> companies = [];
 
     // Load companies for management role selection
     companies = await _loadCompanies();
 
+    // CSS company auto-set
+    final cssCompanyId = activeCompanyNotifier.value?.id;
+
     if (!mounted) return;
 
+    final outerContext = context;
+
     await showDialog(
-      context: context,
-      builder: (context) {
+      context: outerContext,
+      builder: (dialogCtx) {
         return StatefulBuilder(
-          builder: (context, setDialogState) {
+          builder: (dialogCtx, setDialogState) {
             return AlertDialog(
               title: const Text("Add user"),
 
@@ -355,20 +362,29 @@ class _SettingsPageState extends State<SettingsPage> {
 
                     const SizedBox(height: 10),
 
+                    TextField(
+                      controller: phoneCtrl,
+                      decoration: const InputDecoration(
+                        labelText: "Phone",
+                      ),
+                    ),
+
+                    const SizedBox(height: 10),
+
                     DropdownButtonFormField<String>(
-                      value: selectedRole,
+                      initialValue: selectedRole,
                       decoration: const InputDecoration(
                         labelText: "Role",
                       ),
                       items: const [
+                        DropdownMenuItem(value: 'driver', child: Text('driver')),
                         DropdownMenuItem(value: 'admin', child: Text('admin')),
-                        DropdownMenuItem(value: 'user', child: Text('user')),
                         DropdownMenuItem(
                             value: 'management', child: Text('management')),
                       ],
                       onChanged: (v) {
                         setDialogState(() {
-                          selectedRole = v ?? 'user';
+                          selectedRole = v ?? 'driver';
                           if (selectedRole != 'management') {
                             selectedCompanyId = null;
                           }
@@ -380,7 +396,7 @@ class _SettingsPageState extends State<SettingsPage> {
                     if (selectedRole == 'management') ...[
                       const SizedBox(height: 10),
                       DropdownButtonFormField<String>(
-                        value: selectedCompanyId,
+                        initialValue: selectedCompanyId,
                         decoration: const InputDecoration(
                           labelText: "Company",
                           hintText: "Select company",
@@ -402,7 +418,7 @@ class _SettingsPageState extends State<SettingsPage> {
               actions: [
 
                 TextButton(
-                  onPressed: () => Navigator.pop(context),
+                  onPressed: () => Navigator.pop(dialogCtx),
                   child: const Text("Cancel"),
                 ),
 
@@ -411,7 +427,7 @@ class _SettingsPageState extends State<SettingsPage> {
 
                     if (selectedRole == 'management' &&
                         selectedCompanyId == null) {
-                      ScaffoldMessenger.of(context).showSnackBar(
+                      ScaffoldMessenger.of(dialogCtx).showSnackBar(
                         const SnackBar(
                           content: Text("Please select a company for management users"),
                           backgroundColor: Colors.red,
@@ -420,22 +436,26 @@ class _SettingsPageState extends State<SettingsPage> {
                       return;
                     }
 
+                    // For driver/admin: bruk CSS company. For management: valgt company.
+                    final companyForUser = selectedRole == 'management'
+                        ? selectedCompanyId
+                        : cssCompanyId;
+
                     final tempPassword = await _createProfileUser(
                       name: nameCtrl.text.trim(),
                       email: emailCtrl.text.trim(),
+                      phone: phoneCtrl.text.trim(),
                       role: selectedRole,
-                      companyId: selectedRole == 'management'
-                          ? selectedCompanyId
-                          : null,
+                      companyId: companyForUser,
                     );
 
                     if (!mounted) return;
 
-                    Navigator.pop(context);
+                    Navigator.pop(dialogCtx);
 
                     if (tempPassword != null) {
                       await showDialog(
-                        context: context,
+                        context: outerContext,
                         builder: (ctx) => AlertDialog(
                           title: const Text("User created"),
                           content: SizedBox(
@@ -486,7 +506,7 @@ class _SettingsPageState extends State<SettingsPage> {
                         ),
                       );
                     } else {
-                      ScaffoldMessenger.of(context).showSnackBar(
+                      ScaffoldMessenger.of(outerContext).showSnackBar(
                         const SnackBar(content: Text("User created")),
                       );
                     }
@@ -508,6 +528,7 @@ class _SettingsPageState extends State<SettingsPage> {
   Future<String?> _createProfileUser({
     required String name,
     required String email,
+    String phone = '',
     required String role,
     String? companyId,
   }) async {
@@ -524,6 +545,7 @@ class _SettingsPageState extends State<SettingsPage> {
       final body = {
         'name': name,
         'email': email,
+        if (phone.isNotEmpty) 'phone': phone,
         'role': role.isEmpty ? 'user' : role,
         if (companyId != null) 'company_id': companyId,
       };

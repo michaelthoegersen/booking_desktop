@@ -31,12 +31,22 @@ class ChatService {
             .toList());
   }
 
+  // Update own tour message text.
+  static Future<void> updateMessage(String messageId, String newText) async {
+    await _sb.from('tour_messages').update({
+      'message': newText,
+      'edited_at': DateTime.now().toUtc().toIso8601String(),
+    }).eq('id', messageId);
+  }
+
   // Send admin-svar
   static Future<void> sendAdminMessage({
     required String dato,
     required String produksjon,
     required String message,
     String? targetUserId,
+    String? replyToId,
+    List<String>? mentionedUserIds,
   }) async {
     await _sb.from('tour_messages').insert({
       'dato': dato,
@@ -46,6 +56,9 @@ class ChatService {
       'message': message,
       'is_admin': true,
       'read_by_admin': true,
+      if (replyToId != null) 'reply_to_id': replyToId,
+      if (mentionedUserIds != null && mentionedUserIds.isNotEmpty)
+        'mentioned_user_ids': mentionedUserIds,
     });
 
     // Push til sjåfør hvis vi har user_id

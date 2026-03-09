@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import '../ui/web_svg_image.dart';
 
 import '../ui/css_theme.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -52,8 +53,8 @@ const _routeTitles = {
   '/economy': 'Economy',
   '/issues': 'Issues',
   '/chat': 'Chat',
+  '/contacts': 'Contacts',
   '/bus-requests': 'Bus Requests',
-  '/dm-inbox': 'DM Inbox',
   '/settings': 'Settings',
   '/routes': 'Route Manager',
 };
@@ -161,7 +162,6 @@ class _AppShellState extends State<AppShell> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: CssTheme.bg,
       body: Row(
         children: [
           _SideNav(
@@ -499,7 +499,7 @@ class _TopBarState extends State<_TopBar> {
                 await Supabase.instance.client.auth.signOut();
 
                 if (context.mounted) {
-                  context.go('/login');
+                  context.go('/portal');
                 }
               }
             },
@@ -697,12 +697,13 @@ class _SideNavState extends State<_SideNav> {
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
     return Container(
       width: 260,
-      decoration: const BoxDecoration(
-        color: CssTheme.surface,
+      decoration: BoxDecoration(
+        color: cs.surfaceContainerLowest,
         border: Border(
-          right: BorderSide(color: CssTheme.outline),
+          right: BorderSide(color: cs.outlineVariant),
         ),
       ),
       child: Padding(
@@ -712,23 +713,10 @@ class _SideNavState extends State<_SideNav> {
             Padding(
               padding: const EdgeInsets.only(bottom: 20, top: 10),
               child: Center(
-                child: Image(
-                  image: const ResizeImage(
-                    AssetImage("assets/pdf/logos/TourFlowLogo.png"),
-                    width: 900,
-                  ),
+                child: const WebSvgImage(
+                  svgAsset: 'pdf/logos/TourFlowLogo.svg',
+                  width: 300,
                   height: 150,
-                  fit: BoxFit.contain,
-                  filterQuality: FilterQuality.medium,
-                  errorBuilder: (context, error, stack) {
-                    return const Text(
-                      "TourFlow",
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 24,
-                      ),
-                    );
-                  },
                 ),
               ),
             ),
@@ -818,6 +806,14 @@ class _SideNavState extends State<_SideNav> {
                       label: "Chat",
                       route: "/chat",
                       badge: _unreadChatCount,
+                      onOpenInNewTab: widget.onOpenInNewTab,
+                      overrideActiveRoute: widget.overrideActiveRoute,
+                    ),
+
+                    _NavItem(
+                      icon: Icons.contacts_rounded,
+                      label: "Contacts",
+                      route: "/contacts",
                       onOpenInNewTab: widget.onOpenInNewTab,
                       overrideActiveRoute: widget.overrideActiveRoute,
                     ),
@@ -970,9 +966,6 @@ class _NavItemState extends State<_NavItem> {
         decoration: BoxDecoration(
           color: selected ? Colors.black : Colors.transparent,
           borderRadius: BorderRadius.circular(14),
-          border: Border.all(
-            color: selected ? Colors.black : CssTheme.outline,
-          ),
         ),
 
         child: Row(

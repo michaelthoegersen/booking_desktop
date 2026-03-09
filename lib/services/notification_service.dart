@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 /// Sends a push notification + in-app bell notification to a driver.
@@ -13,10 +14,7 @@ class NotificationService {
   // ──────────────────────────────────────────────────────────────────────────
 
   /// Send a notification to a driver identified by their display name.
-  ///
-  /// Returns `true` if the Edge Function was called without error.
-  /// The Edge Function itself logs FCM errors; this method won't throw on
-  /// FCM failures—only on network/function invocation errors.
+  /// Sends to ALL profiles matching the name (handles duplicates gracefully).
   static Future<bool> sendToDriver({
     required String driverName,
     required String title,
@@ -24,15 +22,33 @@ class NotificationService {
     String? draftId,
   }) async {
     try {
-      final userId = await _userIdByName(driverName);
-      if (userId == null) {
-        // Driver not found in profiles — nothing to send
+      debugPrint('🔔 sendToDriver: name="$driverName" title="$title"');
+
+      final rows = await _sb
+          .from('profiles')
+          .select('id')
+          .eq('name', driverName);
+
+      final userIds = (rows as List)
+          .map((r) => r['id'] as String)
+          .toList();
+
+      if (userIds.isEmpty) {
+        debugPrint('🔔 sendToDriver: no profile found for "$driverName"');
         return false;
       }
-      return await sendToUserId(
-          userId: userId, title: title, body: body, draftId: draftId);
+
+      debugPrint('🔔 sendToDriver: found ${userIds.length} profile(s): $userIds');
+
+      bool anySent = false;
+      for (final userId in userIds) {
+        final ok = await sendToUserId(
+            userId: userId, title: title, body: body, draftId: draftId);
+        if (ok) anySent = true;
+      }
+      return anySent;
     } catch (e) {
-      // Swallow errors so the caller never crashes
+      debugPrint('🔔 sendToDriver ERROR: $e');
       return false;
     }
   }
@@ -45,6 +61,7 @@ class NotificationService {
     String? draftId,
   }) async {
     try {
+      debugPrint('🔔 sendToUserId: userId=$userId title="$title"');
       final response = await _sb.functions.invoke(
         'send-push',
         body: {
@@ -55,28 +72,16 @@ class NotificationService {
         },
       );
 
-      // FunctionsResponse.status is the HTTP status code
+      debugPrint(
+          '🔔 sendToUserId: status=${response.status} data=${response.data}');
+
       if (response.status != null && response.status! >= 400) {
         return false;
       }
       return true;
     } catch (e) {
+      debugPrint('🔔 sendToUserId ERROR: $e');
       return false;
     }
-  }
-
-  // ──────────────────────────────────────────────────────────────────────────
-  // HELPERS
-  // ──────────────────────────────────────────────────────────────────────────
-
-  /// Look up the Supabase user id for a given profile display name.
-  static Future<String?> _userIdByName(String name) async {
-    final res = await _sb
-        .from('profiles')
-        .select('id')
-        .eq('name', name)
-        .maybeSingle();
-
-    return res?['id'] as String?;
   }
 }

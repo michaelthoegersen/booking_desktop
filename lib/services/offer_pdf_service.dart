@@ -116,6 +116,7 @@ static List<pw.Widget> _buildTableForIndexes(
 
   double grandTotal = 0;
   double grandFerry = 0;
+  double grandBridge = 0;
   double grandToll = 0;
   final Map<String, double> allCountryKm = {};
 
@@ -126,11 +127,13 @@ static List<pw.Widget> _buildTableForIndexes(
 
     if (round.entries.isEmpty || result == null) continue;
 
-    // ---- totalsamling
-    if (result.totalCost != null) {
-      grandTotal += result.totalCost!;
+    // ---- totalsamling (manual override takes priority)
+    final roundPrice = offer.roundOverrides[roundIndex] ?? result.totalCost;
+    if (roundPrice != null) {
+      grandTotal += roundPrice;
     }
     grandFerry += result.ferryCost;
+    grandBridge += result.bridgeCost;
     grandToll += result.tollCost;
 
     for (final entry in round.entries) {
@@ -145,28 +148,31 @@ static List<pw.Widget> _buildTableForIndexes(
     widgets.addAll(
       _buildTable(
         offer.copyWithRounds([roundIndex]),
-        {0: result},                 // 👈 indeks reset med vilje
+        {0: result},
         regular,
         bold,
-        roundNumberOverride: roundIndex + 1, // 👈 RIKTIG NUMMER
+        roundNumberOverride: roundIndex + 1,
+        subtotalOverride: offer.roundOverrides[roundIndex],
       ),
     );
   }
 
   // ================= GRAND TOTAL (KUN ÉN GANG) =================
+  // totalOverride overrides everything if set
+  if (offer.totalOverride != null) grandTotal = offer.totalOverride!;
+
   if (showGrandTotal && grandTotal > 0) {
-    // VAT base = total excluding ferry and toll (same as new_offer_page)
-    final vatBase = grandTotal - grandFerry - grandToll;
+    // VAT base = total excluding ferry, bridge and toll (same as new_offer_page)
+    final vatBase = grandTotal - grandFerry - grandBridge - grandToll;
     final vatMap = _calculateForeignVat(
       basePrice: vatBase,
       countryKm: allCountryKm,
     );
 
-    // grandTotal is the gross (VAT-inclusive) price.
-    // VAT is extracted from it (not added on top).
-    final vatExtracted = vatMap.values.fold(0.0, (a, b) => a + b);
-    final totalIncVat = grandTotal;                 // gross price (incl VAT)
-    final totalExVat  = grandTotal - vatExtracted;  // net of foreign VAT
+    // grandTotal is excl VAT. Foreign VAT is added on top.
+    final vatAdded = vatMap.values.fold(0.0, (a, b) => a + b);
+    final totalExVat  = grandTotal;                 // excl VAT
+    final totalIncVat = grandTotal + vatAdded;      // incl foreign VAT
 
     widgets.add(
   pw.Padding(
@@ -368,10 +374,10 @@ static List<pw.Widget> _buildTotalSection({
     countryKm: countryKm,
   );
 
-  // grandTotal is the gross (VAT-inclusive) price.
-  final vatExtracted = vatMap.values.fold(0.0, (a, b) => a + b);
-  final totalIncVat = grandTotal;                 // gross price (incl VAT)
-  final totalExVat  = grandTotal - vatExtracted;  // net of foreign VAT
+  // grandTotal is excl VAT. Foreign VAT is added on top.
+  final vatAdded = vatMap.values.fold(0.0, (a, b) => a + b);
+  final totalExVat  = grandTotal;                 // excl VAT
+  final totalIncVat = grandTotal + vatAdded;      // incl foreign VAT
 
   return [
     pw.Padding(
@@ -589,7 +595,8 @@ static pw.Widget _buildOfferTitle(pw.Font bold) {
   Map<int, RoundCalcResult> calc,
   pw.Font regular,
   pw.Font bold, {
-  int? roundNumberOverride, // 👈 NY
+  int? roundNumberOverride,
+  double? subtotalOverride,
 }) {
   final widgets = <pw.Widget>[];
 
@@ -771,15 +778,16 @@ for (int r = 0; r < round.entries.length; r++) {
       ),
     );
 
-    // ---------------- SUBTOTAL (PER ROUND)
-    if (result.totalCost != null) {
+    // ---------------- SUBTOTAL (PER ROUND, override takes priority)
+    final subtotal = subtotalOverride ?? result.totalCost;
+    if (subtotal != null) {
       widgets.add(pw.SizedBox(height: 6));
 
       widgets.add(
         pw.Align(
           alignment: pw.Alignment.centerRight,
           child: pw.Text(
-            "Subtotal: ${_formatNok(result.totalCost)}",
+            "Subtotal: ${_formatNok(subtotal)}",
             style: pw.TextStyle(
               font: bold,
               fontSize: 9,
@@ -966,9 +974,8 @@ static Map<String, double> _calculateForeignVat({
     if (rate <= 0) return;
 
     final share = km / totalKm;
-    // Excel formula: (price/[100+rate])*rate = price * rate/(1+rate)
-    // Treats basePrice as gross (VAT-inclusive); extracts the VAT component.
-    final vat = basePrice * share * rate / (1 + rate);
+    // basePrice is excl VAT. VAT is added on top.
+    final vat = basePrice * share * rate;
 
     if (vat > 0) {
       result[country] = vat;

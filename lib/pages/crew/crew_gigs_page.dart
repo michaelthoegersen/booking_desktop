@@ -4,7 +4,6 @@ import 'package:intl/intl.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../state/active_company.dart';
-import '../../ui/css_theme.dart';
 
 class CrewGigsPage extends StatefulWidget {
   const CrewGigsPage({super.key});
@@ -73,6 +72,7 @@ class _CrewGigsPageState extends State<CrewGigsPage> {
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
     if (_loading) {
       return const Center(child: CircularProgressIndicator());
     }
@@ -96,10 +96,10 @@ class _CrewGigsPageState extends State<CrewGigsPage> {
           const SizedBox(height: 16),
 
           if (upcoming.isEmpty)
-            const Expanded(
+            Expanded(
               child: Center(
                 child: Text('Ingen kommende gigs.',
-                    style: TextStyle(color: CssTheme.textMuted)),
+                    style: TextStyle(color: cs.onSurfaceVariant)),
               ),
             )
           else
@@ -139,6 +139,7 @@ class _GigCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
     final dateFrom = gig['date_from'] as String?;
     final venue = gig['venue_name'] as String? ?? '';
     final city = gig['city'] as String? ?? '';
@@ -176,9 +177,9 @@ class _GigCard extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
         decoration: BoxDecoration(
-          color: CssTheme.surface,
+          color: cs.surfaceContainerLowest,
           borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: CssTheme.outline),
+          border: Border.all(color: cs.outlineVariant),
         ),
         child: Row(
           children: [

@@ -6,7 +6,6 @@ import 'package:intl/intl.dart';
 import 'package:printing/printing.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
-import '../../ui/css_theme.dart';
 import '../../state/active_company.dart';
 import '../../services/intensjonsavtale_pdf_service.dart';
 import '../../services/email_service.dart';
@@ -33,8 +32,9 @@ class _MgmtGigDetailPageState extends State<MgmtGigDetailPage>
   List<Map<String, dynamic>> _companyMembers = []; // {user_id, name, status, section}
   String? _linkedOfferId; // gig_offer linked to this gig
   List<Map<String, dynamic>> _lineup = [];
-  Set<String> _selectedSkarp = {};
-  Set<String> _selectedBass = {};
+  // showId → Set<userId> per section
+  Map<String, Set<String>> _selectedSkarpByShow = {};
+  Map<String, Set<String>> _selectedBassByShow = {};
 
 
   @override
@@ -141,19 +141,22 @@ class _MgmtGigDetailPageState extends State<MgmtGigDetailPage>
         _companyMembers.sort((a, b) =>
             (a['name'] as String).compareTo(b['name'] as String));
 
-        // Load lineup
+        // Load lineup (including show_id for per-show assignment)
         final lineupData = await _sb
             .from('gig_lineup')
-            .select('user_id, section')
+            .select('user_id, section, show_id')
             .eq('gig_id', widget.gigId);
         _lineup = List<Map<String, dynamic>>.from(lineupData);
-        _selectedSkarp = {};
-        _selectedBass = {};
+        _selectedSkarpByShow = {};
+        _selectedBassByShow = {};
         for (final l in _lineup) {
+          final showId = l['show_id'] as String? ?? '';
           if (l['section'] == 'skarp') {
-            _selectedSkarp.add(l['user_id'] as String);
+            _selectedSkarpByShow.putIfAbsent(showId, () => {});
+            _selectedSkarpByShow[showId]!.add(l['user_id'] as String);
           } else if (l['section'] == 'bass') {
-            _selectedBass.add(l['user_id'] as String);
+            _selectedBassByShow.putIfAbsent(showId, () => {});
+            _selectedBassByShow[showId]!.add(l['user_id'] as String);
           }
         }
       }
@@ -175,9 +178,13 @@ class _MgmtGigDetailPageState extends State<MgmtGigDetailPage>
   // LINEUP HELPERS
   // -------------------------------------------------------------------------
 
-  void _toggleLineupMember(String userId, String section) {
+  void _toggleLineupMember(String userId, String section, String showId) {
     setState(() {
-      final set = section == 'skarp' ? _selectedSkarp : _selectedBass;
+      final map = section == 'skarp'
+          ? _selectedSkarpByShow
+          : _selectedBassByShow;
+      map.putIfAbsent(showId, () => {});
+      final set = map[showId]!;
       if (set.contains(userId)) {
         set.remove(userId);
       } else {
@@ -186,37 +193,59 @@ class _MgmtGigDetailPageState extends State<MgmtGigDetailPage>
     });
   }
 
+  void _copyToAllShows(String fromShowId) {
+    setState(() {
+      final showIds = _shows.map((s) => s['id'] as String).toList();
+      for (final section in ['skarp', 'bass']) {
+        final map = section == 'skarp'
+            ? _selectedSkarpByShow
+            : _selectedBassByShow;
+        final source = Set<String>.from(map[fromShowId] ?? {});
+        for (final sid in showIds) {
+          map[sid] = Set<String>.from(source);
+        }
+      }
+    });
+  }
+
   Future<void> _saveLineup(String section) async {
-    final selected = section == 'skarp' ? _selectedSkarp : _selectedBass;
+    final map = section == 'skarp'
+        ? _selectedSkarpByShow
+        : _selectedBassByShow;
     // Delete existing lineup for this section
     await _sb
         .from('gig_lineup')
         .delete()
         .eq('gig_id', widget.gigId)
         .eq('section', section);
-    // Insert new
-    if (selected.isNotEmpty) {
-      await _sb.from('gig_lineup').insert(
-        selected
-            .map((uid) => {
-                  'gig_id': widget.gigId,
-                  'user_id': uid,
-                  'section': section,
-                })
-            .toList(),
-      );
+    // Insert new — one row per (user, show)
+    final rows = <Map<String, dynamic>>[];
+    for (final entry in map.entries) {
+      final showId = entry.key;
+      for (final uid in entry.value) {
+        rows.add({
+          'gig_id': widget.gigId,
+          'user_id': uid,
+          'section': section,
+          if (showId.isNotEmpty) 'show_id': showId,
+        });
+      }
+    }
+    if (rows.isNotEmpty) {
+      await _sb.from('gig_lineup').insert(rows);
     }
   }
 
   Future<void> _saveAndToggleLock(String section) async {
     try {
-      // Save lineup first
-      await _saveLineup(section);
-      // Toggle lock
       final field = section == 'skarp'
           ? 'lineup_locked_skarp'
           : 'lineup_locked_bass';
       final currentlyLocked = _gig?[field] == true;
+      // Only save lineup when locking, not when unlocking
+      if (!currentlyLocked) {
+        await _saveLineup(section);
+      }
       await _sb
           .from('gigs')
           .update({field: !currentlyLocked})
@@ -689,9 +718,9 @@ class _MgmtGigDetailPageState extends State<MgmtGigDetailPage>
             label: const Text('Send'),
             onPressed: () async {
               Navigator.pop(ctx);
-              Uint8List? bytes;
+              ({Uint8List mainPdf, List<({String filename, Uint8List bytes})> riders})? result;
               try {
-                bytes = await IntensjonsavtalePdfService.generate(
+                result = await IntensjonsavtalePdfService.generate(
                   gig: _gig!,
                   shows: _shows,
                 );
@@ -706,14 +735,16 @@ class _MgmtGigDetailPageState extends State<MgmtGigDetailPage>
               try {
                 final venue = _gig?['venue_name'] ?? 'gig';
                 final dateFrom = _gig?['date_from'] ?? '';
-                await EmailService.sendEmailWithAttachment(
+                final attachments = <({String filename, Uint8List bytes})>[
+                  (filename: 'Intensjonsavtale_${venue.replaceAll(' ', '_')}.pdf', bytes: result!.mainPdf),
+                  ...result.riders,
+                ];
+                await EmailService.sendEmailWithAttachments(
                   to: emailCtrl.text.trim(),
                   subject: 'Intensjonsavtale — $venue $dateFrom',
                   body:
                       'Hei,\n\nVedlagt finner du intensjonsavtalen for oppdrag ${venue != '' ? 'ved $venue' : ''} ${dateFrom != '' ? 'den $dateFrom' : ''}.\n\nMed vennlig hilsen,\nComplete Drums / Stian Skog',
-                  attachmentBytes: bytes,
-                  attachmentFilename:
-                      'Intensjonsavtale_${venue.replaceAll(' ', '_')}.pdf',
+                  attachments: attachments,
                 );
                 if (mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
@@ -741,6 +772,7 @@ class _MgmtGigDetailPageState extends State<MgmtGigDetailPage>
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
     if (_loading) {
       return const Scaffold(
         body: Center(child: CircularProgressIndicator()),
@@ -796,15 +828,15 @@ class _MgmtGigDetailPageState extends State<MgmtGigDetailPage>
           // Breadcrumb
           GestureDetector(
             onTap: () => context.go('/m/gigs'),
-            child: const Row(
+            child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Icon(Icons.arrow_back_ios, size: 13, color: CssTheme.textMuted),
-                SizedBox(width: 2),
+                Icon(Icons.arrow_back_ios, size: 13, color: cs.onSurfaceVariant),
+                const SizedBox(width: 2),
                 Text(
                   'Gigs',
                   style: TextStyle(
-                    color: CssTheme.textMuted,
+                    color: cs.onSurfaceVariant,
                     fontWeight: FontWeight.w700,
                     fontSize: 13,
                   ),
@@ -833,22 +865,22 @@ class _MgmtGigDetailPageState extends State<MgmtGigDetailPage>
                       Text(
                         dateLabel,
                         style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                              color: CssTheme.textMuted,
+                              color: cs.onSurfaceVariant,
                             ),
                       ),
                     if (gigType == 'rehearsal' && title.isNotEmpty)
                       Text(
                         title,
-                        style: const TextStyle(
-                          color: CssTheme.textMuted,
+                        style: TextStyle(
+                          color: cs.onSurfaceVariant,
                           fontSize: 13,
                         ),
                       ),
                     if (customerLine.isNotEmpty && gigType != 'rehearsal')
                       Text(
                         customerLine,
-                        style: const TextStyle(
-                          color: CssTheme.textMuted,
+                        style: TextStyle(
+                          color: cs.onSurfaceVariant,
                           fontSize: 13,
                         ),
                       ),
@@ -1031,10 +1063,12 @@ class _MgmtGigDetailPageState extends State<MgmtGigDetailPage>
                             _CrewLineupTab(
                               companyMembers: _companyMembers,
                               gig: _gig!,
-                              selectedSkarp: _selectedSkarp,
-                              selectedBass: _selectedBass,
+                              shows: _shows,
+                              selectedSkarpByShow: _selectedSkarpByShow,
+                              selectedBassByShow: _selectedBassByShow,
                               onToggleMember: _toggleLineupMember,
                               onSaveAndLock: _saveAndToggleLock,
+                              onCopyToAllShows: _copyToAllShows,
                             ),
                           ],
                         ),
@@ -1083,6 +1117,7 @@ class _InfoTab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
     final gigType = gig['type'] as String? ?? 'gig';
     final isGig = gigType == 'gig';
 
@@ -1094,12 +1129,12 @@ class _InfoTab extends StatelessWidget {
           Expanded(
             child: Column(
               children: [
-                _card('Sted', [
+                _card(cs, 'Sted', [
                   MapEntry('Venue', gig['venue_name']),
                   MapEntry('By', gig['city']),
                   MapEntry('Land', gig['country']),
                 ]),
-                _card('Tider', [
+                _card(cs, 'Tider', [
                   MapEntry('Fra', gig['meeting_time']),
                   MapEntry('Til', gig['get_out_time']),
                 ]),
@@ -1111,10 +1146,10 @@ class _InfoTab extends StatelessWidget {
             child: Column(
               children: [
                 if (gig['responsible'] != null)
-                  _card('Ansvarlig', [
+                  _card(cs, 'Ansvarlig', [
                     MapEntry('Navn', gig['responsible']),
                   ]),
-                _card('Notat', [
+                _card(cs, 'Notat', [
                   MapEntry('Dette skal vi gjøre', gig['notes_for_contract']),
                 ]),
               ],
@@ -1132,12 +1167,12 @@ class _InfoTab extends StatelessWidget {
         Expanded(
           child: Column(
             children: [
-              _card('Sted', [
+              _card(cs, 'Sted', [
                 MapEntry('Venue', gig['venue_name']),
                 MapEntry('By', gig['city']),
                 MapEntry('Land', gig['country']),
               ]),
-              _card('Kunde', [
+              _card(cs, 'Kunde', [
                 MapEntry('Firma', gig['customer_firma']),
                 MapEntry('Kontakt', gig['customer_name']),
                 MapEntry('Telefon', gig['customer_phone']),
@@ -1146,7 +1181,7 @@ class _InfoTab extends StatelessWidget {
                 MapEntry('Adresse', gig['customer_address']),
                 MapEntry('EHF', gig['invoice_on_ehf'] == true ? 'Ja' : null),
               ]),
-              _card('Tider', [
+              _card(cs, 'Tider', [
                 MapEntry('Oppmøte', gig['meeting_time']),
                 MapEntry('Get-in', gig['get_in_time']),
                 MapEntry('Prøver', gig['rehearsal_time']),
@@ -1162,12 +1197,12 @@ class _InfoTab extends StatelessWidget {
         Expanded(
           child: Column(
             children: [
-              _card('Scene', [
+              _card(cs, 'Scene', [
                 MapEntry('Form', gig['stage_shape']),
                 MapEntry('Størrelse', gig['stage_size']),
                 MapEntry('Notat', gig['stage_notes']),
               ]),
-              _card('Teknikk', [
+              _card(cs, 'Teknikk', [
                 MapEntry('In-ear fra oss',
                     gig['inear_from_us'] == true ? 'Ja' : 'Nei'),
                 MapEntry(
@@ -1178,7 +1213,7 @@ class _InfoTab extends StatelessWidget {
                 MapEntry('Playback fra oss',
                     gig['playback_from_us'] != false ? 'Ja' : 'Nei'),
               ]),
-              _card('Transport & Extra', [
+              _card(cs, 'Transport & Extra', [
                 MapEntry('Km', gig['transport_km']?.toString()),
                 MapEntry(
                     'Transport',
@@ -1192,7 +1227,7 @@ class _InfoTab extends StatelessWidget {
                         ? 'kr ${_fmt(gig['extra_price'])}'
                         : null),
               ]),
-              _card('Notater', [
+              _card(cs, 'Notater', [
                 MapEntry('For kontrakt', gig['notes_for_contract']),
                 MapEntry('Fra arrangør', gig['info_from_organizer']),
               ]),
@@ -1203,7 +1238,7 @@ class _InfoTab extends StatelessWidget {
     );
   }
 
-  Widget _card(String title, List<MapEntry<String, dynamic>> entries) {
+  Widget _card(ColorScheme cs, String title, List<MapEntry<String, dynamic>> entries) {
     final nonEmpty = entries
         .where((e) => e.value?.toString().isNotEmpty ?? false)
         .toList();
@@ -1213,19 +1248,19 @@ class _InfoTab extends StatelessWidget {
       margin: const EdgeInsets.only(bottom: 12),
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: CssTheme.surface,
+        color: cs.surfaceContainerLowest,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: CssTheme.outline),
+        border: Border.all(color: cs.outlineVariant),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
             title.toUpperCase(),
-            style: const TextStyle(
+            style: TextStyle(
               fontSize: 11,
               fontWeight: FontWeight.w900,
-              color: CssTheme.textMuted,
+              color: cs.onSurfaceVariant,
               letterSpacing: 0.8,
             ),
           ),
@@ -1251,6 +1286,7 @@ class _InfoRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
     if (value == null || value!.isEmpty) return const SizedBox.shrink();
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 2),
@@ -1261,8 +1297,8 @@ class _InfoRow extends StatelessWidget {
             width: 130,
             child: Text(
               label,
-              style: const TextStyle(
-                color: CssTheme.textMuted,
+              style: TextStyle(
+                color: cs.onSurfaceVariant,
                 fontSize: 13,
                 fontWeight: FontWeight.w600,
               ),
@@ -1322,6 +1358,7 @@ class _ShowsPrisTabState extends State<_ShowsPrisTab> {
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
     return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -1341,12 +1378,12 @@ class _ShowsPrisTabState extends State<_ShowsPrisTab> {
 
           // Shows table
           if (widget.shows.isEmpty)
-            const Text('Ingen shows lagt til ennå.',
-                style: TextStyle(color: CssTheme.textMuted))
+            Text('Ingen shows lagt til ennå.',
+                style: TextStyle(color: cs.onSurfaceVariant))
           else
             Container(
               decoration: BoxDecoration(
-                border: Border.all(color: CssTheme.outline),
+                border: Border.all(color: cs.outlineVariant),
                 borderRadius: BorderRadius.circular(12),
               ),
               child: Column(
@@ -1355,10 +1392,10 @@ class _ShowsPrisTabState extends State<_ShowsPrisTab> {
                   Container(
                     padding: const EdgeInsets.symmetric(
                         horizontal: 12, vertical: 8),
-                    decoration: const BoxDecoration(
-                      color: CssTheme.surface2,
+                    decoration: BoxDecoration(
+                      color: cs.surfaceContainerLow,
                       borderRadius:
-                          BorderRadius.vertical(top: Radius.circular(12)),
+                          const BorderRadius.vertical(top: Radius.circular(12)),
                     ),
                     child: Row(
                       children: const [
@@ -1423,8 +1460,8 @@ class _ShowsPrisTabState extends State<_ShowsPrisTab> {
           Container(
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
-              color: CssTheme.surface,
-              border: Border.all(color: CssTheme.outline),
+              color: cs.surfaceContainerLowest,
+              border: Border.all(color: cs.outlineVariant),
               borderRadius: BorderRadius.circular(12),
             ),
             child: Column(
@@ -1497,14 +1534,15 @@ class _ShowRowState extends State<_ShowRow> {
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
     final show = widget.show;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
         border: widget.isLast
             ? null
-            : const Border(
-                bottom: BorderSide(color: CssTheme.outline)),
+            : Border(
+                bottom: BorderSide(color: cs.outlineVariant)),
       ),
       child: Row(
         children: [
@@ -1626,22 +1664,27 @@ class _PriceRow extends StatelessWidget {
 class _CrewLineupTab extends StatelessWidget {
   final List<Map<String, dynamic>> companyMembers;
   final Map<String, dynamic> gig;
-  final Set<String> selectedSkarp;
-  final Set<String> selectedBass;
-  final void Function(String userId, String section) onToggleMember;
+  final List<Map<String, dynamic>> shows;
+  final Map<String, Set<String>> selectedSkarpByShow;
+  final Map<String, Set<String>> selectedBassByShow;
+  final void Function(String userId, String section, String showId) onToggleMember;
   final Future<void> Function(String section) onSaveAndLock;
+  final void Function(String fromShowId) onCopyToAllShows;
 
   const _CrewLineupTab({
     required this.companyMembers,
     required this.gig,
-    required this.selectedSkarp,
-    required this.selectedBass,
+    required this.shows,
+    required this.selectedSkarpByShow,
+    required this.selectedBassByShow,
     required this.onToggleMember,
     required this.onSaveAndLock,
+    required this.onCopyToAllShows,
   });
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
     final skarpMembers = companyMembers
         .where((m) => m['section'] == 'skarp')
         .toList();
@@ -1687,33 +1730,70 @@ class _CrewLineupTab extends StatelessWidget {
         const SizedBox(height: 16),
 
         if (companyMembers.isEmpty)
-          const Text('Ingen medlemmer lagt til ennå.',
-              style: TextStyle(color: CssTheme.textMuted))
-        else ...[
-          // Skarp section
+          Text('Ingen medlemmer lagt til ennå.',
+              style: TextStyle(color: cs.onSurfaceVariant))
+        else if (shows.isNotEmpty) ...[
+          // Gig-level lock buttons
+          Row(
+            children: [
+              FilledButton.icon(
+                onPressed: () => onSaveAndLock('skarp'),
+                icon: Icon(lockedSkarp ? Icons.lock_open : Icons.lock, size: 16),
+                label: Text(lockedSkarp ? 'Lås opp Skarp' : 'Lås Skarp'),
+                style: FilledButton.styleFrom(
+                  backgroundColor: lockedSkarp ? Colors.orange : Colors.purple,
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                ),
+              ),
+              const SizedBox(width: 12),
+              FilledButton.icon(
+                onPressed: () => onSaveAndLock('bass'),
+                icon: Icon(lockedBass ? Icons.lock_open : Icons.lock, size: 16),
+                label: Text(lockedBass ? 'Lås opp Bass' : 'Lås Bass'),
+                style: FilledButton.styleFrom(
+                  backgroundColor: lockedBass ? Colors.orange : Colors.teal,
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          // ── Per-show crew assignment ──
+          for (final show in shows) ...[
+            _buildShowBlock(
+              context,
+              show: show,
+              skarpMembers: skarpMembers,
+              bassMembers: bassMembers,
+              noSectionMembers: noSectionMembers,
+              lockedSkarp: lockedSkarp,
+              lockedBass: lockedBass,
+            ),
+            const SizedBox(height: 20),
+          ],
+        ] else ...[
+          // Fallback: no shows → assign per gig (showId = '')
           _buildSectionBlock(
             context,
             title: 'Skarp',
             color: Colors.purple,
             members: skarpMembers,
-            selected: selectedSkarp,
+            selected: selectedSkarpByShow[''] ?? {},
             section: 'skarp',
+            showId: '',
             locked: lockedSkarp,
           ),
           const SizedBox(height: 16),
-
-          // Bass section
           _buildSectionBlock(
             context,
             title: 'Bass',
             color: Colors.teal,
             members: bassMembers,
-            selected: selectedBass,
+            selected: selectedBassByShow[''] ?? {},
             section: 'bass',
+            showId: '',
             locked: lockedBass,
           ),
-
-          // No section
           if (noSectionMembers.isNotEmpty) ...[
             const SizedBox(height: 16),
             _buildSectionBlock(
@@ -1723,12 +1803,95 @@ class _CrewLineupTab extends StatelessWidget {
               members: noSectionMembers,
               selected: const {},
               section: '',
+              showId: '',
               locked: false,
               readOnly: true,
             ),
           ],
         ],
       ],
+    );
+  }
+
+  Widget _buildShowBlock(
+    BuildContext context, {
+    required Map<String, dynamic> show,
+    required List<Map<String, dynamic>> skarpMembers,
+    required List<Map<String, dynamic>> bassMembers,
+    required List<Map<String, dynamic>> noSectionMembers,
+    required bool lockedSkarp,
+    required bool lockedBass,
+  }) {
+    final cs = Theme.of(context).colorScheme;
+    final showId = show['id'] as String;
+    final showName = show['show_name'] as String? ?? 'Show';
+
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        border: Border.all(color: cs.outlineVariant),
+        borderRadius: BorderRadius.circular(14),
+        color: cs.surfaceContainerLowest,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Text(showName,
+                  style: const TextStyle(
+                      fontSize: 15, fontWeight: FontWeight.w900)),
+              const Spacer(),
+              if (shows.length > 1)
+                TextButton.icon(
+                  onPressed: () => onCopyToAllShows(showId),
+                  icon: const Icon(Icons.copy_all, size: 16),
+                  label: const Text('Kopier til alle shows',
+                      style: TextStyle(fontSize: 12)),
+                  style: TextButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(horizontal: 10),
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          _buildSectionBlock(
+            context,
+            title: 'Skarp',
+            color: Colors.purple,
+            members: skarpMembers,
+            selected: selectedSkarpByShow[showId] ?? {},
+            section: 'skarp',
+            showId: showId,
+            locked: lockedSkarp,
+          ),
+          const SizedBox(height: 12),
+          _buildSectionBlock(
+            context,
+            title: 'Bass',
+            color: Colors.teal,
+            members: bassMembers,
+            selected: selectedBassByShow[showId] ?? {},
+            section: 'bass',
+            showId: showId,
+            locked: lockedBass,
+          ),
+          if (noSectionMembers.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            _buildSectionBlock(
+              context,
+              title: 'Ingen seksjon',
+              color: Colors.grey,
+              members: noSectionMembers,
+              selected: const {},
+              section: '',
+              showId: showId,
+              locked: false,
+              readOnly: true,
+            ),
+          ],
+        ],
+      ),
     );
   }
 
@@ -1739,9 +1902,12 @@ class _CrewLineupTab extends StatelessWidget {
     required List<Map<String, dynamic>> members,
     required Set<String> selected,
     required String section,
+    required String showId,
     required bool locked,
     bool readOnly = false,
   }) {
+    final cs = Theme.of(context).colorScheme;
+    final selectedCount = selected.length;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -1754,7 +1920,7 @@ class _CrewLineupTab extends StatelessWidget {
                 borderRadius: BorderRadius.circular(99),
               ),
               child: Text(
-                title,
+                '$title ($selectedCount valgt)',
                 style: TextStyle(
                   fontSize: 13,
                   fontWeight: FontWeight.w800,
@@ -1763,7 +1929,8 @@ class _CrewLineupTab extends StatelessWidget {
               ),
             ),
             const Spacer(),
-            if (!readOnly && section.isNotEmpty)
+            // Only show lock button on the top-level (not per-show) or when no shows
+            if (!readOnly && section.isNotEmpty && shows.isEmpty)
               FilledButton.icon(
                 onPressed: () => onSaveAndLock(section),
                 icon: Icon(locked ? Icons.lock_open : Icons.lock, size: 16),
@@ -1778,11 +1945,11 @@ class _CrewLineupTab extends StatelessWidget {
         const SizedBox(height: 8),
         if (members.isEmpty)
           Text('Ingen medlemmer i denne seksjonen.',
-              style: TextStyle(color: CssTheme.textMuted, fontSize: 13))
+              style: TextStyle(color: cs.onSurfaceVariant, fontSize: 13))
         else
           Container(
             decoration: BoxDecoration(
-              border: Border.all(color: CssTheme.outline),
+              border: Border.all(color: cs.outlineVariant),
               borderRadius: BorderRadius.circular(12),
             ),
             child: Column(
@@ -1814,8 +1981,8 @@ class _CrewLineupTab extends StatelessWidget {
                   decoration: BoxDecoration(
                     border: isLast
                         ? null
-                        : const Border(
-                            bottom: BorderSide(color: CssTheme.outline)),
+                        : Border(
+                            bottom: BorderSide(color: cs.outlineVariant)),
                   ),
                   child: Row(
                     children: [
@@ -1826,7 +1993,7 @@ class _CrewLineupTab extends StatelessWidget {
                           value: selected.contains(uid),
                           onChanged: locked
                               ? null
-                              : (_) => onToggleMember(uid, section),
+                              : (_) => onToggleMember(uid, section, showId),
                           activeColor: color,
                         ),
                       Expanded(
@@ -1907,11 +2074,11 @@ class _KontraktTabState extends State<_KontraktTab> {
   Future<void> _buildPdf() async {
     if (mounted) setState(() => _generating = true);
     try {
-      final bytes = await IntensjonsavtalePdfService.generate(
+      final result = await IntensjonsavtalePdfService.generate(
         gig: widget.gig,
         shows: widget.shows,
       );
-      if (mounted) setState(() => _pdfBytes = bytes);
+      if (mounted) setState(() => _pdfBytes = result.mainPdf);
     } catch (e) {
       debugPrint('PDF build error: $e');
     }
@@ -1920,6 +2087,7 @@ class _KontraktTabState extends State<_KontraktTab> {
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -1928,9 +2096,9 @@ class _KontraktTabState extends State<_KontraktTab> {
           child: _generating
               ? const Center(child: CircularProgressIndicator())
               : _pdfBytes == null
-                  ? const Center(
+                  ? Center(
                       child: Text('Kunne ikke generere PDF',
-                          style: TextStyle(color: CssTheme.textMuted)))
+                          style: TextStyle(color: cs.onSurfaceVariant)))
                   : PdfPreview(
                       key: ValueKey(_pdfBytes!.length),
                       build: (_) async => _pdfBytes!,
@@ -1966,19 +2134,19 @@ class _KontraktTabState extends State<_KontraktTab> {
                 ),
                 if (_generating) ...[
                   const SizedBox(height: 10),
-                  const Row(
+                  Row(
                     children: [
-                      SizedBox(
+                      const SizedBox(
                         width: 14,
                         height: 14,
                         child: CircularProgressIndicator(strokeWidth: 2),
                       ),
-                      SizedBox(width: 8),
+                      const SizedBox(width: 8),
                       Flexible(
                         child: Text(
                           'Regenererer PDF…',
                           style: TextStyle(
-                              fontSize: 11, color: CssTheme.textMuted),
+                              fontSize: 11, color: cs.onSurfaceVariant),
                         ),
                       ),
                     ],

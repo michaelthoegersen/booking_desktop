@@ -28,37 +28,35 @@ class CssTheme {
     ).copyWith(
       primary: primary2,
       onPrimary: Colors.white,
-      surface: surface,
       onSurface: text,
-      outline: outline,
     );
 
     return base.copyWith(
-      scaffoldBackgroundColor: bg,
+      scaffoldBackgroundColor: scheme.surfaceContainerLow,
       colorScheme: scheme,
 
       // ✅ Cards (containers)
-      cardTheme: const CardThemeData(
-        color: surface,
+      cardTheme: CardThemeData(
+        color: scheme.surfaceContainerLowest,
         elevation: 0,
         shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.all(Radius.circular(18)),
-        side: BorderSide(color: outline),
-  ),
-),
+          borderRadius: const BorderRadius.all(Radius.circular(18)),
+          side: BorderSide(color: scheme.outlineVariant),
+        ),
+      ),
 
       // ✅ Inputs
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
-        fillColor: surface,
+        fillColor: scheme.surfaceContainerLowest,
         contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(16),
-          borderSide: const BorderSide(color: outline),
+          borderSide: BorderSide(color: scheme.outlineVariant),
         ),
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(16),
-          borderSide: const BorderSide(color: outline),
+          borderSide: BorderSide(color: scheme.outlineVariant),
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(16),
@@ -83,7 +81,7 @@ class CssTheme {
           foregroundColor: primary2,
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          side: const BorderSide(color: outline),
+          side: BorderSide(color: scheme.outlineVariant),
           textStyle: const TextStyle(fontWeight: FontWeight.w900),
         ),
       ),

@@ -7,6 +7,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../services/google_routes_service.dart';
 import '../services/route_country_analyzer.dart';
 import '../services/polyline_decoder.dart';
+import '../services/route_crossing_detector.dart';
 import '../services/routes_service.dart';
 
 class RouteCalcResult {
@@ -54,6 +55,8 @@ class _RoutePopupDialogState extends State<RoutePopupDialog> {
   // ✅ NYTT: per route data
   List<double> _routeKm = [];
   List<Map<String, double>> _routeCountryKm = [];
+
+  List<CrossingDetectionResult> _routeCrossings = [];
 
   int _activeRouteIndex = 0;
 
@@ -193,7 +196,9 @@ String _buildExtra() {
 
     final List<List<LatLng>> lines = [];
     final List<double> kms = [];
-    final List<Map<String, double>> countries = [];
+    final List<CrossingDetectionResult> crossings = [];
+    // Store raw route data for background country analysis
+    final List<Map<String, dynamic>> routeData = [];
 
     for (final r in routes) {
       final rawPoints = r['rawPoints'] as List?;
@@ -225,8 +230,84 @@ String _buildExtra() {
       if (line.isEmpty) continue;
 
       lines.add(line);
+      routeData.add(r);
 
       final km = meters / 1000;
+
+      // Ferry/bridge auto-detection
+      final hasFerrySteps = r['hasFerrySteps'] as bool? ?? false;
+      final apiFerryNames = List<String>.from(r['ferryNames'] ?? []);
+      final crossing = RouteCrossingDetector.detect(
+        hasFerrySteps: hasFerrySteps,
+        apiFerryNames: apiFerryNames,
+        polylinePoints: line,
+      );
+      crossings.add(crossing);
+
+      kms.add(km);
+    }
+
+    // ❗ Ingen ruter? Helt OK.
+    if (lines.isEmpty) {
+      setState(() {
+        _allRoutes = [];
+        _routeKm = [];
+        _routeCountryKm = [];
+        _distanceKm = null;
+        _countryKm = {};
+        _loading = false;
+      });
+      return;
+    }
+
+    // ✅ Show map + routes IMMEDIATELY (no country data yet)
+    final firstCrossing = crossings.first;
+    final emptyCountries = List.generate(lines.length, (_) => <String, double>{});
+    setState(() {
+      _allRoutes = lines;
+      _routeKm = kms;
+      _routeCountryKm = emptyCountries;
+      _routeCrossings = crossings;
+      _activeRouteIndex = 0;
+      _distanceKm = kms.first;
+      _countryKm = {};
+      _hasFerry = firstCrossing.hasFerry;
+      _hasBridge = firstCrossing.hasBridge;
+      _loading = false;
+    });
+    _kmCtrl.text = kms.first.toStringAsFixed(0);
+    _ferryNameCtrl.text = firstCrossing.combinedName;
+
+    // 🌍 Country analysis in background — updates UI when done
+    _loadCountryData(routeData, lines.length);
+
+  } catch (e) {
+    // ❗ ALDRI blokker popup
+    debugPrint("Route load failed: $e");
+
+    setState(() {
+      _allRoutes = [];
+      _routeKm = [];
+      _routeCountryKm = [];
+      _distanceKm = null;
+      _countryKm = {};
+      _loading = false;
+    });
+  }
+}
+
+  // =================================================
+  // BACKGROUND COUNTRY ANALYSIS
+  // =================================================
+  Future<void> _loadCountryData(
+    List<Map<String, dynamic>> routeData,
+    int routeCount,
+  ) async {
+    final List<Map<String, double>> countries = [];
+
+    for (final r in routeData) {
+      final rawPoints = r['rawPoints'] as List?;
+      final polyline = r['polyline'] as String?;
 
       Map<String, double> country = {};
       try {
@@ -245,49 +326,19 @@ String _buildExtra() {
       } catch (e) {
         debugPrint('Country analysis failed (non-fatal): $e');
       }
-
-      kms.add(km);
       countries.add(country);
     }
 
-    // ❗ Ingen ruter? Helt OK.
-    if (lines.isEmpty) {
-      setState(() {
-        _allRoutes = [];
-        _routeKm = [];
-        _routeCountryKm = [];
-        _distanceKm = null;
-        _countryKm = {};
-        _loading = false;
-      });
-      return;
-    }
+    // Widget might have been disposed while we were loading
+    if (!mounted) return;
 
     setState(() {
-      _allRoutes = lines;
-      _routeKm = kms;
       _routeCountryKm = countries;
-      _activeRouteIndex = 0;
-      _distanceKm = kms.first;
-      _countryKm = countries.first;
-      _loading = false;
-    });
-    _kmCtrl.text = kms.first.toStringAsFixed(0);
-
-  } catch (e) {
-    // ❗ ALDRI blokker popup
-    debugPrint("Route load failed: $e");
-
-    setState(() {
-      _allRoutes = [];
-      _routeKm = [];
-      _routeCountryKm = [];
-      _distanceKm = null;
-      _countryKm = {};
-      _loading = false;
+      if (_activeRouteIndex < countries.length) {
+        _countryKm = countries[_activeRouteIndex];
+      }
     });
   }
-}
 
   // =================================================
 // SAVE
@@ -532,13 +583,28 @@ Future<void> _save() async {
                 onChanged: (v) {
                   if (v == null) return;
 
+                  final crossing = _routeCrossings.isNotEmpty
+                      ? _routeCrossings[v]
+                      : null;
+
                   setState(() {
                     _activeRouteIndex = v;
 
                     // ✅ AUTO UPDATE
                     _distanceKm = _routeKm[v];
                     _countryKm = _routeCountryKm[v];
+
+                    if (crossing != null) {
+                      _hasFerry = crossing.hasFerry;
+                      _hasBridge = crossing.hasBridge;
+                    }
                   });
+
+                  _kmCtrl.text = _routeKm[v].toStringAsFixed(0);
+
+                  if (crossing != null) {
+                    _ferryNameCtrl.text = crossing.combinedName;
+                  }
                 },
               ),
 

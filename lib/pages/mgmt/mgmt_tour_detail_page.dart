@@ -4,7 +4,6 @@ import 'package:intl/intl.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../state/active_company.dart';
-import '../../ui/css_theme.dart';
 
 class MgmtTourDetailPage extends StatefulWidget {
   final String tourId;
@@ -709,6 +708,7 @@ class _MgmtTourDetailPageState extends State<MgmtTourDetailPage>
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
     if (_loading) {
       return const Center(child: CircularProgressIndicator());
     }
@@ -734,7 +734,7 @@ class _MgmtTourDetailPageState extends State<MgmtTourDetailPage>
                   Text(
                     _tour!['artist'] as String? ?? '',
                     style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                          color: CssTheme.textMuted,
+                          color: cs.onSurfaceVariant,
                         ),
                   ),
                 ],
@@ -822,6 +822,7 @@ class _ShowsTab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
     return Column(
       children: [
         Row(
@@ -837,10 +838,10 @@ class _ShowsTab extends StatelessWidget {
         const SizedBox(height: 12),
         Expanded(
           child: shows.isEmpty
-              ? const Center(
+              ? Center(
                   child: Text(
                     'Ingen shows ennå',
-                    style: TextStyle(color: CssTheme.textMuted),
+                    style: TextStyle(color: cs.onSurfaceVariant),
                   ),
                 )
               : ListView.builder(
@@ -873,6 +874,7 @@ class _ShowRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
     final date = show['date'] as String?;
     final venue = show['venue_name'] as String? ?? '';
     final city = show['city'] as String? ?? '';
@@ -884,9 +886,9 @@ class _ShowRow extends StatelessWidget {
       margin: const EdgeInsets.only(bottom: 8),
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: CssTheme.surface,
+        color: cs.surfaceContainerLowest,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: CssTheme.outline),
+        border: Border.all(color: cs.outlineVariant),
       ),
       child: Row(
         children: [
@@ -899,10 +901,10 @@ class _ShowRow extends StatelessWidget {
                   date != null
                       ? DateFormat('MMM').format(DateTime.parse(date))
                       : '',
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 11,
                     fontWeight: FontWeight.w700,
-                    color: CssTheme.textMuted,
+                    color: cs.onSurfaceVariant,
                   ),
                 ),
                 Text(
@@ -928,7 +930,7 @@ class _ShowRow extends StatelessWidget {
                 ),
                 Text(
                   [city, country].where((s) => s.isNotEmpty).join(', '),
-                  style: const TextStyle(color: CssTheme.textMuted),
+                  style: TextStyle(color: cs.onSurfaceVariant),
                 ),
               ],
             ),
@@ -979,6 +981,7 @@ class _ItineraryTab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
     // Group by date
     final Map<String, List<Map<String, dynamic>>> byDate = {};
     for (final item in itinerary) {
@@ -1002,10 +1005,10 @@ class _ItineraryTab extends StatelessWidget {
         const SizedBox(height: 12),
         Expanded(
           child: itinerary.isEmpty
-              ? const Center(
+              ? Center(
                   child: Text(
                     'Ingen reiseplan ennå',
-                    style: TextStyle(color: CssTheme.textMuted),
+                    style: TextStyle(color: cs.onSurfaceVariant),
                   ),
                 )
               : ListView.builder(
@@ -1045,6 +1048,7 @@ class _ItineraryRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
     final time = item['time'] as String?;
     final type = item['type'] as String? ?? 'note';
     final description = item['description'] as String? ?? '';
@@ -1067,9 +1071,9 @@ class _ItineraryRow extends StatelessWidget {
       margin: const EdgeInsets.only(bottom: 6),
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
-        color: CssTheme.surface,
+        color: cs.surfaceContainerLowest,
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: CssTheme.outline),
+        border: Border.all(color: cs.outlineVariant),
       ),
       child: Row(
         children: [
@@ -1115,9 +1119,9 @@ class _ItineraryRow extends StatelessWidget {
                 if (location.isNotEmpty)
                   Text(
                     location,
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 12,
-                      color: CssTheme.textMuted,
+                      color: cs.onSurfaceVariant,
                     ),
                   ),
               ],
@@ -1139,6 +1143,7 @@ class _TeamTab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
     return Column(
       children: [
         Row(
@@ -1154,10 +1159,10 @@ class _TeamTab extends StatelessWidget {
         const SizedBox(height: 12),
         Expanded(
           child: team.isEmpty
-              ? const Center(
+              ? Center(
                   child: Text(
                     'Ingen teammedlemmer ennå',
-                    style: TextStyle(color: CssTheme.textMuted),
+                    style: TextStyle(color: cs.onSurfaceVariant),
                   ),
                 )
               : ListView.builder(
@@ -1177,6 +1182,7 @@ class _TeamMemberRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
     final name = member['name'] as String? ?? '';
     final role = member['role'] as String? ?? '';
     final email = member['email'] as String? ?? '';
@@ -1186,9 +1192,9 @@ class _TeamMemberRow extends StatelessWidget {
       margin: const EdgeInsets.only(bottom: 8),
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: CssTheme.surface,
+        color: cs.surfaceContainerLowest,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: CssTheme.outline),
+        border: Border.all(color: cs.outlineVariant),
       ),
       child: Row(
         children: [
@@ -1210,16 +1216,16 @@ class _TeamMemberRow extends StatelessWidget {
                 ),
                 Text(
                   role.replaceAll('_', ' '),
-                  style: const TextStyle(color: CssTheme.textMuted),
+                  style: TextStyle(color: cs.onSurfaceVariant),
                 ),
                 if (email.isNotEmpty || phone.isNotEmpty)
                   Text(
                     [email, phone]
                         .where((s) => s.isNotEmpty)
                         .join(' · '),
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 12,
-                      color: CssTheme.textMuted,
+                      color: cs.onSurfaceVariant,
                     ),
                   ),
               ],
@@ -1241,6 +1247,7 @@ class _InfoTab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
     final start = tour['tour_start'] as String?;
     final end = tour['tour_end'] as String?;
     final notes = tour['notes'] as String? ?? '';
@@ -1265,9 +1272,9 @@ class _InfoTab extends StatelessWidget {
             width: double.infinity,
             padding: const EdgeInsets.all(20),
             decoration: BoxDecoration(
-              color: CssTheme.surface,
+              color: cs.surfaceContainerLowest,
               borderRadius: BorderRadius.circular(14),
-              border: Border.all(color: CssTheme.outline),
+              border: Border.all(color: cs.outlineVariant),
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -1287,11 +1294,11 @@ class _InfoTab extends StatelessWidget {
                   ),
                 if (notes.isNotEmpty) ...[
                   const Divider(height: 24),
-                  const Text(
+                  Text(
                     'Notater',
                     style: TextStyle(
                       fontWeight: FontWeight.w700,
-                      color: CssTheme.textMuted,
+                      color: cs.onSurfaceVariant,
                       fontSize: 12,
                     ),
                   ),
@@ -1302,9 +1309,9 @@ class _InfoTab extends StatelessWidget {
                   const Divider(height: 24),
                   Text(
                     'Opprettet ${DateFormat('dd.MM.yyyy').format(DateTime.parse(createdAt))}',
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 12,
-                      color: CssTheme.textMuted,
+                      color: cs.onSurfaceVariant,
                     ),
                   ),
                 ],
@@ -1325,6 +1332,7 @@ class _InfoRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 6),
       child: Row(
@@ -1333,9 +1341,9 @@ class _InfoRow extends StatelessWidget {
             width: 120,
             child: Text(
               label,
-              style: const TextStyle(
+              style: TextStyle(
                 fontWeight: FontWeight.w700,
-                color: CssTheme.textMuted,
+                color: cs.onSurfaceVariant,
                 fontSize: 13,
               ),
             ),

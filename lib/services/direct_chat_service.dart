@@ -33,18 +33,58 @@ class DirectChatService {
             }).toList());
   }
 
+  /// Update own DM text.
+  static Future<void> updateMessage(String messageId, String newText) async {
+    await _sb.from('direct_messages').update({
+      'message': newText,
+      'edited_at': DateTime.now().toUtc().toIso8601String(),
+    }).eq('id', messageId).eq('sender_id', _sb.auth.currentUser!.id);
+  }
+
   /// Send a DM to [peerId].
   static Future<void> sendMessage({
     required String peerId,
     required String message,
     required String senderName,
+    String? replyToId,
+    List<String>? mentionedUserIds,
   }) async {
     await _sb.from('direct_messages').insert({
       'sender_id': _sb.auth.currentUser!.id,
       'receiver_id': peerId,
       'sender_name': senderName,
       'message': message,
+      if (replyToId != null) 'reply_to_id': replyToId,
+      if (mentionedUserIds != null && mentionedUserIds.isNotEmpty)
+        'mentioned_user_ids': mentionedUserIds,
     });
+
+    // Push notification to receiver
+    try {
+      await _sb.functions.invoke('notify-chat', body: {
+        'type': 'direct',
+        'receiver_id': peerId,
+        'sender_id': _sb.auth.currentUser!.id,
+        'sender_name': senderName,
+        'message': message,
+        if (mentionedUserIds != null && mentionedUserIds.isNotEmpty)
+          'mentioned_user_ids': mentionedUserIds,
+      });
+    } catch (_) {}
+  }
+
+  /// Convert a DM conversation to a group chat.
+  static Future<String> convertToGroup(
+    String peerId,
+    String groupName, [
+    List<String> additionalMemberIds = const [],
+  ]) async {
+    final result = await _sb.rpc('convert_dm_to_group', params: {
+      'p_peer_id': peerId,
+      'p_group_name': groupName,
+      'p_additional_member_ids': additionalMemberIds,
+    });
+    return result as String;
   }
 
   /// Get current user's display name from profiles.

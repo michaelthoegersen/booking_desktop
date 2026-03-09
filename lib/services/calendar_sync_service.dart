@@ -5,6 +5,7 @@ import '../services/trip_calculator.dart';
 import '../state/settings_store.dart';
 import '../supabase_clients.dart';
 import '../models/round_calc_result.dart';
+import '../state/active_company.dart';
 
 class CalendarSyncService {
   static SupabaseClient get sb => Supabase.instance.client;
@@ -203,6 +204,8 @@ class CalendarSyncService {
                 'status': offer.status,
                 'kilde': bus,
                 'no_ddrive': legNoDDrive,
+                if (activeCompanyNotifier.value != null)
+                  'owner_company_id': activeCompanyNotifier.value!.id,
               };
             });
 

@@ -23,7 +23,8 @@ class _RouteMapPageState extends State<RouteMapPage> {
   void initState() {
     super.initState();
 
-    final apiKey = dotenv.env['GOOGLE_MAPS_API_KEY'];
+    String? apiKey;
+    try { apiKey = dotenv.env['GOOGLE_MAPS_API_KEY']; } catch (_) {}
     if (apiKey == null || apiKey.isEmpty) {
       throw Exception("GOOGLE_MAPS_API_KEY mangler");
     }
