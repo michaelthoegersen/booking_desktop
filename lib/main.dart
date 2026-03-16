@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
@@ -38,6 +39,10 @@ import 'pages/mgmt/gig_offer_page.dart';
 import 'pages/mgmt/mgmt_gig_hire_admin_page.dart';
 import 'pages/mgmt/mgmt_dropbox_page.dart';
 import 'pages/mgmt/mgmt_economy_page.dart';
+import 'pages/mgmt/mgmt_meetings_page.dart';
+import 'pages/mgmt/meeting_wizard_page.dart';
+import 'pages/mgmt/meeting_detail_page.dart';
+import 'pages/mgmt/meeting_live_page.dart';
 
 import 'pages/crew/crew_gigs_page.dart';
 import 'pages/crew/crew_gig_detail_page.dart';
@@ -284,6 +289,7 @@ class BookingApp extends StatelessWidget {
                   prefillDateFrom: qp['dateFrom'],
                   prefillDateTo: qp['dateTo'],
                   prefillStops: qp['stops'],
+                  prefillRounds: qp['rounds'],
                   busRequestId: qp['busRequestId'],
                   prefillPax: int.tryParse(qp['pax'] ?? ''),
                   prefillBusCount: int.tryParse(qp['busCount'] ?? ''),
@@ -458,6 +464,26 @@ class BookingApp extends StatelessWidget {
               path: '/m/economy',
               builder: (_, __) => const MgmtEconomyPage(),
             ),
+            GoRoute(
+              path: '/m/meetings',
+              builder: (_, __) => const MgmtMeetingsPage(),
+            ),
+            GoRoute(
+              path: '/m/meetings/new',
+              builder: (_, __) => const MeetingWizardPage(),
+            ),
+            GoRoute(
+              path: '/m/meetings/:id',
+              builder: (_, s) => MeetingDetailPage(
+                meetingId: s.pathParameters['id']!,
+              ),
+            ),
+            GoRoute(
+              path: '/m/meetings/:id/live',
+              builder: (_, s) => MeetingLivePage(
+                meetingId: s.pathParameters['id']!,
+              ),
+            ),
           ],
         ),
 
@@ -509,6 +535,13 @@ class BookingApp extends StatelessWidget {
       title: "TourFlow",
       theme: CssTheme.theme(),
       routerConfig: router,
+      locale: const Locale('en', 'GB'),
+      supportedLocales: const [Locale('en', 'GB')],
+      localizationsDelegates: const [
+        GlobalMaterialLocalizations.delegate,
+        GlobalWidgetsLocalizations.delegate,
+        GlobalCupertinoLocalizations.delegate,
+      ],
     );
   }
 }

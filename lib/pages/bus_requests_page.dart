@@ -38,7 +38,7 @@ class _BusRequestsPageState extends State<BusRequestsPage> {
     try {
       final query = _sb
           .from('bus_requests')
-          .select('*, companies(name), management_tours(name, artist), gigs(venue_name, city, date_from, date_to, customer_firma, customer_name, customer_phone, customer_email), bus_request_gigs(sort_order, gigs(id, venue_name, city, date_from, date_to, customer_name, customer_phone, customer_email))');
+          .select('*, companies(name), management_tours(name, artist), gigs(venue_name, city, date_from, date_to, customer_firma, customer_name, customer_phone, customer_email), bus_request_gigs(sort_order, round_index, round_start_city, round_end_city, gigs(id, venue_name, city, date_from, date_to, customer_name, customer_phone, customer_email))');
 
       final List<dynamic> data;
       if (_filterStatus == 'archived') {
@@ -125,12 +125,41 @@ class _BusRequestsPageState extends State<BusRequestsPage> {
     final busCount = request['bus_count'] as int?;
     final trailer = request['trailer'] as bool? ?? false;
 
-    // Build stops list for the route (from junction gigs sorted by date)
+    // Build stops list for the route (from junction gigs sorted by sort_order)
     final junctionGigs = (request['bus_request_gigs'] as List<dynamic>? ?? [])
         .map((e) => Map<String, dynamic>.from(e as Map))
         .toList()
       ..sort((a, b) => (a['sort_order'] as int? ?? 0).compareTo(b['sort_order'] as int? ?? 0));
 
+    // Group gigs by round_index for multi-round support
+    final Map<int, List<Map<String, dynamic>>> roundGroups = {};
+    for (final jg in junctionGigs) {
+      final ri = jg['round_index'] as int? ?? 0;
+      roundGroups.putIfAbsent(ri, () => []);
+      roundGroups[ri]!.add(jg);
+    }
+
+    // Build rounds param: "startCity|endCity|date:city,date:city;startCity|endCity|date:city,date:city"
+    String? roundsData;
+    if (roundGroups.length > 1 || roundGroups.values.any((g) => g.first['round_start_city'] != null)) {
+      final sortedKeys = roundGroups.keys.toList()..sort();
+      final roundStrings = <String>[];
+      for (final ri in sortedKeys) {
+        final gigs = roundGroups[ri]!;
+        final startCity = gigs.first['round_start_city'] as String? ?? fromCity;
+        final endCity = gigs.first['round_end_city'] as String? ?? toCity;
+        final gigParts = gigs.map((jg) {
+          final g = jg['gigs'] as Map<String, dynamic>?;
+          final city = g?['city'] as String? ?? '';
+          final date = g?['date_from'] as String? ?? '';
+          return '$date:$city';
+        }).where((s) => s.length > 1).join(',');
+        roundStrings.add('$startCity|$endCity|$gigParts');
+      }
+      roundsData = roundStrings.join(';');
+    }
+
+    // Fallback: flat stops for single-round (backwards compat)
     final stops = junctionGigs
         .map((jg) => jg['gigs'] as Map<String, dynamic>?)
         .whereType<Map<String, dynamic>>()
@@ -143,7 +172,6 @@ class _BusRequestsPageState extends State<BusRequestsPage> {
     final production = tour?['name'] as String? ?? '';
 
     if (mounted) {
-      // Navigate directly to new offer with prefill params
       final params = <String, String>{
         'busRequestId': busRequestId,
         if (companyName.isNotEmpty) 'company': companyName,
@@ -153,6 +181,7 @@ class _BusRequestsPageState extends State<BusRequestsPage> {
         if (dateFrom.isNotEmpty) 'dateFrom': dateFrom,
         if (dateTo.isNotEmpty) 'dateTo': dateTo,
         if (stops.isNotEmpty) 'stops': stops,
+        if (roundsData != null) 'rounds': roundsData,
         if (pax != null) 'pax': pax.toString(),
         if (busCount != null) 'busCount': busCount.toString(),
         if (trailer) 'trailer': 'true',

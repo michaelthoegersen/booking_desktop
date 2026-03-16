@@ -10,8 +10,10 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../../services/brreg_service.dart';
 import '../../state/active_company.dart';
+import '../../state/settings_store.dart';
 import '../../ui/css_theme.dart';
 import '../../widgets/new_company_dialog.dart';
+import '../../widgets/rich_text_field.dart';
 
 class MgmtGigsPage extends StatefulWidget {
   const MgmtGigsPage({super.key});
@@ -29,6 +31,7 @@ class _MgmtGigsPageState extends State<MgmtGigsPage> {
   List<Map<String, dynamic>> _gigs = [];
   String _search = '';
   String _statusFilter = 'all';
+  String _typeFilter = 'all'; // 'all', 'gig', 'rehearsal'
 
   // Multi-select for bus booking
   bool _selectionMode = false;
@@ -77,6 +80,12 @@ class _MgmtGigsPageState extends State<MgmtGigsPage> {
   List<Map<String, dynamic>> get _filtered {
     var list = _gigs;
 
+    if (_typeFilter != 'all') {
+      list = list
+          .where((g) => (g['type'] as String? ?? 'gig') == _typeFilter)
+          .toList();
+    }
+
     if (_statusFilter != 'all') {
       if (_statusFilter == 'upcoming') {
         final today = DateTime.now();
@@ -110,26 +119,43 @@ class _MgmtGigsPageState extends State<MgmtGigsPage> {
   Future<void> _openNewGigDialog() async {
     if (_companyId == null) return;
 
-    // Ask user: Gig or Øvelse?
+    // Ask user what type to create
     final type = await showDialog<String>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Ny hendelse'),
-        content: const Text('Hva vil du opprette?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Avbryt'),
-          ),
-          FilledButton.icon(
-            icon: const Icon(Icons.piano, size: 16),
-            label: const Text('Øvelse'),
-            onPressed: () => Navigator.pop(ctx, 'rehearsal'),
-          ),
-          FilledButton.icon(
-            icon: const Icon(Icons.music_note, size: 16),
-            label: const Text('Gig'),
+      builder: (ctx) => SimpleDialog(
+        title: const Text('Ny aktivitet'),
+        children: [
+          SimpleDialogOption(
             onPressed: () => Navigator.pop(ctx, 'gig'),
+            child: const Row(children: [
+              Icon(Icons.music_note, size: 20),
+              SizedBox(width: 12),
+              Text('Gig', style: TextStyle(fontSize: 15)),
+            ]),
+          ),
+          SimpleDialogOption(
+            onPressed: () => Navigator.pop(ctx, 'rehearsal'),
+            child: const Row(children: [
+              Icon(Icons.piano, size: 20),
+              SizedBox(width: 12),
+              Text('Øvelse', style: TextStyle(fontSize: 15)),
+            ]),
+          ),
+          SimpleDialogOption(
+            onPressed: () => Navigator.pop(ctx, 'meeting'),
+            child: const Row(children: [
+              Icon(Icons.groups, size: 20),
+              SizedBox(width: 12),
+              Text('Møte', style: TextStyle(fontSize: 15)),
+            ]),
+          ),
+          SimpleDialogOption(
+            onPressed: () => Navigator.pop(ctx, 'other'),
+            child: const Row(children: [
+              Icon(Icons.event, size: 20),
+              SizedBox(width: 12),
+              Text('Annet', style: TextStyle(fontSize: 15)),
+            ]),
           ),
         ],
       ),
@@ -140,14 +166,17 @@ class _MgmtGigsPageState extends State<MgmtGigsPage> {
     if (type == 'gig') {
       // Gig → open the offer page (creates both gig + gig_offer)
       context.go('/m/offers/new');
+    } else if (type == 'meeting') {
+      // Møte → open the meeting wizard
+      context.go('/m/meetings/new');
     } else {
-      // Øvelse → open the existing dialog with type locked to rehearsal
+      // Øvelse/Annet → open the dialog with type locked
       final gigId = await showDialog<String>(
         context: context,
         barrierDismissible: false,
         builder: (_) => _NewGigDialog(
           managementCompanyId: _companyId!,
-          forceType: 'rehearsal',
+          forceType: type,
         ),
       );
 
@@ -155,6 +184,47 @@ class _MgmtGigsPageState extends State<MgmtGigsPage> {
         context.go('/m/gigs/$gigId');
       } else {
         await _load();
+      }
+    }
+  }
+
+  Future<void> _confirmCancel(Map<String, dynamic> gig) async {
+    final venue = gig['venue_name'] as String?;
+    final dateFrom = gig['date_from'] as String?;
+    final label = venue?.isNotEmpty == true ? venue! : (dateFrom ?? 'denne gigen');
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Avlys aktivitet'),
+        content: Text('Er du sikker på at du vil avlyse "$label"?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Avbryt'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Avlys'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true || !mounted) return;
+
+    try {
+      await _sb
+          .from('gigs')
+          .update({'status': 'cancelled'})
+          .eq('id', gig['id'] as String);
+      await _load();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Kunne ikke avlyse: $e')),
+        );
       }
     }
   }
@@ -568,7 +638,7 @@ class _MgmtGigsPageState extends State<MgmtGigsPage> {
           Row(
             children: [
               Text(
-                'Gigs',
+                'Aktiviteter',
                 style: Theme.of(context).textTheme.headlineMedium,
               ),
               const Spacer(),
@@ -577,7 +647,7 @@ class _MgmtGigsPageState extends State<MgmtGigsPage> {
                 child: TextField(
                   controller: _searchCtrl,
                   decoration: const InputDecoration(
-                    hintText: 'Søk i gigs…',
+                    hintText: 'Søk i aktiviteter…',
                     prefixIcon: Icon(Icons.search),
                     isDense: true,
                   ),
@@ -609,36 +679,86 @@ class _MgmtGigsPageState extends State<MgmtGigsPage> {
               FilledButton.icon(
                 onPressed: _openNewGigDialog,
                 icon: const Icon(Icons.add),
-                label: const Text('Ny event'),
+                label: const Text('Ny aktivitet'),
               ),
             ],
           ),
 
           const SizedBox(height: 12),
 
-          // Status filter chips
+          // Filters row — type + status as compact text tabs
           Row(
-            children: _statuses.map((s) {
-              final selected = _statusFilter == s;
-              return Padding(
-                padding: const EdgeInsets.only(right: 8),
-                child: ChoiceChip(
-                  label: Text(const {
-                    'all': 'Alle',
-                    'upcoming': 'Kommende',
-                    'confirmed': 'Bekreftet',
-                    'invoiced': 'Fakturert',
-                  }[s] ?? _capitalize(s)),
-                  selected: selected,
-                  onSelected: (_) => setState(() => _statusFilter = s),
-                  selectedColor: Colors.black,
-                  labelStyle: TextStyle(
-                    color: selected ? Colors.white : cs.onSurface,
-                    fontWeight: FontWeight.w700,
+            children: [
+              // Type filters
+              ...const [
+                ('all', 'Alle'),
+                ('gig', 'Gigs'),
+                ('rehearsal', 'Øvelser'),
+                ('meeting', 'Møter'),
+                ('other', 'Annet'),
+              ].map((e) {
+                final active = _typeFilter == e.$1;
+                return Padding(
+                  padding: const EdgeInsets.only(right: 16),
+                  child: InkWell(
+                    onTap: () => setState(() => _typeFilter = e.$1),
+                    borderRadius: BorderRadius.circular(4),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 4),
+                      child: Text(
+                        e.$2,
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: active ? FontWeight.w800 : FontWeight.w500,
+                          color: active ? cs.onSurface : cs.onSurface.withValues(alpha: 0.5),
+                          decoration: active ? TextDecoration.underline : TextDecoration.none,
+                          decorationThickness: 2,
+                        ),
+                      ),
+                    ),
                   ),
-                ),
-              );
-            }).toList(),
+                );
+              }),
+
+              // Divider
+              Container(
+                height: 20,
+                width: 1,
+                color: cs.outlineVariant,
+                margin: const EdgeInsets.only(right: 16),
+              ),
+
+              // Status filters
+              ..._statuses.map((s) {
+                final active = _statusFilter == s;
+                final label = const {
+                  'all': 'Alle',
+                  'upcoming': 'Kommende',
+                  'confirmed': 'Bekreftet',
+                  'invoiced': 'Fakturert',
+                }[s] ?? _capitalize(s);
+                return Padding(
+                  padding: const EdgeInsets.only(right: 16),
+                  child: InkWell(
+                    onTap: () => setState(() => _statusFilter = s),
+                    borderRadius: BorderRadius.circular(4),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 4),
+                      child: Text(
+                        label,
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: active ? FontWeight.w800 : FontWeight.w500,
+                          color: active ? cs.onSurface : cs.onSurface.withValues(alpha: 0.5),
+                          decoration: active ? TextDecoration.underline : TextDecoration.none,
+                          decorationThickness: 2,
+                        ),
+                      ),
+                    ),
+                  ),
+                );
+              }),
+            ],
           ),
 
           const SizedBox(height: 14),
@@ -650,9 +770,9 @@ class _MgmtGigsPageState extends State<MgmtGigsPage> {
                 : _filtered.isEmpty
                     ? Center(
                         child: Text(
-                          _search.isNotEmpty || _statusFilter != 'all'
-                              ? 'Ingen gigs matcher filteret'
-                              : 'Ingen gigs ennå. Opprett din første gig!',
+                          _search.isNotEmpty || _statusFilter != 'all' || _typeFilter != 'all'
+                              ? 'Ingen aktiviteter matcher filteret'
+                              : 'Ingen aktiviteter ennå. Opprett din første aktivitet!',
                           style: TextStyle(color: cs.onSurfaceVariant),
                         ),
                       )
@@ -685,16 +805,17 @@ class _MgmtGigsPageState extends State<MgmtGigsPage> {
                               itemBuilder: (context, i) {
                                 final gig = _filtered[i];
                                 final gigId = gig['id'] as String;
-                                final isRehearsal = (gig['type'] as String? ?? 'gig') == 'rehearsal';
+                                final isGig = (gig['type'] as String? ?? 'gig') == 'gig';
                                 return _GigRow(
                                   gig: gig,
-                                  onTap: _selectionMode && !isRehearsal
+                                  onTap: _selectionMode && isGig
                                       ? () => _toggleGigSelection(gigId)
                                       : () => context.go('/m/gigs/$gigId'),
+                                  onCancel: () => _confirmCancel(gig),
                                   onDelete: () => _confirmDelete(gig),
                                   selectionMode: _selectionMode,
                                   selected: _selectedGigIds.contains(gigId),
-                                  onSelect: isRehearsal ? null : () => _toggleGigSelection(gigId),
+                                  onSelect: isGig ? () => _toggleGigSelection(gigId) : null,
                                 );
                               },
                             ),
@@ -769,7 +890,8 @@ class _NewGigDialogState extends State<_NewGigDialog> {
   final _stageShapeCtrl = TextEditingController();
   final _stageSizeCtrl = TextEditingController();
   final _stageNotesCtrl = TextEditingController();
-  final _inearPriceCtrl = TextEditingController(text: '7000');
+  final _inearPriceCtrl = TextEditingController(
+      text: SettingsStore.current.inearPrice.toStringAsFixed(0));
   final _transportKmCtrl = TextEditingController();
   final _transportPriceCtrl = TextEditingController();
   final _extraDescCtrl = TextEditingController();
@@ -962,7 +1084,7 @@ class _NewGigDialogState extends State<_NewGigDialog> {
         'stage_notes': n(_stageNotesCtrl.text),
         'inear_from_us': _inearFromUs,
         'playback_from_us': _playbackFromUs,
-        'inear_price': double.tryParse(_inearPriceCtrl.text) ?? 7000,
+        'inear_price': double.tryParse(_inearPriceCtrl.text) ?? SettingsStore.current.inearPrice,
         'transport_km': int.tryParse(_transportKmCtrl.text),
         'transport_price': double.tryParse(_transportPriceCtrl.text),
         'extra_desc': n(_extraDescCtrl.text),
@@ -992,9 +1114,10 @@ class _NewGigDialogState extends State<_NewGigDialog> {
       try {
         final venue = n(_venueCtrl.text) ?? '';
         final date = df.format(_dateFrom!);
+        final label = const {'gig': 'Ny gig', 'rehearsal': 'Ny øvelse', 'meeting': 'Nytt møte', 'other': 'Ny aktivitet'}[_type] ?? 'Ny aktivitet';
         await _sb.functions.invoke('notify-company', body: {
           'company_id': widget.managementCompanyId,
-          'title': 'Ny gig: $venue',
+          'title': '$label: $venue',
           'body': '$date — $venue',
           'exclude_user_id': _sb.auth.currentUser?.id,
           'gig_id': gigId,
@@ -1026,7 +1149,7 @@ class _NewGigDialogState extends State<_NewGigDialog> {
             children: [
               // Title
               Text(
-                _type == 'gig' ? 'Ny Gig' : 'Ny Øvelse',
+                const {'gig': 'Ny Gig', 'rehearsal': 'Ny Øvelse', 'meeting': 'Nytt Møte', 'other': 'Ny Aktivitet'}[_type] ?? 'Ny Aktivitet',
                 style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w900),
               ),
               const SizedBox(height: 12),
@@ -1037,6 +1160,8 @@ class _NewGigDialogState extends State<_NewGigDialog> {
                   segments: const [
                     ButtonSegment(value: 'gig', label: Text('Gig'), icon: Icon(Icons.music_note, size: 16)),
                     ButtonSegment(value: 'rehearsal', label: Text('Øvelse'), icon: Icon(Icons.piano, size: 16)),
+                    ButtonSegment(value: 'meeting', label: Text('Møte'), icon: Icon(Icons.groups, size: 16)),
+                    ButtonSegment(value: 'other', label: Text('Annet'), icon: Icon(Icons.event, size: 16)),
                   ],
                   selected: {_type},
                   onSelectionChanged: (v) => setState(() => _type = v.first),
@@ -1091,7 +1216,7 @@ class _NewGigDialogState extends State<_NewGigDialog> {
                               },
                             ),
                           ),
-                          if (_type != 'rehearsal') ...[
+                          if (_type == 'gig') ...[
                           const SizedBox(width: 8),
                           SizedBox(
                             width: 160,
@@ -1226,7 +1351,7 @@ class _NewGigDialogState extends State<_NewGigDialog> {
                       ], // end if gig
 
                       // ── SCHEDULE ────────────────────────────────────────
-                      if (_type == 'rehearsal') ...[
+                      if (_type != 'gig') ...[
                       _sec('Timeplan'),
                       _row([
                         _tf(_meetingTimeCtrl, 'Fra'),
@@ -1234,7 +1359,7 @@ class _NewGigDialogState extends State<_NewGigDialog> {
                       ]),
                       ],
 
-                      if (_type != 'rehearsal') ...[
+                      if (_type == 'gig') ...[
                       _sec('Timeplan'),
                       _row([
                         _tf(_meetingTimeCtrl, 'Oppmøte'),
@@ -1308,17 +1433,30 @@ class _NewGigDialogState extends State<_NewGigDialog> {
 
                       // ── NOTES (gig only) ────────────────────────────────
                       _sec('Notat'),
-                      _tfFull(_notesCtrl, 'Notat for kontrakt',
-                          maxLines: 2),
+                      RichTextField(
+                        controller: _notesCtrl,
+                        label: 'Notat for kontrakt',
+                        minLines: 2,
+                        maxLines: 5,
+                      ),
                       const SizedBox(height: 8),
-                      _tfFull(_infoFromOrgCtrl, 'Info fra arrangør',
-                          maxLines: 2),
+                      RichTextField(
+                        controller: _infoFromOrgCtrl,
+                        label: 'Info fra arrangør',
+                        minLines: 2,
+                        maxLines: 5,
+                      ),
                       ], // end if gig
 
                       // ── REHEARSAL NOTES ─────────────────────────────────
-                      if (_type == 'rehearsal') ...[
+                      if (_type != 'gig') ...[
                       _sec('Notat'),
-                      _tfFull(_notesCtrl, 'Dette skal vi gjøre på øvelsen', maxLines: 3),
+                      RichTextField(
+                        controller: _notesCtrl,
+                        label: 'Notat / hva skal gjøres',
+                        minLines: 3,
+                        maxLines: 6,
+                      ),
                       ],
 
                       const SizedBox(height: 8),
@@ -1353,7 +1491,7 @@ class _NewGigDialogState extends State<_NewGigDialog> {
                                   strokeWidth: 2,
                                   color: Colors.white),
                             )
-                          : Text(_type == 'gig' ? 'Opprett gig' : 'Opprett øvelse'),
+                          : Text(const {'gig': 'Opprett gig', 'rehearsal': 'Opprett øvelse', 'meeting': 'Opprett møte', 'other': 'Opprett aktivitet'}[_type] ?? 'Opprett'),
                     ),
                   ),
                 ],
@@ -1389,12 +1527,12 @@ class _NewGigDialogState extends State<_NewGigDialog> {
     int flex = 1,
     double? width,
     int maxLines = 1,
-    TextInputType keyboardType = TextInputType.text,
+    TextInputType? keyboardType,
   }) {
     final field = TextField(
       controller: ctrl,
       maxLines: maxLines,
-      keyboardType: keyboardType,
+      keyboardType: keyboardType ?? (maxLines > 1 ? TextInputType.multiline : TextInputType.text),
       decoration: InputDecoration(labelText: label),
     );
     if (width != null) return SizedBox(width: width, child: field);
@@ -1405,12 +1543,12 @@ class _NewGigDialogState extends State<_NewGigDialog> {
     TextEditingController ctrl,
     String label, {
     int maxLines = 1,
-    TextInputType keyboardType = TextInputType.text,
+    TextInputType? keyboardType,
   }) {
     return TextField(
       controller: ctrl,
       maxLines: maxLines,
-      keyboardType: keyboardType,
+      keyboardType: keyboardType ?? (maxLines > 1 ? TextInputType.multiline : TextInputType.text),
       decoration: InputDecoration(labelText: label),
     );
   }
@@ -1825,6 +1963,7 @@ class _CustomerPickerDialogState extends State<_CustomerPickerDialog>
 class _GigRow extends StatelessWidget {
   final Map<String, dynamic> gig;
   final VoidCallback onTap;
+  final VoidCallback onCancel;
   final VoidCallback onDelete;
   final bool selectionMode;
   final bool selected;
@@ -1833,6 +1972,7 @@ class _GigRow extends StatelessWidget {
   const _GigRow({
     required this.gig,
     required this.onTap,
+    required this.onCancel,
     required this.onDelete,
     this.selectionMode = false,
     this.selected = false,
@@ -1904,10 +2044,10 @@ class _GigRow extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  if (type == 'rehearsal') ...[
-                    const Text(
-                      'Øvelse',
-                      style: TextStyle(
+                  if (type != 'gig') ...[
+                    Text(
+                      const {'rehearsal': 'Øvelse', 'meeting': 'Møte', 'other': 'Annet'}[type] ?? type,
+                      style: const TextStyle(
                           fontWeight: FontWeight.w900, fontSize: 15),
                     ),
                     if (locationLine.isNotEmpty)
@@ -1954,29 +2094,53 @@ class _GigRow extends StatelessWidget {
               ),
               const SizedBox(width: 8),
             ],
-            if (type == 'rehearsal' && status != 'cancelled') ...[
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                decoration: BoxDecoration(
-                  color: Colors.purple.withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(999),
-                  border: Border.all(color: Colors.purple.withValues(alpha: 0.3)),
-                ),
-                child: const Text(
-                  'Øvelse',
-                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: Colors.purple),
-                ),
-              ),
+            if (type != 'gig' && status != 'cancelled') ...[
+              Builder(builder: (_) {
+                final badgeColor = const {
+                  'rehearsal': Colors.purple,
+                  'meeting': Colors.teal,
+                  'other': Colors.blueGrey,
+                }[type] ?? Colors.grey;
+                final badgeLabel = const {
+                  'rehearsal': 'Øvelse',
+                  'meeting': 'Møte',
+                  'other': 'Annet',
+                }[type] ?? type;
+                return Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: badgeColor.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(999),
+                    border: Border.all(color: badgeColor.withValues(alpha: 0.3)),
+                  ),
+                  child: Text(
+                    badgeLabel,
+                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: badgeColor),
+                  ),
+                );
+              }),
               const SizedBox(width: 8),
             ],
-            if (type != 'rehearsal' && status != 'cancelled')
+            if (type == 'gig' && status != 'cancelled')
               _GigStatusBadge(status: status),
             PopupMenuButton<String>(
               icon: Icon(Icons.more_vert, color: cs.onSurfaceVariant),
               onSelected: (v) {
+                if (v == 'cancel') onCancel();
                 if (v == 'delete') onDelete();
               },
               itemBuilder: (_) => [
+                if (status != 'cancelled')
+                  const PopupMenuItem(
+                    value: 'cancel',
+                    child: Row(
+                      children: [
+                        Icon(Icons.cancel_outlined, size: 18),
+                        SizedBox(width: 8),
+                        Text('Avlys'),
+                      ],
+                    ),
+                  ),
                 const PopupMenuItem(
                   value: 'delete',
                   child: Row(

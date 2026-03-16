@@ -50,9 +50,22 @@ Tidsrom vi holder av: $tidsrom''';
   // --------------------------------------------------------------------------
 
   /// Returns the main PDF bytes plus any rider PDF attachments.
+  /// When [customerSignature] and [companySignature] are provided,
+  /// the PDF includes digital signatures with names and dates.
+  ///
+  /// When [calcLines] and [calcTotal] are provided, the PDF uses those
+  /// directly instead of recalculating from raw gig/show data.
+  /// [dateEntries] overrides the single-date display for multi-date offers.
   static Future<({Uint8List mainPdf, List<({String filename, Uint8List bytes})> riders})> generate({
     required Map<String, dynamic> gig,
     required List<Map<String, dynamic>> shows,
+    String? customerSignature,
+    String? customerSignatureDate,
+    String? companySignature,
+    String? companySignatureDate,
+    List<({String label, double amount})>? calcLines,
+    double? calcTotal,
+    List<({String date, String venue})>? dateEntries,
   }) async {
     final pdf = pw.Document();
 
@@ -103,16 +116,14 @@ Tidsrom vi holder av: $tidsrom''';
     final custPhone = gig['customer_phone'] as String? ?? '';
     final custEmail = gig['customer_email'] as String? ?? '';
     final performanceTime = gig['performance_time'] as String? ?? '';
-    final inearFromUs = gig['inear_from_us'] == true;
-    final inearPrice = (gig['inear_price'] as num?)?.toDouble() ?? 0;
-    final transportPrice = (gig['transport_price'] as num?)?.toDouble() ?? 0;
-    final extraPrice = (gig['extra_price'] as num?)?.toDouble() ?? 0;
     final notesForContract = gig['notes_for_contract'] as String? ?? '';
 
     // Date formatting
     final df = DateFormat('dd.MM.yyyy');
     String dateLabel = '';
-    if (dateFrom != null) {
+    if (dateEntries != null && dateEntries.isNotEmpty) {
+      dateLabel = dateEntries.map((e) => e.date).join(', ');
+    } else if (dateFrom != null) {
       final fromFmt = df.format(DateTime.parse(dateFrom));
       if (dateTo != null && dateTo != dateFrom) {
         dateLabel = '$fromFmt - ${df.format(DateTime.parse(dateTo))}';
@@ -124,17 +135,32 @@ Tidsrom vi holder av: $tidsrom''';
     // Time info — use performance_time (the "Tidspunkt" field from the offer)
     final timeLabel = performanceTime;
 
-    // Price calculations — include markup in all sub-totals
-    final showsRaw = shows.fold<double>(
-        0, (s, sh) => s + ((sh['price'] as num?)?.toDouble() ?? 0));
-    final basePrice = showsRaw +
-        (inearFromUs ? inearPrice : 0) +
-        transportPrice;
-    final total = basePrice + extraPrice;
-    final markupFactor = basePrice > 0 ? total / basePrice : 1.0;
-    final showsTotal = showsRaw * markupFactor;
-    final inearWithMarkup = inearPrice * markupFactor;
-    final transportWithMarkup = transportPrice * markupFactor;
+    // Use pre-calculated values if provided, otherwise fall back to legacy calc
+    final bool useCalcLines = calcLines != null && calcTotal != null;
+    double total;
+    double markupFactor = 1.0;
+    double showsTotal = 0;
+    double inearWithMarkup = 0;
+    double transportWithMarkup = 0;
+    bool inearFromUs = false;
+    double transportPrice = 0;
+
+    if (!useCalcLines) {
+      inearFromUs = gig['inear_from_us'] == true;
+      final inearPrice = (gig['inear_price'] as num?)?.toDouble() ?? 0;
+      transportPrice = (gig['transport_price'] as num?)?.toDouble() ?? 0;
+      final extraPrice = (gig['extra_price'] as num?)?.toDouble() ?? 0;
+      final showsRaw = shows.fold<double>(
+          0, (s, sh) => s + ((sh['price'] as num?)?.toDouble() ?? 0));
+      final basePrice = showsRaw + (inearFromUs ? inearPrice : 0) + transportPrice;
+      total = basePrice + extraPrice;
+      markupFactor = basePrice > 0 ? total / basePrice : 1.0;
+      showsTotal = showsRaw * markupFactor;
+      inearWithMarkup = inearPrice * markupFactor;
+      transportWithMarkup = transportPrice * markupFactor;
+    } else {
+      total = calcTotal;
+    }
 
     // Today's date
     final todayStr = df.format(DateTime.now());
@@ -175,11 +201,19 @@ Tidsrom vi holder av: $tidsrom''';
 
             // ── VENUE / DATES ────────────────────────────────────────────
             _buildSection(boldFont, regularFont, 'SPILLESTED OG TIDSPUNKT', [
-              _labelValue(regularFont, boldFont, 'Spillested',
-                  [venueName, city, country]
-                      .where((s) => s.isNotEmpty)
-                      .join(', ')),
-              _labelValue(regularFont, boldFont, 'Dato', dateLabel),
+              if (dateEntries != null && dateEntries.length > 1) ...[
+                for (int i = 0; i < dateEntries.length; i++)
+                  _labelValue(regularFont, boldFont, 'Dato ${i + 1}',
+                      '${dateEntries[i].date} - ${dateEntries[i].venue}'),
+              ] else ...[
+                _labelValue(regularFont, boldFont, 'Spillested',
+                    dateEntries != null && dateEntries.isNotEmpty
+                        ? dateEntries.first.venue
+                        : [venueName, city, country]
+                            .where((s) => s.isNotEmpty)
+                            .join(', ')),
+                _labelValue(regularFont, boldFont, 'Dato', dateLabel),
+              ],
               if (timeLabel.isNotEmpty)
                 _labelValue(regularFont, boldFont, 'Tider', timeLabel),
             ]),
@@ -198,23 +232,28 @@ Tidsrom vi holder av: $tidsrom''';
             ]),
             pw.SizedBox(height: 12),
 
-            // ── SHOWS TABLE ───────────────────────────────────────────────
-            _buildShowsTable(boldFont, regularFont, shows, nok,
-                markupFactor: markupFactor),
-            pw.SizedBox(height: 12),
-
-            // ── PRICE SUMMARY ─────────────────────────────────────────────
-            _buildPriceSummary(
-              boldFont,
-              regularFont,
-              nok,
-              shows: shows,
-              showsTotal: showsTotal,
-              inearFromUs: inearFromUs,
-              inearPrice: inearWithMarkup,
-              transportPrice: transportWithMarkup,
-              total: total,
-            ),
+            // ── SHOWS TABLE / PRICE SUMMARY ──────────────────────────────
+            if (useCalcLines) ...[
+              // Show names as a simple list
+              _buildShowsList(boldFont, regularFont, shows),
+              pw.SizedBox(height: 12),
+              // Price lines from calc card
+              _buildCalcPriceSummary(boldFont, regularFont, nok,
+                  lines: calcLines, total: calcTotal),
+            ] else ...[
+              _buildShowsTable(boldFont, regularFont, shows, nok,
+                  markupFactor: markupFactor),
+              pw.SizedBox(height: 12),
+              _buildPriceSummary(
+                boldFont, regularFont, nok,
+                shows: shows,
+                showsTotal: showsTotal,
+                inearFromUs: inearFromUs,
+                inearPrice: inearWithMarkup,
+                transportPrice: transportWithMarkup,
+                total: total,
+              ),
+            ],
             pw.SizedBox(height: 16),
 
             // ── NOTES FOR CONTRACT ─────────────────────────────────────────
@@ -227,7 +266,13 @@ Tidsrom vi holder av: $tidsrom''';
             ],
 
             // ── SIGNATURES ────────────────────────────────────────────────
-            _buildSignature(boldFont, regularFont, firma),
+            _buildSignature(
+              boldFont, regularFont, firma,
+              customerSignature: customerSignature,
+              customerSignatureDate: customerSignatureDate,
+              companySignature: companySignature,
+              companySignatureDate: companySignatureDate,
+            ),
             pw.SizedBox(height: 20),
 
             // ── AGREEMENT TEXT ────────────────────────────────────────────
@@ -237,7 +282,9 @@ Tidsrom vi holder av: $tidsrom''';
               _agreementText(
                 firma: firma,
                 kontaktperson: custName,
-                spillested: [venueName, city].where((s) => s.isNotEmpty).join(' - '),
+                spillested: dateEntries != null && dateEntries.isNotEmpty
+                    ? dateEntries.map((e) => e.venue).toSet().join(', ')
+                    : [venueName, city].where((s) => s.isNotEmpty).join(' - '),
                 tidsrom: '$dateLabel${performanceTime.isNotEmpty ? ' kl $performanceTime' : ''}',
               ),
               style: pw.TextStyle(font: regularFont, fontSize: 8.5,
@@ -504,7 +551,112 @@ Tidsrom vi holder av: $tidsrom''';
   }
 
   // --------------------------------------------------------------------------
-  // PRICE SUMMARY
+  // SHOWS LIST (simple — used with calcLines mode)
+  // --------------------------------------------------------------------------
+
+  static pw.Widget _buildShowsList(
+    pw.Font bold,
+    pw.Font regular,
+    List<Map<String, dynamic>> shows,
+  ) {
+    final showNames = shows
+        .map((s) {
+          final name = s['show_name'] as String? ?? '';
+          final ekstra = s['ekstrainnslag'] as String? ?? '';
+          return ekstra.isNotEmpty ? '$name ($ekstra)' : name;
+        })
+        .where((n) => n.isNotEmpty)
+        .toList();
+    if (showNames.isEmpty) return pw.SizedBox();
+    return _buildSection(bold, regular, 'SHOW-OVERSIKT', [
+      pw.Text(
+        showNames.join(', '),
+        style: pw.TextStyle(font: regular, fontSize: 10),
+      ),
+    ]);
+  }
+
+  // --------------------------------------------------------------------------
+  // CALC PRICE SUMMARY (from calc card — used with calcLines mode)
+  // --------------------------------------------------------------------------
+
+  static pw.Widget _buildCalcPriceSummary(
+    pw.Font bold,
+    pw.Font regular,
+    NumberFormat nok, {
+    required List<({String label, double amount})> lines,
+    required double total,
+  }) {
+    // Merge CompleteKonto + BookingHonorar into Utøverhyrer
+    double ckAmount = 0;
+    double bhAmount = 0;
+    for (final l in lines) {
+      if (l.label == 'CompleteKonto') ckAmount = l.amount;
+      if (l.label == 'BookingHonorar') bhAmount = l.amount;
+    }
+    final displayLines = lines
+        .map((l) {
+          if (l.label == 'Utøverhyrer') {
+            return (label: l.label, amount: l.amount + ckAmount + bhAmount);
+          }
+          return l;
+        })
+        .where((l) =>
+            l.amount > 0 &&
+            l.label != 'CompleteKonto' &&
+            l.label != 'BookingHonorar')
+        .toList();
+
+    return pw.Container(
+      padding: const pw.EdgeInsets.all(12),
+      decoration: pw.BoxDecoration(
+        border: pw.Border.all(color: PdfColors.grey400),
+        borderRadius: pw.BorderRadius.circular(4),
+      ),
+      child: pw.Column(
+        crossAxisAlignment: pw.CrossAxisAlignment.start,
+        children: [
+          pw.Text(
+            'PRISOPPSUMMERING',
+            style: pw.TextStyle(
+              font: bold,
+              fontSize: 11,
+              color: PdfColors.grey800,
+              letterSpacing: 1,
+            ),
+          ),
+          pw.SizedBox(height: 8),
+          ...displayLines.map((l) => pw.Padding(
+                padding: const pw.EdgeInsets.only(bottom: 3),
+                child: pw.Row(
+                  mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                  children: [
+                    pw.Text(l.label,
+                        style: pw.TextStyle(font: regular, fontSize: 10)),
+                    pw.Text('kr ${nok.format(l.amount)}',
+                        style: pw.TextStyle(font: bold, fontSize: 10)),
+                  ],
+                ),
+              )),
+          pw.SizedBox(height: 6),
+          pw.Divider(thickness: 1, color: PdfColors.black),
+          pw.SizedBox(height: 4),
+          pw.Row(
+            mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+            children: [
+              pw.Text('TOTAL',
+                  style: pw.TextStyle(font: bold, fontSize: 13)),
+              pw.Text('kr ${nok.format(total)}',
+                  style: pw.TextStyle(font: bold, fontSize: 13)),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  // --------------------------------------------------------------------------
+  // PRICE SUMMARY (legacy — used without calcLines)
   // --------------------------------------------------------------------------
 
   static pw.Widget _buildPriceSummary(
@@ -586,7 +738,14 @@ Tidsrom vi holder av: $tidsrom''';
   // --------------------------------------------------------------------------
 
   static pw.Widget _buildSignature(
-      pw.Font bold, pw.Font regular, String customerFirma) {
+    pw.Font bold,
+    pw.Font regular,
+    String customerFirma, {
+    String? customerSignature,
+    String? customerSignatureDate,
+    String? companySignature,
+    String? companySignatureDate,
+  }) {
     return pw.Row(
       children: [
         // Complete Drums side
@@ -598,7 +757,15 @@ Tidsrom vi holder av: $tidsrom''';
                 'For Complete Drums',
                 style: pw.TextStyle(font: bold, fontSize: 10),
               ),
-              pw.SizedBox(height: 30),
+              pw.SizedBox(height: 6),
+              if (companySignature != null) ...[
+                pw.Text(
+                  companySignature,
+                  style: pw.TextStyle(font: bold, fontSize: 14, color: PdfColors.blue900),
+                ),
+                pw.SizedBox(height: 4),
+              ] else
+                pw.SizedBox(height: 24),
               pw.Container(
                 height: 1,
                 decoration: const pw.BoxDecoration(
@@ -609,7 +776,9 @@ Tidsrom vi holder av: $tidsrom''';
               ),
               pw.SizedBox(height: 4),
               pw.Text(
-                'Stian Skog  ·  Dato: _______________',
+                companySignature != null
+                    ? '$companySignature  ·  Dato: ${companySignatureDate ?? ''}'
+                    : 'Stian Skog  ·  Dato: _______________',
                 style: pw.TextStyle(
                     font: regular, fontSize: 9, color: PdfColors.grey600),
               ),
@@ -626,7 +795,15 @@ Tidsrom vi holder av: $tidsrom''';
                 'For ${customerFirma.isNotEmpty ? customerFirma : 'Oppdragsgiver'}',
                 style: pw.TextStyle(font: bold, fontSize: 10),
               ),
-              pw.SizedBox(height: 30),
+              pw.SizedBox(height: 6),
+              if (customerSignature != null) ...[
+                pw.Text(
+                  customerSignature,
+                  style: pw.TextStyle(font: bold, fontSize: 14, color: PdfColors.blue900),
+                ),
+                pw.SizedBox(height: 4),
+              ] else
+                pw.SizedBox(height: 24),
               pw.Container(
                 height: 1,
                 decoration: const pw.BoxDecoration(
@@ -637,7 +814,9 @@ Tidsrom vi holder av: $tidsrom''';
               ),
               pw.SizedBox(height: 4),
               pw.Text(
-                'Navn og tittel  ·  Dato: _______________',
+                customerSignature != null
+                    ? '$customerSignature  ·  Dato: ${customerSignatureDate ?? ''}'
+                    : 'Navn og tittel  ·  Dato: _______________',
                 style: pw.TextStyle(
                     font: regular, fontSize: 9, color: PdfColors.grey600),
               ),

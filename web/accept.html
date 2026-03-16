@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="no">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Intensjonsavtale - Complete Drums</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f5f5; color: #1a1a1a; }
+    .header { background: #1a1a1a; color: white; padding: 20px 28px; }
+    .header h1 { font-size: 15px; font-weight: 700; letter-spacing: 0.5px; }
+    .container { max-width: 900px; margin: 0 auto; padding: 24px 16px; }
+    .pdf-frame { width: 100%; height: 68vh; border: 1px solid #ddd; border-radius: 8px; background: white; }
+    .card { background: white; border-radius: 12px; padding: 24px 28px; margin-top: 20px; box-shadow: 0 2px 12px rgba(0,0,0,0.06); }
+    .card h2 { font-size: 17px; margin-bottom: 6px; }
+    .card p { font-size: 14px; color: #666; margin-bottom: 14px; line-height: 1.5; }
+    .form-group { margin-bottom: 14px; }
+    .form-group label { display: block; font-size: 13px; font-weight: 600; color: #444; margin-bottom: 5px; }
+    .form-group input { width: 100%; padding: 10px 14px; border: 1px solid #ccc; border-radius: 8px; font-size: 15px; outline: none; }
+    .form-group input:focus { border-color: #16a34a; box-shadow: 0 0 0 3px rgba(22,163,74,0.12); }
+    .btn { display: inline-block; padding: 12px 32px; border: none; border-radius: 8px; font-size: 15px; font-weight: 600; cursor: pointer; }
+    .btn-accept { background: #16a34a; color: white; }
+    .btn-accept:hover { background: #15803d; }
+    .btn-accept:disabled { background: #86efac; cursor: not-allowed; }
+    .info-text { font-size: 12px; color: #999; margin-top: 10px; }
+    .error { color: #dc2626; font-size: 14px; margin-top: 8px; }
+
+    .spinner { text-align: center; padding: 60px 0; }
+    .spinner-ring { display: inline-block; width: 40px; height: 40px; border: 4px solid #e5e5e5; border-top-color: #333; border-radius: 50%; animation: spin 0.8s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .spinner p { margin-top: 16px; font-size: 15px; color: #666; }
+
+    .done-card { text-align: center; padding: 40px 28px; }
+    .done-card svg { margin-bottom: 16px; }
+    .done-card h2 { color: #16a34a; font-size: 20px; margin-bottom: 8px; }
+    .done-card p { color: #666; font-size: 14px; line-height: 1.5; }
+
+    .already-card { text-align: center; padding: 40px 28px; }
+    .already-card h2 { color: #16a34a; font-size: 20px; margin-bottom: 8px; }
+    .already-card p { color: #666; font-size: 14px; margin-top: 8px; }
+
+    .subtitle { color: #aaa; font-size: 13px; margin-top: 3px; }
+    .footer { padding: 14px 28px; background: #fafafa; border-top: 1px solid #eee; text-align: center; font-size: 12px; color: #999; }
+    .footer strong { color: #333; }
+    .hidden { display: none; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>COMPLETE DRUMS</h1>
+  </div>
+
+  <!-- Loading -->
+  <div id="loading" class="container">
+    <div class="spinner">
+      <div class="spinner-ring"></div>
+      <p>Henter avtale...</p>
+    </div>
+  </div>
+
+  <!-- Main content -->
+  <div id="main" class="container hidden">
+    <iframe id="pdf-viewer" class="pdf-frame" title="Intensjonsavtale PDF"></iframe>
+    <div class="card">
+      <h2>Godta avtalen</h2>
+      <p>Ved å skrive inn ditt navn og trykke «Godta avtale» bekrefter du at du har lest og aksepterer betingelsene i intensjonsavtalen.</p>
+      <form id="acceptForm">
+        <div class="form-group">
+          <label for="name">Ditt fulle navn</label>
+          <input type="text" id="name" required placeholder="Skriv inn navn...">
+        </div>
+        <button type="submit" class="btn btn-accept" id="submitBtn">Godta avtale</button>
+        <div class="error hidden" id="errorMsg"></div>
+        <p class="info-text" id="dateInfo"></p>
+      </form>
+    </div>
+  </div>
+
+  <!-- Already accepted -->
+  <div id="already" class="container hidden">
+    <div class="card already-card">
+      <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="#16a34a" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+      <h2>Avtalen er allerede godtatt</h2>
+      <p id="already-info"></p>
+      <p>Du vil motta en signert kopi når Complete Drums har godkjent avtalen.</p>
+    </div>
+  </div>
+
+  <!-- Success -->
+  <div id="success" class="container hidden">
+    <div class="card done-card">
+      <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="#16a34a" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+      <h2>Avtalen er godtatt!</h2>
+      <p id="success-msg"></p>
+    </div>
+  </div>
+
+  <!-- Error -->
+  <div id="error-view" class="container hidden">
+    <div class="card" style="text-align:center;padding:40px 28px;">
+      <div style="font-size:48px;margin-bottom:16px;">&#9888;&#65039;</div>
+      <h2 style="font-size:20px;margin-bottom:12px;">Noe gikk galt</h2>
+      <p id="error-text" style="color:#666;font-size:15px;"></p>
+    </div>
+  </div>
+
+  <div class="footer">
+    <p>Sendt fra <strong>Complete Drums</strong> via TourFlow</p>
+  </div>
+
+  <script>
+    const API = 'https://fqefvgqlrntwgschkugf.supabase.co/functions/v1/agreement-accept';
+
+    async function init() {
+      const params = new URLSearchParams(window.location.search);
+      const token = params.get('token');
+
+      if (!token) {
+        showError('Ugyldig lenke. Mangler token.');
+        return;
+      }
+
+      try {
+        const res = await fetch(API + '?token=' + encodeURIComponent(token));
+        const data = await res.json();
+
+        if (!res.ok) {
+          showError(data.error || 'Kunne ikke hente avtalen.');
+          return;
+        }
+
+        // Already accepted or approved
+        if (data.status === 'accepted' || data.status === 'approved') {
+          document.getElementById('loading').classList.add('hidden');
+          document.getElementById('already').classList.remove('hidden');
+          const acceptedAt = data.accepted_at ? new Date(data.accepted_at).toLocaleDateString('nb-NO') : '';
+          document.getElementById('already-info').textContent =
+            'Godtatt av ' + (data.accepted_name || '') + (acceptedAt ? ' den ' + acceptedAt : '') + '.';
+          return;
+        }
+
+        // Show the accept form
+        document.getElementById('loading').classList.add('hidden');
+        document.getElementById('main').classList.remove('hidden');
+
+        // Load PDF
+        if (data.pdf_url) {
+          document.getElementById('pdf-viewer').src = data.pdf_url;
+        }
+
+        // Pre-fill name
+        if (data.customer_name) {
+          document.getElementById('name').value = data.customer_name;
+        }
+
+        // Today's date
+        document.getElementById('dateInfo').textContent =
+          'Dato registreres automatisk: ' + new Date().toLocaleDateString('nb-NO');
+
+        // Handle form submission
+        document.getElementById('acceptForm').addEventListener('submit', async (e) => {
+          e.preventDefault();
+          const name = document.getElementById('name').value.trim();
+          if (!name) return;
+
+          const btn = document.getElementById('submitBtn');
+          btn.disabled = true;
+          btn.textContent = 'Sender...';
+          document.getElementById('errorMsg').classList.add('hidden');
+
+          try {
+            const postRes = await fetch(API + '?token=' + encodeURIComponent(token), {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ name }),
+            });
+
+            const postData = await postRes.json();
+
+            if (!postRes.ok) {
+              throw new Error(postData.error || 'Noe gikk galt');
+            }
+
+            // Show success
+            document.getElementById('main').classList.add('hidden');
+            document.getElementById('success').classList.remove('hidden');
+            document.getElementById('success-msg').textContent =
+              'Takk, ' + name + '. Du vil motta en signert kopi når avtalen er godkjent av Complete Drums.';
+          } catch (err) {
+            const errEl = document.getElementById('errorMsg');
+            errEl.textContent = err.message;
+            errEl.classList.remove('hidden');
+            btn.disabled = false;
+            btn.textContent = 'Godta avtale';
+          }
+        });
+
+      } catch (e) {
+        showError('En uventet feil oppstod. Prøv igjen senere.');
+      }
+    }
+
+    function showError(msg) {
+      document.getElementById('loading').classList.add('hidden');
+      document.getElementById('error-view').classList.remove('hidden');
+      document.getElementById('error-text').textContent = msg;
+    }
+
+    init();
+  </script>
+</body>
+</html>

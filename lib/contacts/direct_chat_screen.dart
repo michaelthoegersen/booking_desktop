@@ -1,12 +1,19 @@
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../services/chat_attachment_service.dart';
 import '../services/direct_chat_service.dart';
+import '../services/poll_service.dart';
 import '../state/active_company.dart';
 import '../ui/css_theme.dart';
+import '../widgets/chat_attach_menu.dart';
+import '../widgets/chat_media_content.dart';
+import '../widgets/gif_picker.dart';
 import '../widgets/mention_helpers.dart';
+import '../widgets/poll_create_dialog.dart';
 
 class DirectChatScreen extends StatefulWidget {
   final String peerId;
@@ -42,10 +49,14 @@ class _DirectChatScreenState extends State<DirectChatScreen>
   /// Current message IDs for streaming reactions
   List<String> _currentMessageIds = [];
 
+  /// Peer's read cursor for showing read receipts
+  DateTime? _peerLastReadAt;
+
   @override
   void initState() {
     super.initState();
     _loadSenderName();
+    _loadPeerReadCursor();
     _focusNode.onKeyEvent = _handleKeyEvent;
     _controller.addListener(() => onMentionTextChanged(_controller));
     // In a DM, the only mention candidate is the peer
@@ -67,6 +78,25 @@ class _DirectChatScreenState extends State<DirectChatScreen>
   Future<void> _loadSenderName() async {
     final name = await DirectChatService.getSenderName();
     if (mounted) setState(() => _senderName = name);
+  }
+
+  Future<void> _loadPeerReadCursor() async {
+    try {
+      final sb = Supabase.instance.client;
+      final myId = sb.auth.currentUser?.id;
+      if (myId == null) return;
+      final row = await sb
+          .from('dm_read_cursors')
+          .select('last_read_at')
+          .eq('user_id', widget.peerId)
+          .eq('peer_id', myId)
+          .maybeSingle();
+      if (row != null && mounted) {
+        setState(() {
+          _peerLastReadAt = DateTime.parse(row['last_read_at'] as String);
+        });
+      }
+    } catch (_) {}
   }
 
   @override
@@ -120,6 +150,105 @@ class _DirectChatScreenState extends State<DirectChatScreen>
 
   void _cancelReply() {
     setState(() => _replyTo = null);
+  }
+
+  Future<void> _pickImage() async {
+    final result = await FilePicker.platform.pickFiles(type: FileType.image);
+    if (result == null || result.files.isEmpty) return;
+    final file = result.files.first;
+    final bytes = file.bytes;
+    if (bytes == null) return;
+    setState(() => _sending = true);
+    try {
+      final url = await ChatAttachmentService.uploadFile(
+        bytes: bytes,
+        fileName: file.name,
+        contentType: 'image/${file.extension ?? 'png'}',
+      );
+      await DirectChatService.sendMessage(
+        peerId: widget.peerId,
+        message: '',
+        senderName: _senderName,
+        messageType: 'image',
+        attachmentUrl: url,
+      );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Feil ved opplasting: $e')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _sending = false);
+    }
+  }
+
+  Future<void> _pickFile() async {
+    final result = await FilePicker.platform.pickFiles();
+    if (result == null || result.files.isEmpty) return;
+    final file = result.files.first;
+    final bytes = file.bytes;
+    if (bytes == null) return;
+    setState(() => _sending = true);
+    try {
+      final url = await ChatAttachmentService.uploadFile(
+        bytes: bytes,
+        fileName: file.name,
+      );
+      await DirectChatService.sendMessage(
+        peerId: widget.peerId,
+        message: file.name,
+        senderName: _senderName,
+        messageType: 'file',
+        attachmentUrl: url,
+      );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Feil ved opplasting: $e')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _sending = false);
+    }
+  }
+
+  void _showGifPicker() {
+    showDialog(
+      context: context,
+      builder: (_) => GifPicker(
+        onGifSelected: (url) async {
+          await DirectChatService.sendMessage(
+            peerId: widget.peerId,
+            message: '',
+            senderName: _senderName,
+            messageType: 'gif',
+            attachmentUrl: url,
+          );
+        },
+      ),
+    );
+  }
+
+  void _showPollCreator() {
+    showDialog(
+      context: context,
+      builder: (_) => PollCreateDialog(
+        onCreate: (question, options) async {
+          final pollId = await PollService.createPoll(
+            question: question,
+            options: options,
+          );
+          await DirectChatService.sendMessage(
+            peerId: widget.peerId,
+            message: question,
+            senderName: _senderName,
+            messageType: 'poll',
+            attachmentUrl: pollId,
+          );
+        },
+      ),
+    );
   }
 
   void _startEdit(Map<String, dynamic> msg) {
@@ -238,6 +367,23 @@ class _DirectChatScreenState extends State<DirectChatScreen>
                     }
                     _reactionsByMessage = reactionsMap;
 
+                    // Find last message sent by me that peer has read
+                    String? lastReadMsgId;
+                    if (_peerLastReadAt != null) {
+                      for (final m in messages) {
+                        if (m['sender_id'] == _currentUserId) {
+                          final ca = m['created_at'] as String?;
+                          if (ca != null) {
+                            final dt = DateTime.parse(ca);
+                            if (!dt.isAfter(_peerLastReadAt!)) {
+                              lastReadMsgId = m['id'] as String?;
+                              break;
+                            }
+                          }
+                        }
+                      }
+                    }
+
                     return ListView.separated(
                       controller: _scrollController,
                       reverse: true,
@@ -276,6 +422,9 @@ class _DirectChatScreenState extends State<DirectChatScreen>
                               DirectChatService.removeReaction(msgId, emoji),
                           onReply: () => _startReply(msg),
                           onEdit: isMine ? () => _startEdit(msg) : null,
+                          messageType: msg['message_type'] as String? ?? 'text',
+                          attachmentUrl: msg['attachment_url'] as String?,
+                          showRead: isMine && msgId == lastReadMsgId,
                         );
                       },
                     );
@@ -370,6 +519,13 @@ class _DirectChatScreenState extends State<DirectChatScreen>
             ),
             child: Row(
               children: [
+                ChatAttachMenu(
+                  onPickImage: _pickImage,
+                  onPickFile: _pickFile,
+                  onGif: _showGifPicker,
+                  onPoll: _showPollCreator,
+                ),
+                const SizedBox(width: 4),
                 Expanded(
                   child: TextField(
                     controller: _controller,
@@ -580,6 +736,9 @@ class _Bubble extends StatelessWidget {
   final Future<void> Function(String emoji) onRemoveReaction;
   final VoidCallback onReply;
   final VoidCallback? onEdit;
+  final String messageType;
+  final String? attachmentUrl;
+  final bool showRead;
 
   const _Bubble({
     required this.messageId,
@@ -595,6 +754,9 @@ class _Bubble extends StatelessWidget {
     required this.onRemoveReaction,
     required this.onReply,
     this.onEdit,
+    this.messageType = 'text',
+    this.attachmentUrl,
+    this.showRead = false,
   });
 
   static const _emojiOptions = ['👍', '❤️', '😂', '😮', '🙏', '🔥'];
@@ -624,6 +786,7 @@ class _Bubble extends StatelessWidget {
           children: [
             // Bubble
             GestureDetector(
+              onSecondaryTapUp: (details) => _showContextMenu(context),
               onLongPress: () => _showContextMenu(context),
               child: Container(
                 padding:
@@ -692,19 +855,14 @@ class _Bubble extends StatelessWidget {
                         ),
                       ),
                     ],
-                    Text.rich(
-                      TextSpan(
-                        children: buildMentionSpans(
-                          message,
-                          TextStyle(
-                            fontSize: 14,
-                            color: isMine ? Colors.white : Colors.black87,
-                          ),
-                        ),
-                        style: TextStyle(
-                          fontSize: 14,
-                          color: isMine ? Colors.white : Colors.black87,
-                        ),
+                    ChatMediaContent(
+                      messageType: messageType,
+                      message: message,
+                      attachmentUrl: attachmentUrl,
+                      isMine: isMine,
+                      textStyle: TextStyle(
+                        fontSize: 14,
+                        color: isMine ? Colors.white : Colors.black87,
                       ),
                     ),
                     if (timeStr != null) ...[
@@ -730,6 +888,11 @@ class _Bubble extends StatelessWidget {
                                     isMine ? Colors.white38 : Colors.black38,
                               ),
                             ),
+                          ],
+                          if (showRead && isMine) ...[
+                            const SizedBox(width: 6),
+                            Icon(Icons.done_all, size: 14,
+                              color: Colors.blue.shade300),
                           ],
                         ],
                       ),
@@ -821,10 +984,20 @@ class _Bubble extends StatelessWidget {
             }).toList(),
           ),
         ),
-        PopupMenuItem<String>(
+        const PopupMenuItem<String>(
+          value: 'copy',
+          child: Row(
+            children: [
+              Icon(Icons.copy, size: 18),
+              SizedBox(width: 8),
+              Text('Kopier'),
+            ],
+          ),
+        ),
+        const PopupMenuItem<String>(
           value: 'reply',
           child: Row(
-            children: const [
+            children: [
               Icon(Icons.reply, size: 18),
               SizedBox(width: 8),
               Text('Svar'),
@@ -832,10 +1005,10 @@ class _Bubble extends StatelessWidget {
           ),
         ),
         if (onEdit != null)
-          PopupMenuItem<String>(
+          const PopupMenuItem<String>(
             value: 'edit',
             child: Row(
-              children: const [
+              children: [
                 Icon(Icons.edit, size: 18),
                 SizedBox(width: 8),
                 Text('Rediger'),
@@ -844,7 +1017,12 @@ class _Bubble extends StatelessWidget {
           ),
       ],
     ).then((value) {
-      if (value == 'reply') {
+      if (value == 'copy') {
+        Clipboard.setData(ClipboardData(text: message));
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Kopiert'), duration: Duration(seconds: 1)),
+        );
+      } else if (value == 'reply') {
         onReply();
       } else if (value == 'edit' && onEdit != null) {
         onEdit!();

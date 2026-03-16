@@ -9,6 +9,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../state/active_company.dart';
 import '../../services/intensjonsavtale_pdf_service.dart';
 import '../../services/email_service.dart';
+import '../../widgets/rich_text_field.dart';
 
 class MgmtGigDetailPage extends StatefulWidget {
   final String gigId;
@@ -31,6 +32,8 @@ class _MgmtGigDetailPageState extends State<MgmtGigDetailPage>
   List<Map<String, dynamic>> _showTypes = [];
   List<Map<String, dynamic>> _companyMembers = []; // {user_id, name, status, section}
   String? _linkedOfferId; // gig_offer linked to this gig
+  List<Map<String, dynamic>> _siblingGigs = []; // all gigs in multi-date offer
+  Map<String, dynamic>? _offerData; // the linked offer (for final_calc etc.)
   List<Map<String, dynamic>> _lineup = [];
   // showId → Set<userId> per section
   Map<String, Set<String>> _selectedSkarpByShow = {};
@@ -40,8 +43,16 @@ class _MgmtGigDetailPageState extends State<MgmtGigDetailPage>
   @override
   void initState() {
     super.initState();
-    _tabCtrl = TabController(length: 2, vsync: this);
+    _tabCtrl = TabController(length: 3, vsync: this);
     _load();
+  }
+
+  @override
+  void didUpdateWidget(MgmtGigDetailPage old) {
+    super.didUpdateWidget(old);
+    if (old.gigId != widget.gigId) {
+      _load();
+    }
   }
 
   @override
@@ -60,9 +71,9 @@ class _MgmtGigDetailPageState extends State<MgmtGigDetailPage>
           .maybeSingle();
       _gig = gig;
 
-      // Adjust tab count: rehearsal only needs Info tab
-      final isRehearsal = (gig?['type'] as String?) == 'rehearsal';
-      final desiredLength = isRehearsal ? 1 : 2;
+      // Adjust tab count: only gigs get full tabs
+      final isGig = (gig?['type'] as String?) == 'gig';
+      final desiredLength = isGig ? 3 : 1;
       if (_tabCtrl.length != desiredLength) {
         _tabCtrl.dispose();
         _tabCtrl = TabController(length: desiredLength, vsync: this);
@@ -119,10 +130,41 @@ class _MgmtGigDetailPageState extends State<MgmtGigDetailPage>
           }
         }
 
-        final avail = await _sb
+        var avail = await _sb
             .from('gig_availability')
             .select('user_id, status')
             .eq('gig_id', widget.gigId);
+
+        // For multi-date offers: if this gig has no availability entries,
+        // copy from a sibling gig that does
+        if ((avail as List).isEmpty && _siblingGigs.length > 1) {
+          for (final sg in _siblingGigs) {
+            final sgId = sg['id'] as String;
+            if (sgId == widget.gigId) continue;
+            final siblingAvail = await _sb
+                .from('gig_availability')
+                .select('user_id, status')
+                .eq('gig_id', sgId);
+            if ((siblingAvail as List).isNotEmpty) {
+              // Copy availability to this gig
+              final rows = siblingAvail
+                  .map((a) => {
+                        'gig_id': widget.gigId,
+                        'user_id': a['user_id'] as String,
+                        'status': a['status'] as String,
+                        'updated_at': DateTime.now().toIso8601String(),
+                      })
+                  .toList();
+              await _sb.from('gig_availability').insert(rows);
+              avail = await _sb
+                  .from('gig_availability')
+                  .select('user_id, status')
+                  .eq('gig_id', widget.gigId);
+              break;
+            }
+          }
+        }
+
         final availMap = <String, String>{};
         for (final a in (avail as List)) {
           availMap[a['user_id'] as String] = a['status'] as String;
@@ -168,6 +210,45 @@ class _MgmtGigDetailPageState extends State<MgmtGigDetailPage>
           .eq('gig_id', widget.gigId)
           .maybeSingle();
       _linkedOfferId = offerRow?['id'] as String?;
+      // Fallback: check junction table for multi-date offers
+      if (_linkedOfferId == null) {
+        final junctionRow = await _sb
+            .from('gig_offer_gigs')
+            .select('offer_id')
+            .eq('gig_id', widget.gigId)
+            .limit(1)
+            .maybeSingle();
+        _linkedOfferId = junctionRow?['offer_id'] as String?;
+      }
+
+      // Load sibling gigs + offer data for multi-date offers
+      _siblingGigs = [];
+      _offerData = null;
+      if (_linkedOfferId != null) {
+        final junctionRows = await _sb
+            .from('gig_offer_gigs')
+            .select('gig_id')
+            .eq('offer_id', _linkedOfferId!)
+            .order('sort_order');
+        final siblingIds = (junctionRows as List)
+            .map((r) => r['gig_id'] as String)
+            .toList();
+        if (siblingIds.length > 1) {
+          // Multi-date offer — load all sibling gigs
+          final siblings = await _sb
+              .from('gigs')
+              .select('id, date_from, date_to, venue_name, city, country')
+              .inFilter('id', siblingIds)
+              .order('date_from', ascending: true);
+          _siblingGigs = List<Map<String, dynamic>>.from(siblings);
+          // Load the offer for final_calc and pricing params
+          _offerData = await _sb
+              .from('gig_offers')
+              .select('*')
+              .eq('id', _linkedOfferId!)
+              .maybeSingle();
+        }
+      }
     } catch (e) {
       debugPrint('Gig detail load error: $e');
     }
@@ -250,7 +331,13 @@ class _MgmtGigDetailPageState extends State<MgmtGigDetailPage>
           .from('gigs')
           .update({field: !currentlyLocked})
           .eq('id', widget.gigId);
-      await _load();
+      // Only refresh the gig row (for lock flag) — don't reset lineup state
+      final gig = await _sb
+          .from('gigs')
+          .select('*')
+          .eq('id', widget.gigId)
+          .single();
+      if (mounted) setState(() => _gig = gig);
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -391,13 +478,11 @@ class _MgmtGigDetailPageState extends State<MgmtGigDetailPage>
                           ]),
                           const SizedBox(height: 12),
                           // Notes
-                          TextField(
+                          RichTextField(
                             controller: notesCtrl,
-                            decoration: const InputDecoration(
-                              labelText: 'Dette skal vi gjøre på øvelsen',
-                              isDense: true,
-                            ),
-                            maxLines: 3,
+                            label: 'Dette skal vi gjøre på øvelsen',
+                            minLines: 3,
+                            maxLines: 6,
                           ),
                         ],
                       ),
@@ -688,6 +773,106 @@ class _MgmtGigDetailPageState extends State<MgmtGigDetailPage>
   // PDF / EMAIL
   // -------------------------------------------------------------------------
 
+  bool get _isMultiDate => _siblingGigs.length > 1;
+
+  /// Build calc lines from the offer's stored final_calc,
+  /// or compute from offer params as fallback
+  ({List<({String label, double amount})> lines, double total})? get _offerCalcFromDetail {
+    if (_offerData == null) return null;
+
+    // Try stored final_calc first
+    final fc = _offerData!['final_calc'];
+    if (fc != null) {
+      final rawLines = fc['lines'] as List? ?? [];
+      final lines = rawLines.map<({String label, double amount})>((l) {
+        return (
+          label: l['label'] as String? ?? '',
+          amount: (l['amount'] as num?)?.toDouble() ?? 0,
+        );
+      }).toList();
+      final total = (fc['total'] as num?)?.toDouble() ?? 0;
+      return (lines: lines, total: total);
+    }
+
+    // Fallback: compute from offer params
+    return _computeCalcFromOffer();
+  }
+
+  /// Compute calc lines from the offer's stored pricing params
+  ({List<({String label, double amount})> lines, double total})? _computeCalcFromOffer() {
+    if (_offerData == null) return null;
+    final o = _offerData!;
+    final numDates = _siblingGigs.length;
+
+    // Sum show prices across all sibling gigs' gig_shows
+    // We only have _shows for this gig, but shows are typically the same across dates
+    final showPricePerGig = _shows.fold<double>(
+        0, (s, sh) => s + ((sh['price'] as num?)?.toDouble() ?? 0));
+    final performerFees = showPricePerGig * numDates;
+
+    final inearIncluded = o['inear_included'] == true;
+    final inearPrice = (o['inear_price'] as num?)?.toDouble() ?? 0;
+    final inearTotal = inearIncluded ? inearPrice * numDates : 0.0;
+
+    final transportPrice = (o['transport_price'] as num?)?.toDouble() ?? 0;
+    final rehearsalTransport = (o['rehearsal_transport'] as num?)?.toDouble() ?? 0;
+    final totalTransport = (transportPrice * numDates) + rehearsalTransport;
+
+    final rehearsalPerformers = (o['rehearsal_performers'] as num?)?.toInt() ?? 0;
+    final rehearsalCount = (o['rehearsal_count'] as num?)?.toInt() ?? 0;
+    final rehearsalPPP = (o['rehearsal_price_per_person'] as num?)?.toDouble() ?? 0;
+    final rehearsalTotal = (rehearsalPerformers * rehearsalCount * rehearsalPPP).toDouble();
+
+    final markupPct = (o['markup_pct'] as num?)?.toDouble() ?? 0;
+    final markupOnAll = o['markup_on_all'] == true;
+    final completePct = markupPct / 2;
+    final bookingPct = markupPct / 2;
+
+    final subtotal = performerFees + inearTotal + totalTransport + rehearsalTotal;
+    final markupBase = markupOnAll ? subtotal : performerFees;
+    final completeKonto = markupBase * completePct;
+    final bookingHonorar = markupBase * bookingPct;
+
+    // Apply overrides if stored
+    final ovJson = o['calc_overrides'];
+    final ov = <String, double>{};
+    if (ovJson is Map) {
+      for (final e in ovJson.entries) {
+        if (e.value is num) ov[e.key as String] = (e.value as num).toDouble();
+      }
+    }
+    double ovv(String key, double calc) => ov.containsKey(key) ? ov[key]! : calc;
+
+    final lines = <({String label, double amount})>[
+      (label: 'Utøverhyrer', amount: ovv('performer_fees', performerFees)),
+      (label: 'CompleteKonto', amount: ovv('complete_konto', completeKonto)),
+      (label: 'BookingHonorar', amount: ovv('booking_honorar', bookingHonorar)),
+      (label: 'In-Ear', amount: ovv('inear', inearTotal)),
+      (label: 'Transport', amount: ovv('transport', totalTransport)),
+      (label: 'Prøver', amount: ovv('rehearsal', rehearsalTotal)),
+    ];
+
+    final effectiveTotal = lines.fold<double>(0, (s, l) => s + l.amount);
+    final total = ov.containsKey('total') ? ov['total']! : effectiveTotal;
+
+    return (lines: lines.where((l) => l.amount > 0).toList(), total: total);
+  }
+
+  /// Build date entries for multi-date PDF
+  List<({String date, String venue})> get _pdfDateEntriesFromDetail {
+    final df = DateFormat('dd.MM.yyyy');
+    return _siblingGigs.map((g) {
+      final dateFrom = g['date_from'] as String?;
+      final dateStr = dateFrom != null ? df.format(DateTime.parse(dateFrom)) : '';
+      final venue = [
+        g['venue_name'] as String? ?? '',
+        g['city'] as String? ?? '',
+        g['country'] as String? ?? '',
+      ].where((s) => s.isNotEmpty).join(', ');
+      return (date: dateStr, venue: venue);
+    }).toList();
+  }
+
   Future<void> _sendIntensjon() async {
     final emailCtrl =
         TextEditingController(text: _gig?['customer_email'] ?? '');
@@ -701,8 +886,9 @@ class _MgmtGigDetailPageState extends State<MgmtGigDetailPage>
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Text(
-                  'PDF-avtalen blir generert og sendt til mottakeren under.'),
+              Text(_isMultiDate
+                  ? 'PDF-avtalen for alle ${_siblingGigs.length} datoer blir generert og sendt med aksepteringslenke.'
+                  : 'PDF-avtalen blir generert og sendt med aksepteringslenke.'),
               const SizedBox(height: 12),
               _tf(emailCtrl, 'Mottaker e-post'),
             ],
@@ -720,9 +906,13 @@ class _MgmtGigDetailPageState extends State<MgmtGigDetailPage>
               Navigator.pop(ctx);
               ({Uint8List mainPdf, List<({String filename, Uint8List bytes})> riders})? result;
               try {
+                final calc = _isMultiDate ? _offerCalcFromDetail : null;
                 result = await IntensjonsavtalePdfService.generate(
                   gig: _gig!,
                   shows: _shows,
+                  calcLines: calc?.lines,
+                  calcTotal: calc?.total,
+                  dateEntries: _isMultiDate ? _pdfDateEntriesFromDetail : null,
                 );
               } catch (e) {
                 if (mounted) {
@@ -733,23 +923,96 @@ class _MgmtGigDetailPageState extends State<MgmtGigDetailPage>
                 return;
               }
               try {
+                // For multi-date, use first sibling gig as canonical
+                final canonicalGigId = _isMultiDate
+                    ? _siblingGigs.first['id'] as String
+                    : _gig!['id'] as String;
                 final venue = _gig?['venue_name'] ?? 'gig';
                 final dateFrom = _gig?['date_from'] ?? '';
+                final toEmail = emailCtrl.text.trim();
+
+                // 1. Create agreement token (on canonical gig)
+                final tokenRow = await _sb.from('agreement_tokens').insert({
+                  'gig_id': canonicalGigId,
+                  'customer_email': toEmail,
+                  'status': 'pending',
+                }).select('id, token').single();
+
+                final token = tokenRow['token'] as String;
+                final pdfPath = '$canonicalGigId/$token.pdf';
+
+                // 2. Upload PDF to storage
+                await _sb.storage.from('agreements').uploadBinary(
+                  pdfPath,
+                  result!.mainPdf,
+                  fileOptions: const FileOptions(
+                    contentType: 'application/pdf',
+                    upsert: true,
+                  ),
+                );
+
+                // 3. Update pdf_path on token
+                await _sb.from('agreement_tokens')
+                    .update({'pdf_path': pdfPath})
+                    .eq('id', tokenRow['id']);
+
+                // 4. Build accept URL
+                final acceptUrl = 'https://tourflow-60890.web.app/accept.html?token=$token';
+
+                // 5. Send HTML email with accept button + PDF attached
+                final subjectLabel = _isMultiDate
+                    ? '${_siblingGigs.length} datoer'
+                    : '$venue $dateFrom';
+                final venueLabel = venue != '' ? 'ved $venue' : '';
+                final dateLabel = dateFrom != '' ? 'den $dateFrom' : '';
+                final bodyDesc = _isMultiDate
+                    ? 'for ${_siblingGigs.length} avtalte datoer'
+                    : 'for oppdrag $venueLabel $dateLabel';
+                final htmlBody = '''
+<div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 600px; margin: 0 auto;">
+  <div style="background: #1a1a1a; padding: 24px 32px; border-radius: 8px 8px 0 0;">
+    <h1 style="color: white; font-size: 20px; margin: 0;">Intensjonsavtale</h1>
+    <p style="color: #aaa; font-size: 14px; margin: 4px 0 0;">$subjectLabel</p>
+  </div>
+  <div style="background: #ffffff; padding: 28px 32px; border: 1px solid #eee; border-top: none;">
+    <p style="font-size: 15px; line-height: 1.6; color: #333;">Hei,</p>
+    <p style="font-size: 15px; line-height: 1.6; color: #333;">
+      Vedlagt finner du intensjonsavtalen $bodyDesc.
+    </p>
+    <p style="font-size: 15px; line-height: 1.6; color: #333;">
+      Du kan lese gjennom avtalen i vedlegget, og deretter godta den ved å trykke på knappen under:
+    </p>
+    <div style="text-align: center; margin: 28px 0;">
+      <a href="$acceptUrl" style="display: inline-block; padding: 14px 36px; background: #16a34a; color: white; text-decoration: none; border-radius: 8px; font-size: 16px; font-weight: 600;">
+        Aksepter avtale
+      </a>
+    </div>
+    <p style="font-size: 13px; color: #888; line-height: 1.5;">
+      Ved å akseptere bekrefter du at du har lest og godtar betingelsene i intensjonsavtalen.
+    </p>
+  </div>
+  <div style="padding: 16px 32px; background: #f9f9f9; border: 1px solid #eee; border-top: none; border-radius: 0 0 8px 8px;">
+    <p style="font-size: 13px; color: #666; margin: 0;">Med vennlig hilsen,<br><strong>Complete Drums / Stian Skog</strong></p>
+  </div>
+</div>
+''';
+
                 final attachments = <({String filename, Uint8List bytes})>[
-                  (filename: 'Intensjonsavtale_${venue.replaceAll(' ', '_')}.pdf', bytes: result!.mainPdf),
+                  (filename: 'Intensjonsavtale_${venue.toString().replaceAll(' ', '_')}.pdf', bytes: result.mainPdf),
                   ...result.riders,
                 ];
                 await EmailService.sendEmailWithAttachments(
-                  to: emailCtrl.text.trim(),
-                  subject: 'Intensjonsavtale — $venue $dateFrom',
-                  body:
-                      'Hei,\n\nVedlagt finner du intensjonsavtalen for oppdrag ${venue != '' ? 'ved $venue' : ''} ${dateFrom != '' ? 'den $dateFrom' : ''}.\n\nMed vennlig hilsen,\nComplete Drums / Stian Skog',
+                  to: toEmail,
+                  subject: 'Intensjonsavtale — $subjectLabel',
+                  body: htmlBody,
                   attachments: attachments,
+                  isHtml: true,
+                  companyId: _gig?['company_id'] as String?,
                 );
                 if (mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
                     const SnackBar(
-                        content: Text('Intensjonsavtale sendt!')),
+                        content: Text('Intensjonsavtale sendt med aksepteringslenke!')),
                   );
                 }
               } catch (e) {
@@ -915,21 +1178,6 @@ class _MgmtGigDetailPageState extends State<MgmtGigDetailPage>
                 ),
                 const SizedBox(width: 8),
               ],
-              if (gigType == 'rehearsal' && status != 'cancelled') ...[
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: Colors.purple.withValues(alpha: 0.12),
-                    borderRadius: BorderRadius.circular(999),
-                    border: Border.all(color: Colors.purple.withValues(alpha: 0.3)),
-                  ),
-                  child: const Text(
-                    'Øvelse',
-                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: Colors.purple),
-                  ),
-                ),
-                const SizedBox(width: 8),
-              ],
               if (gigType != 'rehearsal' && status != 'cancelled')
                 _GigStatusBadge(status: status),
               if (gigType != 'rehearsal') ...[
@@ -1019,11 +1267,12 @@ class _MgmtGigDetailPageState extends State<MgmtGigDetailPage>
           // Tabs — rehearsal only shows Info tab
           TabBar(
             controller: _tabCtrl,
-            tabs: _gig?['type'] == 'rehearsal'
+            tabs: _gig?['type'] != 'gig'
                 ? const [Tab(text: 'Info')]
                 : const [
                     Tab(text: 'Info'),
                     Tab(text: 'Kontrakt'),
+                    Tab(text: 'Chat'),
                   ],
           ),
 
@@ -1032,7 +1281,7 @@ class _MgmtGigDetailPageState extends State<MgmtGigDetailPage>
           Expanded(
             child: TabBarView(
               controller: _tabCtrl,
-              children: _gig?['type'] == 'rehearsal'
+              children: _gig?['type'] != 'gig'
                   ? [
                       SingleChildScrollView(
                         child: _InfoTab(gig: _gig!),
@@ -1044,6 +1293,14 @@ class _MgmtGigDetailPageState extends State<MgmtGigDetailPage>
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
+                            if (_isMultiDate) ...[
+                              _MultiDateBanner(
+                                siblingGigs: _siblingGigs,
+                                currentGigId: widget.gigId,
+                                linkedOfferId: _linkedOfferId,
+                              ),
+                              const SizedBox(height: 12),
+                            ],
                             _InfoTab(gig: _gig!),
                             const SizedBox(height: 12),
                             _ShowsPrisTab(
@@ -1058,6 +1315,9 @@ class _MgmtGigDetailPageState extends State<MgmtGigDetailPage>
                               transportPrice: _transportPrice,
                               extraPrice: _extraPrice,
                               total: _total,
+                              siblingGigs: _siblingGigs,
+                              offerData: _offerData,
+                              linkedOfferId: _linkedOfferId,
                             ),
                             const SizedBox(height: 12),
                             _CrewLineupTab(
@@ -1078,7 +1338,11 @@ class _MgmtGigDetailPageState extends State<MgmtGigDetailPage>
                         shows: _shows,
                         total: _total,
                         onSend: _sendIntensjon,
+                        siblingGigs: _siblingGigs,
+                        offerData: _offerData,
+                        linkedOfferId: _linkedOfferId,
                       ),
+                      _ChatTab(gigId: widget.gigId),
                     ],
             ),
           ),
@@ -1151,7 +1415,7 @@ class _InfoTab extends StatelessWidget {
                   ]),
                 _card(cs, 'Notat', [
                   MapEntry('Dette skal vi gjøre', gig['notes_for_contract']),
-                ]),
+                ], useMarkdown: true),
               ],
             ),
           ),
@@ -1230,7 +1494,7 @@ class _InfoTab extends StatelessWidget {
               _card(cs, 'Notater', [
                 MapEntry('For kontrakt', gig['notes_for_contract']),
                 MapEntry('Fra arrangør', gig['info_from_organizer']),
-              ]),
+              ], useMarkdown: true),
             ],
           ),
         ),
@@ -1238,7 +1502,7 @@ class _InfoTab extends StatelessWidget {
     );
   }
 
-  Widget _card(ColorScheme cs, String title, List<MapEntry<String, dynamic>> entries) {
+  Widget _card(ColorScheme cs, String title, List<MapEntry<String, dynamic>> entries, {bool useMarkdown = false}) {
     final nonEmpty = entries
         .where((e) => e.value?.toString().isNotEmpty ?? false)
         .toList();
@@ -1265,7 +1529,7 @@ class _InfoTab extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 10),
-          ...nonEmpty.map((e) => _InfoRow(label: e.key, value: e.value?.toString())),
+          ...nonEmpty.map((e) => _InfoRow(label: e.key, value: e.value?.toString(), useMarkdown: useMarkdown)),
         ],
       ),
     );
@@ -1281,8 +1545,9 @@ class _InfoTab extends StatelessWidget {
 class _InfoRow extends StatelessWidget {
   final String label;
   final String? value;
+  final bool useMarkdown;
 
-  const _InfoRow({required this.label, this.value});
+  const _InfoRow({required this.label, this.value, this.useMarkdown = false});
 
   @override
   Widget build(BuildContext context) {
@@ -1305,10 +1570,101 @@ class _InfoRow extends StatelessWidget {
             ),
           ),
           Expanded(
-            child: Text(
-              value!,
-              style: const TextStyle(fontWeight: FontWeight.w700),
-            ),
+            child: useMarkdown
+                ? MarkdownText(value!)
+                : Text(
+                    value!,
+                    style: const TextStyle(fontWeight: FontWeight.w700),
+                  ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ===========================================================================
+// MULTI-DATE BANNER
+// ===========================================================================
+
+class _MultiDateBanner extends StatelessWidget {
+  final List<Map<String, dynamic>> siblingGigs;
+  final String? linkedOfferId;
+  final String currentGigId;
+
+  const _MultiDateBanner({
+    required this.siblingGigs,
+    required this.currentGigId,
+    this.linkedOfferId,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final df = DateFormat('dd.MM');
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: cs.surfaceContainerLowest,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: cs.outlineVariant),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.date_range, size: 18, color: cs.primary),
+              const SizedBox(width: 8),
+              Text(
+                'Tilbud med ${siblingGigs.length} datoer',
+                style: TextStyle(
+                  fontWeight: FontWeight.w600,
+                  fontSize: 13,
+                  color: cs.onSurface,
+                ),
+              ),
+              const Spacer(),
+              if (linkedOfferId != null)
+                TextButton.icon(
+                  onPressed: () => context.go('/m/offers/$linkedOfferId'),
+                  icon: const Icon(Icons.open_in_new, size: 14),
+                  label: const Text('Rediger tilbud', style: TextStyle(fontSize: 12)),
+                  style: TextButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    minimumSize: Size.zero,
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            children: siblingGigs.map((g) {
+              final gId = g['id'] as String;
+              final isCurrent = gId == currentGigId;
+              final dateFrom = g['date_from'] as String?;
+              final dateStr = dateFrom != null ? df.format(DateTime.parse(dateFrom)) : '?';
+              final venue = g['venue_name'] as String? ?? '';
+              final label = venue.isNotEmpty ? '$dateStr · $venue' : dateStr;
+
+              return ActionChip(
+                label: Text(label, style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: isCurrent ? FontWeight.w700 : FontWeight.w400,
+                  color: isCurrent ? cs.onPrimary : cs.onSurfaceVariant,
+                )),
+                backgroundColor: isCurrent ? cs.primary : cs.surfaceContainerHigh,
+                side: BorderSide.none,
+                onPressed: isCurrent ? null : () => context.go('/m/gigs/$gId'),
+                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                visualDensity: VisualDensity.compact,
+              );
+            }).toList(),
           ),
         ],
       ),
@@ -1332,6 +1688,9 @@ class _ShowsPrisTab extends StatefulWidget {
   final double transportPrice;
   final double extraPrice;
   final double total;
+  final List<Map<String, dynamic>> siblingGigs;
+  final Map<String, dynamic>? offerData;
+  final String? linkedOfferId;
 
   const _ShowsPrisTab({
     required this.gig,
@@ -1345,6 +1704,9 @@ class _ShowsPrisTab extends StatefulWidget {
     required this.transportPrice,
     required this.extraPrice,
     required this.total,
+    this.siblingGigs = const [],
+    this.offerData,
+    this.linkedOfferId,
   });
 
   @override
@@ -1355,6 +1717,101 @@ class _ShowsPrisTabState extends State<_ShowsPrisTab> {
   final _nok = NumberFormat('#,##0', 'nb_NO');
 
   String _fmt(double v) => 'kr ${_nok.format(v)}';
+
+  bool get _isMultiDate => widget.siblingGigs.length > 1;
+
+  ({List<({String label, double amount})> lines, double total})? get _offerCalcLines {
+    if (widget.offerData == null) return null;
+    final fc = widget.offerData!['final_calc'];
+    if (fc != null) {
+      final rawLines = fc['lines'] as List? ?? [];
+      final lines = rawLines.map<({String label, double amount})>((l) {
+        return (
+          label: l['label'] as String? ?? '',
+          amount: (l['amount'] as num?)?.toDouble() ?? 0,
+        );
+      }).toList();
+      // Merge CompleteKonto + BookingHonorar into Utøverhyrer
+      double ck = 0, bh = 0;
+      for (final l in lines) {
+        if (l.label == 'CompleteKonto') ck = l.amount;
+        if (l.label == 'BookingHonorar') bh = l.amount;
+      }
+      final merged = lines
+          .map((l) => l.label == 'Utøverhyrer'
+              ? (label: l.label, amount: l.amount + ck + bh)
+              : l)
+          .where((l) =>
+              l.amount > 0 &&
+              l.label != 'CompleteKonto' &&
+              l.label != 'BookingHonorar')
+          .toList();
+      final total = (fc['total'] as num?)?.toDouble() ?? 0;
+      return (lines: merged, total: total);
+    }
+    // Fallback: compute from offer params
+    return _computeFromOffer();
+  }
+
+  ({List<({String label, double amount})> lines, double total})? _computeFromOffer() {
+    if (widget.offerData == null) return null;
+    final o = widget.offerData!;
+    final numDates = widget.siblingGigs.length;
+
+    final showPricePerGig = widget.shows.fold<double>(
+        0, (s, sh) => s + ((sh['price'] as num?)?.toDouble() ?? 0));
+    final performerFees = showPricePerGig * numDates;
+
+    final inearIncluded = o['inear_included'] == true;
+    final inearPrice = (o['inear_price'] as num?)?.toDouble() ?? 0;
+    final inearTotal = inearIncluded ? inearPrice * numDates : 0.0;
+
+    final transportPrice = (o['transport_price'] as num?)?.toDouble() ?? 0;
+    final rehearsalTransport = (o['rehearsal_transport'] as num?)?.toDouble() ?? 0;
+    final totalTransport = (transportPrice * numDates) + rehearsalTransport;
+
+    final rehearsalPerformers = (o['rehearsal_performers'] as num?)?.toInt() ?? 0;
+    final rehearsalCount = (o['rehearsal_count'] as num?)?.toInt() ?? 0;
+    final rehearsalPPP = (o['rehearsal_price_per_person'] as num?)?.toDouble() ?? 0;
+    final rehearsalTotal = (rehearsalPerformers * rehearsalCount * rehearsalPPP).toDouble();
+
+    final markupPct = (o['markup_pct'] as num?)?.toDouble() ?? 0;
+    final markupOnAll = o['markup_on_all'] == true;
+    final completePct = markupPct / 2;
+    final bookingPct = markupPct / 2;
+
+    final subtotal = performerFees + inearTotal + totalTransport + rehearsalTotal;
+    final markupBase = markupOnAll ? subtotal : performerFees;
+    // Merge markup into performer fees for display
+    final displayPerformerFees = performerFees + (markupBase * completePct) + (markupBase * bookingPct);
+
+    final ovJson = o['calc_overrides'];
+    final ov = <String, double>{};
+    if (ovJson is Map) {
+      for (final e in ovJson.entries) {
+        if (e.value is num) ov[e.key as String] = (e.value as num).toDouble();
+      }
+    }
+    // If overrides exist for individual lines, use them but still merge markup
+    final pfOv = ov['performer_fees'];
+    final ckOv = ov['complete_konto'];
+    final bhOv = ov['booking_honorar'];
+    final finalPF = (pfOv ?? performerFees) + (ckOv ?? markupBase * completePct) + (bhOv ?? markupBase * bookingPct);
+
+    double ovv(String key, double calc) => ov.containsKey(key) ? ov[key]! : calc;
+
+    final lines = <({String label, double amount})>[
+      (label: 'Utøverhyrer', amount: ov.containsKey('performer_fees') || ov.containsKey('complete_konto') || ov.containsKey('booking_honorar') ? finalPF : displayPerformerFees),
+      (label: 'In-Ear', amount: ovv('inear', inearTotal)),
+      (label: 'Transport', amount: ovv('transport', totalTransport)),
+      (label: 'Prøver', amount: ovv('rehearsal', rehearsalTotal)),
+    ];
+
+    final effectiveTotal = lines.fold<double>(0, (s, l) => s + l.amount);
+    final total = ov.containsKey('total') ? ov['total']! : effectiveTotal;
+
+    return (lines: lines.where((l) => l.amount > 0).toList(), total: total);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -1367,11 +1824,12 @@ class _ShowsPrisTabState extends State<_ShowsPrisTab> {
               Text('Shows',
                   style: Theme.of(context).textTheme.titleMedium),
               const Spacer(),
-              FilledButton.icon(
-                onPressed: widget.onAddShow,
-                icon: const Icon(Icons.add, size: 18),
-                label: const Text('Legg til show'),
-              ),
+              if (!_isMultiDate)
+                FilledButton.icon(
+                  onPressed: widget.onAddShow,
+                  icon: const Icon(Icons.add, size: 18),
+                  label: const Text('Legg til show'),
+                ),
             ],
           ),
           const SizedBox(height: 12),
@@ -1380,6 +1838,21 @@ class _ShowsPrisTabState extends State<_ShowsPrisTab> {
           if (widget.shows.isEmpty)
             Text('Ingen shows lagt til ennå.',
                 style: TextStyle(color: cs.onSurfaceVariant))
+          else if (_isMultiDate)
+            // Simplified shows list for multi-date offers — just names
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: widget.shows.map((show) {
+                final name = show['show_name'] as String? ?? '';
+                return Chip(
+                  label: Text(name, style: const TextStyle(fontSize: 13)),
+                  backgroundColor: cs.surfaceContainerHigh,
+                  side: BorderSide.none,
+                  visualDensity: VisualDensity.compact,
+                );
+              }).toList(),
+            )
           else
             Container(
               decoration: BoxDecoration(
@@ -1470,26 +1943,37 @@ class _ShowsPrisTabState extends State<_ShowsPrisTab> {
                 Text('Prisoppsummering',
                     style: Theme.of(context).textTheme.titleMedium),
                 const SizedBox(height: 12),
-                _PriceRow(
-                    label: 'Sum show', value: _fmt(widget.showsTotal)),
-                if (widget.inearPrice > 0)
+                if (_isMultiDate && _offerCalcLines != null) ...[
+                  ..._offerCalcLines!.lines.map((l) =>
+                      _PriceRow(label: l.label, value: _fmt(l.amount))),
+                  const Divider(height: 20),
                   _PriceRow(
-                      label: 'In-ear', value: _fmt(widget.inearPrice)),
-                if (widget.transportPrice > 0)
+                    label: 'TILBUD (${widget.siblingGigs.length} datoer)',
+                    value: _fmt(_offerCalcLines!.total),
+                    bold: true,
+                  ),
+                ] else ...[
                   _PriceRow(
-                      label: 'Transport',
-                      value: _fmt(widget.transportPrice)),
-                if (widget.extraPrice > 0)
+                      label: 'Sum show', value: _fmt(widget.showsTotal)),
+                  if (widget.inearPrice > 0)
+                    _PriceRow(
+                        label: 'In-ear', value: _fmt(widget.inearPrice)),
+                  if (widget.transportPrice > 0)
+                    _PriceRow(
+                        label: 'Transport',
+                        value: _fmt(widget.transportPrice)),
+                  if (widget.extraPrice > 0)
+                    _PriceRow(
+                        label:
+                            widget.gig['extra_desc'] as String? ?? 'Ekstra',
+                        value: _fmt(widget.extraPrice)),
+                  const Divider(height: 20),
                   _PriceRow(
-                      label:
-                          widget.gig['extra_desc'] as String? ?? 'Ekstra',
-                      value: _fmt(widget.extraPrice)),
-                const Divider(height: 20),
-                _PriceRow(
-                  label: 'TOTAL',
-                  value: _fmt(widget.total),
-                  bold: true,
-                ),
+                    label: 'TOTAL',
+                    value: _fmt(widget.total),
+                    bold: true,
+                  ),
+                ],
               ],
             ),
           ),
@@ -2040,12 +2524,18 @@ class _KontraktTab extends StatefulWidget {
   final List<Map<String, dynamic>> shows;
   final double total;
   final Future<void> Function() onSend;
+  final List<Map<String, dynamic>> siblingGigs;
+  final Map<String, dynamic>? offerData;
+  final String? linkedOfferId;
 
   const _KontraktTab({
     required this.gig,
     required this.shows,
     required this.total,
     required this.onSend,
+    this.siblingGigs = const [],
+    this.offerData,
+    this.linkedOfferId,
   });
 
   @override
@@ -2053,14 +2543,20 @@ class _KontraktTab extends StatefulWidget {
 }
 
 class _KontraktTabState extends State<_KontraktTab> {
+  final _sb = Supabase.instance.client;
   Uint8List? _pdfBytes;
   bool _generating = true;
   bool _sending = false;
+
+  // Agreement status
+  Map<String, dynamic>? _agreement;
+  bool _approving = false;
 
   @override
   void initState() {
     super.initState();
     _buildPdf();
+    _loadAgreement();
   }
 
   @override
@@ -2071,12 +2567,111 @@ class _KontraktTabState extends State<_KontraktTab> {
     }
   }
 
+  bool get _isMultiDate => widget.siblingGigs.length > 1;
+
+  /// Build calc lines from offer's final_calc or compute from params
+  ({List<({String label, double amount})> lines, double total})? get _offerCalc {
+    if (widget.offerData == null) return null;
+
+    // Try stored final_calc first
+    final fc = widget.offerData!['final_calc'];
+    if (fc != null) {
+      final rawLines = fc['lines'] as List? ?? [];
+      final lines = rawLines.map<({String label, double amount})>((l) {
+        return (
+          label: l['label'] as String? ?? '',
+          amount: (l['amount'] as num?)?.toDouble() ?? 0,
+        );
+      }).toList();
+      final total = (fc['total'] as num?)?.toDouble() ?? 0;
+      return (lines: lines, total: total);
+    }
+
+    // Fallback: compute from offer params
+    return _computeCalcFromOffer();
+  }
+
+  ({List<({String label, double amount})> lines, double total})? _computeCalcFromOffer() {
+    if (widget.offerData == null) return null;
+    final o = widget.offerData!;
+    final numDates = widget.siblingGigs.length;
+
+    final showPricePerGig = widget.shows.fold<double>(
+        0, (s, sh) => s + ((sh['price'] as num?)?.toDouble() ?? 0));
+    final performerFees = showPricePerGig * numDates;
+
+    final inearIncluded = o['inear_included'] == true;
+    final inearPrice = (o['inear_price'] as num?)?.toDouble() ?? 0;
+    final inearTotal = inearIncluded ? inearPrice * numDates : 0.0;
+
+    final transportPrice = (o['transport_price'] as num?)?.toDouble() ?? 0;
+    final rehearsalTransport = (o['rehearsal_transport'] as num?)?.toDouble() ?? 0;
+    final totalTransport = (transportPrice * numDates) + rehearsalTransport;
+
+    final rehearsalPerformers = (o['rehearsal_performers'] as num?)?.toInt() ?? 0;
+    final rehearsalCount = (o['rehearsal_count'] as num?)?.toInt() ?? 0;
+    final rehearsalPPP = (o['rehearsal_price_per_person'] as num?)?.toDouble() ?? 0;
+    final rehearsalTotal = (rehearsalPerformers * rehearsalCount * rehearsalPPP).toDouble();
+
+    final markupPct = (o['markup_pct'] as num?)?.toDouble() ?? 0;
+    final markupOnAll = o['markup_on_all'] == true;
+    final completePct = markupPct / 2;
+    final bookingPct = markupPct / 2;
+
+    final subtotal = performerFees + inearTotal + totalTransport + rehearsalTotal;
+    final markupBase = markupOnAll ? subtotal : performerFees;
+    final completeKonto = markupBase * completePct;
+    final bookingHonorar = markupBase * bookingPct;
+
+    final ovJson = o['calc_overrides'];
+    final ov = <String, double>{};
+    if (ovJson is Map) {
+      for (final e in ovJson.entries) {
+        if (e.value is num) ov[e.key as String] = (e.value as num).toDouble();
+      }
+    }
+    double ovv(String key, double calc) => ov.containsKey(key) ? ov[key]! : calc;
+
+    final lines = <({String label, double amount})>[
+      (label: 'Utøverhyrer', amount: ovv('performer_fees', performerFees)),
+      (label: 'CompleteKonto', amount: ovv('complete_konto', completeKonto)),
+      (label: 'BookingHonorar', amount: ovv('booking_honorar', bookingHonorar)),
+      (label: 'In-Ear', amount: ovv('inear', inearTotal)),
+      (label: 'Transport', amount: ovv('transport', totalTransport)),
+      (label: 'Prøver', amount: ovv('rehearsal', rehearsalTotal)),
+    ];
+
+    final effectiveTotal = lines.fold<double>(0, (s, l) => s + l.amount);
+    final total = ov.containsKey('total') ? ov['total']! : effectiveTotal;
+
+    return (lines: lines.where((l) => l.amount > 0).toList(), total: total);
+  }
+
+  /// Build date entries for multi-date PDF
+  List<({String date, String venue})> get _pdfDateEntries {
+    final df = DateFormat('dd.MM.yyyy');
+    return widget.siblingGigs.map((g) {
+      final dateFrom = g['date_from'] as String?;
+      final dateStr = dateFrom != null ? df.format(DateTime.parse(dateFrom)) : '';
+      final venue = [
+        g['venue_name'] as String? ?? '',
+        g['city'] as String? ?? '',
+        g['country'] as String? ?? '',
+      ].where((s) => s.isNotEmpty).join(', ');
+      return (date: dateStr, venue: venue);
+    }).toList();
+  }
+
   Future<void> _buildPdf() async {
     if (mounted) setState(() => _generating = true);
     try {
+      final calc = _isMultiDate ? _offerCalc : null;
       final result = await IntensjonsavtalePdfService.generate(
         gig: widget.gig,
         shows: widget.shows,
+        calcLines: calc?.lines,
+        calcTotal: calc?.total,
+        dateEntries: _isMultiDate ? _pdfDateEntries : null,
       );
       if (mounted) setState(() => _pdfBytes = result.mainPdf);
     } catch (e) {
@@ -2085,9 +2680,143 @@ class _KontraktTabState extends State<_KontraktTab> {
     if (mounted) setState(() => _generating = false);
   }
 
+  Future<void> _loadAgreement() async {
+    try {
+      final gigId = widget.gig['id'] as String?;
+      if (gigId == null) return;
+
+      // For multi-date offers, check agreement on any sibling gig
+      final gigIds = _isMultiDate
+          ? widget.siblingGigs.map((g) => g['id'] as String).toList()
+          : [gigId];
+
+      final row = await _sb
+          .from('agreement_tokens')
+          .select()
+          .inFilter('gig_id', gigIds)
+          .order('created_at', ascending: false)
+          .limit(1)
+          .maybeSingle();
+      if (mounted) setState(() => _agreement = row);
+    } catch (e) {
+      debugPrint('Load agreement error: $e');
+    }
+  }
+
+  Future<void> _approveAgreement() async {
+    if (_agreement == null) return;
+    setState(() => _approving = true);
+    try {
+      final myId = _sb.auth.currentUser?.id;
+
+      // Update agreement status
+      await _sb.from('agreement_tokens').update({
+        'status': 'approved',
+        'approved_at': DateTime.now().toIso8601String(),
+        'approved_by': myId,
+      }).eq('id', _agreement!['id']);
+
+      // Update ALL gigs + offer status to confirmed
+      if (_isMultiDate) {
+        for (final g in widget.siblingGigs) {
+          await _sb.from('gigs').update({
+            'status': 'confirmed',
+          }).eq('id', g['id']);
+        }
+        if (widget.linkedOfferId != null) {
+          await _sb.from('gig_offers').update({
+            'status': 'confirmed',
+          }).eq('id', widget.linkedOfferId!);
+        }
+      } else {
+        final gigId = widget.gig['id'] as String?;
+        if (gigId != null) {
+          await _sb.from('gigs').update({
+            'status': 'confirmed',
+          }).eq('id', gigId);
+          await _sb.from('gig_offers').update({
+            'status': 'confirmed',
+          }).eq('gig_id', gigId);
+        }
+      }
+
+      // Generate signed PDF
+      final acceptedName = _agreement!['accepted_name'] as String? ?? '';
+      final acceptedAt = _agreement!['accepted_at'] as String?;
+      final acceptedDate = acceptedAt != null
+          ? DateFormat('dd.MM.yyyy').format(DateTime.parse(acceptedAt))
+          : DateFormat('dd.MM.yyyy').format(DateTime.now());
+      final approvedDate = DateFormat('dd.MM.yyyy').format(DateTime.now());
+
+      final calc = _isMultiDate ? _offerCalc : null;
+      final signedResult = await IntensjonsavtalePdfService.generate(
+        gig: widget.gig,
+        shows: widget.shows,
+        customerSignature: acceptedName,
+        customerSignatureDate: acceptedDate,
+        companySignature: 'Stian Skog',
+        companySignatureDate: approvedDate,
+        calcLines: calc?.lines,
+        calcTotal: calc?.total,
+        dateEntries: _isMultiDate ? _pdfDateEntries : null,
+      );
+
+      // Send signed PDF to customer
+      final customerEmail = _agreement!['customer_email'] as String? ?? '';
+      final venue = widget.gig['venue_name'] ?? '';
+      final dateFrom = widget.gig['date_from'] ?? '';
+      final subjectLabel = _isMultiDate
+          ? '${widget.siblingGigs.length} datoer'
+          : '$venue $dateFrom';
+      if (customerEmail.isNotEmpty) {
+        final htmlBody = '''
+<div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 600px; margin: 0 auto;">
+  <div style="background: #1a1a1a; padding: 24px 32px; border-radius: 8px 8px 0 0;">
+    <h1 style="color: white; font-size: 20px; margin: 0;">Signert intensjonsavtale</h1>
+    <p style="color: #aaa; font-size: 14px; margin: 4px 0 0;">$subjectLabel</p>
+  </div>
+  <div style="background: #ffffff; padding: 28px 32px; border: 1px solid #eee; border-top: none; border-radius: 0 0 8px 8px;">
+    <p style="font-size: 15px; line-height: 1.6; color: #333;">Hei $acceptedName,</p>
+    <p style="font-size: 15px; line-height: 1.6; color: #333;">
+      Intensjonsavtalen er nå godkjent av begge parter. Vedlagt finner du den signerte versjonen.
+    </p>
+    <p style="font-size: 13px; color: #888; margin-top: 20px;">Med vennlig hilsen,<br><strong>Complete Drums / Stian Skog</strong></p>
+  </div>
+</div>
+''';
+        await EmailService.sendEmailWithAttachments(
+          to: customerEmail,
+          subject: 'Signert intensjonsavtale — $subjectLabel',
+          body: htmlBody,
+          attachments: [
+            (filename: 'Signert_Intensjonsavtale_${venue.toString().replaceAll(' ', '_')}.pdf', bytes: signedResult.mainPdf),
+          ],
+          isHtml: true,
+          companyId: widget.gig['company_id'] as String?,
+        );
+      }
+
+      await _loadAgreement();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Avtale godkjent og signert kopi sendt!')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Godkjenning feilet: $e')),
+        );
+      }
+    }
+    if (mounted) setState(() => _approving = false);
+  }
+
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
+    final agreementStatus = _agreement?['status'] as String?;
+
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -2112,7 +2841,7 @@ class _KontraktTabState extends State<_KontraktTab> {
 
         // -------- RIGHT SIDEBAR --------
         SizedBox(
-          width: 220,
+          width: 240,
           child: Padding(
             padding: const EdgeInsets.only(left: 16),
             child: Column(
@@ -2120,6 +2849,20 @@ class _KontraktTabState extends State<_KontraktTab> {
               children: [
                 Text('Intensjonsavtale',
                     style: Theme.of(context).textTheme.titleMedium),
+                if (_isMultiDate) ...[
+                  const SizedBox(height: 8),
+                  Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: cs.primaryContainer.withOpacity(0.3),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Text(
+                      'Felles kontrakt for ${widget.siblingGigs.length} datoer',
+                      style: TextStyle(fontSize: 12, color: cs.onSurfaceVariant),
+                    ),
+                  ),
+                ],
                 const SizedBox(height: 12),
                 FilledButton.icon(
                   onPressed: _sending
@@ -2127,6 +2870,7 @@ class _KontraktTabState extends State<_KontraktTab> {
                       : () async {
                           setState(() => _sending = true);
                           await widget.onSend();
+                          await _loadAgreement();
                           if (mounted) setState(() => _sending = false);
                         },
                   icon: const Icon(Icons.send, size: 18),
@@ -2152,11 +2896,141 @@ class _KontraktTabState extends State<_KontraktTab> {
                     ],
                   ),
                 ],
+
+                // -------- AGREEMENT STATUS --------
+                if (_agreement != null) ...[
+                  const SizedBox(height: 20),
+                  const Divider(),
+                  const SizedBox(height: 12),
+                  Text('Avtalestatus',
+                      style: Theme.of(context).textTheme.titleSmall),
+                  const SizedBox(height: 8),
+
+                  // Status badge
+                  _AgreementStatusBadge(status: agreementStatus ?? 'pending'),
+                  const SizedBox(height: 8),
+
+                  // Sent to
+                  Text(
+                    'Sendt til: ${_agreement!['customer_email'] ?? ''}',
+                    style: TextStyle(fontSize: 12, color: cs.onSurfaceVariant),
+                  ),
+                  if (_agreement!['created_at'] != null) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      'Sendt: ${DateFormat('dd.MM.yyyy HH:mm').format(DateTime.parse(_agreement!['created_at']))}',
+                      style: TextStyle(fontSize: 12, color: cs.onSurfaceVariant),
+                    ),
+                  ],
+
+                  // Accepted info
+                  if (agreementStatus == 'accepted' || agreementStatus == 'approved') ...[
+                    const SizedBox(height: 8),
+                    Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: Colors.green.withValues(alpha: 0.08),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: Colors.green.withValues(alpha: 0.2)),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Godtatt av: ${_agreement!['accepted_name'] ?? ''}',
+                            style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+                          ),
+                          if (_agreement!['accepted_at'] != null)
+                            Text(
+                              'Dato: ${DateFormat('dd.MM.yyyy HH:mm').format(DateTime.parse(_agreement!['accepted_at']))}',
+                              style: TextStyle(fontSize: 11, color: cs.onSurfaceVariant),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ],
+
+                  // Approve button (only when accepted, not yet approved)
+                  if (agreementStatus == 'accepted') ...[
+                    const SizedBox(height: 12),
+                    FilledButton.icon(
+                      onPressed: _approving ? null : _approveAgreement,
+                      style: FilledButton.styleFrom(
+                        backgroundColor: Colors.green,
+                      ),
+                      icon: Icon(_approving ? Icons.hourglass_top : Icons.check_circle, size: 18),
+                      label: Text(_approving ? 'Godkjenner…' : 'Godkjenn og signer'),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Sender signert kopi til kunden',
+                      style: TextStyle(fontSize: 11, color: cs.onSurfaceVariant),
+                    ),
+                  ],
+
+                  // Approved info
+                  if (agreementStatus == 'approved') ...[
+                    const SizedBox(height: 8),
+                    Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: Colors.blue.withValues(alpha: 0.08),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: Colors.blue.withValues(alpha: 0.2)),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'Avtale fullstendig signert',
+                            style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: Colors.blue),
+                          ),
+                          if (_agreement!['approved_at'] != null)
+                            Text(
+                              'Godkjent: ${DateFormat('dd.MM.yyyy HH:mm').format(DateTime.parse(_agreement!['approved_at']))}',
+                              style: TextStyle(fontSize: 11, color: cs.onSurfaceVariant),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ],
               ],
             ),
           ),
         ),
       ],
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Agreement status badge
+// ---------------------------------------------------------------------------
+
+class _AgreementStatusBadge extends StatelessWidget {
+  final String status;
+  const _AgreementStatusBadge({required this.status});
+
+  @override
+  Widget build(BuildContext context) {
+    final (Color color, String label) = switch (status) {
+      'pending' => (Colors.orange, 'Venter på svar'),
+      'accepted' => (Colors.green, 'Godtatt av kunde'),
+      'approved' => (Colors.blue, 'Signert'),
+      _ => (Colors.grey, status),
+    };
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: color.withValues(alpha: 0.3)),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: color),
+      ),
     );
   }
 }
@@ -2202,5 +3076,420 @@ class _GigStatusBadge extends StatelessWidget {
         ),
       ),
     );
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+// CHAT TAB
+// ═══════════════════════════════════════════════════════════
+
+class _ChatTab extends StatefulWidget {
+  final String gigId;
+  const _ChatTab({required this.gigId});
+
+  @override
+  State<_ChatTab> createState() => _ChatTabState();
+}
+
+class _ChatTabState extends State<_ChatTab> {
+  final _sb = Supabase.instance.client;
+  final _msgCtrl = TextEditingController();
+  final _scrollCtrl = ScrollController();
+  String _senderName = '';
+  bool _sending = false;
+
+  // Edit state
+  String? _editingId;
+
+  // Reply state
+  Map<String, dynamic>? _replyTo;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadSenderName();
+  }
+
+  @override
+  void dispose() {
+    _msgCtrl.dispose();
+    _scrollCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadSenderName() async {
+    final user = _sb.auth.currentUser;
+    if (user == null) return;
+    try {
+      final p = await _sb
+          .from('profiles')
+          .select('name')
+          .eq('id', user.id)
+          .maybeSingle();
+      if (mounted) {
+        setState(() {
+          _senderName = (p?['name'] ?? '').toString().trim().isNotEmpty
+              ? p!['name'] as String
+              : user.email ?? 'Admin';
+        });
+      }
+    } catch (_) {
+      if (mounted) setState(() => _senderName = user.email ?? 'Admin');
+    }
+  }
+
+  Future<void> _send() async {
+    final text = _msgCtrl.text.trim();
+    if (text.isEmpty) return;
+    setState(() => _sending = true);
+
+    try {
+      if (_editingId != null) {
+        // Update existing message
+        await _sb.from('gig_messages').update({
+          'message': text,
+          'edited_at': DateTime.now().toUtc().toIso8601String(),
+        }).eq('id', _editingId!);
+        _editingId = null;
+      } else {
+        // Insert new message
+        await _sb.from('gig_messages').insert({
+          'gig_id': widget.gigId,
+          'user_id': _sb.auth.currentUser!.id,
+          'sender_name': _senderName,
+          'message': text,
+          'is_admin': true,
+          if (_replyTo != null) 'reply_to_id': _replyTo!['id'],
+        });
+
+        // Notify
+        try {
+          final gig = await _sb
+              .from('gigs')
+              .select('company_id')
+              .eq('id', widget.gigId)
+              .maybeSingle();
+          if (gig != null) {
+            await _sb.functions.invoke('notify-chat', body: {
+              'type': 'gig',
+              'gig_id': widget.gigId,
+              'company_id': gig['company_id'],
+              'sender_id': _sb.auth.currentUser!.id,
+              'sender_name': _senderName,
+              'message': text,
+            });
+          }
+        } catch (_) {}
+      }
+
+      _msgCtrl.clear();
+      _replyTo = null;
+
+      // Scroll to bottom after short delay
+      Future.delayed(const Duration(milliseconds: 200), () {
+        if (_scrollCtrl.hasClients) {
+          _scrollCtrl.animateTo(
+            _scrollCtrl.position.maxScrollExtent,
+            duration: const Duration(milliseconds: 300),
+            curve: Curves.easeOut,
+          );
+        }
+      });
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Feil: $e'), backgroundColor: Colors.red),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _sending = false);
+    }
+  }
+
+  void _startEdit(Map<String, dynamic> msg) {
+    setState(() {
+      _editingId = msg['id'] as String;
+      _msgCtrl.text = msg['message'] as String;
+      _replyTo = null;
+    });
+  }
+
+  void _startReply(Map<String, dynamic> msg) {
+    setState(() {
+      _replyTo = msg;
+      _editingId = null;
+      _msgCtrl.clear();
+    });
+  }
+
+  void _cancelEditReply() {
+    setState(() {
+      _editingId = null;
+      _replyTo = null;
+      _msgCtrl.clear();
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final userId = _sb.auth.currentUser?.id;
+    final df = DateFormat('dd.MM HH:mm');
+
+    return Column(
+      children: [
+        // Message list
+        Expanded(
+          child: StreamBuilder<List<Map<String, dynamic>>>(
+            stream: _sb
+                .from('gig_messages')
+                .stream(primaryKey: ['id'])
+                .eq('gig_id', widget.gigId)
+                .order('created_at'),
+            builder: (context, snap) {
+              if (!snap.hasData) {
+                return const Center(child: CircularProgressIndicator());
+              }
+              final msgs = snap.data!;
+              if (msgs.isEmpty) {
+                return Center(
+                  child: Text(
+                    'Ingen meldinger ennå',
+                    style: TextStyle(color: cs.onSurface.withOpacity(0.5)),
+                  ),
+                );
+              }
+
+              return ListView.builder(
+                controller: _scrollCtrl,
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                itemCount: msgs.length,
+                itemBuilder: (context, i) {
+                  final msg = msgs[i];
+                  final isAdmin = msg['is_admin'] == true;
+                  final isOwn = msg['user_id'] == userId;
+                  final edited = msg['edited_at'] != null;
+                  final replyId = msg['reply_to_id'] as String?;
+
+                  // Find reply-to message
+                  Map<String, dynamic>? replyMsg;
+                  if (replyId != null) {
+                    replyMsg = msgs
+                        .cast<Map<String, dynamic>?>()
+                        .firstWhere((m) => m?['id'] == replyId,
+                            orElse: () => null);
+                  }
+
+                  final bubbleColor = isAdmin
+                      ? cs.primary.withOpacity(0.12)
+                      : cs.surfaceContainerHighest;
+                  final align =
+                      isAdmin ? CrossAxisAlignment.end : CrossAxisAlignment.start;
+
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: 6),
+                    child: Column(
+                      crossAxisAlignment: align,
+                      children: [
+                        // Sender name
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 2),
+                          child: Text(
+                            msg['sender_name'] ?? '',
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                              color: cs.onSurface.withOpacity(0.5),
+                            ),
+                          ),
+                        ),
+                        // Bubble
+                        GestureDetector(
+                          onSecondaryTapUp: isOwn
+                              ? (details) => _showContextMenu(
+                                    context, details.globalPosition, msg)
+                              : (_) => _showReplyMenu(
+                                    context, _.globalPosition, msg),
+                          onLongPress: () {
+                            if (isOwn) {
+                              _startEdit(msg);
+                            } else {
+                              _startReply(msg);
+                            }
+                          },
+                          child: Container(
+                            constraints: const BoxConstraints(maxWidth: 500),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 12, vertical: 8),
+                            decoration: BoxDecoration(
+                              color: bubbleColor,
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                // Reply quote
+                                if (replyMsg != null) ...[
+                                  Container(
+                                    padding: const EdgeInsets.all(6),
+                                    margin: const EdgeInsets.only(bottom: 4),
+                                    decoration: BoxDecoration(
+                                      color: cs.onSurface.withOpacity(0.06),
+                                      borderRadius: BorderRadius.circular(6),
+                                      border: Border(
+                                        left: BorderSide(
+                                          color: cs.primary,
+                                          width: 3,
+                                        ),
+                                      ),
+                                    ),
+                                    child: Text(
+                                      '${replyMsg['sender_name']}: ${(replyMsg['message'] as String).length > 60 ? '${(replyMsg['message'] as String).substring(0, 60)}…' : replyMsg['message']}',
+                                      style: TextStyle(
+                                        fontSize: 11,
+                                        color: cs.onSurface.withOpacity(0.6),
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                                // Message text
+                                SelectableText(
+                                  msg['message'] ?? '',
+                                  style: TextStyle(
+                                    fontSize: 13,
+                                    color: cs.onSurface,
+                                  ),
+                                ),
+                                const SizedBox(height: 2),
+                                // Timestamp + edited
+                                Text(
+                                  '${df.format(DateTime.parse(msg['created_at']).toLocal())}${edited ? ' · redigert' : ''}',
+                                  style: TextStyle(
+                                    fontSize: 10,
+                                    color: cs.onSurface.withOpacity(0.35),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              );
+            },
+          ),
+        ),
+
+        // Edit / Reply indicator
+        if (_editingId != null || _replyTo != null)
+          Container(
+            color: _editingId != null
+                ? Colors.amber.withOpacity(0.15)
+                : cs.primary.withOpacity(0.08),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+            child: Row(
+              children: [
+                Icon(
+                  _editingId != null ? Icons.edit : Icons.reply,
+                  size: 16,
+                  color: _editingId != null ? Colors.amber : cs.primary,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    _editingId != null
+                        ? 'Redigerer melding'
+                        : 'Svarer ${_replyTo!['sender_name']}',
+                    style: const TextStyle(fontSize: 12),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.close, size: 16),
+                  onPressed: _cancelEditReply,
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(),
+                ),
+              ],
+            ),
+          ),
+
+        // Input bar
+        Container(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+          decoration: BoxDecoration(
+            border: Border(top: BorderSide(color: cs.outlineVariant)),
+          ),
+          child: Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: _msgCtrl,
+                  minLines: 1,
+                  maxLines: 4,
+                  textInputAction: TextInputAction.send,
+                  onSubmitted: (_) => _send(),
+                  decoration: InputDecoration(
+                    hintText: 'Skriv en melding…',
+                    isDense: true,
+                    contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 12, vertical: 10),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              IconButton(
+                icon: _sending
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : Icon(
+                        _editingId != null ? Icons.check : Icons.send,
+                        color: cs.primary,
+                      ),
+                onPressed: _sending ? null : _send,
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  void _showContextMenu(
+      BuildContext context, Offset position, Map<String, dynamic> msg) {
+    showMenu(
+      context: context,
+      position: RelativeRect.fromLTRB(
+          position.dx, position.dy, position.dx, position.dy),
+      items: [
+        const PopupMenuItem(value: 'reply', child: Text('Svar')),
+        const PopupMenuItem(value: 'edit', child: Text('Rediger')),
+      ],
+    ).then((value) {
+      if (value == 'edit') _startEdit(msg);
+      if (value == 'reply') _startReply(msg);
+    });
+  }
+
+  void _showReplyMenu(
+      BuildContext context, Offset position, Map<String, dynamic> msg) {
+    showMenu(
+      context: context,
+      position: RelativeRect.fromLTRB(
+          position.dx, position.dy, position.dx, position.dy),
+      items: [
+        const PopupMenuItem(value: 'reply', child: Text('Svar')),
+      ],
+    ).then((value) {
+      if (value == 'reply') _startReply(msg);
+    });
   }
 }

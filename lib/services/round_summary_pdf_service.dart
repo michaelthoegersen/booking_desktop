@@ -181,6 +181,7 @@ class RoundSummaryPdfService {
     required String contactEmail,
     required String contactPhone,
     required List<Map<String, dynamic>> days,
+    bool pickupEveningFirstDay = false,
   }) async {
     final doc = pw.Document();
 
@@ -236,8 +237,11 @@ class RoundSummaryPdfService {
             bold: bold,
           ),
           pw.SizedBox(height: 20),
-          ...sortedDays.map(
-            (day) => _buildDayCard(day, regular, bold),
+          ...sortedDays.asMap().entries.map(
+            (e) => _buildDayCard(
+              e.value, regular, bold,
+              isPickupEvening: pickupEveningFirstDay && e.key == 0,
+            ),
           ),
         ],
       ),
@@ -440,8 +444,9 @@ class RoundSummaryPdfService {
   static pw.Widget _buildDayCard(
     Map<String, dynamic> day,
     pw.Font regular,
-    pw.Font bold,
-  ) {
+    pw.Font bold, {
+    bool isPickupEvening = false,
+  }) {
     final dato = _dateFmt.format(DateTime.parse(day['dato'] as String));
     final sted = (day['sted'] as String?) ?? '';
     final venue = (day['venue'] as String?) ?? '';
@@ -482,6 +487,17 @@ class RoundSummaryPdfService {
                       font: regular,
                       fontSize: 11,
                       color: PdfColors.grey700,
+                    ),
+                  ),
+                ],
+                if (isPickupEvening) ...[
+                  pw.SizedBox(width: 8),
+                  pw.Text(
+                    'Pickup evening',
+                    style: pw.TextStyle(
+                      font: regular,
+                      fontSize: 9,
+                      color: PdfColors.orange800,
                     ),
                   ),
                 ],

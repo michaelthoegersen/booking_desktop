@@ -5,6 +5,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../models/swe_settings.dart';
 import '../services/km_se_updater.dart';
+import '../services/email_service.dart';
 import '../state/active_company.dart';
 import '../state/settings_store.dart';
 import '../pages/routes_admin_page.dart';
@@ -26,6 +27,13 @@ class _SettingsPageState extends State<SettingsPage> {
   late TextEditingController dropboxCtrl;
   late TextEditingController bankAccountCtrl;
   late TextEditingController tollKmRateCtrl;
+
+  // --- Complete pricing ---
+  late TextEditingController creoFeeMinCtrl;
+  late TextEditingController extraShowFeeCtrl;
+  late TextEditingController markupPctCtrl;
+  late TextEditingController inearPriceCtrl;
+  late TextEditingController transportPerKmCtrl;
 
   // --- Swedish pricing model ---
   late TextEditingController sweTimlonCtrl;
@@ -62,6 +70,111 @@ class _SettingsPageState extends State<SettingsPage> {
 
   late TextEditingController sweTrailerCtrl;
   late TextEditingController sweUtlandstraktCtrl;
+
+  // --- SMTP Email Account ---
+  SmtpAccount? _smtpAccount;
+
+  Future<void> _loadSmtpAccount() async {
+    final companyId = activeCompanyNotifier.value?.id;
+    final accounts = await EmailService.loadSmtpAccounts(companyId: companyId);
+    if (mounted) setState(() => _smtpAccount = accounts.isNotEmpty ? accounts.first : null);
+  }
+
+  Future<void> _openSmtpDialog({SmtpAccount? existing}) async {
+    final emailCtrl = TextEditingController(text: existing?.email ?? '');
+    final nameCtrl = TextEditingController(text: existing?.displayName ?? '');
+    final hostCtrl = TextEditingController(text: existing?.smtpHost ?? 'smtp.office365.com');
+    final portCtrl = TextEditingController(text: (existing?.smtpPort ?? 587).toString());
+    final passCtrl = TextEditingController(text: existing?.password ?? '');
+
+    final saved = await showDialog<bool>(
+      context: context,
+      builder: (_) {
+        bool saving = false;
+        return StatefulBuilder(
+          builder: (ctx, setLocal) => AlertDialog(
+            title: Text(existing != null ? 'Edit email account' : 'Add email account'),
+            content: SizedBox(
+              width: 420,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextField(controller: emailCtrl, decoration: const InputDecoration(labelText: 'Email address')),
+                  const SizedBox(height: 8),
+                  TextField(controller: nameCtrl, decoration: const InputDecoration(labelText: 'Display name (e.g. Coach Service Scandinavia)')),
+                  const SizedBox(height: 8),
+                  Row(children: [
+                    Expanded(child: TextField(controller: hostCtrl, decoration: const InputDecoration(labelText: 'SMTP host'))),
+                    const SizedBox(width: 8),
+                    SizedBox(width: 80, child: TextField(controller: portCtrl, decoration: const InputDecoration(labelText: 'Port'), keyboardType: TextInputType.number)),
+                  ]),
+                  const SizedBox(height: 8),
+                  TextField(controller: passCtrl, obscureText: true, decoration: const InputDecoration(labelText: 'Password')),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+              FilledButton(
+                onPressed: saving
+                    ? null
+                    : () async {
+                        if (emailCtrl.text.trim().isEmpty || passCtrl.text.trim().isEmpty) return;
+                        setLocal(() => saving = true);
+                        try {
+                          final sb = Supabase.instance.client;
+                          final data = {
+                            'user_id': sb.auth.currentUser!.id,
+                            'company_id': activeCompanyNotifier.value?.id,
+                            'email': emailCtrl.text.trim(),
+                            'display_name': nameCtrl.text.trim(),
+                            'smtp_host': hostCtrl.text.trim(),
+                            'smtp_port': int.tryParse(portCtrl.text.trim()) ?? 587,
+                            'password': passCtrl.text.trim(),
+                            'is_default': true,
+                          };
+                          if (existing != null) {
+                            await sb.from('smtp_accounts').update(data).eq('id', existing.id);
+                          } else {
+                            await sb.from('smtp_accounts').insert(data);
+                          }
+                          EmailService.clearSmtpCache();
+                          Navigator.pop(ctx, true);
+                        } catch (e) {
+                          ScaffoldMessenger.of(ctx).showSnackBar(
+                            SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+                          );
+                          setLocal(() => saving = false);
+                        }
+                      },
+                child: Text(saving ? 'Saving…' : 'Save'),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+    if (saved == true) await _loadSmtpAccount();
+  }
+
+  Future<void> _deleteSmtpAccount() async {
+    if (_smtpAccount == null) return;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Remove email account?'),
+        content: const Text('Emails will fall back to the default sender (michael@nttas.com).'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Remove')),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    await Supabase.instance.client.from('smtp_accounts').delete().eq('id', _smtpAccount!.id);
+    EmailService.clearSmtpCache();
+    if (mounted) setState(() => _smtpAccount = null);
+  }
 
   Future<void> _openChangePasswordDialog() async {
 
@@ -203,6 +316,12 @@ class _SettingsPageState extends State<SettingsPage> {
     bankAccountCtrl = TextEditingController(text: s.bankAccount);
     tollKmRateCtrl = TextEditingController(text: s.tollKmRate.toStringAsFixed(2));
 
+    creoFeeMinCtrl = TextEditingController(text: s.creoFeeMinimum.toStringAsFixed(0));
+    extraShowFeeCtrl = TextEditingController(text: s.extraShowFee.toStringAsFixed(0));
+    markupPctCtrl = TextEditingController(text: (s.markupPct * 100).toStringAsFixed(0));
+    inearPriceCtrl = TextEditingController(text: s.inearPrice.toStringAsFixed(0));
+    transportPerKmCtrl = TextEditingController(text: s.transportPricePerKm.toStringAsFixed(2));
+
     final swe = s.sweSettings;
     sweTimlonCtrl = TextEditingController(text: swe.timlon.toStringAsFixed(0));
     sweTimmarCtrl = TextEditingController(text: swe.timmarPerDag.toStringAsFixed(0));
@@ -238,6 +357,8 @@ class _SettingsPageState extends State<SettingsPage> {
 
     sweTrailerCtrl = TextEditingController(text: swe.trailerhyraPerDygn.toStringAsFixed(0));
     sweUtlandstraktCtrl = TextEditingController(text: swe.utlandstraktamente.toStringAsFixed(0));
+
+    _loadSmtpAccount();
   }
 
   @override
@@ -251,6 +372,11 @@ class _SettingsPageState extends State<SettingsPage> {
     dropboxCtrl.dispose();
     bankAccountCtrl.dispose();
     tollKmRateCtrl.dispose();
+    creoFeeMinCtrl.dispose();
+    extraShowFeeCtrl.dispose();
+    markupPctCtrl.dispose();
+    inearPriceCtrl.dispose();
+    transportPerKmCtrl.dispose();
 
     sweTimlonCtrl.dispose();
     sweTimmarCtrl.dispose();
@@ -661,6 +787,11 @@ class _SettingsPageState extends State<SettingsPage> {
       dropboxRootPath: dropboxCtrl.text.trim(),
       bankAccount: bankAccountCtrl.text.trim(),
       tollKmRate: _parseDouble(tollKmRateCtrl.text, current.tollKmRate),
+      creoFeeMinimum: _parseDouble(creoFeeMinCtrl.text, current.creoFeeMinimum),
+      extraShowFee: _parseDouble(extraShowFeeCtrl.text, current.extraShowFee),
+      markupPct: _parseDouble(markupPctCtrl.text, current.markupPct * 100) / 100,
+      inearPrice: _parseDouble(inearPriceCtrl.text, current.inearPrice),
+      transportPricePerKm: _parseDouble(transportPerKmCtrl.text, current.transportPricePerKm),
       sweSettings: SweSettings(
         timlon: _parseDouble(sweTimlonCtrl.text, current.sweSettings.timlon),
         timmarPerDag: _parseDouble(sweTimmarCtrl.text, current.sweSettings.timmarPerDag),
@@ -938,6 +1069,77 @@ class _SettingsPageState extends State<SettingsPage> {
             Divider(color: cs.outlineVariant),
             const SizedBox(height: 18),
 
+            // ---------------- EMAIL ACCOUNT ----------------
+
+            Text(
+              "Email Account",
+              style: Theme.of(context)
+                  .textTheme
+                  .titleMedium
+                  ?.copyWith(fontWeight: FontWeight.w900),
+            ),
+
+            const SizedBox(height: 6),
+
+            Text(
+              "Set up an SMTP account to send emails from a custom address (e.g. Office 365, Gmail).",
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: cs.onSurfaceVariant,
+                  ),
+            ),
+
+            const SizedBox(height: 10),
+
+            if (_smtpAccount != null) ...[
+              Row(
+                children: [
+                  Icon(Icons.check_circle, color: Colors.green[700], size: 20),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          _smtpAccount!.email,
+                          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                fontWeight: FontWeight.w600,
+                              ),
+                        ),
+                        if (_smtpAccount!.displayName.isNotEmpty)
+                          Text(
+                            '${_smtpAccount!.displayName} · ${_smtpAccount!.smtpHost}',
+                            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                  color: cs.onSurfaceVariant,
+                                ),
+                          ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  TextButton.icon(
+                    onPressed: () => _openSmtpDialog(existing: _smtpAccount),
+                    icon: const Icon(Icons.edit, size: 18),
+                    label: const Text("Edit"),
+                  ),
+                  TextButton.icon(
+                    onPressed: _deleteSmtpAccount,
+                    icon: const Icon(Icons.delete_outline, size: 18),
+                    label: const Text("Remove"),
+                  ),
+                ],
+              ),
+            ] else ...[
+              FilledButton.icon(
+                onPressed: () => _openSmtpDialog(),
+                icon: const Icon(Icons.add),
+                label: const Text("Add Email Account"),
+              ),
+            ],
+
+            const SizedBox(height: 18),
+            Divider(color: cs.outlineVariant),
+            const SizedBox(height: 18),
+
             // ---------------- BANK ACCOUNT ----------------
 
             Text(
@@ -960,6 +1162,32 @@ class _SettingsPageState extends State<SettingsPage> {
                   prefixIcon: Icon(Icons.account_balance),
                 ),
               ),
+            ),
+
+            const SizedBox(height: 18),
+            Divider(color: cs.outlineVariant),
+            const SizedBox(height: 18),
+
+            // ---------------- COMPLETE PRICING ----------------
+
+            Text(
+              "Complete — prisparametre",
+              style: Theme.of(context)
+                  .textTheme
+                  .titleMedium
+                  ?.copyWith(fontWeight: FontWeight.w900),
+            ),
+            const SizedBox(height: 10),
+            Wrap(
+              spacing: 16,
+              runSpacing: 12,
+              children: [
+                SizedBox(width: 170, child: _field("Creo fee minimum", creoFeeMinCtrl, "NOK")),
+                SizedBox(width: 170, child: _field("Extra show fee", extraShowFeeCtrl, "NOK")),
+                SizedBox(width: 170, child: _field("Markup", markupPctCtrl, "%")),
+                SizedBox(width: 170, child: _field("In-ear price", inearPriceCtrl, "NOK")),
+                SizedBox(width: 170, child: _field("Transport kr/km", transportPerKmCtrl, "NOK/km")),
+              ],
             ),
 
             const SizedBox(height: 18),

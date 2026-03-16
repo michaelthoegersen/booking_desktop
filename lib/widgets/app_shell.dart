@@ -603,6 +603,7 @@ class _SideNavState extends State<_SideNav> {
   int _unseenCount = 0;
   int _unreadChatCount = 0;
   int _pendingBusRequests = 0;
+  int _pendingOfferAcceptances = 0;
   RealtimeChannel? _channel;
   Timer? _pollTimer;
 
@@ -612,6 +613,7 @@ class _SideNavState extends State<_SideNav> {
     _loadUnseenCount();
     _loadUnreadChatCount();
     _loadPendingBusRequests();
+    _loadPendingOfferAcceptances();
     _subscribeRealtime();
     ChatService.readEventNotifier.addListener(_loadUnreadChatCount);
     busRequestsBadgeNotifier.addListener(_onBusRequestBadgeChanged);
@@ -620,6 +622,7 @@ class _SideNavState extends State<_SideNav> {
       _loadUnseenCount();
       _loadUnreadChatCount();
       _loadPendingBusRequests();
+      _loadPendingOfferAcceptances();
     });
   }
 
@@ -647,6 +650,18 @@ class _SideNavState extends State<_SideNav> {
       if (mounted) setState(() => _pendingBusRequests = (res as List).length);
     } catch (e) {
       debugPrint('Bus requests badge error: $e');
+    }
+  }
+
+  Future<void> _loadPendingOfferAcceptances() async {
+    try {
+      final res = await _supabase
+          .from('offer_tokens')
+          .select('id')
+          .eq('status', 'accepted');
+      if (mounted) setState(() => _pendingOfferAcceptances = (res as List).length);
+    } catch (e) {
+      debugPrint('Offer acceptances badge error: $e');
     }
   }
 
@@ -692,6 +707,12 @@ class _SideNavState extends State<_SideNav> {
           table: 'bus_requests',
           callback: (_) => _loadPendingBusRequests(),
         )
+        .onPostgresChanges(
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: 'offer_tokens',
+          callback: (_) => _loadPendingOfferAcceptances(),
+        )
         .subscribe();
   }
 
@@ -732,6 +753,7 @@ class _SideNavState extends State<_SideNav> {
                       icon: Icons.dashboard_rounded,
                       label: "Dashboard",
                       route: "/",
+                      badge: _pendingOfferAcceptances,
                       onOpenInNewTab: widget.onOpenInNewTab,
                       overrideActiveRoute: widget.overrideActiveRoute,
                     ),

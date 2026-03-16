@@ -92,11 +92,19 @@ static String _busImageForType(BusType type) {
 
 static Future<Uint8List> generatePdf(
   OfferDraft offer,
-  Map<int, RoundCalcResult> roundCalc,
-) async {
+  Map<int, RoundCalcResult> roundCalc, {
+  String? customerSignature,
+  String? customerSignatureDate,
+  String? companySignature,
+  String? companySignatureDate,
+}) async {
   return buildPdf(
     offer: offer,
     roundCalcByIndex: roundCalc,
+    customerSignature: customerSignature,
+    customerSignatureDate: customerSignatureDate,
+    companySignature: companySignature,
+    companySignatureDate: companySignatureDate,
   );
 }
 
@@ -225,6 +233,10 @@ static List<pw.Widget> _buildTableForIndexes(
 static Future<Uint8List> buildPdf({
   required OfferDraft offer,
   required Map<int, RoundCalcResult> roundCalcByIndex,
+  String? customerSignature,
+  String? customerSignatureDate,
+  String? companySignature,
+  String? companySignatureDate,
 }) async {
   final doc = pw.Document();
 
@@ -304,7 +316,15 @@ static Future<Uint8List> buildPdf({
         pw.SizedBox(height: 30),
         _buildTerms(regular, bold),
         pw.SizedBox(height: 30),
-        _buildSignature(regular),
+        _buildSignature(
+          regular,
+          bold,
+          offer.company,
+          customerSignature: customerSignature,
+          customerSignatureDate: customerSignatureDate,
+          companySignature: companySignature,
+          companySignatureDate: companySignatureDate,
+        ),
       ],
     ),
   );
@@ -838,25 +858,87 @@ for (int r = 0; r < round.entries.length; r++) {
   // SIGNATURE
   // ============================================================
 
-  static pw.Widget _buildSignature(pw.Font font) {
+  static pw.Widget _buildSignature(
+    pw.Font font,
+    pw.Font bold,
+    String customerCompany, {
+    String? customerSignature,
+    String? customerSignatureDate,
+    String? companySignature,
+    String? companySignatureDate,
+  }) {
     return pw.Padding(
       padding: const pw.EdgeInsets.symmetric(horizontal: 40),
-      child: pw.Column(
-        crossAxisAlignment: pw.CrossAxisAlignment.start,
+      child: pw.Row(
         children: [
-          pw.Text(
-            "Location and date: ____________________________",
-            style: pw.TextStyle(font: font, fontSize: 9),
+          // Company side (CSS)
+          pw.Expanded(
+            child: pw.Column(
+              crossAxisAlignment: pw.CrossAxisAlignment.start,
+              children: [
+                pw.Text(
+                  'For Coach Service Scandinavia',
+                  style: pw.TextStyle(font: bold, fontSize: 10),
+                ),
+                pw.SizedBox(height: 6),
+                if (companySignature != null) ...[
+                  pw.Text(
+                    companySignature,
+                    style: pw.TextStyle(font: bold, fontSize: 14, color: PdfColors.blue900),
+                  ),
+                  pw.SizedBox(height: 4),
+                ] else
+                  pw.SizedBox(height: 24),
+                pw.Container(
+                  height: 1,
+                  decoration: const pw.BoxDecoration(
+                    border: pw.Border(bottom: pw.BorderSide(color: PdfColors.black)),
+                  ),
+                ),
+                pw.SizedBox(height: 4),
+                pw.Text(
+                  companySignature != null
+                      ? '$companySignature  ·  Date: ${companySignatureDate ?? ''}'
+                      : 'Name and title  ·  Date: _______________',
+                  style: pw.TextStyle(font: font, fontSize: 9, color: PdfColors.grey600),
+                ),
+              ],
+            ),
           ),
-          pw.SizedBox(height: 8),
-          pw.Text(
-            "Customer name: _______________________________",
-            style: pw.TextStyle(font: font, fontSize: 9),
-          ),
-          pw.SizedBox(height: 8),
-          pw.Text(
-            "Signature: ___________________________________",
-            style: pw.TextStyle(font: font, fontSize: 9),
+          pw.SizedBox(width: 40),
+          // Customer side
+          pw.Expanded(
+            child: pw.Column(
+              crossAxisAlignment: pw.CrossAxisAlignment.start,
+              children: [
+                pw.Text(
+                  'For ${customerCompany.isNotEmpty ? customerCompany : 'Customer'}',
+                  style: pw.TextStyle(font: bold, fontSize: 10),
+                ),
+                pw.SizedBox(height: 6),
+                if (customerSignature != null) ...[
+                  pw.Text(
+                    customerSignature,
+                    style: pw.TextStyle(font: bold, fontSize: 14, color: PdfColors.blue900),
+                  ),
+                  pw.SizedBox(height: 4),
+                ] else
+                  pw.SizedBox(height: 24),
+                pw.Container(
+                  height: 1,
+                  decoration: const pw.BoxDecoration(
+                    border: pw.Border(bottom: pw.BorderSide(color: PdfColors.black)),
+                  ),
+                ),
+                pw.SizedBox(height: 4),
+                pw.Text(
+                  customerSignature != null
+                      ? '$customerSignature  ·  Date: ${customerSignatureDate ?? ''}'
+                      : 'Name and title  ·  Date: _______________',
+                  style: pw.TextStyle(font: font, fontSize: 9, color: PdfColors.grey600),
+                ),
+              ],
+            ),
           ),
         ],
       ),

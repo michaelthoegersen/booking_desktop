@@ -35,6 +35,13 @@ class AppSettings {
   /// Toll rate per km (NOK/km). Default 2.8.
   final double tollKmRate;
 
+  // ── Complete pricing defaults ──
+  final double creoFeeMinimum;
+  final double extraShowFee;
+  final double markupPct;
+  final double inearPrice;
+  final double transportPricePerKm;
+
   const AppSettings({
     required this.dayPrice,
     required this.extraKmPrice,
@@ -52,6 +59,13 @@ class AppSettings {
     this.graphClientSecret = '',
     this.graphSenderEmail = '',
     this.tollKmRate = 2.8,
+
+    // Complete defaults
+    this.creoFeeMinimum = 5500,
+    this.extraShowFee = 1500,
+    this.markupPct = 0.25,
+    this.inearPrice = 7000,
+    this.transportPricePerKm = 3.50,
 
     /// ✅ NEW
     this.ferries = const [],
@@ -74,6 +88,11 @@ class AppSettings {
     String? graphClientSecret,
     String? graphSenderEmail,
     double? tollKmRate,
+    double? creoFeeMinimum,
+    double? extraShowFee,
+    double? markupPct,
+    double? inearPrice,
+    double? transportPricePerKm,
 
     /// ✅ NEW
     List<FerryDefinition>? ferries,
@@ -95,6 +114,11 @@ class AppSettings {
       graphClientSecret: graphClientSecret ?? this.graphClientSecret,
       graphSenderEmail: graphSenderEmail ?? this.graphSenderEmail,
       tollKmRate: tollKmRate ?? this.tollKmRate,
+      creoFeeMinimum: creoFeeMinimum ?? this.creoFeeMinimum,
+      extraShowFee: extraShowFee ?? this.extraShowFee,
+      markupPct: markupPct ?? this.markupPct,
+      inearPrice: inearPrice ?? this.inearPrice,
+      transportPricePerKm: transportPricePerKm ?? this.transportPricePerKm,
 
       /// ✅ NEW
       ferries: ferries ?? this.ferries,

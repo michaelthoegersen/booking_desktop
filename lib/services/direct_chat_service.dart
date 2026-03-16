@@ -48,12 +48,16 @@ class DirectChatService {
     required String senderName,
     String? replyToId,
     List<String>? mentionedUserIds,
+    String messageType = 'text',
+    String? attachmentUrl,
   }) async {
     await _sb.from('direct_messages').insert({
       'sender_id': _sb.auth.currentUser!.id,
       'receiver_id': peerId,
       'sender_name': senderName,
       'message': message,
+      'message_type': messageType,
+      if (attachmentUrl != null) 'attachment_url': attachmentUrl,
       if (replyToId != null) 'reply_to_id': replyToId,
       if (mentionedUserIds != null && mentionedUserIds.isNotEmpty)
         'mentioned_user_ids': mentionedUserIds,

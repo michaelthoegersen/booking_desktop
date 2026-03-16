@@ -47,6 +47,8 @@ class ChatService {
     String? targetUserId,
     String? replyToId,
     List<String>? mentionedUserIds,
+    String messageType = 'text',
+    String? attachmentUrl,
   }) async {
     await _sb.from('tour_messages').insert({
       'dato': dato,
@@ -56,6 +58,8 @@ class ChatService {
       'message': message,
       'is_admin': true,
       'read_by_admin': true,
+      'message_type': messageType,
+      if (attachmentUrl != null) 'attachment_url': attachmentUrl,
       if (replyToId != null) 'reply_to_id': replyToId,
       if (mentionedUserIds != null && mentionedUserIds.isNotEmpty)
         'mentioned_user_ids': mentionedUserIds,

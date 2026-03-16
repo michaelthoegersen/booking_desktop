@@ -7,6 +7,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:http/http.dart' as http;
+import 'package:intl/intl.dart';
 import 'package:printing/printing.dart';
 import '../services/offer_storage_service.dart';
 import '../state/active_company.dart';
@@ -93,6 +94,11 @@ class _DashboardPageState extends State<DashboardPage> {
 
   final Map<String, String> offerDateCache = {};
 
+  // ------------------------------------------------------------
+  // PENDING OFFER ACCEPTANCES
+  // ------------------------------------------------------------
+
+  List<Map<String, dynamic>> _pendingAcceptances = [];
 
   // ------------------------------------------------------------
   // INIT
@@ -105,6 +111,7 @@ class _DashboardPageState extends State<DashboardPage> {
     _loadRoutesCount();
     _loadRecentOffers();
     _loadBusLocationsToday();
+    _loadPendingAcceptances();
 
     OfferStorageService.recentOffersRefresh
         .addListener(_onRecentRefresh);
@@ -133,10 +140,33 @@ class _DashboardPageState extends State<DashboardPage> {
   void _onCompanyChanged() {
     _loadRecentOffers();
     _loadBusLocationsToday();
+    _loadPendingAcceptances();
   }
 
   void _onRecentRefresh() {
     _loadRecentOffers();
+  }
+
+
+  // ------------------------------------------------------------
+  // PENDING OFFER ACCEPTANCES LOAD
+  // ------------------------------------------------------------
+
+  Future<void> _loadPendingAcceptances() async {
+    try {
+      final res = await sb
+          .from('offer_tokens')
+          .select('*, offers(id, company, contact, production)')
+          .inFilter('status', ['accepted', 'approved'])
+          .order('created_at', ascending: false);
+
+      if (!mounted) return;
+      setState(() {
+        _pendingAcceptances = List<Map<String, dynamic>>.from(res);
+      });
+    } catch (e) {
+      debugPrint('Pending acceptances error: $e');
+    }
   }
 
 
@@ -674,6 +704,21 @@ Future<void> _confirmDeleteDraft(
     );
   }
 
+  /// Shows a dialog with all PDF versions for an offer (sent, accepted, signed).
+  Future<void> _showPdfVersionsDialog(BuildContext context, String offerId, String? offerPdfPath) async {
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => _PdfVersionsDialog(
+        offerId: offerId,
+        offerPdfPath: offerPdfPath,
+        onViewPdf: (url) {
+          Navigator.of(ctx).pop();
+          _showPdfDialog(context, url);
+        },
+      ),
+    );
+  }
+
   // ------------------------------------------------------------
 // BUS MAP SECTION (MapTiler)
 // ------------------------------------------------------------
@@ -805,6 +850,88 @@ Widget build(BuildContext context) {
           flex: 10,
           child: _buildBusMapSection(),
         ),
+
+        // =========================
+        // PENDING OFFER ACCEPTANCES
+        // =========================
+        if (_pendingAcceptances.any((t) => t['status'] == 'accepted')) ...[
+          const SizedBox(height: 12),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: Colors.orange.withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: Colors.orange.withValues(alpha: 0.3)),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    const Icon(Icons.notification_important, color: Colors.orange, size: 20),
+                    const SizedBox(width: 8),
+                    Text(
+                      'Offer status',
+                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w700,
+                        color: Colors.orange.shade800,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                ..._pendingAcceptances.where((t) => t['status'] == 'accepted').map((token) {
+                  final offer = token['offers'] as Map<String, dynamic>?;
+                  final acceptedName = token['accepted_name'] ?? '';
+                  final company = offer?['company'] ?? '';
+                  final production = offer?['production'] ?? '';
+                  final offerId = offer?['id'] as String?;
+                  final label = [acceptedName, company, production]
+                      .where((s) => s.isNotEmpty)
+                      .join(' — ');
+
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: 4),
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(8),
+                      onTap: offerId != null
+                          ? () => context.go('/new/$offerId')
+                          : null,
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 8),
+                        child: Row(
+                          children: [
+                            const Icon(Icons.check_circle_outline, size: 16, color: Colors.orange),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    label,
+                                    style: const TextStyle(fontSize: 13),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                  Text(
+                                    'Awaiting your approval',
+                                    style: TextStyle(fontSize: 11, color: Colors.orange.shade700),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            const Icon(Icons.arrow_forward_ios, size: 12, color: Colors.grey),
+                          ],
+                        ),
+                      ),
+                    ),
+                  );
+                }),
+              ],
+            ),
+          ),
+        ],
 
         const SizedBox(height: 18),
 
@@ -1042,19 +1169,18 @@ Widget build(BuildContext context) {
           ),
         ),
 
-        // PDF + DELETE
+        // PDF VERSIONS + ARCHIVE
         trailing: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            if (row['pdf_path'] != null)
+            if (id.isNotEmpty)
               IconButton(
                 icon: const Icon(Icons.picture_as_pdf, color: Colors.red),
-                tooltip: 'View PDF',
-                onPressed: () => _showPdfDialog(
+                tooltip: 'PDF versions',
+                onPressed: () => _showPdfVersionsDialog(
                   context,
-                  OfferStorageService.getPdfUrl(
-                    row['pdf_path'] as String,
-                  ),
+                  id,
+                  row['pdf_path'] as String?,
                 ),
               ),
             IconButton(
@@ -1197,6 +1323,180 @@ class _PdfViewDialogState extends State<_PdfViewDialog> {
           ],
         ),
       ),
+    );
+  }
+}
+
+// ============================================================
+// PDF VERSIONS DIALOG
+// ============================================================
+
+class _PdfVersionsDialog extends StatefulWidget {
+  final String offerId;
+  final String? offerPdfPath;
+  final void Function(String url) onViewPdf;
+
+  const _PdfVersionsDialog({
+    required this.offerId,
+    required this.offerPdfPath,
+    required this.onViewPdf,
+  });
+
+  @override
+  State<_PdfVersionsDialog> createState() => _PdfVersionsDialogState();
+}
+
+class _PdfVersionsDialogState extends State<_PdfVersionsDialog> {
+  final _sb = Supabase.instance.client;
+  List<Map<String, dynamic>> _tokens = [];
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    try {
+      final res = await _sb
+          .from('offer_tokens')
+          .select()
+          .eq('offer_id', widget.offerId)
+          .order('created_at', ascending: false);
+      if (mounted) {
+        setState(() {
+          _tokens = List<Map<String, dynamic>>.from(res);
+          _loading = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  String _pdfUrl(String path) {
+    final base = _sb.storage.from('offers-pdf').getPublicUrl(path);
+    return '$base?t=${DateTime.now().millisecondsSinceEpoch}';
+  }
+
+  String _offerPdfUrl(String path) {
+    return OfferStorageService.getPdfUrl(path);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final hasOfferPdf = widget.offerPdfPath != null;
+    final hasTokens = _tokens.isNotEmpty;
+
+    return AlertDialog(
+      title: const Text('PDF Versions'),
+      content: SizedBox(
+        width: 440,
+        child: _loading
+            ? const Center(child: Padding(padding: EdgeInsets.all(20), child: CircularProgressIndicator()))
+            : !hasOfferPdf && !hasTokens
+                ? const Padding(
+                    padding: EdgeInsets.all(16),
+                    child: Text('No PDFs have been generated yet.', style: TextStyle(color: Colors.grey)),
+                  )
+                : SingleChildScrollView(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        // Saved offer PDF
+                        if (hasOfferPdf) ...[
+                          ListTile(
+                            contentPadding: EdgeInsets.zero,
+                            leading: const Icon(Icons.description, color: Colors.blue),
+                            title: const Text('Saved offer', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
+                            subtitle: const Text('Latest saved version', style: TextStyle(fontSize: 12)),
+                            trailing: IconButton(
+                              icon: const Icon(Icons.open_in_new, size: 18),
+                              onPressed: () => widget.onViewPdf(_offerPdfUrl(widget.offerPdfPath!)),
+                            ),
+                          ),
+                          if (hasTokens) const Divider(),
+                        ],
+
+                        // Sent offer tokens with PDFs
+                        ..._tokens.map((token) {
+                          final status = token['status'] as String? ?? 'pending';
+                          final email = token['customer_email'] as String? ?? '';
+                          final pdfPath = token['pdf_path'] as String?;
+                          final signedPath = token['signed_pdf_path'] as String?;
+                          final acceptedName = token['accepted_name'] as String?;
+                          final createdAt = token['created_at'] as String?;
+                          final date = createdAt != null
+                              ? DateFormat('dd.MM.yyyy').format(DateTime.parse(createdAt))
+                              : '';
+
+                          final isApproved = status == 'approved';
+                          final showSigned = signedPath != null;
+                          final showOriginal = pdfPath != null && !isApproved;
+
+                          IconData statusIcon;
+                          Color statusColor;
+                          String statusLabel;
+                          switch (status) {
+                            case 'approved':
+                              statusIcon = Icons.verified;
+                              statusColor = Colors.green;
+                              statusLabel = 'Signed by both parties';
+                            case 'accepted':
+                              statusIcon = Icons.check_circle;
+                              statusColor = Colors.orange;
+                              statusLabel = 'Accepted by ${acceptedName ?? email}';
+                            default:
+                              statusIcon = Icons.send;
+                              statusColor = Colors.blue;
+                              statusLabel = 'Sent to $email';
+                          }
+
+                          return Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              ListTile(
+                                contentPadding: EdgeInsets.zero,
+                                leading: Icon(statusIcon, color: statusColor),
+                                title: Text(statusLabel, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+                                subtitle: Text('$date · $email', style: const TextStyle(fontSize: 11, color: Colors.grey)),
+                                trailing: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    if (showOriginal)
+                                      Tooltip(
+                                        message: 'Original offer',
+                                        child: IconButton(
+                                          icon: const Icon(Icons.picture_as_pdf, size: 18, color: Colors.red),
+                                          onPressed: () => widget.onViewPdf(_pdfUrl(pdfPath!)),
+                                        ),
+                                      ),
+                                    if (showSigned)
+                                      Tooltip(
+                                        message: 'Signed version',
+                                        child: IconButton(
+                                          icon: const Icon(Icons.verified, size: 18, color: Colors.green),
+                                          onPressed: () => widget.onViewPdf(_pdfUrl(signedPath!)),
+                                        ),
+                                      ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          );
+                        }),
+                      ],
+                    ),
+                  ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Close'),
+        ),
+      ],
     );
   }
 }

@@ -12,10 +12,14 @@ import '../services/offer_storage_service.dart';
 import '../services/notification_service.dart';
 import '../services/email_service.dart';
 import '../services/round_summary_pdf_service.dart';
+import '../services/calendar_file_service.dart';
+import '../services/calendar_pdf_service.dart';
 import '../state/settings_store.dart';
 import '../utils/bus_utils.dart';
 import '../utils/company_vehicles.dart';
 import '../state/active_company.dart';
+import 'package:file_picker/file_picker.dart';
+import 'dart:io';
 
 // ============================================================
 // HELPERS
@@ -530,6 +534,15 @@ FilledButton.icon(
   onPressed: _openManualBlockDialog,
   icon: const Icon(Icons.add),
   label: const Text("Block"),
+),
+
+const SizedBox(width: 8),
+
+// 📤 EXPORT
+OutlinedButton.icon(
+  onPressed: _openExportDialog,
+  icon: const Icon(Icons.picture_as_pdf, size: 18),
+  label: const Text("Export"),
 ),
 
 const SizedBox(width: 12),
@@ -1294,6 +1307,109 @@ List<Widget> buildSegments(
     }
   }
 
+  Future<void> _sendWaitingListInfo(Map<String, dynamic> item) async {
+    try {
+      final production = (item['production'] ?? '—').toString();
+      final contact = (item['contact'] ?? '').toString();
+      final draftId = item['draft_id']?.toString();
+
+      // Fetch samletdata rows and pickup evening flag if draft-backed
+      final dayList = <Map<String, dynamic>>[];
+      bool pickupEvening = false;
+      final roundIdx = item['round_index'];
+
+      if (draftId != null && draftId.isNotEmpty) {
+        var query = supabase
+            .from('samletdata')
+            .select()
+            .eq('draft_id', draftId)
+            .eq('kilde', 'WAITING_LIST');
+        if (roundIdx != null) {
+          final ri = roundIdx is int ? roundIdx : (roundIdx as num).toInt();
+          query = query.eq('round_index', ri);
+        }
+        final rows = await query.order('dato', ascending: true);
+        for (final r in rows) {
+          dayList.add({
+            'dato': r['dato'] ?? '',
+            'sted': r['sted'] ?? '',
+            'venue': r['venue'] ?? '',
+            'adresse': r['adresse'] ?? '',
+            'getin': r['getin'] ?? '',
+            'd_drive': r['d_drive'] ?? '',
+            'kommentarer': r['kommentarer'] ?? '',
+          });
+        }
+
+        // Lookup pickupEveningFirstDay from draft
+        try {
+          final draft = await OfferStorageService.loadDraft(draftId);
+          final ri = roundIdx is int
+              ? roundIdx
+              : (roundIdx as num?)?.toInt() ?? 0;
+          if (ri < draft.rounds.length) {
+            pickupEvening = draft.rounds[ri].pickupEveningFirstDay;
+          }
+        } catch (_) {}
+      }
+
+      // Fallback: generate day entries from date range
+      if (dayList.isEmpty &&
+          item['date_from'] != null &&
+          item['date_to'] != null) {
+        var d = DateTime.parse(item['date_from']);
+        final end = DateTime.parse(item['date_to']);
+        while (!d.isAfter(end)) {
+          dayList.add({'dato': fmtDb(d), 'sted': '', 'venue': '',
+            'adresse': '', 'getin': '', 'd_drive': '', 'kommentarer': ''});
+          d = d.add(const Duration(days: 1));
+        }
+      }
+
+      final bytes = await RoundSummaryPdfService.generate(
+        production: production,
+        bus: '',
+        driver: '',
+        status: '',
+        contactName: contact,
+        contactEmail: '',
+        contactPhone: '',
+        days: dayList,
+        pickupEveningFirstDay: pickupEvening,
+      );
+
+      final fromStr = item['date_from'] != null
+          ? DateFormat('dd.MM.yy').format(DateTime.parse(item['date_from']))
+          : '';
+      final toStr = item['date_to'] != null
+          ? DateFormat('dd.MM.yy').format(DateTime.parse(item['date_to']))
+          : '';
+      final safeProd = production.replaceAll(RegExp(r'[^\w\s-]'), '');
+      final filename = 'Tour Schedule $safeProd $fromStr-$toStr.pdf';
+
+      if (!mounted) return;
+
+      await showDialog<void>(
+        context: context,
+        builder: (_) => _SendRoundSummaryDialog(
+          initialTo: contact,
+          initialSubject:
+              'Tour schedule — $production — $fromStr – $toStr',
+          bytes: bytes,
+          filename: filename,
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Could not prepare tour schedule: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
   Future<void> _deleteWaitingListItem(Map<String, dynamic> item) async {
     final id = item['id'].toString();
     final draftId = item['draft_id']?.toString();
@@ -1452,6 +1568,13 @@ List<Widget> buildSegments(
                             children: [
                               OutlinedButton.icon(
                                 onPressed: () =>
+                                    _sendWaitingListInfo(item),
+                                icon: const Icon(Icons.send, size: 16),
+                                label: const Text("Send info"),
+                              ),
+                              const SizedBox(width: 8),
+                              OutlinedButton.icon(
+                                onPressed: () =>
                                     _openAssignToBusDialog(item),
                                 icon: const Icon(Icons.directions_bus,
                                     size: 16),
@@ -1488,6 +1611,17 @@ List<Widget> buildSegments(
     isMonthView ? loadMonth() : loadWeek();
   }
 }
+
+  Future<void> _openExportDialog() async {
+    await showDialog<void>(
+      context: context,
+      builder: (_) => _CalendarExportDialog(
+        allBuses: buses,
+        currentMonth: monthStart,
+        calendarData: data,
+      ),
+    );
+  }
   }
 
   class _StatusDot extends StatelessWidget {
@@ -1998,6 +2132,7 @@ class _EditCalendarDialogState extends State<EditCalendarDialog> {
 
   final List<Map<String, dynamic>> rows = [];
 
+  List<Map<String, dynamic>> _attachments = [];
 
   bool loading = true;
   bool saving = false;
@@ -2128,10 +2263,15 @@ Future<void> load() async {
   }
 
 
+  // Load attachments for all days
+  final allIds = list.map((r) => r['id'].toString()).toList();
+  final atts = await CalendarFileService.getFilesForIds(allIds);
+
   if (mounted) {
     setState(() {
+      _attachments = atts;
       loading = false;
-      activeIndex = 0; // ✅ start alltid på dag 1
+      activeIndex = 0;
     });
   }
 }
@@ -2162,6 +2302,22 @@ Future<void> load() async {
       final contactEmail = contactEmailCtrl.text.trim();
       final contactPhone = contactPhoneCtrl.text.trim();
 
+      // Lookup pickupEveningFirstDay from draft
+      bool pickupEvening = false;
+      final draftId = rows.isNotEmpty ? rows.first['draft_id']?.toString() : null;
+      final roundIndex = rows.isNotEmpty ? rows.first['round_index'] : null;
+      if (draftId != null && draftId.isNotEmpty) {
+        try {
+          final draft = await OfferStorageService.loadDraft(draftId);
+          final ri = roundIndex is int
+              ? roundIndex
+              : (roundIndex as num?)?.toInt() ?? 0;
+          if (ri < draft.rounds.length) {
+            pickupEvening = draft.rounds[ri].pickupEveningFirstDay;
+          }
+        } catch (_) {}
+      }
+
       final bytes = await RoundSummaryPdfService.generate(
         production: widget.production,
         bus: widget.bus,
@@ -2171,6 +2327,7 @@ Future<void> load() async {
         contactEmail: contactEmail,
         contactPhone: contactPhone,
         days: dayList,
+        pickupEveningFirstDay: pickupEvening,
       );
 
       final fromStr = fmt(widget.from);
@@ -2540,6 +2697,70 @@ Future<void> load() async {
                     _dayField("Venue", venueCtrls),
                     _multiDayField("Address", addrCtrls),
                     _multiDayField("Comment", commentCtrls),
+
+                    // ── Attachments for active day ──
+                    if (rows.isNotEmpty) ...[
+                      Builder(builder: (_) {
+                        final dayId = rows[activeIndex]['id'].toString();
+                        final dayFiles = _attachments
+                            .where((a) => a['samletdata_id'] == dayId)
+                            .toList();
+                        if (dayFiles.isEmpty) return const SizedBox.shrink();
+                        return Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Divider(),
+                            const SizedBox(height: 4),
+                            Text("Vedlegg",
+                                style: TextStyle(
+                                    fontWeight: FontWeight.w600,
+                                    fontSize: 13,
+                                    color: Colors.grey.shade600)),
+                            const SizedBox(height: 4),
+                            ...dayFiles.map((a) => Padding(
+                                  padding: const EdgeInsets.only(bottom: 4),
+                                  child: Row(
+                                    children: [
+                                      Icon(
+                                        a['file_type'] == 'image'
+                                            ? Icons.image
+                                            : a['file_type'] == 'pdf'
+                                                ? Icons.picture_as_pdf
+                                                : Icons.attach_file,
+                                        size: 16,
+                                        color: Colors.grey.shade700,
+                                      ),
+                                      const SizedBox(width: 6),
+                                      Expanded(
+                                        child: Text(
+                                          a['file_name'] ?? 'fil',
+                                          style: const TextStyle(fontSize: 13),
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                      ),
+                                      InkWell(
+                                        onTap: () async {
+                                          await CalendarFileService.deleteFile(
+                                              a['id']);
+                                          final ids = rows
+                                              .map((r) =>
+                                                  r['id'].toString())
+                                              .toList();
+                                          final fresh =
+                                              await CalendarFileService
+                                                  .getFilesForIds(ids);
+                                          setState(() => _attachments = fresh);
+                                        },
+                                        child: const Icon(Icons.close,
+                                            size: 16, color: Colors.red),
+                                      ),
+                                    ],
+                                  ),
+                                )),
+                          ],
+                        );
+                      }),
+                    ],
                   ],
                 ),
               ),
@@ -2583,6 +2804,54 @@ Future<void> load() async {
         Navigator.pop(context, true);
       },
     ),
+
+  OutlinedButton.icon(
+    icon: const Icon(Icons.attach_file, size: 18),
+    label: const Text("Vedlegg"),
+    onPressed: rows.isEmpty
+        ? null
+        : () async {
+            final result = await FilePicker.platform.pickFiles(
+              withData: true,
+              allowMultiple: true,
+            );
+            if (result == null || result.files.isEmpty) return;
+            final dayId = rows[activeIndex]['id'].toString();
+            int uploaded = 0;
+            for (final file in result.files) {
+              try {
+                Uint8List? bytes = file.bytes;
+                if (bytes == null && file.path != null) {
+                  bytes = await File(file.path!).readAsBytes();
+                }
+                if (bytes == null || bytes.isEmpty) {
+                  debugPrint('⚠️ Vedlegg: tom fil ${file.name}');
+                  continue;
+                }
+                debugPrint('📎 Laster opp ${file.name} (${bytes.length} bytes) for dag $dayId');
+                await CalendarFileService.uploadFile(
+                  samletdataId: dayId,
+                  bytes: bytes,
+                  fileName: file.name,
+                  contentType: _guessContentType(file.name),
+                );
+                uploaded++;
+              } catch (e) {
+                debugPrint('❌ Vedlegg-feil: $e');
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('Feil ved opplasting av ${file.name}: $e')),
+                  );
+                }
+              }
+            }
+            if (uploaded > 0) {
+              final ids = rows.map((r) => r['id'].toString()).toList();
+              final fresh = await CalendarFileService.getFilesForIds(ids);
+              setState(() => _attachments = fresh);
+            }
+          },
+  ),
 
   OutlinedButton.icon(
     icon: const Icon(Icons.copy),
@@ -2756,6 +3025,16 @@ Future<void> load() async {
         ),
       ),
     );
+  }
+
+  static String _guessContentType(String name) {
+    final l = name.toLowerCase();
+    if (l.endsWith('.jpg') || l.endsWith('.jpeg')) return 'image/jpeg';
+    if (l.endsWith('.png')) return 'image/png';
+    if (l.endsWith('.gif')) return 'image/gif';
+    if (l.endsWith('.webp')) return 'image/webp';
+    if (l.endsWith('.pdf')) return 'application/pdf';
+    return 'application/octet-stream';
   }
 }
 // ============================================================
@@ -3910,7 +4189,23 @@ class _SendRoundSummaryDialogState extends State<_SendRoundSummaryDialog> {
 
   Future<void> _loadProfiles() async {
     try {
-      final rows = await sb.from('profiles').select('name, email');
+      final companyId = activeCompanyNotifier.value?.id;
+      if (companyId == null) return;
+
+      final members = await sb
+          .from('company_members')
+          .select('user_id')
+          .eq('company_id', companyId);
+      final userIds = (members as List)
+          .map((r) => r['user_id'] as String)
+          .toList();
+      if (userIds.isEmpty) return;
+
+      final rows = await sb
+          .from('profiles')
+          .select('name, email')
+          .inFilter('id', userIds);
+
       final list = <Map<String, String>>[];
       for (final r in rows) {
         final email = (r['email'] ?? '').toString().trim();
@@ -4155,6 +4450,592 @@ class _SendRoundSummaryDialogState extends State<_SendRoundSummaryDialog> {
               : const Text('Send'),
         ),
       ],
+    );
+  }
+}
+
+// ============================================================
+// CALENDAR EXPORT DIALOG
+// ============================================================
+
+class _CalendarExportDialog extends StatefulWidget {
+  final List<String> allBuses;
+  final DateTime currentMonth;
+  final Map<String, Map<DateTime, List<Map<String, dynamic>>>> calendarData;
+
+  const _CalendarExportDialog({
+    required this.allBuses,
+    required this.currentMonth,
+    required this.calendarData,
+  });
+
+  @override
+  State<_CalendarExportDialog> createState() => _CalendarExportDialogState();
+}
+
+class _CalendarExportDialogState extends State<_CalendarExportDialog> {
+  final sb = Supabase.instance.client;
+
+  late Set<String> _selectedBuses;
+  late DateTime _fromMonth;
+  late DateTime _toMonth;
+
+  final _emailInputCtrl = TextEditingController();
+  final _subjectCtrl = TextEditingController();
+  final _messageCtrl = TextEditingController();
+  final _emailFocus = FocusNode();
+
+  List<String> _recipients = [];
+  List<Map<String, String>> _allProfiles = [];
+  List<Map<String, String>> _suggestions = [];
+
+  bool _sending = false;
+
+  // Step: 0 = select buses/months, 1 = email
+  int _step = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _selectedBuses = Set.from(widget.allBuses.where((b) => b != 'Conference'));
+    _fromMonth = DateTime(widget.currentMonth.year, widget.currentMonth.month, 1);
+    _toMonth = DateTime(widget.currentMonth.year, widget.currentMonth.month, 1);
+    _updateSubject();
+    _loadProfiles();
+  }
+
+  @override
+  void dispose() {
+    _emailInputCtrl.dispose();
+    _subjectCtrl.dispose();
+    _messageCtrl.dispose();
+    _emailFocus.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadProfiles() async {
+    try {
+      final companyId = activeCompanyNotifier.value?.id;
+      if (companyId == null) return;
+
+      // Load members of this company only
+      final members = await sb
+          .from('company_members')
+          .select('user_id')
+          .eq('company_id', companyId);
+      final userIds = (members as List)
+          .map((r) => r['user_id'] as String)
+          .toList();
+      if (userIds.isEmpty) return;
+
+      final rows = await sb
+          .from('profiles')
+          .select('name, email')
+          .inFilter('id', userIds);
+
+      final list = <Map<String, String>>[];
+      for (final r in rows) {
+        final email = (r['email'] ?? '').toString().trim();
+        if (email.isNotEmpty) {
+          list.add({
+            'name': (r['name'] ?? '').toString(),
+            'email': email,
+          });
+        }
+      }
+      if (mounted) setState(() => _allProfiles = list);
+    } catch (_) {}
+  }
+
+  void _onSearchChanged(String query) {
+    if (query.trim().isEmpty) {
+      setState(() => _suggestions = []);
+      return;
+    }
+    final q = query.toLowerCase();
+    setState(() {
+      _suggestions = _allProfiles
+          .where((p) =>
+              !_recipients.contains(p['email']) &&
+              (p['name']!.toLowerCase().contains(q) ||
+               p['email']!.toLowerCase().contains(q)))
+          .take(5)
+          .toList();
+    });
+  }
+
+  void _addRecipient(String email) {
+    final trimmed = email.trim();
+    if (trimmed.isEmpty || _recipients.contains(trimmed)) return;
+    setState(() {
+      _recipients.add(trimmed);
+      _emailInputCtrl.clear();
+      _suggestions = [];
+    });
+  }
+
+  void _removeRecipient(String email) {
+    setState(() => _recipients.remove(email));
+  }
+
+  void _handleEmailSubmit(String value) {
+    for (final part in value.split(RegExp(r'[,;\s]+'))) {
+      final trimmed = part.trim();
+      if (trimmed.isNotEmpty) _addRecipient(trimmed);
+    }
+    _emailInputCtrl.clear();
+  }
+
+  Future<void> _generateAndSend() async {
+    if (_recipients.isEmpty) return;
+    final to = _recipients.join(', ');
+
+    setState(() => _sending = true);
+
+    try {
+      // Load full data range
+      final sb = Supabase.instance.client;
+      final cid = activeCompanyNotifier.value?.id;
+      final start = DateTime(_fromMonth.year, _fromMonth.month, 1);
+      final end = DateTime(_toMonth.year, _toMonth.month + 1, 0);
+
+      var query = sb
+          .from('samletdata')
+          .select()
+          .gte('dato', DateFormat('yyyy-MM-dd').format(start))
+          .lte('dato', DateFormat('yyyy-MM-dd').format(end));
+      if (cid != null) {
+        query = query.eq('owner_company_id', cid);
+      }
+      final res = await query;
+
+      final rows = List<Map<String, dynamic>>.from(res);
+      final fullData = <String, Map<DateTime, List<Map<String, dynamic>>>>{};
+
+      for (final r in rows) {
+        final bus = r['kilde']?.toString();
+        final dateStr = r['dato'];
+        if (bus == null || dateStr == null) continue;
+        final parsed = DateTime.parse(dateStr).toUtc();
+        final date = DateTime.utc(parsed.year, parsed.month, parsed.day);
+
+        fullData.putIfAbsent(bus, () => {});
+        fullData[bus]!.putIfAbsent(date, () => []);
+        fullData[bus]![date]!.add(r);
+      }
+
+      final companyName = activeCompanyNotifier.value?.name ?? 'Calendar';
+
+      // Include waiting list as an extra row if data exists
+      final busList = _selectedBuses.toList();
+      if (fullData.containsKey('WAITING_LIST') && !busList.contains('WAITING_LIST')) {
+        busList.add('WAITING_LIST');
+      }
+
+      final pdfBytes = await CalendarPdfService.generate(
+        buses: busList,
+        fromMonth: _fromMonth,
+        toMonth: _toMonth,
+        data: fullData,
+        companyName: companyName,
+      );
+
+      // Build email
+      final subject = _subjectCtrl.text.trim();
+      final message = _messageCtrl.text.trim();
+      final companyId = activeCompanyNotifier.value?.id;
+      final signature = await EmailService.getEmailSignature(companyId: companyId);
+
+      final htmlBody = '''
+<div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 600px; margin: 0 auto;">
+  <div style="background: #1a1a1a; padding: 24px 32px; border-radius: 8px 8px 0 0;">
+    <h1 style="color: white; font-size: 20px; margin: 0;">Calendar Export</h1>
+    <p style="color: #aaa; font-size: 14px; margin: 4px 0 0;">$companyName</p>
+  </div>
+  <div style="background: #ffffff; padding: 28px 32px; border: 1px solid #eee; border-top: none;">
+    ${message.isNotEmpty ? '<p style="font-size: 15px; color: #333; line-height: 1.6;">$message</p>' : '<p style="font-size: 15px; color: #333; line-height: 1.6;">Please find the calendar overview attached.</p>'}
+  </div>
+  <div style="padding: 16px 32px; background: #1a1a1a; border-radius: 0 0 8px 8px;">
+    $signature
+  </div>
+</div>
+''';
+
+      final safeMonth = DateFormat('yyyy_MM').format(_fromMonth);
+      final filename = 'Calendar_${companyName.replaceAll(' ', '_')}_$safeMonth.pdf';
+
+      await EmailService.sendEmailWithAttachment(
+        to: to,
+        subject: subject,
+        body: htmlBody,
+        attachmentBytes: pdfBytes,
+        attachmentFilename: filename,
+        isHtml: true,
+        companyId: companyId,
+      );
+
+      if (mounted) {
+        Navigator.pop(context);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Calendar sent to $to'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to send: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _sending = false);
+    }
+  }
+
+  void _updateSubject() {
+    final companyName = activeCompanyNotifier.value?.name ?? '';
+    final from = DateFormat('MMM yyyy').format(_fromMonth);
+    final to = DateFormat('MMM yyyy').format(_toMonth);
+    _subjectCtrl.text = _fromMonth == _toMonth
+        ? 'Calendar Export — $companyName — $from'
+        : 'Calendar Export — $companyName — $from to $to';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+
+    if (_step == 0) {
+      return _buildSelectStep(cs);
+    } else {
+      return _buildEmailStep(cs);
+    }
+  }
+
+  Widget _buildSelectStep(ColorScheme cs) {
+    return AlertDialog(
+      title: const Text('Export Calendar'),
+      content: SizedBox(
+        width: 500,
+        child: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // Month range
+              const Text('Month range', style: TextStyle(fontWeight: FontWeight.w700)),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Expanded(
+                    child: _MonthPicker(
+                      label: 'From',
+                      value: _fromMonth,
+                      onChanged: (d) {
+                        setState(() {
+                          _fromMonth = d;
+                          if (_toMonth.isBefore(_fromMonth)) _toMonth = _fromMonth;
+                        });
+                        _updateSubject();
+                      },
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: _MonthPicker(
+                      label: 'To',
+                      value: _toMonth,
+                      onChanged: (d) {
+                        setState(() {
+                          _toMonth = d;
+                          if (_fromMonth.isAfter(_toMonth)) _fromMonth = _toMonth;
+                        });
+                        _updateSubject();
+                      },
+                    ),
+                  ),
+                ],
+              ),
+
+              const SizedBox(height: 20),
+
+              // Bus selection
+              Row(
+                children: [
+                  const Text('Buses', style: TextStyle(fontWeight: FontWeight.w700)),
+                  const Spacer(),
+                  TextButton(
+                    onPressed: () => setState(() => _selectedBuses = Set.from(widget.allBuses)),
+                    child: const Text('All', style: TextStyle(fontSize: 12)),
+                  ),
+                  TextButton(
+                    onPressed: () => setState(() => _selectedBuses.clear()),
+                    child: const Text('None', style: TextStyle(fontSize: 12)),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 4),
+              Wrap(
+                spacing: 6,
+                runSpacing: 4,
+                children: widget.allBuses.map((bus) {
+                  final selected = _selectedBuses.contains(bus);
+                  return FilterChip(
+                    label: Text(
+                      formatBusName(bus),
+                      style: const TextStyle(fontSize: 12),
+                    ),
+                    selected: selected,
+                    onSelected: (v) {
+                      setState(() {
+                        if (v) {
+                          _selectedBuses.add(bus);
+                        } else {
+                          _selectedBuses.remove(bus);
+                        }
+                      });
+                    },
+                  );
+                }).toList(),
+              ),
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
+        FilledButton.icon(
+          onPressed: _selectedBuses.isEmpty
+              ? null
+              : () => setState(() => _step = 1),
+          icon: const Icon(Icons.arrow_forward, size: 16),
+          label: const Text('Next'),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildEmailStep(ColorScheme cs) {
+    return AlertDialog(
+      title: Row(
+        children: [
+          IconButton(
+            icon: const Icon(Icons.arrow_back, size: 20),
+            onPressed: () => setState(() => _step = 0),
+          ),
+          const Text('Send Calendar'),
+        ],
+      ),
+      content: SizedBox(
+        width: 500,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Summary
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: cs.surfaceContainerHighest,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  '${_selectedBuses.length} buses · '
+                  '${DateFormat('MMM yyyy').format(_fromMonth)}'
+                  '${_fromMonth != _toMonth ? ' — ${DateFormat('MMM yyyy').format(_toMonth)}' : ''}',
+                  style: const TextStyle(fontSize: 13),
+                ),
+              ),
+              const SizedBox(height: 16),
+
+              // To field with chips + autocomplete
+              InputDecorator(
+                decoration: const InputDecoration(
+                  labelText: 'To',
+                  border: OutlineInputBorder(),
+                  contentPadding: EdgeInsets.fromLTRB(8, 8, 8, 8),
+                  floatingLabelBehavior: FloatingLabelBehavior.always,
+                ),
+                child: Wrap(
+                  spacing: 4,
+                  runSpacing: 4,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    ..._recipients.map((email) {
+                      final profile = _allProfiles
+                          .where((p) => p['email'] == email)
+                          .firstOrNull;
+                      final label = profile != null && profile['name']!.isNotEmpty
+                          ? profile['name']!
+                          : email;
+                      return Chip(
+                        label: Text(label, style: const TextStyle(fontSize: 12)),
+                        deleteIcon: const Icon(Icons.close, size: 14),
+                        onDeleted: () => _removeRecipient(email),
+                        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        visualDensity: VisualDensity.compact,
+                        padding: EdgeInsets.zero,
+                        labelPadding: const EdgeInsets.symmetric(horizontal: 6),
+                      );
+                    }),
+                    IntrinsicWidth(
+                      child: ConstrainedBox(
+                        constraints: const BoxConstraints(minWidth: 120),
+                        child: TextField(
+                          controller: _emailInputCtrl,
+                          focusNode: _emailFocus,
+                          decoration: const InputDecoration(
+                            hintText: 'Name or email...',
+                            border: InputBorder.none,
+                            isDense: true,
+                            contentPadding: EdgeInsets.symmetric(vertical: 8),
+                          ),
+                          style: const TextStyle(fontSize: 13),
+                          onChanged: _onSearchChanged,
+                          onSubmitted: (v) {
+                            _handleEmailSubmit(v);
+                            _emailFocus.requestFocus();
+                          },
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
+              // Suggestions dropdown
+              if (_suggestions.isNotEmpty)
+                Container(
+                  constraints: const BoxConstraints(maxHeight: 160),
+                  margin: const EdgeInsets.only(top: 2),
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).colorScheme.surface,
+                    border: Border.all(color: Colors.grey.shade300),
+                    borderRadius: BorderRadius.circular(4),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.1),
+                        blurRadius: 4,
+                        offset: const Offset(0, 2),
+                      ),
+                    ],
+                  ),
+                  child: ListView.builder(
+                    shrinkWrap: true,
+                    itemCount: _suggestions.length,
+                    itemBuilder: (_, i) {
+                      final s = _suggestions[i];
+                      return ListTile(
+                        dense: true,
+                        visualDensity: VisualDensity.compact,
+                        title: Text(s['name']!, style: const TextStyle(fontSize: 13)),
+                        subtitle: Text(s['email']!, style: const TextStyle(fontSize: 11)),
+                        onTap: () {
+                          _addRecipient(s['email']!);
+                          _emailFocus.requestFocus();
+                        },
+                      );
+                    },
+                  ),
+                ),
+
+              const SizedBox(height: 12),
+              TextField(
+                controller: _subjectCtrl,
+                decoration: const InputDecoration(
+                  labelText: 'Subject',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: _messageCtrl,
+                maxLines: 3,
+                decoration: const InputDecoration(
+                  labelText: 'Message (optional)',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: _sending ? null : () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
+        FilledButton.icon(
+          onPressed: _sending || _recipients.isEmpty
+              ? null
+              : _generateAndSend,
+          icon: _sending
+              ? const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                )
+              : const Icon(Icons.send, size: 16),
+          label: Text(_sending ? 'Sending...' : 'Send'),
+        ),
+      ],
+    );
+  }
+}
+
+// ============================================================
+// MONTH PICKER HELPER
+// ============================================================
+
+class _MonthPicker extends StatelessWidget {
+  final String label;
+  final DateTime value;
+  final ValueChanged<DateTime> onChanged;
+
+  const _MonthPicker({
+    required this.label,
+    required this.value,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(8),
+      onTap: () async {
+        final now = DateTime.now();
+        final picked = await showDatePicker(
+          context: context,
+          initialDate: DateTime(value.year, value.month, 15),
+          firstDate: DateTime(now.year - 2),
+          lastDate: DateTime(now.year + 2),
+          initialEntryMode: DatePickerEntryMode.calendarOnly,
+        );
+        if (picked != null) {
+          onChanged(DateTime(picked.year, picked.month, 1));
+        }
+      },
+      child: InputDecorator(
+        decoration: InputDecoration(
+          labelText: label,
+          border: const OutlineInputBorder(),
+          suffixIcon: const Icon(Icons.calendar_month, size: 18),
+        ),
+        child: Text(
+          DateFormat('MMMM yyyy').format(value),
+          style: const TextStyle(fontSize: 14),
+        ),
+      ),
     );
   }
 }

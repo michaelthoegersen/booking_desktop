@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:math';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -8,11 +7,14 @@ import 'package:intl/intl.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../services/brreg_service.dart';
+import '../../services/email_service.dart';
 import '../../services/google_routes_service.dart';
+import '../../services/intensjonsavtale_pdf_service.dart';
 import '../../services/polyline_decoder.dart';
 import '../../services/toll_service.dart';
 import '../../services/tripletex_service.dart';
 import '../../state/active_company.dart';
+import '../../state/settings_store.dart';
 import '../../widgets/new_company_dialog.dart';
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -54,14 +56,11 @@ class _GigOfferPageState extends State<GigOfferPage> {
   final _addressCtrl = TextEditingController();
   bool _invoiceOnEhf = false;
 
-  // ── Location ──────────────────────────────────────────────────────────────
-  final _venueCtrl = TextEditingController();
-  final _cityCtrl = TextEditingController();
-  final _countryCtrl = TextEditingController(text: 'NO');
+  // ── Multi-date entries ───────────────────────────────────────────────────
+  List<_DateEntry> _dateEntries = [_DateEntry()];
+  Set<String> _originalGigIds = {}; // track gigs loaded at start for deletion
 
-  // ── Dates & status ────────────────────────────────────────────────────────
-  DateTime? _dateFrom;
-  DateTime? _dateTo;
+  // ── Status ──────────────────────────────────────────────────────────────
   String _gigStatus = 'inquiry';
   DateTime? _invoicedAt;
   final _responsibleCtrl = TextEditingController();
@@ -89,15 +88,15 @@ class _GigOfferPageState extends State<GigOfferPage> {
   final _notesCtrl = TextEditingController();
 
   // ── Price parameters ──────────────────────────────────────────────────────
-  double _creoFeeMinimum = 5500;
-  double _extraShowFee = 1500;
-  double _markupPct = 0.25;
+  double _creoFeeMinimum = SettingsStore.current.creoFeeMinimum;
+  double _extraShowFee = SettingsStore.current.extraShowFee;
+  double _markupPct = SettingsStore.current.markupPct;
   bool _inearIncluded = false;
-  double _inearPrice = 7000;
+  double _inearPrice = SettingsStore.current.inearPrice;
   double _transportPrice = 0;
   final _transportPriceCtrl = TextEditingController(text: '0');
   int _transportKm = 0;
-  double _transportPricePerKm = 3.50;
+  double _transportPricePerKm = SettingsStore.current.transportPricePerKm;
   bool _privatbilExpanded = false;
 
   // ── Transport route calculator ──────────────────────────────────────────
@@ -114,6 +113,16 @@ class _GigOfferPageState extends State<GigOfferPage> {
   List<_OfferShow> _shows = [];
   List<Map<String, dynamic>> _showTypes = [];
 
+  // ── Rehearsals ──────────────────────────────────────────────────────────
+  int _rehearsalPerformers = 0;
+  int _rehearsalCount = 0;
+  double _rehearsalPricePerPerson = 0;
+  double _rehearsalTransport = 0;
+  final _rehearsalTransportCtrl = TextEditingController(text: '0');
+
+  // ── Markup scope ────────────────────────────────────────────────────────
+  bool _markupOnAll = false; // false = only performer fees, true = entire subtotal
+
   // ── Calculated ────────────────────────────────────────────────────────────
   double _performerFees = 0;
   double _completeKonto = 0;
@@ -122,13 +131,21 @@ class _GigOfferPageState extends State<GigOfferPage> {
   double _bookingPct = 0;
   double _inearTotal = 0;
   double _transportTotal = 0;
-  double _total = 0;
+  double _rehearsalTotal = 0;
   int _totalPerformers = 0;
   int _totalAppearances = 0;
+
+  // ── Manual overrides (null = use calculated value) ─────────────────────
+  Map<String, double> _overrides = {};
 
   // _offerStatus removed — use _gigStatus for both gig and offer
   int? _tripletexInvoiceId;
   bool _sendingToTripletex = false;
+
+  // ── Agreement ───────────────────────────────────────────────────────────
+  Map<String, dynamic>? _agreement;
+  bool _approvingAgreement = false;
+
 
   String? get _companyId => activeCompanyNotifier.value?.id;
 
@@ -148,9 +165,7 @@ class _GigOfferPageState extends State<GigOfferPage> {
     _phoneCtrl.dispose();
     _orgNrCtrl.dispose();
     _addressCtrl.dispose();
-    _venueCtrl.dispose();
-    _cityCtrl.dispose();
-    _countryCtrl.dispose();
+    for (final e in _dateEntries) { e.dispose(); }
     _responsibleCtrl.dispose();
     _meetingTimeCtrl.dispose();
     _getInTimeCtrl.dispose();
@@ -169,6 +184,7 @@ class _GigOfferPageState extends State<GigOfferPage> {
     _transportFromCtrl.dispose();
     _transportToCtrl.dispose();
     _transportViaCtrl.dispose();
+    _rehearsalTransportCtrl.dispose();
     super.dispose();
   }
 
@@ -200,19 +216,35 @@ class _GigOfferPageState extends State<GigOfferPage> {
 
         _gigId = offer['gig_id'] as String?;
         // Status is read from gig, not offer
-        _creoFeeMinimum = _dbl(offer['creo_fee_minimum'], 5500);
-        _extraShowFee = _dbl(offer['extra_show_fee'], 1500);
-        _markupPct = _dbl(offer['markup_pct'], 0.25);
+        final _s = SettingsStore.current;
+        _creoFeeMinimum = _dbl(offer['creo_fee_minimum'], _s.creoFeeMinimum);
+        _extraShowFee = _dbl(offer['extra_show_fee'], _s.extraShowFee);
+        _markupPct = _dbl(offer['markup_pct'], _s.markupPct);
         _inearIncluded = offer['inear_included'] == true;
-        _inearPrice = _dbl(offer['inear_price'], 7000);
+        _inearPrice = _dbl(offer['inear_price'], _s.inearPrice);
         _transportKm = (offer['transport_km'] as num?)?.toInt() ?? 0;
-        _transportPricePerKm = _dbl(offer['transport_price_per_km'], 3.50);
+        _transportPricePerKm = _dbl(offer['transport_price_per_km'], _s.transportPricePerKm);
         // Use stored transport_price if available, otherwise calculate from km
         final storedPrice = offer['transport_price'];
         _transportPrice = storedPrice != null
             ? _dbl(storedPrice, 0)
             : _transportKm * _transportPricePerKm;
         _transportPriceCtrl.text = _nf.format(_transportPrice);
+        _rehearsalPerformers = (offer['rehearsal_performers'] as num?)?.toInt() ?? 0;
+        _rehearsalCount = (offer['rehearsal_count'] as num?)?.toInt() ?? 0;
+        _rehearsalPricePerPerson = _dbl(offer['rehearsal_price_per_person'], 0);
+        _rehearsalTransport = _dbl(offer['rehearsal_transport'], 0);
+        _rehearsalTransportCtrl.text = _nf.format(_rehearsalTransport);
+        _markupOnAll = offer['markup_on_all'] == true;
+        // Load manual overrides
+        final ovJson = offer['calc_overrides'];
+        if (ovJson is Map) {
+          _overrides = {};
+          for (final e in ovJson.entries) {
+            final v = e.value;
+            if (v is num) _overrides[e.key as String] = v.toDouble();
+          }
+        }
         _notesCtrl.text = offer['notes'] ?? '';
         if (offer['invoiced_at'] != null) {
           _invoicedAt = DateTime.tryParse(offer['invoiced_at'].toString());
@@ -228,18 +260,152 @@ class _GigOfferPageState extends State<GigOfferPage> {
         _shows = (rows as List)
             .map((r) => _OfferShow.fromMap(r as Map<String, dynamic>))
             .toList();
-      }
 
-      // If we have a gig (either from offer or directly), load gig fields
-      if (_gigId != null) {
+        // Load multi-date entries from junction table
+        final junctionRows = await _sb
+            .from('gig_offer_gigs')
+            .select('gig_id, sort_order')
+            .eq('offer_id', _offerId!)
+            .order('sort_order');
+        final junctionList = List<Map<String, dynamic>>.from(junctionRows);
+
+        if (junctionList.isNotEmpty) {
+          // Dispose old entries
+          for (final e in _dateEntries) { e.dispose(); }
+          _dateEntries = [];
+
+          for (final j in junctionList) {
+            final jGigId = j['gig_id'] as String;
+            final gig = await _sb
+                .from('gigs')
+                .select('*')
+                .eq('id', jGigId)
+                .maybeSingle();
+            if (gig != null) {
+              final entry = _DateEntry();
+              entry.gigId = jGigId;
+              entry.dateFrom = gig['date_from'] != null
+                  ? DateTime.tryParse(gig['date_from'])
+                  : null;
+              entry.dateTo = gig['date_to'] != null
+                  ? DateTime.tryParse(gig['date_to'])
+                  : null;
+              entry.venueCtrl.text = gig['venue_name'] ?? '';
+              entry.cityCtrl.text = gig['city'] ?? '';
+              entry.countryCtrl.text = gig['country'] ?? 'NO';
+
+              // Load per-date show selection from gig_shows
+              if (_shows.isNotEmpty) {
+                final gigShows = await _sb
+                    .from('gig_shows')
+                    .select('show_type_id')
+                    .eq('gig_id', jGigId);
+                final gigShowTypeIds = (gigShows as List)
+                    .map((r) => r['show_type_id'] as String?)
+                    .where((id) => id != null)
+                    .toSet();
+                // Map to indices in _shows
+                entry.selectedShowIndices = {};
+                for (int si = 0; si < _shows.length; si++) {
+                  if (gigShowTypeIds.contains(_shows[si].showTypeId)) {
+                    entry.selectedShowIndices!.add(si);
+                  }
+                }
+                // If all selected shows match, set to null (= all)
+                final allSelectedIndices = _shows.asMap().entries
+                    .where((e) => e.value.selected)
+                    .map((e) => e.key)
+                    .toSet();
+                if (entry.selectedShowIndices!.containsAll(allSelectedIndices) &&
+                    allSelectedIndices.containsAll(entry.selectedShowIndices!)) {
+                  entry.selectedShowIndices = null;
+                }
+              }
+
+              _dateEntries.add(entry);
+
+              // Apply shared fields from the first gig
+              if (_dateEntries.length == 1) {
+                _gigId = jGigId;
+                _applyGigFields(gig);
+              }
+            }
+          }
+          if (_dateEntries.isEmpty) {
+            _dateEntries = [_DateEntry()];
+          }
+          _originalGigIds = _dateEntries
+              .where((e) => e.gigId != null)
+              .map((e) => e.gigId!)
+              .toSet();
+        } else if (_gigId != null) {
+          // Legacy: single gig via gig_id
+          final gig = await _sb
+              .from('gigs')
+              .select('*')
+              .eq('id', _gigId!)
+              .maybeSingle();
+          if (gig != null) {
+            _applyGigFields(gig);
+            _dateEntries = [_DateEntry()];
+            _dateEntries[0].gigId = _gigId;
+            _dateEntries[0].dateFrom = gig['date_from'] != null
+                ? DateTime.tryParse(gig['date_from'])
+                : null;
+            _dateEntries[0].dateTo = gig['date_to'] != null
+                ? DateTime.tryParse(gig['date_to'])
+                : null;
+            _dateEntries[0].venueCtrl.text = gig['venue_name'] ?? '';
+            _dateEntries[0].cityCtrl.text = gig['city'] ?? '';
+            _dateEntries[0].countryCtrl.text = gig['country'] ?? 'NO';
+          }
+
+          // Load gig shows if we don't have offer shows yet
+          if (_shows.isEmpty) {
+            final gigShows = await _sb
+                .from('gig_shows')
+                .select('*')
+                .eq('gig_id', _gigId!)
+                .order('sort_order');
+            _shows = (gigShows as List).map((s) {
+              final m = s as Map<String, dynamic>;
+              return _OfferShow(
+                showTypeId: m['show_type_id'] as String?,
+                showName: m['show_name'] as String? ?? '',
+                drummers: (m['drummers'] as num?)?.toInt() ?? 0,
+                dancers: (m['dancers'] as num?)?.toInt() ?? 0,
+                others: (m['others'] as num?)?.toInt() ?? 0,
+                selected: true,
+                sortOrder: (m['sort_order'] as num?)?.toInt() ?? 0,
+                ekstrainnslag: m['ekstrainnslag'] as String? ?? '',
+              );
+            }).toList();
+          }
+          _originalGigIds = _gigId != null ? {_gigId!} : {};
+        }
+      } else if (_gigId != null) {
+        // Opening from a gig directly (no offer yet)
         final gig = await _sb
             .from('gigs')
             .select('*')
             .eq('id', _gigId!)
             .maybeSingle();
-        if (gig != null) _applyGigFields(gig);
+        if (gig != null) {
+          _applyGigFields(gig);
+          _dateEntries = [_DateEntry()];
+          _dateEntries[0].gigId = _gigId;
+          _dateEntries[0].dateFrom = gig['date_from'] != null
+              ? DateTime.tryParse(gig['date_from'])
+              : null;
+          _dateEntries[0].dateTo = gig['date_to'] != null
+              ? DateTime.tryParse(gig['date_to'])
+              : null;
+          _dateEntries[0].venueCtrl.text = gig['venue_name'] ?? '';
+          _dateEntries[0].cityCtrl.text = gig['city'] ?? '';
+          _dateEntries[0].countryCtrl.text = gig['country'] ?? 'NO';
+        }
 
-        // Load gig shows if we don't have offer shows yet
+        // Load gig shows
         if (_shows.isEmpty) {
           final gigShows = await _sb
               .from('gig_shows')
@@ -278,6 +444,20 @@ class _GigOfferPageState extends State<GigOfferPage> {
       }
 
       _recalc();
+
+      // Load agreement status for the first gig
+      final firstGigId = _dateEntries.first.gigId;
+      if (firstGigId != null) {
+        final agr = await _sb
+            .from('agreement_tokens')
+            .select()
+            .eq('gig_id', firstGigId)
+            .order('created_at', ascending: false)
+            .limit(1)
+            .maybeSingle();
+        _agreement = agr;
+      }
+
     } catch (e) {
       debugPrint('GigOfferPage load error: $e');
     }
@@ -292,14 +472,7 @@ class _GigOfferPageState extends State<GigOfferPage> {
     _orgNrCtrl.text = gig['customer_org_nr'] ?? '';
     _addressCtrl.text = gig['customer_address'] ?? '';
     _invoiceOnEhf = gig['invoice_on_ehf'] == true;
-    _venueCtrl.text = gig['venue_name'] ?? '';
-    _cityCtrl.text = gig['city'] ?? '';
-    _countryCtrl.text = gig['country'] ?? 'NO';
-    _dateFrom = gig['date_from'] != null
-        ? DateTime.tryParse(gig['date_from'])
-        : null;
-    _dateTo =
-        gig['date_to'] != null ? DateTime.tryParse(gig['date_to']) : null;
+    // venue/city/country/dateFrom/dateTo are now per _DateEntry
     _gigStatus = gig['status'] as String? ?? 'inquiry';
     _responsibleCtrl.text = gig['responsible'] ?? '';
     _meetingTimeCtrl.text = gig['meeting_time'] ?? '';
@@ -511,45 +684,80 @@ class _GigOfferPageState extends State<GigOfferPage> {
   // CALCULATION ENGINE
   // ────────────────────────────────────────────────────────────────────────────
 
+  /// Which shows are active for a given date entry
+  List<_OfferShow> _showsForDate(int dateIdx) {
+    final entry = _dateEntries[dateIdx];
+    final allSelected = _shows.asMap().entries
+        .where((e) => e.value.selected)
+        .toList();
+    if (entry.selectedShowIndices == null) {
+      // null = use all selected shows
+      return allSelected.map((e) => e.value).toList();
+    }
+    return _shows.asMap().entries
+        .where((e) => entry.selectedShowIndices!.contains(e.key))
+        .map((e) => e.value)
+        .toList();
+  }
+
+  /// Calculate performer fees for a list of shows
+  double _calcPerformerFees(List<_OfferShow> shows) {
+    if (shows.isEmpty) return 0;
+    int mainShowPerf = 0;
+    int totalApp = 0;
+    for (final s in shows) {
+      final perf = s.drummers + s.dancers + s.others;
+      if (perf > mainShowPerf) mainShowPerf = perf;
+      totalApp += perf;
+    }
+    final mainFees = mainShowPerf * _creoFeeMinimum;
+    final extraFees = (totalApp - mainShowPerf) * _extraShowFee;
+    return mainFees + extraFees;
+  }
+
   void _recalc() {
-    final selected = _shows.where((s) => s.selected).toList();
+    // Aggregate across all date entries
+    _performerFees = 0;
+    _totalPerformers = 0;
+    _totalAppearances = 0;
 
-    // Calculate performer fees from selected shows (can be 0)
-    int maxDrummers = 0, maxDancers = 0, maxOthers = 0;
-    int sumDrummers = 0, sumDancers = 0, sumOthers = 0;
-
-    for (final s in selected) {
-      maxDrummers = max(maxDrummers, s.drummers);
-      maxDancers = max(maxDancers, s.dancers);
-      maxOthers = max(maxOthers, s.others);
-      sumDrummers += s.drummers;
-      sumDancers += s.dancers;
-      sumOthers += s.others;
+    for (int d = 0; d < _dateEntries.length; d++) {
+      final dateShows = _showsForDate(d);
+      int mainPerf = 0;
+      int dateApp = 0;
+      for (final s in dateShows) {
+        final perf = s.drummers + s.dancers + s.others;
+        if (perf > mainPerf) mainPerf = perf;
+        dateApp += perf;
+      }
+      _performerFees += _calcPerformerFees(dateShows);
+      _totalAppearances += dateApp;
+      if (mainPerf > _totalPerformers) _totalPerformers = mainPerf;
     }
 
-    _totalPerformers = maxDrummers + maxDancers + maxOthers;
-    _totalAppearances = sumDrummers + sumDancers + sumOthers;
+    _inearTotal = _inearIncluded ? _inearPrice * _dateEntries.length : 0;
 
-    final firstShowFees = _totalPerformers * _creoFeeMinimum;
-    final extraShowFees =
-        (_totalAppearances - _totalPerformers) * _extraShowFee;
-    _performerFees = firstShowFees + extraShowFees;
-
-    _inearTotal = _inearIncluded ? _inearPrice : 0;
     // Privatbil sub-values (for display only)
     _transportTotal = _transportKm * _transportPricePerKm;
     final tollMultiplier = _routePersons * (_routeReturn ? 2 : 1);
     final tollBase = _tollStations.fold<double>(0, (s, t) => s + t.priceCar);
     _tollCost = tollBase * tollMultiplier;
 
-    // Markup is only applied to show/performer fees
+    // Rehearsals (performer fees only — transport is in transport line)
+    _rehearsalTotal = _rehearsalPerformers * _rehearsalCount * _rehearsalPricePerPerson;
+
+    // Subtotal before markup
+    // Transport = gig transport × dates + rehearsal transport
+    final totalTransport = (_transportPrice * _dateEntries.length) + _rehearsalTransport;
+    final subtotalBeforeMarkup = _performerFees + _inearTotal +
+        totalTransport + _rehearsalTotal;
+
+    // Markup
     _completePct = _markupPct / 2;
     _bookingPct = _markupPct / 2;
-    _completeKonto = _performerFees * _completePct;
-    _bookingHonorar = _performerFees * _bookingPct;
-
-    _total = _performerFees + _completeKonto + _bookingHonorar +
-        _inearTotal + _transportPrice;
+    final markupBase = _markupOnAll ? subtotalBeforeMarkup : _performerFees;
+    _completeKonto = markupBase * _completePct;
+    _bookingHonorar = markupBase * _bookingPct;
   }
 
   /// Update _transportPrice from privatbil calculator values
@@ -564,9 +772,9 @@ class _GigOfferPageState extends State<GigOfferPage> {
 
   Future<void> _save() async {
     if (_companyId == null) return;
-    if (_dateFrom == null) {
+    if (_dateEntries.every((e) => e.dateFrom == null)) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Velg en dato først')),
+        const SnackBar(content: Text('Velg minst én dato')),
       );
       return;
     }
@@ -580,88 +788,74 @@ class _GigOfferPageState extends State<GigOfferPage> {
 
       _recalc();
 
-      final gigData = {
-        'company_id': _companyId,
-        'type': 'gig',
-        'date_from': df.format(_dateFrom!),
-        'date_to': _dateTo != null ? df.format(_dateTo!) : null,
-        'status': _gigStatus,
-        'venue_name': n(_venueCtrl.text),
-        'city': n(_cityCtrl.text),
-        'country': n(_countryCtrl.text),
-        'customer_firma': n(_firmaCtrl.text),
-        'customer_name': n(_nameCtrl.text),
-        'customer_email': n(_emailCtrl.text),
-        'customer_phone': n(_phoneCtrl.text),
-        'customer_org_nr': n(_orgNrCtrl.text),
-        'customer_address': n(_addressCtrl.text),
-        'invoice_on_ehf': _invoiceOnEhf,
-        'responsible': n(_responsibleCtrl.text),
-        'show_desc': n(_showDescCtrl.text),
-        'meeting_time': n(_meetingTimeCtrl.text),
-        'get_in_time': n(_getInTimeCtrl.text),
-        'rehearsal_time': n(_rehearsalTimeCtrl.text),
-        'performance_time': n(_performanceTimeCtrl.text),
-        'get_out_time': n(_getOutTimeCtrl.text),
-        'meeting_notes': n(_meetingNotesCtrl.text),
-        'stage_shape': n(_stageShapeCtrl.text),
-        'stage_size': n(_stageSizeCtrl.text),
-        'stage_notes': n(_stageNotesCtrl.text),
-        'inear_from_us': _inearIncluded,
-        'inear_price': _inearIncluded ? _inearPrice : null,
-        'playback_from_us': _playbackFromUs,
-        'transport_km': _transportKm,
-        'transport_price': _transportPrice > 0 ? _transportPrice : null,
-        'extra_desc': (_completeKonto + _bookingHonorar) > 0
-            ? 'Complete + Bookinghonorar'
-            : null,
-        'extra_price': (_completeKonto + _bookingHonorar) > 0
-            ? _completeKonto + _bookingHonorar
-            : null,
-        'notes_for_contract': n(_notesContractCtrl.text),
-        'info_from_organizer': n(_infoOrgCtrl.text),
-        'updated_at': now,
-      };
-
-      // ── 1. Create or update the gig ───────────────────────────────────────
-      if (_gigId != null) {
-        await _sb.from('gigs').update(gigData).eq('id', _gigId!);
-      } else {
-        gigData['created_by'] = _sb.auth.currentUser?.id;
-        gigData['created_at'] = now;
-        final gigRes =
-            await _sb.from('gigs').insert(gigData).select('id').single();
-        _gigId = gigRes['id'] as String;
-
-        // Notify crew about the new gig
-        try {
-          final venue = n(_venueCtrl.text) ?? '';
-          final notifyRes = await _sb.functions.invoke('notify-company', body: {
-            'company_id': _companyId,
-            'title': 'Ny gig: $venue',
-            'body': '${_dateFrom != null ? DateFormat('dd.MM.yyyy').format(_dateFrom!) : ''} — $venue',
-            'exclude_user_id': _sb.auth.currentUser?.id,
-            'gig_id': _gigId,
-          });
-          debugPrint('notify-company response: status=${notifyRes.status} data=${notifyRes.data}');
-        } catch (e) {
-          debugPrint('notify-company error: $e');
-        }
+      // ── Shared gig data (applied to all date entries) ─────────────────
+      Map<String, dynamic> sharedGigData(int entryIdx) {
+        final entry = _dateEntries[entryIdx];
+        return {
+          'company_id': _companyId,
+          'type': 'gig',
+          'date_from': entry.dateFrom != null ? df.format(entry.dateFrom!) : null,
+          'date_to': entry.dateTo != null ? df.format(entry.dateTo!) : null,
+          'status': _gigStatus,
+          'venue_name': n(entry.venueCtrl.text),
+          'city': n(entry.cityCtrl.text),
+          'country': n(entry.countryCtrl.text),
+          'customer_firma': n(_firmaCtrl.text),
+          'customer_name': n(_nameCtrl.text),
+          'customer_email': n(_emailCtrl.text),
+          'customer_phone': n(_phoneCtrl.text),
+          'customer_org_nr': n(_orgNrCtrl.text),
+          'customer_address': n(_addressCtrl.text),
+          'invoice_on_ehf': _invoiceOnEhf,
+          'responsible': n(_responsibleCtrl.text),
+          'show_desc': n(_showDescCtrl.text),
+          'meeting_time': n(_meetingTimeCtrl.text),
+          'get_in_time': n(_getInTimeCtrl.text),
+          'rehearsal_time': n(_rehearsalTimeCtrl.text),
+          'performance_time': n(_performanceTimeCtrl.text),
+          'get_out_time': n(_getOutTimeCtrl.text),
+          'meeting_notes': n(_meetingNotesCtrl.text),
+          'stage_shape': n(_stageShapeCtrl.text),
+          'stage_size': n(_stageSizeCtrl.text),
+          'stage_notes': n(_stageNotesCtrl.text),
+          'inear_from_us': _inearIncluded,
+          'inear_price': _inearIncluded ? _inearPrice : null,
+          'playback_from_us': _playbackFromUs,
+          'transport_km': _transportKm,
+          'transport_price': _transportPrice > 0 ? _transportPrice : null,
+          'extra_desc': (_completeKonto + _bookingHonorar) > 0
+              ? 'Complete + Bookinghonorar'
+              : null,
+          'extra_price': (_completeKonto + _bookingHonorar) > 0
+              ? _completeKonto + _bookingHonorar
+              : null,
+          'notes_for_contract': n(_notesContractCtrl.text),
+          'info_from_organizer': n(_infoOrgCtrl.text),
+          'updated_at': now,
+        };
       }
 
-      // ── 2. Sync gig_shows ─────────────────────────────────────────────────
-      await _sb.from('gig_shows').delete().eq('gig_id', _gigId!);
-      final selectedShows = _shows.where((s) => s.selected).toList();
-      if (selectedShows.isNotEmpty) {
-        final gigShowRows = selectedShows.asMap().entries.map((e) {
+      // ── Gig show rows helper ──────────────────────────────────────────
+      List<Map<String, dynamic>> gigShowRows(String gigId, int dateIdx) {
+        final dateShows = _showsForDate(dateIdx);
+        // Find main show (most performers) for this date's shows
+        int dateMainPerf = 0;
+        int dateMainIdx = 0;
+        for (int j = 0; j < dateShows.length; j++) {
+          final p = dateShows[j].drummers + dateShows[j].dancers + dateShows[j].others;
+          if (p > dateMainPerf) {
+            dateMainPerf = p;
+            dateMainIdx = j;
+          }
+        }
+        return dateShows.asMap().entries.map((e) {
           final s = e.value;
           final showPerf = s.drummers + s.dancers + s.others;
-          final isEkstra = s.showName.toLowerCase().contains('ekstrainnslag');
-          final showPrice = isEkstra
-              ? showPerf * _extraShowFee
-              : showPerf * _creoFeeMinimum;
+          final showPrice = e.key == dateMainIdx
+              ? showPerf * _creoFeeMinimum
+              : showPerf * _extraShowFee;
           return {
-            'gig_id': _gigId,
+            'gig_id': gigId,
             'show_type_id': s.showTypeId,
             'show_name': s.showName,
             'drummers': s.drummers,
@@ -672,10 +866,52 @@ class _GigOfferPageState extends State<GigOfferPage> {
             'ekstrainnslag': s.ekstrainnslag.isNotEmpty ? s.ekstrainnslag : null,
           };
         }).toList();
-        await _sb.from('gig_shows').insert(gigShowRows);
       }
 
-      // ── 3. Save gig_offer ─────────────────────────────────────────────────
+      // ── 1. Create or update gigs for each date entry ──────────────────
+      final Set<String> activeGigIds = {};
+      for (int i = 0; i < _dateEntries.length; i++) {
+        final entry = _dateEntries[i];
+        final gigData = sharedGigData(i);
+
+        if (entry.gigId != null) {
+          await _sb.from('gigs').update(gigData).eq('id', entry.gigId!);
+        } else {
+          gigData['created_by'] = _sb.auth.currentUser?.id;
+          gigData['created_at'] = now;
+          final gigRes =
+              await _sb.from('gigs').insert(gigData).select('id').single();
+          entry.gigId = gigRes['id'] as String;
+
+          // Notify crew about the new gig
+          try {
+            final venue = n(entry.venueCtrl.text) ?? '';
+            final dateStr = entry.dateFrom != null ? DateFormat('dd.MM.yyyy').format(entry.dateFrom!) : '';
+            await _sb.functions.invoke('notify-company', body: {
+              'company_id': _companyId,
+              'title': 'Ny gig: $venue',
+              'body': '$dateStr — $venue',
+              'exclude_user_id': _sb.auth.currentUser?.id,
+              'gig_id': entry.gigId,
+            });
+          } catch (e) {
+            debugPrint('notify-company error: $e');
+          }
+        }
+        activeGigIds.add(entry.gigId!);
+
+        // ── Sync gig_shows per gig (per-date show selection) ────────
+        await _sb.from('gig_shows').delete().eq('gig_id', entry.gigId!);
+        final dateShows = _showsForDate(i);
+        if (dateShows.isNotEmpty) {
+          await _sb.from('gig_shows').insert(gigShowRows(entry.gigId!, i));
+        }
+      }
+
+      // Keep _gigId pointing to the first gig (for backward compat)
+      _gigId = _dateEntries.first.gigId;
+
+      // ── 2. Save gig_offer ─────────────────────────────────────────────────
       final offerData = {
         'company_id': _companyId,
         'gig_id': _gigId,
@@ -693,6 +929,19 @@ class _GigOfferPageState extends State<GigOfferPage> {
         'transport_km': _transportKm,
         'transport_price_per_km': _transportPricePerKm,
         'transport_price': _transportPrice > 0 ? _transportPrice : null,
+        'rehearsal_performers': _rehearsalPerformers > 0 ? _rehearsalPerformers : null,
+        'rehearsal_count': _rehearsalCount > 0 ? _rehearsalCount : null,
+        'rehearsal_price_per_person': _rehearsalPricePerPerson > 0 ? _rehearsalPricePerPerson : null,
+        'rehearsal_transport': _rehearsalTransport > 0 ? _rehearsalTransport : null,
+        'markup_on_all': _markupOnAll,
+        'calc_overrides': _overrides.isNotEmpty ? _overrides : null,
+        'final_calc': {
+          'lines': _pdfCalcLines
+              .where((l) => l.amount > 0)
+              .map((l) => {'label': l.label, 'amount': l.amount})
+              .toList(),
+          'total': _pdfTotal,
+        },
         'status': _gigStatus,
         'notes': n(_notesCtrl.text),
         'updated_at': now,
@@ -719,7 +968,7 @@ class _GigOfferPageState extends State<GigOfferPage> {
         _offerId = res['id'] as String;
       }
 
-      // ── 4. Sync gig_offer_shows ───────────────────────────────────────────
+      // ── 3. Sync gig_offer_shows ───────────────────────────────────────────
       await _sb.from('gig_offer_shows').delete().eq('offer_id', _offerId!);
       if (_shows.isNotEmpty) {
         final showRows = _shows.asMap().entries.map((e) {
@@ -739,7 +988,25 @@ class _GigOfferPageState extends State<GigOfferPage> {
         await _sb.from('gig_offer_shows').insert(showRows);
       }
 
-      // ── 5. Auto-save contact person ─────────────────────────────────────────
+      // ── 4. Sync gig_offer_gigs junction ─────────────────────────────────
+      await _sb.from('gig_offer_gigs').delete().eq('offer_id', _offerId!);
+      final junctionRows = _dateEntries.asMap().entries.map((e) {
+        return {
+          'offer_id': _offerId,
+          'gig_id': e.value.gigId,
+          'sort_order': e.key,
+        };
+      }).toList();
+      await _sb.from('gig_offer_gigs').insert(junctionRows);
+
+      // ── 5. Delete removed gigs ────────────────────────────────────────────
+      final removedGigIds = _originalGigIds.difference(activeGigIds);
+      for (final gid in removedGigIds) {
+        await _sb.from('gigs').delete().eq('id', gid);
+      }
+      _originalGigIds = Set.from(activeGigIds);
+
+      // ── 6. Auto-save contact person ─────────────────────────────────────────
       if (_selectedCompany != null && n(_nameCtrl.text) != null) {
         try {
           final companyId = _selectedCompany!['id'] as String;
@@ -780,9 +1047,13 @@ class _GigOfferPageState extends State<GigOfferPage> {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Lagret')),
         );
-        // If this was a new offer, navigate to the gig detail page
-        if (isNew && _gigId != null) {
-          context.go('/m/gigs/$_gigId');
+        // If this was a new offer, navigate appropriately
+        if (isNew) {
+          if (_dateEntries.length == 1 && _gigId != null) {
+            context.go('/m/gigs/$_gigId');
+          } else {
+            context.go('/m/offers/$_offerId');
+          }
         }
       }
     } catch (e) {
@@ -884,7 +1155,7 @@ class _GigOfferPageState extends State<GigOfferPage> {
             _offerId != null ? 'Rediger gig / tilbud' : 'Ny gig / tilbud',
             style: Theme.of(context).textTheme.headlineMedium,
           ),
-          const SizedBox(height: 18),
+          const SizedBox(height: 24),
 
           // Two-panel layout
           Expanded(
@@ -897,25 +1168,27 @@ class _GigOfferPageState extends State<GigOfferPage> {
                   child: SingleChildScrollView(
                     child: Column(
                       children: [
-                        _buildDateLocationCard(),
-                        const SizedBox(height: 14),
+                        _buildDatesCard(),
+                        const SizedBox(height: 20),
                         _buildCustomerCard(),
-                        const SizedBox(height: 14),
+                        const SizedBox(height: 20),
                         _buildShowsCard(),
-                        const SizedBox(height: 14),
+                        const SizedBox(height: 20),
+                        _buildRehearsalsCard(),
+                        const SizedBox(height: 20),
                         _buildPriceParamsCard(),
-                        const SizedBox(height: 14),
+                        const SizedBox(height: 20),
                         _buildScheduleCard(),
-                        const SizedBox(height: 14),
+                        const SizedBox(height: 20),
                         _buildStageCard(),
-                        const SizedBox(height: 14),
+                        const SizedBox(height: 20),
                         _buildNotesCard(),
                         const SizedBox(height: 40),
                       ],
                     ),
                   ),
                 ),
-                const SizedBox(width: 18),
+                const SizedBox(width: 24),
 
                 // RIGHT PANEL
                 SizedBox(
@@ -924,7 +1197,7 @@ class _GigOfferPageState extends State<GigOfferPage> {
                     child: Column(
                       children: [
                         _buildCalcCard(),
-                        const SizedBox(height: 14),
+                        const SizedBox(height: 20),
                         _buildActionsCard(),
                       ],
                     ),
@@ -946,7 +1219,7 @@ class _GigOfferPageState extends State<GigOfferPage> {
     final cs = Theme.of(context).colorScheme;
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(18),
+      padding: const EdgeInsets.all(22),
       decoration: BoxDecoration(
         color: cs.surfaceContainerLowest,
         borderRadius: BorderRadius.circular(14),
@@ -958,7 +1231,7 @@ class _GigOfferPageState extends State<GigOfferPage> {
           Text(title,
               style:
                   const TextStyle(fontWeight: FontWeight.w900, fontSize: 15)),
-          const SizedBox(height: 12),
+          const SizedBox(height: 16),
           child,
         ],
       ),
@@ -983,7 +1256,7 @@ class _GigOfferPageState extends State<GigOfferPage> {
   Widget _row2(Widget a, Widget b) {
     return Row(children: [
       Expanded(child: a),
-      const SizedBox(width: 8),
+      const SizedBox(width: 12),
       Expanded(child: b),
     ]);
   }
@@ -992,71 +1265,178 @@ class _GigOfferPageState extends State<GigOfferPage> {
   // DATO & STED
   // ────────────────────────────────────────────────────────────────────────────
 
-  Widget _buildDateLocationCard() {
+  Widget _buildDatesCard() {
     final dfmt = DateFormat('dd.MM.yyyy');
+    final availableShows = _shows.asMap().entries
+        .where((e) => e.value.selected)
+        .toList();
     return _card(
-      title: 'Dato & sted',
+      title: 'Datoer & steder',
       child: Column(
         children: [
-          Row(
-            children: [
-              Expanded(
-                child: OutlinedButton.icon(
-                  icon: const Icon(Icons.calendar_today, size: 16),
-                  label: Text(_dateFrom != null
-                      ? dfmt.format(_dateFrom!)
-                      : 'Dato fra *'),
-                  onPressed: () async {
-                    final d = await showDatePicker(
-                      context: context,
-                      initialDate: _dateFrom ?? DateTime.now(),
-                      firstDate: DateTime(2020),
-                      lastDate: DateTime(2035),
-                    );
-                    if (d != null) setState(() => _dateFrom = d);
-                  },
-                ),
+          ...List.generate(_dateEntries.length, (i) {
+            final entry = _dateEntries[i];
+            return Padding(
+              padding: EdgeInsets.only(bottom: i < _dateEntries.length - 1 ? 12 : 0),
+              child: Column(
+                children: [
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // Date from
+                      Expanded(
+                        flex: 2,
+                        child: OutlinedButton.icon(
+                          icon: const Icon(Icons.calendar_today, size: 16),
+                          label: Text(entry.dateFrom != null
+                              ? dfmt.format(entry.dateFrom!)
+                              : 'Dato fra *'),
+                          onPressed: () async {
+                            final d = await showDatePicker(
+                              context: context,
+                              initialDate: entry.dateFrom ?? DateTime.now(),
+                              firstDate: DateTime(2020),
+                              lastDate: DateTime(2035),
+                            );
+                            if (d != null) setState(() => entry.dateFrom = d);
+                          },
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      // Venue
+                      Expanded(
+                        flex: 2,
+                        child: TextField(
+                          controller: entry.venueCtrl,
+                          style: const TextStyle(fontSize: 13),
+                          decoration: const InputDecoration(
+                            labelText: 'Venue',
+                            isDense: true,
+                            contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      // City
+                      Expanded(
+                        flex: 2,
+                        child: TextField(
+                          controller: entry.cityCtrl,
+                          style: const TextStyle(fontSize: 13),
+                          decoration: const InputDecoration(
+                            labelText: 'By',
+                            isDense: true,
+                            contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      // Country
+                      SizedBox(
+                        width: 60,
+                        child: TextField(
+                          controller: entry.countryCtrl,
+                          style: const TextStyle(fontSize: 13),
+                          decoration: const InputDecoration(
+                            labelText: 'Land',
+                            isDense: true,
+                            contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+                          ),
+                        ),
+                      ),
+                      // Remove button (only when 2+ entries)
+                      if (_dateEntries.length > 1)
+                        IconButton(
+                          icon: const Icon(Icons.close, size: 18),
+                          tooltip: 'Fjern dato',
+                          onPressed: () {
+                            setState(() {
+                              final removed = _dateEntries.removeAt(i);
+                              removed.dispose();
+                              _recalc();
+                            });
+                          },
+                        )
+                      else
+                        const SizedBox(width: 40),
+                    ],
+                  ),
+                  // Per-date show selection (only when multiple dates)
+                  if (_dateEntries.length > 1 && availableShows.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 6, left: 4),
+                      child: Align(
+                        alignment: Alignment.centerLeft,
+                        child: Wrap(
+                          spacing: 6,
+                          runSpacing: 4,
+                          children: availableShows.map((e) {
+                            final idx = e.key;
+                            final show = e.value;
+                            final isOn = entry.selectedShowIndices == null ||
+                                entry.selectedShowIndices!.contains(idx);
+                            return FilterChip(
+                              label: Text(show.showName, style: const TextStyle(fontSize: 11)),
+                              selected: isOn,
+                              visualDensity: VisualDensity.compact,
+                              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                              onSelected: (v) {
+                                setState(() {
+                                  // Initialize from all selected if null
+                                  entry.selectedShowIndices ??=
+                                      availableShows.map((e) => e.key).toSet();
+                                  if (v) {
+                                    entry.selectedShowIndices!.add(idx);
+                                  } else {
+                                    entry.selectedShowIndices!.remove(idx);
+                                  }
+                                  _recalc();
+                                });
+                              },
+                            );
+                          }).toList(),
+                        ),
+                      ),
+                    ),
+                ],
               ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: OutlinedButton.icon(
-                  icon: const Icon(Icons.calendar_today, size: 16),
-                  label: Text(
-                      _dateTo != null ? dfmt.format(_dateTo!) : 'Dato til'),
-                  onPressed: () async {
-                    final d = await showDatePicker(
-                      context: context,
-                      initialDate: _dateFrom ?? DateTime.now(),
-                      firstDate: DateTime(2020),
-                      lastDate: DateTime(2035),
-                    );
-                    if (d != null) setState(() => _dateTo = d);
-                  },
-                ),
-              ),
-            ],
+            );
+          }),
+          const SizedBox(height: 8),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton.icon(
+              icon: const Icon(Icons.add, size: 16),
+              label: const Text('Legg til dato'),
+              onPressed: () {
+                setState(() {
+                  _dateEntries.add(_DateEntry());
+                  _recalc();
+                });
+              },
+            ),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 12),
           _tf(_performanceTimeCtrl, 'Tidspunkt'),
-          const SizedBox(height: 8),
+          const SizedBox(height: 12),
           _row2(
             DropdownButtonFormField<String>(
               value: _gigStatus,
               decoration: const InputDecoration(
                   labelText: 'Status', isDense: true),
-              items: ['inquiry', 'confirmed', 'invoiced', 'completed', 'cancelled']
-                  .map((s) => DropdownMenuItem(value: s, child: Text(s)))
-                  .toList(),
+              items: const {
+                'inquiry': 'Forespørsel',
+                'confirmed': 'Bekreftet',
+                'invoiced': 'Fakturert',
+                'completed': 'Fullført',
+                'cancelled': 'Avlyst',
+              }.entries.map((e) => DropdownMenuItem(value: e.key, child: Text(e.value))).toList(),
               onChanged: (v) {
                 if (v != null) setState(() => _gigStatus = v);
               },
             ),
             _tf(_responsibleCtrl, 'Ansvarlig'),
           ),
-          const SizedBox(height: 8),
-          _tf(_venueCtrl, 'Venue'),
-          const SizedBox(height: 8),
-          _row2(_tf(_cityCtrl, 'By'), _tf(_countryCtrl, 'Land')),
         ],
       ),
     );
@@ -1097,14 +1477,14 @@ class _GigOfferPageState extends State<GigOfferPage> {
               },
             ),
           ],
-          const SizedBox(height: 12),
+          const SizedBox(height: 14),
           _row2(_tf(_firmaCtrl, 'Firma'), _tf(_orgNrCtrl, 'Org.nr')),
-          const SizedBox(height: 8),
+          const SizedBox(height: 12),
           _row2(
               _tf(_nameCtrl, 'Kontaktperson'), _tf(_phoneCtrl, 'Telefon')),
-          const SizedBox(height: 8),
+          const SizedBox(height: 12),
           _row2(_tf(_emailCtrl, 'E-post'), _tf(_addressCtrl, 'Adresse')),
-          const SizedBox(height: 4),
+          const SizedBox(height: 8),
           SwitchListTile(
             title: const Text('Faktura på EHF',
                 style: TextStyle(fontSize: 13)),
@@ -1298,6 +1678,157 @@ class _GigOfferPageState extends State<GigOfferPage> {
   }
 
   // ────────────────────────────────────────────────────────────────────────────
+  // PRØVER (REHEARSALS)
+  // ────────────────────────────────────────────────────────────────────────────
+
+  Widget _buildRehearsalsCard() {
+    final cs = Theme.of(context).colorScheme;
+    return _card(
+      title: 'Prøver',
+      child: Column(
+        children: [
+          Row(
+            children: [
+              SizedBox(
+                width: 140,
+                child: Text('Antall utøvere',
+                    style: TextStyle(fontSize: 13, color: cs.onSurfaceVariant)),
+              ),
+              SizedBox(
+                width: 80,
+                child: TextFormField(
+                  key: ValueKey('reh_perf_$_rehearsalPerformers'),
+                  initialValue: '$_rehearsalPerformers',
+                  style: const TextStyle(fontSize: 13),
+                  textAlign: TextAlign.right,
+                  keyboardType: TextInputType.number,
+                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                  decoration: const InputDecoration(
+                    isDense: true,
+                    contentPadding:
+                        EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                  ),
+                  onChanged: (v) {
+                    _rehearsalPerformers = int.tryParse(v) ?? 0;
+                    setState(() => _recalc());
+                  },
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              SizedBox(
+                width: 140,
+                child: Text('Antall prøver',
+                    style: TextStyle(fontSize: 13, color: cs.onSurfaceVariant)),
+              ),
+              SizedBox(
+                width: 80,
+                child: TextFormField(
+                  key: ValueKey('reh_count_$_rehearsalCount'),
+                  initialValue: '$_rehearsalCount',
+                  style: const TextStyle(fontSize: 13),
+                  textAlign: TextAlign.right,
+                  keyboardType: TextInputType.number,
+                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                  decoration: const InputDecoration(
+                    isDense: true,
+                    contentPadding:
+                        EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                  ),
+                  onChanged: (v) {
+                    _rehearsalCount = int.tryParse(v) ?? 0;
+                    setState(() => _recalc());
+                  },
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              SizedBox(
+                width: 140,
+                child: Text('Pris per person/prøve',
+                    style: TextStyle(fontSize: 13, color: cs.onSurfaceVariant)),
+              ),
+              SizedBox(
+                width: 120,
+                child: TextFormField(
+                  key: ValueKey('reh_price_${_rehearsalPricePerPerson.round()}'),
+                  initialValue: _nf.format(_rehearsalPricePerPerson),
+                  style: const TextStyle(fontSize: 13),
+                  textAlign: TextAlign.right,
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(
+                    isDense: true,
+                    contentPadding:
+                        EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                  ),
+                  onChanged: (v) {
+                    final parsed = double.tryParse(
+                        v.replaceAll(RegExp(r'[^0-9.]'), ''));
+                    if (parsed != null) {
+                      _rehearsalPricePerPerson = parsed;
+                      setState(() => _recalc());
+                    }
+                  },
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              SizedBox(
+                width: 140,
+                child: Text('Transport (prøver)',
+                    style: TextStyle(fontSize: 13, color: cs.onSurfaceVariant)),
+              ),
+              SizedBox(
+                width: 120,
+                child: TextField(
+                  controller: _rehearsalTransportCtrl,
+                  style: const TextStyle(fontSize: 13),
+                  textAlign: TextAlign.right,
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(
+                    isDense: true,
+                    contentPadding:
+                        EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                  ),
+                  onChanged: (v) {
+                    final parsed = double.tryParse(
+                        v.replaceAll(RegExp(r'[^0-9.]'), ''));
+                    if (parsed != null) {
+                      _rehearsalTransport = parsed;
+                      setState(() => _recalc());
+                    }
+                  },
+                ),
+              ),
+            ],
+          ),
+          if (_rehearsalTotal > 0) ...[
+            const SizedBox(height: 12),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text('Total prøver',
+                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: cs.onSurfaceVariant)),
+                Text('${_nf.format(_rehearsalTotal)} kr',
+                    style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700)),
+              ],
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  // ────────────────────────────────────────────────────────────────────────────
   // PRISPARAMETRE
   // ────────────────────────────────────────────────────────────────────────────
 
@@ -1319,6 +1850,29 @@ class _GigOfferPageState extends State<GigOfferPage> {
             _markupPct = v;
             setState(() => _recalc());
           }),
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Row(
+              children: [
+                SizedBox(
+                  width: 24,
+                  height: 24,
+                  child: Checkbox(
+                    value: _markupOnAll,
+                    onChanged: (v) {
+                      setState(() {
+                        _markupOnAll = v ?? false;
+                        _recalc();
+                      });
+                    },
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Text('Påslag på alt (inkl. transport, in-ear, prøver)',
+                    style: TextStyle(fontSize: 12, color: cs.onSurfaceVariant)),
+              ],
+            ),
+          ),
           // In-ear
           Padding(
             padding: const EdgeInsets.only(bottom: 8),
@@ -1711,15 +2265,15 @@ class _GigOfferPageState extends State<GigOfferPage> {
       child: Column(
         children: [
           _tf(_meetingTimeCtrl, 'Oppmøte', maxLines: null),
-          const SizedBox(height: 8),
+          const SizedBox(height: 12),
           _tf(_getInTimeCtrl, 'Get-in', maxLines: null),
-          const SizedBox(height: 8),
+          const SizedBox(height: 12),
           _tf(_rehearsalTimeCtrl, 'Prøver', maxLines: null),
-          const SizedBox(height: 8),
+          const SizedBox(height: 12),
           _tf(_performanceTimeCtrl, 'Opptreden', maxLines: null),
-          const SizedBox(height: 8),
+          const SizedBox(height: 12),
           _tf(_getOutTimeCtrl, 'Get-out', maxLines: null),
-          const SizedBox(height: 8),
+          const SizedBox(height: 12),
           _tf(_meetingNotesCtrl, 'Oppmøtenotat', maxLines: null),
         ],
       ),
@@ -1739,7 +2293,7 @@ class _GigOfferPageState extends State<GigOfferPage> {
             _tf(_stageShapeCtrl, 'Sceneform'),
             _tf(_stageSizeCtrl, 'Scenestørrelse'),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 12),
           _tf(_stageNotesCtrl, 'Scenenotater', maxLines: 2),
         ],
       ),
@@ -1756,9 +2310,9 @@ class _GigOfferPageState extends State<GigOfferPage> {
       child: Column(
         children: [
           _tf(_notesContractCtrl, 'Notater for kontrakt', maxLines: 3),
-          const SizedBox(height: 8),
+          const SizedBox(height: 12),
           _tf(_infoOrgCtrl, 'Info fra arrangør', maxLines: 3),
-          const SizedBox(height: 8),
+          const SizedBox(height: 12),
           _tf(_notesCtrl, 'Interne notater (tilbud)', maxLines: 3),
         ],
       ),
@@ -1769,11 +2323,58 @@ class _GigOfferPageState extends State<GigOfferPage> {
   // BEREGNING (RIGHT)
   // ────────────────────────────────────────────────────────────────────────────
 
+  /// Get the effective value for a calc line: override if set, otherwise calculated
+  double _ov(String key, double calculated) =>
+      _overrides.containsKey(key) ? _overrides[key]! : calculated;
+
+  /// Combined transport: gig × dates + rehearsal transport
+  double get _totalTransport =>
+      (_transportPrice * _dateEntries.length) + _rehearsalTransport;
+
+  /// The total using overrides where applicable
+  double get _effectiveTotal {
+    final perf = _ov('performer_fees', _performerFees);
+    final ck = _ov('complete_konto', _completeKonto);
+    final bh = _ov('booking_honorar', _bookingHonorar);
+    final ie = _ov('inear', _inearTotal);
+    final tr = _ov('transport', _totalTransport);
+    final rh = _ov('rehearsal', _rehearsalTotal);
+    return perf + ck + bh + ie + tr + rh;
+  }
+
+  /// Build the calc lines for the PDF (mirrors the calc card exactly)
+  List<({String label, double amount})> get _pdfCalcLines => [
+    (label: 'Utøverhyrer', amount: _ov('performer_fees', _performerFees)),
+    (label: 'CompleteKonto', amount: _ov('complete_konto', _completeKonto)),
+    (label: 'BookingHonorar', amount: _ov('booking_honorar', _bookingHonorar)),
+    (label: 'In-Ear', amount: _ov('inear', _inearTotal)),
+    (label: 'Transport', amount: _ov('transport', _totalTransport)),
+    (label: 'Prøver', amount: _ov('rehearsal', _rehearsalTotal)),
+  ];
+
+  /// The final total for the PDF (respects total override)
+  double get _pdfTotal =>
+      _overrides.containsKey('total') ? _overrides['total']! : _effectiveTotal;
+
+  /// Date entries formatted for the PDF
+  List<({String date, String venue})> get _pdfDateEntries {
+    final df = DateFormat('dd.MM.yyyy');
+    return _dateEntries.map((e) {
+      final dateStr = e.dateFrom != null ? df.format(e.dateFrom!) : '';
+      final venue = [e.venueCtrl.text, e.cityCtrl.text, e.countryCtrl.text]
+          .where((s) => s.isNotEmpty)
+          .join(', ');
+      return (date: dateStr, venue: venue);
+    }).toList();
+  }
+
   Widget _buildCalcCard() {
     final cs = Theme.of(context).colorScheme;
+    final transportGig = _transportPrice * _dateEntries.length;
+    final transportCombined = transportGig + _rehearsalTransport;
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(18),
+      padding: const EdgeInsets.all(22),
       decoration: BoxDecoration(
         color: cs.surfaceContainerLowest,
         borderRadius: BorderRadius.circular(14),
@@ -1784,46 +2385,95 @@ class _GigOfferPageState extends State<GigOfferPage> {
         children: [
           const Text('Beregning',
               style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15)),
-          const SizedBox(height: 14),
-          _calcRow(
+          const SizedBox(height: 16),
+          if (_dateEntries.length > 1)
+            _calcRowInfo('Antall datoer', '${_dateEntries.length}'),
+          _calcRowInfo(
               'Antall show', '${_shows.where((s) => s.selected).length}'),
-          _calcRow('Utøvere', '$_totalPerformers'),
-          _calcRow('Opptredener', '$_totalAppearances'),
+          _calcRowInfo('Utøvere (maks)', '$_totalPerformers'),
+          _calcRowInfo('Opptredener totalt', '$_totalAppearances'),
           const Divider(height: 24),
-          _calcRow('Utøverhyrer', _nf.format(_performerFees)),
-          _calcRowWithPct('CompleteKonto', _nf.format(_completeKonto), _completePct),
-          _calcRowWithPct('BookingHonorar', _nf.format(_bookingHonorar), _bookingPct),
-          _calcRow(
-              'In-Ear', _inearIncluded ? _nf.format(_inearTotal) : '–'),
-          _calcRow('Transport',
-              _transportPrice > 0 ? _nf.format(_transportPrice) : '–'),
-          if (_privatbilExpanded && _tollStations.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 4),
-              child: Text(
-                '${_tollStations.length} bom × ${_routePersons * (_routeReturn ? 2 : 1)}',
-                style: TextStyle(
-                    fontSize: 11, color: cs.onSurfaceVariant),
+          _editableCalcRow('performer_fees', 'Utøverhyrer', _performerFees),
+          _editableCalcRow('complete_konto', 'CompleteKonto', _completeKonto,
+              pct: _completePct),
+          _editableCalcRow('booking_honorar', 'BookingHonorar', _bookingHonorar,
+              pct: _bookingPct),
+          if (_inearIncluded)
+            _editableCalcRow('inear', 'In-Ear', _inearTotal)
+          else
+            _calcRowInfo('In-Ear', '–'),
+          if (transportCombined > 0)
+            _editableCalcRow('transport', 'Transport', transportCombined)
+          else
+            _calcRowInfo('Transport', '–'),
+          // Transport breakdown hint
+          if (transportCombined > 0) ...[
+            if (_dateEntries.length > 1 || _rehearsalTransport > 0)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 4),
+                child: Text(
+                  [
+                    if (_transportPrice > 0)
+                      'Gig: ${_nf.format(_transportPrice)}${_dateEntries.length > 1 ? ' × ${_dateEntries.length}' : ''}',
+                    if (_rehearsalTransport > 0)
+                      'Prøver: ${_nf.format(_rehearsalTransport)}',
+                  ].join('  ·  '),
+                  style: TextStyle(fontSize: 11, color: cs.onSurfaceVariant),
+                ),
               ),
-            ),
+            if (_privatbilExpanded && _tollStations.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 4),
+                child: Text(
+                  '${_tollStations.length} bom × ${_routePersons * (_routeReturn ? 2 : 1)}',
+                  style: TextStyle(
+                      fontSize: 11, color: cs.onSurfaceVariant),
+                ),
+              ),
+          ],
+          if (_rehearsalTotal > 0)
+            _editableCalcRow('rehearsal', 'Prøver', _rehearsalTotal),
           const Divider(height: 24),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              const Text('TILBUD',
-                  style:
-                      TextStyle(fontWeight: FontWeight.w900, fontSize: 18)),
-              Text('${_nf.format(_total)} kr',
-                  style: const TextStyle(
-                      fontWeight: FontWeight.w900, fontSize: 18)),
-            ],
+          GestureDetector(
+            onDoubleTap: () => _editOverride('total', _effectiveTotal),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text('TILBUD',
+                    style:
+                        TextStyle(fontWeight: FontWeight.w900, fontSize: 18)),
+                Row(
+                  children: [
+                    if (_overrides.containsKey('total'))
+                      Padding(
+                        padding: const EdgeInsets.only(right: 6),
+                        child: GestureDetector(
+                          onTap: () => setState(() {
+                            _overrides.remove('total');
+                          }),
+                          child: Icon(Icons.undo, size: 14, color: Colors.orange),
+                        ),
+                      ),
+                    Text(
+                      '${_nf.format(_overrides.containsKey('total') ? _overrides['total']! : _effectiveTotal)} kr',
+                      style: TextStyle(
+                        fontWeight: FontWeight.w900,
+                        fontSize: 18,
+                        color: _overrides.containsKey('total') ? Colors.orange : null,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
           ),
         ],
       ),
     );
   }
 
-  Widget _calcRow(String label, String value) {
+  /// Info-only calc row (not editable)
+  Widget _calcRowInfo(String label, String value) {
     final cs = Theme.of(context).colorScheme;
     return Padding(
       padding: const EdgeInsets.only(bottom: 6),
@@ -1839,28 +2489,113 @@ class _GigOfferPageState extends State<GigOfferPage> {
     );
   }
 
-  Widget _calcRowWithPct(String label, String value, double pct) {
+  /// Editable calc row — double-tap value to override manually
+  Widget _editableCalcRow(String key, String label, double calculated,
+      {double? pct, String? suffix}) {
     final cs = Theme.of(context).colorScheme;
-    final pctStr = '${(pct * 100).toStringAsFixed(1)}%';
+    final hasOverride = _overrides.containsKey(key);
+    final displayVal = hasOverride ? _overrides[key]! : calculated;
+
     return Padding(
       padding: const EdgeInsets.only(bottom: 6),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Row(
-            children: [
-              Text(label,
-                  style:
-                      TextStyle(fontSize: 13, color: cs.onSurfaceVariant)),
-              const SizedBox(width: 6),
-              Text(pctStr,
+      child: GestureDetector(
+        onDoubleTap: () => _editOverride(key, displayVal),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Row(
+              children: [
+                Text(label,
+                    style:
+                        TextStyle(fontSize: 13, color: cs.onSurfaceVariant)),
+                if (pct != null) ...[
+                  const SizedBox(width: 6),
+                  Text('${(pct * 100).toStringAsFixed(1)}%',
+                      style: TextStyle(
+                          fontSize: 11,
+                          fontStyle: FontStyle.italic,
+                          color: cs.onSurfaceVariant)),
+                ],
+                if (suffix != null)
+                  Text(suffix,
+                      style: TextStyle(
+                          fontSize: 11, color: cs.onSurfaceVariant)),
+              ],
+            ),
+            Row(
+              children: [
+                if (hasOverride)
+                  Padding(
+                    padding: const EdgeInsets.only(right: 4),
+                    child: GestureDetector(
+                      onTap: () => setState(() {
+                        _overrides.remove(key);
+                      }),
+                      child: Icon(Icons.undo, size: 13, color: Colors.orange),
+                    ),
+                  ),
+                Text(
+                  _nf.format(displayVal),
                   style: TextStyle(
-                      fontSize: 11,
-                      fontStyle: FontStyle.italic,
-                      color: cs.onSurfaceVariant)),
-            ],
+                    fontSize: 13,
+                    color: hasOverride ? Colors.orange : null,
+                    fontWeight: hasOverride ? FontWeight.w700 : null,
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Show inline edit dialog for a calc row override
+  void _editOverride(String key, double currentValue) {
+    final ctrl = TextEditingController(text: _nf.format(currentValue));
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Manuell justering'),
+        content: SizedBox(
+          width: 200,
+          child: TextField(
+            controller: ctrl,
+            autofocus: true,
+            keyboardType: TextInputType.number,
+            decoration: const InputDecoration(
+              labelText: 'Ny verdi',
+              suffixText: 'kr',
+            ),
+            onSubmitted: (_) {
+              final parsed = double.tryParse(
+                  ctrl.text.replaceAll(RegExp(r'[^0-9.]'), ''));
+              if (parsed != null) {
+                setState(() => _overrides[key] = parsed);
+              }
+              Navigator.pop(ctx);
+            },
           ),
-          Text(value, style: const TextStyle(fontSize: 13)),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              setState(() => _overrides.remove(key));
+              Navigator.pop(ctx);
+            },
+            child: const Text('Tilbakestill'),
+          ),
+          FilledButton(
+            onPressed: () {
+              final parsed = double.tryParse(
+                  ctrl.text.replaceAll(RegExp(r'[^0-9.]'), ''));
+              if (parsed != null) {
+                setState(() => _overrides[key] = parsed);
+              }
+              Navigator.pop(ctx);
+            },
+            child: const Text('OK'),
+          ),
         ],
       ),
     );
@@ -2088,8 +2823,11 @@ class _GigOfferPageState extends State<GigOfferPage> {
           'status': 'invoiced',
           if (_invoicedAt == null) 'invoiced_at': now,
         }).eq('id', _offerId!);
-        if (_gigId != null) {
-          await _sb.from('gigs').update({'status': 'invoiced'}).eq('id', _gigId!);
+        // Update status on all linked gigs
+        for (final entry in _dateEntries) {
+          if (entry.gigId != null) {
+            await _sb.from('gigs').update({'status': 'invoiced'}).eq('id', entry.gigId!);
+          }
         }
         setState(() {
           _tripletexInvoiceId = tripletexId;
@@ -2118,11 +2856,136 @@ class _GigOfferPageState extends State<GigOfferPage> {
   // HANDLINGER (RIGHT)
   // ────────────────────────────────────────────────────────────────────────────
 
+  Future<void> _approveAgreement() async {
+    if (_agreement == null || _gigId == null) return;
+    setState(() => _approvingAgreement = true);
+    try {
+      final myId = _sb.auth.currentUser?.id;
+      final df = DateFormat('dd.MM.yyyy');
+
+      await _sb.from('agreement_tokens').update({
+        'status': 'approved',
+        'approved_at': DateTime.now().toIso8601String(),
+        'approved_by': myId,
+      }).eq('id', _agreement!['id']);
+
+      // Update offer and gig status to confirmed
+      if (_offerId != null) {
+        await _sb.from('gig_offers').update({
+          'status': 'confirmed',
+        }).eq('id', _offerId!);
+      }
+      // Update status on all linked gigs
+      for (final entry in _dateEntries) {
+        if (entry.gigId != null) {
+          await _sb.from('gigs').update({
+            'status': 'confirmed',
+          }).eq('id', entry.gigId!);
+        }
+      }
+
+      // Update local state immediately so UI reflects confirmed status
+      _gigStatus = 'confirmed';
+      if (mounted) setState(() {});
+
+      // Load gig and shows from database so PDF matches the original exactly
+      final firstGigId = _dateEntries.first.gigId ?? _gigId;
+      final gigMap = await _sb
+          .from('gigs')
+          .select('*')
+          .eq('id', firstGigId!)
+          .single();
+      final showMaps = await _sb
+          .from('gig_shows')
+          .select('*')
+          .eq('gig_id', firstGigId!)
+          .order('sort_order')
+          .then((rows) => List<Map<String, dynamic>>.from(rows));
+
+      final acceptedName = _agreement!['accepted_name'] as String? ?? '';
+      final acceptedAt = _agreement!['accepted_at'] as String?;
+      final acceptedDate = acceptedAt != null
+          ? df.format(DateTime.parse(acceptedAt))
+          : df.format(DateTime.now());
+      final approvedDate = df.format(DateTime.now());
+
+      final signedResult = await IntensjonsavtalePdfService.generate(
+        gig: gigMap,
+        shows: showMaps,
+        customerSignature: acceptedName,
+        customerSignatureDate: acceptedDate,
+        companySignature: 'Stian Skog',
+        companySignatureDate: approvedDate,
+        calcLines: _pdfCalcLines,
+        calcTotal: _pdfTotal,
+        dateEntries: _pdfDateEntries,
+      );
+
+      // Send signed PDF to customer
+      final customerEmail = _agreement!['customer_email'] as String? ?? '';
+      final venue = _dateEntries.first.venueCtrl.text;
+      final dateFrom = _dateEntries.first.dateFrom != null ? df.format(_dateEntries.first.dateFrom!) : '';
+      if (customerEmail.isNotEmpty) {
+        final htmlBody = '''
+<div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 600px; margin: 0 auto;">
+  <div style="background: #1a1a1a; padding: 24px 32px; border-radius: 8px 8px 0 0;">
+    <h1 style="color: white; font-size: 20px; margin: 0;">Signert intensjonsavtale</h1>
+    <p style="color: #aaa; font-size: 14px; margin: 4px 0 0;">$venue $dateFrom</p>
+  </div>
+  <div style="background: #ffffff; padding: 28px 32px; border: 1px solid #eee; border-top: none; border-radius: 0 0 8px 8px;">
+    <p style="font-size: 15px; line-height: 1.6; color: #333;">Hei $acceptedName,</p>
+    <p style="font-size: 15px; line-height: 1.6; color: #333;">
+      Intensjonsavtalen for $venue er nå godkjent av begge parter. Vedlagt finner du den signerte versjonen.
+    </p>
+    <p style="font-size: 13px; color: #888; margin-top: 20px;">Med vennlig hilsen,<br><strong>Complete Drums / Stian Skog</strong></p>
+  </div>
+</div>
+''';
+        await EmailService.sendEmailWithAttachments(
+          to: customerEmail,
+          subject: 'Signert intensjonsavtale — $venue $dateFrom',
+          body: htmlBody,
+          attachments: [
+            (filename: 'Signert_Intensjonsavtale_${venue.replaceAll(' ', '_')}.pdf', bytes: signedResult.mainPdf),
+          ],
+          isHtml: true,
+          companyId: _companyId,
+        );
+      }
+
+      // Reload agreement
+      final agrGigId = _dateEntries.first.gigId ?? _gigId;
+      final agr = await _sb
+          .from('agreement_tokens')
+          .select()
+          .eq('gig_id', agrGigId!)
+          .order('created_at', ascending: false)
+          .limit(1)
+          .maybeSingle();
+      _agreement = agr;
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Avtale godkjent og signert kopi sendt!')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Godkjenning feilet: $e')),
+        );
+      }
+    }
+    if (mounted) setState(() => _approvingAgreement = false);
+  }
+
   Widget _buildActionsCard() {
     final cs = Theme.of(context).colorScheme;
+    final agreementStatus = _agreement?['status'] as String?;
+
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(18),
+      padding: const EdgeInsets.all(22),
       decoration: BoxDecoration(
         color: cs.surfaceContainerLowest,
         borderRadius: BorderRadius.circular(14),
@@ -2133,7 +2996,7 @@ class _GigOfferPageState extends State<GigOfferPage> {
         children: [
           const Text('Handlinger',
               style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15)),
-          const SizedBox(height: 14),
+          const SizedBox(height: 16),
           FilledButton.icon(
             onPressed: _saving ? null : _save,
             icon: _saving
@@ -2152,6 +3015,106 @@ class _GigOfferPageState extends State<GigOfferPage> {
               label: const Text('Åpne gig'),
             ),
           ],
+
+          // ── Agreement status ──
+          if (_agreement != null) ...[
+            const SizedBox(height: 16),
+            const Divider(),
+            const SizedBox(height: 12),
+            const Text('Intensjonsavtale',
+                style: TextStyle(fontWeight: FontWeight.w900, fontSize: 13)),
+            const SizedBox(height: 8),
+
+            if (agreementStatus == 'pending')
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: Colors.orange.withValues(alpha: 0.08),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.orange.withValues(alpha: 0.2)),
+                ),
+                child: const Text(
+                  'Sendt — venter på svar fra kunde',
+                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Colors.orange),
+                ),
+              ),
+
+            if (agreementStatus == 'accepted') ...[
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: Colors.green.withValues(alpha: 0.08),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.green.withValues(alpha: 0.2)),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Kunde har godtatt!',
+                      style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: Colors.green),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Godtatt av: ${_agreement!['accepted_name'] ?? ''}',
+                      style: TextStyle(fontSize: 12, color: cs.onSurfaceVariant),
+                    ),
+                    if (_agreement!['accepted_at'] != null)
+                      Text(
+                        'Dato: ${DateFormat('dd.MM.yyyy HH:mm').format(DateTime.parse(_agreement!['accepted_at']))}',
+                        style: TextStyle(fontSize: 11, color: cs.onSurfaceVariant),
+                      ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 10),
+              FilledButton.icon(
+                onPressed: _approvingAgreement ? null : _approveAgreement,
+                style: FilledButton.styleFrom(backgroundColor: Colors.green),
+                icon: Icon(_approvingAgreement ? Icons.hourglass_top : Icons.check_circle, size: 18),
+                label: Text(_approvingAgreement ? 'Godkjenner…' : 'Godkjenn og signer'),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                'Sender signert kopi til kunden',
+                style: TextStyle(fontSize: 11, color: cs.onSurfaceVariant),
+              ),
+            ],
+
+            if (agreementStatus == 'approved')
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: Colors.blue.withValues(alpha: 0.08),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.blue.withValues(alpha: 0.2)),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Row(
+                      children: [
+                        Icon(Icons.check_circle, size: 16, color: Colors.blue),
+                        SizedBox(width: 6),
+                        Text(
+                          'Avtale signert',
+                          style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: Colors.blue),
+                        ),
+                      ],
+                    ),
+                    if (_agreement!['approved_at'] != null)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 4),
+                        child: Text(
+                          'Godkjent: ${DateFormat('dd.MM.yyyy HH:mm').format(DateTime.parse(_agreement!['approved_at']))}',
+                          style: TextStyle(fontSize: 11, color: cs.onSurfaceVariant),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+          ],
+
           // Tripletex invoice button
           if (_offerId != null &&
               (_gigStatus == 'confirmed' || _gigStatus == 'invoiced')) ...[
@@ -2578,6 +3541,27 @@ class _CustomerPickerDialogState extends State<_CustomerPickerDialog>
         ),
       ],
     );
+  }
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// DATE ENTRY — one per gig date in a multi-date offer
+// ──────────────────────────────────────────────────────────────────────────────
+
+class _DateEntry {
+  String? gigId;
+  DateTime? dateFrom;
+  DateTime? dateTo;
+  final venueCtrl = TextEditingController();
+  final cityCtrl = TextEditingController();
+  final countryCtrl = TextEditingController(text: 'NO');
+  /// Indices into the parent's _shows list that are selected for this date.
+  /// null means "use all selected shows" (default for new entries).
+  Set<int>? selectedShowIndices;
+  void dispose() {
+    venueCtrl.dispose();
+    cityCtrl.dispose();
+    countryCtrl.dispose();
   }
 }
 

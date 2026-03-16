@@ -8,6 +8,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../pages/mgmt/mgmt_settings_page.dart' show companyFlagsNotifier;
 import '../state/active_company.dart';
 import '../ui/css_theme.dart';
+import 'incoming_call_overlay.dart';
 
 /// Notifier so the sidebar badge updates immediately after marking messages read.
 final mgmtUnreadNotifier = ValueNotifier<int>(0);
@@ -24,17 +25,22 @@ class MgmtShell extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: Row(
+      body: Stack(
         children: [
-          const _MgmtSideNav(),
-          Expanded(
-            child: Column(
-              children: [
-                const _MgmtTopBar(),
-                Expanded(child: child),
-              ],
-            ),
+          Row(
+            children: [
+              const _MgmtSideNav(),
+              Expanded(
+                child: Column(
+                  children: [
+                    const _MgmtTopBar(),
+                    Expanded(child: child),
+                  ],
+                ),
+              ),
+            ],
           ),
+          const IncomingCallOverlay(),
         ],
       ),
     );
@@ -295,6 +301,7 @@ class _MgmtSideNavState extends State<_MgmtSideNav> {
   final _sb = Supabase.instance.client;
   bool _showTours = true;
   int _unreadMessages = 0;
+  int _pendingAgreements = 0;
   RealtimeChannel? _channel;
   Timer? _pollTimer;
 
@@ -303,6 +310,7 @@ class _MgmtSideNavState extends State<_MgmtSideNav> {
     super.initState();
     _loadFlags();
     _loadUnreadMessages();
+    _loadPendingAgreements();
     companyFlagsNotifier.addListener(_onFlagsChanged);
     mgmtUnreadNotifier.addListener(_loadUnreadMessages);
     activeCompanyNotifier.addListener(_onCompanyChanged);
@@ -326,9 +334,16 @@ class _MgmtSideNavState extends State<_MgmtSideNav> {
           table: 'group_chat_messages',
           callback: (_) => _loadUnreadMessages(),
         )
+        .onPostgresChanges(
+          event: PostgresChangeEvent.update,
+          schema: 'public',
+          table: 'agreement_tokens',
+          callback: (_) => _loadPendingAgreements(),
+        )
         .subscribe();
     _pollTimer = Timer.periodic(const Duration(seconds: 15), (_) {
       _loadUnreadMessages();
+      _loadPendingAgreements();
     });
   }
 
@@ -345,6 +360,7 @@ class _MgmtSideNavState extends State<_MgmtSideNav> {
   void _onCompanyChanged() {
     _loadFlags();
     _loadUnreadMessages();
+    _loadPendingAgreements();
   }
 
   Future<void> _loadUnreadMessages() async {
@@ -428,6 +444,22 @@ class _MgmtSideNavState extends State<_MgmtSideNav> {
     }
   }
 
+  Future<void> _loadPendingAgreements() async {
+    try {
+      final companyId = activeCompanyNotifier.value?.id;
+      if (companyId == null) return;
+      // Count agreements with status 'accepted' (customer accepted, not yet approved)
+      final rows = await _sb
+          .from('agreement_tokens')
+          .select('id, gigs!inner(company_id)')
+          .eq('status', 'accepted')
+          .eq('gigs.company_id', companyId);
+      if (mounted) setState(() => _pendingAgreements = (rows as List).length);
+    } catch (e) {
+      debugPrint('Pending agreements badge error: $e');
+    }
+  }
+
   void _onFlagsChanged() {
     if (!mounted) return;
     setState(() {
@@ -495,8 +527,13 @@ class _MgmtSideNavState extends State<_MgmtSideNav> {
                       ),
                     _MgmtNavItem(
                       icon: Icons.music_note_rounded,
-                      label: 'Gigs',
+                      label: 'Aktiviteter',
                       route: '/m/gigs',
+                    ),
+                    _MgmtNavItem(
+                      icon: Icons.groups_rounded,
+                      label: 'Møter',
+                      route: '/m/meetings',
                     ),
                     _MgmtNavItem(
                       icon: Icons.people_rounded,
@@ -512,6 +549,7 @@ class _MgmtSideNavState extends State<_MgmtSideNav> {
                       icon: Icons.request_quote_rounded,
                       label: 'Tilbud',
                       route: '/m/offers',
+                      badge: _pendingAgreements,
                     ),
                     _MgmtNavItem(
                       icon: Icons.receipt_long_rounded,

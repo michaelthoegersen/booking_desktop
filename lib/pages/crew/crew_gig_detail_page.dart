@@ -3,6 +3,8 @@ import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../../widgets/rich_text_field.dart';
+
 class CrewGigDetailPage extends StatefulWidget {
   final String gigId;
 
@@ -293,6 +295,8 @@ class _CrewGigDetailPageState extends State<CrewGigDetailPage> {
     final title = isRehearsal
         ? 'Øvelse'
         : [venue, city].where((s) => s.isNotEmpty).join(' · ');
+    final status = _gig!['status'] as String? ?? 'inquiry';
+    final isCancelled = status == 'cancelled';
 
     return Padding(
       padding: const EdgeInsets.all(18),
@@ -330,7 +334,10 @@ class _CrewGigDetailPageState extends State<CrewGigDetailPage> {
                   children: [
                     Text(
                       title.isNotEmpty ? title : dateLabel,
-                      style: Theme.of(context).textTheme.headlineMedium,
+                      style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+                        decoration: isCancelled ? TextDecoration.lineThrough : null,
+                        color: isCancelled ? cs.onSurfaceVariant : null,
+                      ),
                       overflow: TextOverflow.ellipsis,
                     ),
                     if (dateLabel.isNotEmpty)
@@ -344,25 +351,21 @@ class _CrewGigDetailPageState extends State<CrewGigDetailPage> {
                   ],
                 ),
               ),
-              if (isRehearsal)
+              if (isCancelled) ...[
+                const SizedBox(width: 12),
                 Container(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 10, vertical: 4),
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                   decoration: BoxDecoration(
-                    color: Colors.purple.withValues(alpha: 0.12),
+                    color: Colors.red.withValues(alpha: 0.12),
                     borderRadius: BorderRadius.circular(999),
-                    border: Border.all(
-                        color: Colors.purple.withValues(alpha: 0.3)),
+                    border: Border.all(color: Colors.red.withValues(alpha: 0.3)),
                   ),
                   child: const Text(
-                    'Øvelse',
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w700,
-                      color: Colors.purple,
-                    ),
+                    'Avlyst',
+                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: Colors.red),
                   ),
                 ),
+              ],
             ],
           ),
 
@@ -376,19 +379,27 @@ class _CrewGigDetailPageState extends State<CrewGigDetailPage> {
                 children: [
                   // Times section
                   _infoSection(cs, [
-                    if (_gig!['meeting_time'] != null)
-                      _infoRow(cs, 'Møtetid', _gig!['meeting_time']),
-                    if (_gig!['get_in_time'] != null)
-                      _infoRow(cs, 'Get-in', _gig!['get_in_time']),
-                    if (_gig!['rehearsal_time'] != null)
-                      _infoRow(cs, 'Lydprøve', _gig!['rehearsal_time']),
-                    if (_gig!['performance_time'] != null)
-                      _infoRow(cs, 'Spilletid', _gig!['performance_time']),
-                    if (_gig!['get_out_time'] != null)
-                      _infoRow(cs, 'Get-out', _gig!['get_out_time']),
+                    if (isRehearsal) ...[
+                      if (_gig!['meeting_time'] != null)
+                        _infoRow(cs, 'Fra', _gig!['meeting_time']),
+                      if (_gig!['get_out_time'] != null)
+                        _infoRow(cs, 'Til', _gig!['get_out_time']),
+                    ] else ...[
+                      if (_gig!['meeting_time'] != null)
+                        _infoRow(cs, 'Møtetid', _gig!['meeting_time']),
+                      if (_gig!['get_in_time'] != null)
+                        _infoRow(cs, 'Get-in', _gig!['get_in_time']),
+                      if (_gig!['rehearsal_time'] != null)
+                        _infoRow(cs, 'Lydprøve', _gig!['rehearsal_time']),
+                      if (_gig!['performance_time'] != null)
+                        _infoRow(cs, 'Spilletid', _gig!['performance_time']),
+                      if (_gig!['get_out_time'] != null)
+                        _infoRow(cs, 'Get-out', _gig!['get_out_time']),
+                    ],
                     if (_gig!['meeting_notes'] != null &&
                         (_gig!['meeting_notes'] as String).isNotEmpty)
-                      _infoRow(cs, 'Notater', _gig!['meeting_notes']),
+                      _infoRow(cs, 'Notater', _gig!['meeting_notes'],
+                          useMarkdown: true),
                   ]),
 
                   const SizedBox(height: 24),
@@ -742,7 +753,8 @@ class _CrewGigDetailPageState extends State<CrewGigDetailPage> {
     );
   }
 
-  Widget _infoRow(ColorScheme cs, String label, String? value) {
+  Widget _infoRow(ColorScheme cs, String label, String? value,
+      {bool useMarkdown = false}) {
     if (value == null || value.isEmpty) return const SizedBox.shrink();
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
@@ -761,13 +773,15 @@ class _CrewGigDetailPageState extends State<CrewGigDetailPage> {
             ),
           ),
           Expanded(
-            child: Text(
-              value,
-              style: const TextStyle(
-                fontWeight: FontWeight.w600,
-                fontSize: 13,
-              ),
-            ),
+            child: useMarkdown
+                ? MarkdownText(value, fontSize: 13)
+                : Text(
+                    value,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w600,
+                      fontSize: 13,
+                    ),
+                  ),
           ),
         ],
       ),

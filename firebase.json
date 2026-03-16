@@ -7,6 +7,14 @@
     ],
     "rewrites": [
       {
+        "source": "/rsvp.html",
+        "destination": "/rsvp.html"
+      },
+      {
+        "source": "/accept.html",
+        "destination": "/accept.html"
+      },
+      {
         "source": "**",
         "destination": "/index.html"
       }

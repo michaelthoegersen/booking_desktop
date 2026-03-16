@@ -24,6 +24,11 @@ class _MgmtGigOffersPageState extends State<MgmtGigOffersPage> {
   String _statusFilter = 'all';
   bool _showArchived = false;
 
+  // Agreement status per gig_id
+  Map<String, Map<String, dynamic>> _agreements = {};
+  // Multi-date junction: offer_id → list of junction rows with gig data
+  Map<String, List<Map<String, dynamic>>> _offerGigs = {};
+
   String? get _companyId => activeCompanyNotifier.value?.id;
 
   @override
@@ -50,11 +55,55 @@ class _MgmtGigOffersPageState extends State<MgmtGigOffersPage> {
       }
       final rows = await _sb
           .from('gig_offers')
-          .select('*, gigs!gig_offers_gig_id_fkey(venue_name, date_from, date_to)')
+          .select('*, gigs!gig_offers_gig_id_fkey(venue_name, date_from, date_to, status)')
           .eq('company_id', _companyId!)
           .eq('archived', _showArchived)
           .order('created_at', ascending: false);
       _offers = List<Map<String, dynamic>>.from(rows);
+
+      // Load multi-date gigs from junction table
+      final offerIds = _offers.map((o) => o['id'] as String).toList();
+      if (offerIds.isNotEmpty) {
+        final junctionRows = await _sb
+            .from('gig_offer_gigs')
+            .select('offer_id, gig_id, sort_order, gigs(venue_name, date_from, date_to, status, city)')
+            .inFilter('offer_id', offerIds)
+            .order('sort_order');
+        // Group junction entries by offer_id
+        _offerGigs = {};
+        for (final j in List<Map<String, dynamic>>.from(junctionRows)) {
+          final oid = j['offer_id'] as String;
+          _offerGigs.putIfAbsent(oid, () => []).add(j);
+        }
+      }
+
+      // Load agreement status for all gig_ids
+      final gigIds = <String>{};
+      for (final o in _offers) {
+        final gid = o['gig_id'] as String?;
+        if (gid != null) gigIds.add(gid);
+      }
+      for (final gigs in _offerGigs.values) {
+        for (final j in gigs) {
+          final gid = j['gig_id'] as String?;
+          if (gid != null) gigIds.add(gid);
+        }
+      }
+      if (gigIds.isNotEmpty) {
+        final agreements = await _sb
+            .from('agreement_tokens')
+            .select('gig_id, status, accepted_name, accepted_at')
+            .inFilter('gig_id', gigIds.toList())
+            .order('created_at', ascending: false);
+        _agreements = {};
+        for (final a in (agreements as List)) {
+          final gid = a['gig_id'] as String;
+          // Keep the latest agreement per gig
+          if (!_agreements.containsKey(gid)) {
+            _agreements[gid] = Map<String, dynamic>.from(a);
+          }
+        }
+      }
     } catch (e) {
       debugPrint('Load offers error: $e');
     }
@@ -119,25 +168,42 @@ class _MgmtGigOffersPageState extends State<MgmtGigOffersPage> {
       ),
     );
     if (ok == true) {
+      // Collect all linked gig IDs from junction
+      final junctionGigs = _offerGigs[id] ?? [];
+      final allGigIds = <String>{};
+      for (final j in junctionGigs) {
+        final gid = j['gig_id'] as String?;
+        if (gid != null) allGigIds.add(gid);
+      }
+      // Also include legacy gig_id
       final offer = _offers.firstWhere((o) => o['id'] == id, orElse: () => {});
-      final gigId = offer['gig_id'] as String?;
-      // Delete offer first (has FK to gig with ON DELETE SET NULL)
+      final legacyGigId = offer['gig_id'] as String?;
+      if (legacyGigId != null) allGigIds.add(legacyGigId);
+
+      // Delete offer first (junction cascade handles gig_offer_gigs)
       await _sb.from('gig_offers').delete().eq('id', id);
-      // Then delete the gig
-      if (gigId != null) {
-        await _sb.from('gigs').delete().eq('id', gigId);
+      // Then delete all linked gigs
+      for (final gid in allGigIds) {
+        await _sb.from('gigs').delete().eq('id', gid);
       }
       _load();
     }
   }
 
   Future<void> _setArchived(String offerId, bool archived) async {
-    // Find the offer to get gig_id
-    final offer = _offers.firstWhere((o) => o['id'] == offerId, orElse: () => {});
     await _sb.from('gig_offers').update({'archived': archived}).eq('id', offerId);
-    final gigId = offer['gig_id'] as String?;
-    if (gigId != null) {
-      await _sb.from('gigs').update({'archived': archived}).eq('id', gigId);
+    // Archive/restore all linked gigs
+    final junctionGigs = _offerGigs[offerId] ?? [];
+    final allGigIds = <String>{};
+    for (final j in junctionGigs) {
+      final gid = j['gig_id'] as String?;
+      if (gid != null) allGigIds.add(gid);
+    }
+    final offer = _offers.firstWhere((o) => o['id'] == offerId, orElse: () => {});
+    final legacyGigId = offer['gig_id'] as String?;
+    if (legacyGigId != null) allGigIds.add(legacyGigId);
+    for (final gid in allGigIds) {
+      await _sb.from('gigs').update({'archived': archived}).eq('id', gid);
     }
     _load();
   }
@@ -228,20 +294,45 @@ class _MgmtGigOffersPageState extends State<MgmtGigOffersPage> {
                         itemCount: _filtered.length,
                         itemBuilder: (context, i) {
                           final o = _filtered[i];
-                          final status = o['status'] as String? ?? 'inquiry';
+                          final offerStatus = o['status'] as String? ?? 'inquiry';
+                          final gig = o['gigs'] as Map<String, dynamic>?;
+                          final gigStatus = gig?['status'] as String?;
+                          // If gig is cancelled, show that instead of offer status
+                          final status = gigStatus == 'cancelled' ? 'cancelled' : offerStatus;
                           final customer =
                               o['customer_firma'] as String? ?? '';
                           final name =
                               o['customer_name'] as String? ?? '';
-                          final gig = o['gigs'] as Map<String, dynamic>?;
-                          final venue = gig?['venue_name'] as String? ?? '';
-                          final dateFrom = gig?['date_from'] as String?;
-                          final dateTo = gig?['date_to'] as String?;
-                          String gigDates = '';
-                          if (dateFrom != null) {
-                            gigDates = _df.format(DateTime.parse(dateFrom));
-                            if (dateTo != null && dateTo != dateFrom) {
-                              gigDates += ' – ${_df.format(DateTime.parse(dateTo))}';
+
+                          // Multi-date support
+                          final jGigs = _offerGigs[o['id']] ?? [];
+                          final dateCount = jGigs.isNotEmpty ? jGigs.length : 1;
+
+                          String venue;
+                          String gigDates;
+                          if (jGigs.length > 1) {
+                            // Multiple dates — show summary
+                            final venues = jGigs
+                                .map((j) => (j['gigs'] as Map?)?['venue_name'] as String? ?? '')
+                                .where((v) => v.isNotEmpty)
+                                .toSet();
+                            venue = venues.join(', ');
+                            final dates = jGigs
+                                .map((j) => (j['gigs'] as Map?)?['date_from'] as String?)
+                                .where((d) => d != null)
+                                .map((d) => _df.format(DateTime.parse(d!)))
+                                .toList();
+                            gigDates = '$dateCount datoer: ${dates.join(', ')}';
+                          } else {
+                            venue = gig?['venue_name'] as String? ?? '';
+                            final dateFrom = gig?['date_from'] as String?;
+                            final dateTo = gig?['date_to'] as String?;
+                            gigDates = '';
+                            if (dateFrom != null) {
+                              gigDates = _df.format(DateTime.parse(dateFrom));
+                              if (dateTo != null && dateTo != dateFrom) {
+                                gigDates += ' – ${_df.format(DateTime.parse(dateTo))}';
+                              }
                             }
                           }
                           final created = o['created_at'] != null
@@ -306,6 +397,49 @@ class _MgmtGigOffersPageState extends State<MgmtGigOffersPage> {
                                       ],
                                     ),
                                   ),
+                                  // Agreement badge (hidden when cancelled)
+                                  if (status != 'cancelled' &&
+                                      _agreements[o['gig_id']]?['status'] == 'accepted') ...[
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 10, vertical: 4),
+                                      decoration: BoxDecoration(
+                                        color: Colors.green.withValues(alpha: 0.12),
+                                        borderRadius: BorderRadius.circular(999),
+                                        border: Border.all(color: Colors.green.withValues(alpha: 0.3)),
+                                      ),
+                                      child: const Text(
+                                        'Avtale godtatt',
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w700,
+                                          color: Colors.green,
+                                        ),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 8),
+                                  ],
+                                  if (status != 'cancelled' &&
+                                      _agreements[o['gig_id']]?['status'] == 'approved') ...[
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 10, vertical: 4),
+                                      decoration: BoxDecoration(
+                                        color: Colors.blue.withValues(alpha: 0.12),
+                                        borderRadius: BorderRadius.circular(999),
+                                        border: Border.all(color: Colors.blue.withValues(alpha: 0.3)),
+                                      ),
+                                      child: const Text(
+                                        'Signert',
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w700,
+                                          color: Colors.blue,
+                                        ),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 8),
+                                  ],
                                   // Status badge
                                   Container(
                                     padding: const EdgeInsets.symmetric(

@@ -45,6 +45,13 @@ class SettingsStore {
   static const _kGraphSenderEmail = "graphSenderEmail";
   static const _kTollKmRate = "tollKmRate";
 
+  // --- Complete pricing ---
+  static const _kCreoFeeMinimum = "creoFeeMinimum";
+  static const _kExtraShowFee = "extraShowFee";
+  static const _kMarkupPct = "markupPct";
+  static const _kInearPrice = "inearPrice";
+  static const _kTransportPricePerKm = "transportPricePerKm";
+
   // --- Swedish pricing model ---
   static const _kSweTimlon = "swe_timlon";
   static const _kSweTimmarPerDag = "swe_timmarPerDag";
@@ -117,6 +124,16 @@ class SettingsStore {
           prefs.getString(_kGraphSenderEmail) ?? current.graphSenderEmail,
       tollKmRate:
           prefs.getDouble(_kTollKmRate) ?? current.tollKmRate,
+      creoFeeMinimum:
+          prefs.getDouble(_kCreoFeeMinimum) ?? current.creoFeeMinimum,
+      extraShowFee:
+          prefs.getDouble(_kExtraShowFee) ?? current.extraShowFee,
+      markupPct:
+          prefs.getDouble(_kMarkupPct) ?? current.markupPct,
+      inearPrice:
+          prefs.getDouble(_kInearPrice) ?? current.inearPrice,
+      transportPricePerKm:
+          prefs.getDouble(_kTransportPricePerKm) ?? current.transportPricePerKm,
       ferries: current.ferries,
       sweSettings: current.sweSettings.copyWith(
         timlon: prefs.getDouble(_kSweTimlon),
@@ -175,6 +192,11 @@ class SettingsStore {
     await prefs.setString(_kGraphClientSecret, current.graphClientSecret);
     await prefs.setString(_kGraphSenderEmail, current.graphSenderEmail);
     await prefs.setDouble(_kTollKmRate, current.tollKmRate);
+    await prefs.setDouble(_kCreoFeeMinimum, current.creoFeeMinimum);
+    await prefs.setDouble(_kExtraShowFee, current.extraShowFee);
+    await prefs.setDouble(_kMarkupPct, current.markupPct);
+    await prefs.setDouble(_kInearPrice, current.inearPrice);
+    await prefs.setDouble(_kTransportPricePerKm, current.transportPricePerKm);
 
     final swe = current.sweSettings;
     await prefs.setDouble(_kSweTimlon, swe.timlon);

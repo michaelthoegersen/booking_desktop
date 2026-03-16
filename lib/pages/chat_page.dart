@@ -1,12 +1,19 @@
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../contacts/direct_chat_screen.dart';
+import '../services/chat_attachment_service.dart';
 import '../services/chat_service.dart';
+import '../services/poll_service.dart';
 import '../state/active_company.dart';
 import '../ui/css_theme.dart';
+import '../widgets/chat_attach_menu.dart';
+import '../widgets/chat_media_content.dart';
+import '../widgets/gif_picker.dart';
 import '../widgets/mention_helpers.dart';
+import '../widgets/poll_create_dialog.dart';
 
 class ChatPage extends StatefulWidget {
   const ChatPage({super.key});
@@ -558,6 +565,109 @@ class _ThreadViewState extends State<_ThreadView> with MentionMixin {
     }
   }
 
+  Future<void> _pickImage() async {
+    final result = await FilePicker.platform.pickFiles(type: FileType.image);
+    if (result == null || result.files.isEmpty) return;
+    final file = result.files.first;
+    final bytes = file.bytes;
+    if (bytes == null) return;
+    setState(() => _sending = true);
+    try {
+      final url = await ChatAttachmentService.uploadFile(
+        bytes: bytes,
+        fileName: file.name,
+        contentType: 'image/${file.extension ?? 'png'}',
+      );
+      await ChatService.sendAdminMessage(
+        dato: widget.thread.dato,
+        produksjon: widget.thread.produksjon,
+        message: '',
+        targetUserId: widget.thread.userId,
+        messageType: 'image',
+        attachmentUrl: url,
+      );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Feil ved opplasting: $e')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _sending = false);
+    }
+  }
+
+  Future<void> _pickFile() async {
+    final result = await FilePicker.platform.pickFiles();
+    if (result == null || result.files.isEmpty) return;
+    final file = result.files.first;
+    final bytes = file.bytes;
+    if (bytes == null) return;
+    setState(() => _sending = true);
+    try {
+      final url = await ChatAttachmentService.uploadFile(
+        bytes: bytes,
+        fileName: file.name,
+      );
+      await ChatService.sendAdminMessage(
+        dato: widget.thread.dato,
+        produksjon: widget.thread.produksjon,
+        message: file.name,
+        targetUserId: widget.thread.userId,
+        messageType: 'file',
+        attachmentUrl: url,
+      );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Feil ved opplasting: $e')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _sending = false);
+    }
+  }
+
+  void _showGifPicker() {
+    showDialog(
+      context: context,
+      builder: (_) => GifPicker(
+        onGifSelected: (url) async {
+          await ChatService.sendAdminMessage(
+            dato: widget.thread.dato,
+            produksjon: widget.thread.produksjon,
+            message: '',
+            targetUserId: widget.thread.userId,
+            messageType: 'gif',
+            attachmentUrl: url,
+          );
+        },
+      ),
+    );
+  }
+
+  void _showPollCreator() {
+    showDialog(
+      context: context,
+      builder: (_) => PollCreateDialog(
+        onCreate: (question, options) async {
+          final pollId = await PollService.createPoll(
+            question: question,
+            options: options,
+          );
+          await ChatService.sendAdminMessage(
+            dato: widget.thread.dato,
+            produksjon: widget.thread.produksjon,
+            message: question,
+            targetUserId: widget.thread.userId,
+            messageType: 'poll',
+            attachmentUrl: pollId,
+          );
+        },
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final dateStr = _fmtDate(widget.thread.dato);
@@ -655,6 +765,8 @@ class _ThreadViewState extends State<_ThreadView> with MentionMixin {
                     replyMsg: replyMsg,
                     onReply: () => _startReply(msg),
                     onEdit: isMine ? () => _startEdit(msg) : null,
+                    messageType: msg['message_type'] as String? ?? 'text',
+                    attachmentUrl: msg['attachment_url'] as String?,
                   );
                 },
               );
@@ -728,6 +840,13 @@ class _ThreadViewState extends State<_ThreadView> with MentionMixin {
           ),
           child: Row(
             children: [
+              ChatAttachMenu(
+                onPickImage: _pickImage,
+                onPickFile: _pickFile,
+                onGif: _showGifPicker,
+                onPoll: _showPollCreator,
+              ),
+              const SizedBox(width: 4),
               Expanded(
                 child: TextField(
                   controller: _controller,
@@ -808,6 +927,8 @@ class _DesktopBubble extends StatelessWidget {
   final Map<String, dynamic>? replyMsg;
   final VoidCallback? onReply;
   final VoidCallback? onEdit;
+  final String messageType;
+  final String? attachmentUrl;
 
   const _DesktopBubble({
     required this.message,
@@ -818,6 +939,8 @@ class _DesktopBubble extends StatelessWidget {
     this.replyMsg,
     this.onReply,
     this.onEdit,
+    this.messageType = 'text',
+    this.attachmentUrl,
   });
 
   @override
@@ -830,6 +953,7 @@ class _DesktopBubble extends StatelessWidget {
       child: ConstrainedBox(
         constraints: BoxConstraints(maxWidth: maxWidth),
         child: GestureDetector(
+          onSecondaryTapUp: (details) => _showContextMenu(context),
           onLongPress: () => _showContextMenu(context),
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
@@ -896,19 +1020,14 @@ class _DesktopBubble extends StatelessWidget {
                     ),
                   ),
                 ],
-                Text.rich(
-                  TextSpan(
-                    children: buildMentionSpans(
-                      message,
-                      TextStyle(
-                        fontSize: 14,
-                        color: isAdmin ? Colors.white : Colors.black87,
-                      ),
-                    ),
-                    style: TextStyle(
-                      fontSize: 14,
-                      color: isAdmin ? Colors.white : Colors.black87,
-                    ),
+                ChatMediaContent(
+                  messageType: messageType,
+                  message: message,
+                  attachmentUrl: attachmentUrl,
+                  isMine: isAdmin,
+                  textStyle: TextStyle(
+                    fontSize: 14,
+                    color: isAdmin ? Colors.white : Colors.black87,
                   ),
                 ),
                 if (timeStr != null) ...[
@@ -946,7 +1065,6 @@ class _DesktopBubble extends StatelessWidget {
   }
 
   void _showContextMenu(BuildContext context) {
-    if (onReply == null && onEdit == null) return;
     final RenderBox box = context.findRenderObject() as RenderBox;
     final offset = box.localToGlobal(Offset.zero);
 
@@ -958,18 +1076,28 @@ class _DesktopBubble extends StatelessWidget {
       ),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       items: [
+        const PopupMenuItem<String>(
+          value: 'copy',
+          child: Row(children: [Icon(Icons.copy, size: 18), SizedBox(width: 8), Text('Kopier')]),
+        ),
         if (onReply != null)
-          PopupMenuItem<String>(
+          const PopupMenuItem<String>(
             value: 'reply',
-            child: Row(children: const [Icon(Icons.reply, size: 18), SizedBox(width: 8), Text('Svar')]),
+            child: Row(children: [Icon(Icons.reply, size: 18), SizedBox(width: 8), Text('Svar')]),
           ),
         if (onEdit != null)
-          PopupMenuItem<String>(
+          const PopupMenuItem<String>(
             value: 'edit',
-            child: Row(children: const [Icon(Icons.edit, size: 18), SizedBox(width: 8), Text('Rediger')]),
+            child: Row(children: [Icon(Icons.edit, size: 18), SizedBox(width: 8), Text('Rediger')]),
           ),
       ],
     ).then((value) {
+      if (value == 'copy') {
+        Clipboard.setData(ClipboardData(text: message));
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Kopiert'), duration: Duration(seconds: 1)),
+        );
+      }
       if (value == 'reply') onReply?.call();
       if (value == 'edit') onEdit?.call();
     });

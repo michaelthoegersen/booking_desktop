@@ -214,7 +214,7 @@ class _MgmtDashboardPageState extends State<MgmtDashboardPage> {
 
                   // Upcoming events (tour shows + gigs)
                   _SectionHeader(
-                    title: 'Kommende hendelser',
+                    title: 'Kommende aktiviteter',
                     subtitle: 'Neste 30 dager',
                     count: _upcomingEvents.length,
                     action: TextButton(

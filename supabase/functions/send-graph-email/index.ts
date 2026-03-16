@@ -49,10 +49,11 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const { to, subject, body, attachment, attachments } = await req.json() as {
+    const { to, subject, body, contentType, attachment, attachments } = await req.json() as {
       to: string;
       subject: string;
       body: string;
+      contentType?: string;
       attachment?: { name: string; contentBytes: string };
       attachments?: { name: string; contentBytes: string }[];
     };
@@ -80,7 +81,7 @@ Deno.serve(async (req) => {
 
     const message: Record<string, unknown> = {
       subject,
-      body: { contentType: 'Text', content: body },
+      body: { contentType: contentType === 'HTML' ? 'HTML' : 'Text', content: body },
       toRecipients: recipients,
     };
 

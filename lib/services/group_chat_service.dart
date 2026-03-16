@@ -68,12 +68,16 @@ class GroupChatService {
     required String senderName,
     String? replyToId,
     List<String>? mentionedUserIds,
+    String messageType = 'text',
+    String? attachmentUrl,
   }) async {
     await _sb.from('group_chat_messages').insert({
       'group_chat_id': groupId,
       'user_id': _sb.auth.currentUser!.id,
       'sender_name': senderName,
       'message': message,
+      'message_type': messageType,
+      if (attachmentUrl != null) 'attachment_url': attachmentUrl,
       if (replyToId != null) 'reply_to_id': replyToId,
       if (mentionedUserIds != null && mentionedUserIds.isNotEmpty)
         'mentioned_user_ids': mentionedUserIds,

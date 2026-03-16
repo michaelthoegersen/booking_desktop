@@ -58,6 +58,7 @@ class NewOfferPage extends StatefulWidget {
   final String? prefillDateFrom;
   final String? prefillDateTo;
   final String? prefillStops; // comma-separated intermediate cities
+  final String? prefillRounds; // multi-round data: "startCity|endCity|date:city,date:city;..."
   final String? busRequestId;
   final int? prefillPax;
   final int? prefillBusCount;
@@ -76,6 +77,7 @@ class NewOfferPage extends StatefulWidget {
     this.prefillDateFrom,
     this.prefillDateTo,
     this.prefillStops,
+    this.prefillRounds,
     this.busRequestId,
     this.prefillPax,
     this.prefillBusCount,
@@ -312,6 +314,223 @@ if (r.flightCost > 0) {
     b.writeln("TOTAL: ${_nok(r.totalCost)}");
 
     return b.toString();
+  }
+
+  // ===================================================
+  // DETAILED CALC (Show calc button)
+  // ===================================================
+
+  String _buildDetailedCalc(int roundIndex, RoundCalcResult r, AppSettings s) {
+    final b = StringBuffer();
+    final round = offer.rounds[roundIndex];
+    final entries = round.entries;
+
+    b.writeln("═══════════════════════════════════════");
+    b.writeln("  DETAILED CALCULATION — ROUND ${roundIndex + 1}");
+    b.writeln("═══════════════════════════════════════");
+
+    // ── SETTINGS ──
+    b.writeln("");
+    b.writeln("SETTINGS:");
+    b.writeln("  Day price:       ${_nok(s.dayPrice)}");
+    b.writeln("  Extra km price:  ${_nok(s.extraKmPrice)}");
+    b.writeln("  Km/day incl:     ${s.includedKmPerDay.toStringAsFixed(0)} km");
+    b.writeln("  D.Drive price:   ${_nok(s.dDriveDayPrice)}");
+    b.writeln("  Trailer day:     ${_nok(s.trailerDayPrice)}");
+    b.writeln("  Trailer km:      ${s.trailerKmPrice.toStringAsFixed(2)}/km");
+    b.writeln("  Toll rate:       ${s.tollKmRate.toStringAsFixed(2)}/km");
+    b.writeln("  Flight ticket:   ${_nok(s.flightTicketPrice)}");
+
+    // ── BUS CONFIG ──
+    b.writeln("");
+    b.writeln("BUS CONFIG:");
+    b.writeln("  Type:     ${offer.busType.name}");
+    b.writeln("  Count:    ${offer.busCount}");
+    b.writeln("  Trailer:  ${round.trailer ? 'YES' : 'no'}");
+    b.writeln("  Pickup PM: ${round.pickupEveningFirstDay ? 'YES' : 'no'}");
+    final busNames = round.busSlots.where((s) => s != null && s.isNotEmpty).toList();
+    if (busNames.isNotEmpty) {
+      b.writeln("  Buses:    ${busNames.join(', ')}");
+    }
+
+    // ── PER-LEG BREAKDOWN ──
+    b.writeln("");
+    b.writeln("PER-LEG BREAKDOWN:");
+    b.writeln("─────────────────────────────────────");
+
+    final start = round.startLocation;
+    double totalLegKm = 0;
+
+    for (int i = 0; i < entries.length; i++) {
+      final e = entries[i];
+      final dateStr = "${e.date.day.toString().padLeft(2, '0')}.${e.date.month.toString().padLeft(2, '0')}";
+      final from = i == 0 ? start : entries[i - 1].location;
+      final to = e.location;
+      final km = i < r.legKm.length ? r.legKm[i] : 0.0;
+      final toll = i < r.tollPerLeg.length ? r.tollPerLeg[i] : 0.0;
+      final extra = i < r.extraPerLeg.length ? r.extraPerLeg[i] : '';
+      final travel = i < r.hasTravelBefore.length && r.hasTravelBefore[i];
+      final noDd = i < r.noDDrivePerLeg.length && r.noDDrivePerLeg[i];
+
+      totalLegKm += km;
+
+      b.writeln("");
+      b.writeln("  LEG $i: $dateStr  $from → $to");
+      b.writeln("    km:     ${km.toStringAsFixed(1)}");
+      if (toll > 0) b.writeln("    toll:   ${toll.toStringAsFixed(2)}");
+      if (extra.isNotEmpty) b.writeln("    extra:  $extra");
+      if (travel) b.writeln("    ⚡ travel-before merge");
+      if (noDd) b.writeln("    🚫 no D.Drive");
+
+      // Country km for this leg
+      if (i < entries.length) {
+        final cEntry = entries[i];
+        if (cEntry.countryKm.isNotEmpty) {
+          final parts = cEntry.countryKm.entries
+              .where((e) => e.value > 0)
+              .map((e) => "${e.key}: ${e.value.toStringAsFixed(1)} km")
+              .join(', ');
+          if (parts.isNotEmpty) b.writeln("    countries: $parts");
+        }
+      }
+    }
+
+    // ── KM SUMMARY ──
+    b.writeln("");
+    b.writeln("─────────────────────────────────────");
+    b.writeln("KM SUMMARY:");
+    b.writeln("  Total driven:  ${totalLegKm.toStringAsFixed(1)} km");
+    b.writeln("  Included:      ${r.includedKm.toStringAsFixed(1)} km (${r.billableDays} days × ${s.includedKmPerDay.toStringAsFixed(0)})");
+    b.writeln("  Extra:         ${r.extraKm.toStringAsFixed(1)} km");
+    b.writeln("");
+    b.writeln("  Sweden (SE):   ${r.sweKm.toStringAsFixed(1)} km (toll-free)");
+    b.writeln("  Germany (DE):  ${r.deKm.toStringAsFixed(1)} km (toll-free)");
+    b.writeln("  Tollable:      ${r.tollableKm.toStringAsFixed(1)} km");
+
+    // ── COST BREAKDOWN ──
+    b.writeln("");
+    b.writeln("─────────────────────────────────────");
+    b.writeln("COST BREAKDOWN:");
+    b.writeln("  Days:      ${r.billableDays} × ${_nok(s.dayPrice)} = ${_nok(r.dayCost)}");
+    if (r.extraKm > 0) {
+      b.writeln("  Extra km:  ${r.extraKm.toStringAsFixed(0)} × ${_nok(s.extraKmPrice)} = ${_nok(r.extraKmCost)}");
+    }
+    if (r.dDriveDays > 0) {
+      b.writeln("  D.Drive:   ${r.dDriveDays} × ${_nok(s.dDriveDayPrice)} = ${_nok(r.dDriveCost)}");
+    }
+    if (r.trailerDayCost > 0) {
+      b.writeln("  Trailer day: ${_nok(r.trailerDayCost)}");
+    }
+    if (r.trailerKmCost > 0) {
+      b.writeln("  Trailer km:  ${_nok(r.trailerKmCost)}");
+    }
+    if (r.ferryCost > 0) {
+      b.writeln("  Ferry:     ${_nok(r.ferryCost)}");
+    }
+    if (r.bridgeCost > 0) {
+      b.writeln("  Bridge:    ${_nok(r.bridgeCost)}");
+    }
+    if (r.tollCost > 0) {
+      b.writeln("  Toll:      ${r.tollableKm.toStringAsFixed(0)} km × ${s.tollKmRate.toStringAsFixed(2)} = ${_nok(r.tollCost)}");
+    }
+    if (r.flightCost > 0) {
+      b.writeln("  Flights:   ${r.flightTickets} × ${_nok(s.flightTicketPrice)} = ${_nok(r.flightCost)}");
+    }
+
+    b.writeln("");
+    // ── TOLL / VAT REASONING ──
+    b.writeln("");
+    b.writeln("─────────────────────────────────────");
+    b.writeln("TOLL / VAT REASONING:");
+    b.writeln("");
+    b.writeln("  Total driven km:    ${totalLegKm.toStringAsFixed(1)}");
+    b.writeln("  Sweden km (SE):     ${r.sweKm.toStringAsFixed(1)}  ← toll-FREE");
+    b.writeln("  Germany km (DE):    ${r.deKm.toStringAsFixed(1)}  ← toll-FREE");
+    final otherKm = totalLegKm - r.sweKm - r.deKm;
+    b.writeln("  Other countries:    ${otherKm.toStringAsFixed(1)}  ← TOLLABLE");
+    b.writeln("");
+    b.writeln("  Formula: tollableKm = totalKm − sweKm − deKm");
+    b.writeln("           ${r.tollableKm.toStringAsFixed(1)} = ${totalLegKm.toStringAsFixed(1)} − ${r.sweKm.toStringAsFixed(1)} − ${r.deKm.toStringAsFixed(1)}");
+    b.writeln("");
+    b.writeln("  Toll cost = tollableKm × tollRate");
+    b.writeln("            = ${r.tollableKm.toStringAsFixed(1)} × ${s.tollKmRate.toStringAsFixed(2)}");
+    b.writeln("            = ${_nok(r.tollCost)}");
+    b.writeln("");
+    b.writeln("  Countries counted as tollable:");
+    b.writeln("    Norway (NO), Denmark (DK), Finland (FI),");
+    b.writeln("    Poland (PL), etc. — all except SE and DE.");
+
+    b.writeln("");
+    b.writeln("═══════════════════════════════════════");
+    b.writeln("  ROUND TOTAL: ${_nok(r.totalCost)}");
+    b.writeln("═══════════════════════════════════════");
+
+    return b.toString();
+  }
+
+  void _showDetailedCalcDialog(int roundIndex, RoundCalcResult calc) {
+    final s = _effectiveSettings();
+    final text = _buildDetailedCalc(roundIndex, calc, s);
+    showDialog(
+      context: context,
+      builder: (ctx) => Dialog(
+        insetPadding: const EdgeInsets.all(24),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 600, maxHeight: 700),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 16, 8, 0),
+                child: Row(
+                  children: [
+                    const Icon(Icons.analytics_outlined, color: Colors.orange),
+                    const SizedBox(width: 8),
+                    Text(
+                      'Detailed Calc — Round ${roundIndex + 1}',
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const Spacer(),
+                    IconButton(
+                      icon: const Icon(Icons.close),
+                      onPressed: () => Navigator.of(ctx).pop(),
+                    ),
+                  ],
+                ),
+              ),
+              const Divider(),
+              Flexible(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.all(16),
+                  child: SelectableText(
+                    text,
+                    style: const TextStyle(
+                      fontFamily: 'monospace',
+                      fontSize: 12,
+                      height: 1.5,
+                    ),
+                  ),
+                ),
+              ),
+              const Divider(height: 1),
+              Padding(
+                padding: const EdgeInsets.all(12),
+                child: Align(
+                  alignment: Alignment.centerRight,
+                  child: FilledButton(
+                    onPressed: () => Navigator.of(ctx).pop(),
+                    child: const Text('Close'),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   // ===================================================
@@ -924,9 +1143,11 @@ final allBuses = getVehicleConfig().all;
   // ===================================================
 
   String? _draftId;
+  int _tokenRefresh = 0;
 
   /// Resolved bus request ID — set from widget param or reverse-lookup on load
   String? _busRequestId;
+  bool _isWebsiteRequest = false;
 
   bool _loadingDraft = false;
 
@@ -981,6 +1202,7 @@ final allBuses = getVehicleConfig().all;
     });
 
     _busRequestId = widget.busRequestId;
+    _isWebsiteRequest = widget.prefillRounds != null && widget.prefillRounds!.isNotEmpty;
 
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       final id = widget.offerId?.trim();
@@ -1022,45 +1244,12 @@ final allBuses = getVehicleConfig().all;
     companyCtrl.text = offer.company;
     productionCtrl.text = offer.production;
 
-    // Prefill round 0 with route/dates
-    final r0 = offer.rounds[0];
-    r0.startLocation = widget.prefillFromCity ?? '';
-    startLocCtrl.text = r0.startLocation;
-
-    // Build intermediate stops list
-    final stops = (widget.prefillStops ?? '')
-        .split(',')
-        .map((s) => s.trim())
-        .where((s) => s.isNotEmpty)
-        .toList();
-
-    // Generate entries: one per stop on its gig date, then return day after last stop
-    // Route: fromCity (startLocation) → stop1 → stop2 → toCity (extra day)
-    if (widget.prefillDateFrom != null) {
-      final from = DateTime.tryParse(widget.prefillDateFrom!);
-      if (from != null) {
-        r0.entries.clear();
-
-        // Each stop gets one day starting from dateFrom
-        for (int i = 0; i < stops.length; i++) {
-          r0.entries.add(RoundEntry(
-            date: from.add(Duration(days: i)),
-            location: stops[i],
-            extra: '',
-          ));
-        }
-
-        // Add return day (day after last stop) with toCity
-        if ((widget.prefillToCity ?? '').isNotEmpty) {
-          r0.entries.add(RoundEntry(
-            date: from.add(Duration(days: stops.isEmpty ? 1 : stops.length)),
-            location: widget.prefillToCity!,
-            extra: '',
-          ));
-        }
-
-        _syncRoundControllers();
-      }
+    // Check for multi-round data
+    final roundsParam = widget.prefillRounds ?? '';
+    if (roundsParam.isNotEmpty) {
+      _applyMultiRoundPrefill(roundsParam);
+    } else {
+      _applySingleRoundPrefill();
     }
 
     // --- Auto-select bustype, busCount, trailer ---
@@ -1106,6 +1295,104 @@ final allBuses = getVehicleConfig().all;
     }
 
     if (mounted) setState(() {});
+  }
+
+  /// Single-round prefill (original behavior)
+  void _applySingleRoundPrefill() {
+    final r0 = offer.rounds[0];
+    r0.startLocation = widget.prefillFromCity ?? '';
+    startLocCtrl.text = r0.startLocation;
+
+    final stops = (widget.prefillStops ?? '')
+        .split(',')
+        .map((s) => s.trim())
+        .where((s) => s.isNotEmpty)
+        .toList();
+
+    if (widget.prefillDateFrom != null) {
+      final from = DateTime.tryParse(widget.prefillDateFrom!);
+      if (from != null) {
+        r0.entries.clear();
+
+        for (int i = 0; i < stops.length; i++) {
+          r0.entries.add(RoundEntry(
+            date: from.add(Duration(days: i)),
+            location: stops[i],
+            extra: '',
+          ));
+        }
+
+        if ((widget.prefillToCity ?? '').isNotEmpty) {
+          r0.entries.add(RoundEntry(
+            date: from.add(Duration(days: stops.isEmpty ? 1 : stops.length)),
+            location: widget.prefillToCity!,
+            extra: '',
+          ));
+        }
+
+        _syncRoundControllers();
+      }
+    }
+  }
+
+  /// Multi-round prefill from website booking
+  /// Format: "startCity|endCity|date:city,date:city;startCity|endCity|date:city,date:city"
+  void _applyMultiRoundPrefill(String roundsParam) {
+    final roundParts = roundsParam.split(';').where((s) => s.isNotEmpty).toList();
+    if (roundParts.isEmpty) return;
+
+    // Ensure enough rounds exist
+    while (offer.rounds.length < roundParts.length) {
+      offer.rounds.add(OfferRound());
+    }
+
+    for (int ri = 0; ri < roundParts.length; ri++) {
+      final parts = roundParts[ri].split('|');
+      if (parts.length < 3) continue;
+
+      final startCity = parts[0];
+      final endCity = parts[1];
+      final gigsStr = parts[2]; // "2026-05-04:Oslo,2026-05-05:Gothenburg"
+
+      final round = offer.rounds[ri];
+      round.startLocation = startCity;
+      round.entries.clear();
+
+      // Parse gig entries — each has its own date from the database
+      final gigPairs = gigsStr.split(',').where((s) => s.isNotEmpty);
+      for (final pair in gigPairs) {
+        // Find first colon after date (format: 2026-05-04:CityName)
+        // Date is always 10 chars: YYYY-MM-DD
+        if (pair.length < 11) continue;
+        final dateStr = pair.substring(0, 10);
+        final city = pair.substring(11); // skip the colon
+        final date = DateTime.tryParse(dateStr);
+        if (date != null) {
+          round.entries.add(RoundEntry(
+            date: date,
+            location: city,
+            extra: '',
+          ));
+        }
+      }
+
+      // Add end city as last entry (day after last gig)
+      if (endCity.isNotEmpty && round.entries.isNotEmpty) {
+        final lastDate = round.entries.last.date;
+        round.entries.add(RoundEntry(
+          date: lastDate.add(const Duration(days: 1)),
+          location: endCity,
+          extra: '',
+        ));
+      }
+    }
+
+    // Set first round start location for the main controller
+    if (offer.rounds.isNotEmpty) {
+      startLocCtrl.text = offer.rounds[0].startLocation;
+    }
+
+    _syncRoundControllers();
   }
 
   /// Map pax-per-bus capacity to BusType
@@ -1320,11 +1607,15 @@ dst.entries
       try {
         final br = await sb
             .from('bus_requests')
-            .select('id')
+            .select('id, notes')
             .eq('offer_id', id)
             .maybeSingle();
         if (br != null) {
           _busRequestId = br['id'] as String;
+          final notes = br['notes'] as String? ?? '';
+          if (notes.contains('[Website Request]')) {
+            _isWebsiteRequest = true;
+          }
         }
       } catch (_) {}
     }
@@ -2546,20 +2837,21 @@ Future<void> _sendOffer() async {
 
     if (!mounted) return;
 
-    // Bus request offers: deliver in-app (no email dialog)
-    if (_busRequestId != null) {
-      if (_draftId?.isNotEmpty == true) {
-        try {
-          await Supabase.instance.client.from('bus_requests').update({
-            'offer_id': _draftId,
-            'status': 'offer_sent',
-          }).eq('id', _busRequestId!);
-          // Trigger sidebar badge refresh
-          busRequestsBadgeNotifier.value++;
-        } catch (e) {
-          debugPrint('Failed to update bus request status: $e');
-        }
+    // Bus request: update status
+    if (_busRequestId != null && _draftId?.isNotEmpty == true) {
+      try {
+        await Supabase.instance.client.from('bus_requests').update({
+          'offer_id': _draftId,
+          'status': 'offer_sent',
+        }).eq('id', _busRequestId!);
+        busRequestsBadgeNotifier.value++;
+      } catch (e) {
+        debugPrint('Failed to update bus request status: $e');
       }
+    }
+
+    // In-app bus requests (from Complete): deliver in-app only
+    if (_busRequestId != null && !_isWebsiteRequest) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -2569,6 +2861,7 @@ Future<void> _sendOffer() async {
       );
       return;
     }
+    // Website requests + manual offers: show email dialog
 
     await showDialog<void>(
       context: context,
@@ -2577,8 +2870,12 @@ Future<void> _sendOffer() async {
         initialSubject: 'Offer – ${offer.production}',
         bytes: bytes,
         filename: filename,
+        offerId: _draftId,
       ),
     );
+
+    // Refresh offer token status in left card
+    if (mounted) setState(() => _tokenRefresh++);
   } catch (e) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
@@ -4360,6 +4657,7 @@ return Padding(
           onCreateInvoice: _openCreateInvoiceDialog,
           onShowVersions: _draftId != null ? _showVersionHistory : null,
           draftId: _draftId,
+          tokenRefresh: _tokenRefresh,
         ),
       ),
 
@@ -4988,6 +5286,19 @@ Container(
             ),
           ),
         ),
+        const SizedBox(height: 8),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: TextButton.icon(
+            onPressed: () => _showDetailedCalcDialog(roundIndex, calc),
+            icon: const Icon(Icons.analytics_outlined, size: 16),
+            label: const Text('Show detailed calc'),
+            style: TextButton.styleFrom(
+              foregroundColor: Colors.orange,
+              textStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+            ),
+          ),
+        ),
       ],
     ),
   ),
@@ -5095,6 +5406,7 @@ class _LeftOfferCard extends StatefulWidget {
   final Future<void> Function() onCreateInvoice;
   final VoidCallback? onShowVersions;
   final String? draftId;
+  final int tokenRefresh;
 
   const _LeftOfferCard({
   super.key,
@@ -5106,6 +5418,7 @@ class _LeftOfferCard extends StatefulWidget {
   required this.onCreateInvoice,
   this.onShowVersions,
   required this.draftId,
+  this.tokenRefresh = 0,
 });
 
   @override
@@ -5128,6 +5441,10 @@ class _LeftOfferCardState extends State<_LeftOfferCard> {
 
   String? _currentCompanyId;
 
+  // ── Offer acceptance ──
+  Map<String, dynamic>? _offerToken;
+  bool _approvingOffer = false;
+
   // --------------------------------------------------
   // INIT
   // --------------------------------------------------
@@ -5139,6 +5456,7 @@ class _LeftOfferCardState extends State<_LeftOfferCard> {
       _companyCtrl.text = widget.offer.company;
       _restore(widget.offer.company);
     }
+    _loadOfferToken();
   }
 
   @override
@@ -5146,6 +5464,7 @@ class _LeftOfferCardState extends State<_LeftOfferCard> {
     _companyCtrl.dispose();
     super.dispose();
   }
+
 @override
 void didUpdateWidget(covariant _LeftOfferCard oldWidget) {
   super.didUpdateWidget(oldWidget);
@@ -5156,7 +5475,284 @@ void didUpdateWidget(covariant _LeftOfferCard oldWidget) {
     _companyCtrl.text = company;
     _restore(company);
   }
+
+  if (oldWidget.draftId != widget.draftId ||
+      oldWidget.tokenRefresh != widget.tokenRefresh) {
+    _loadOfferToken();
+  }
 }
+
+  // --------------------------------------------------
+  // LOAD OFFER TOKEN
+  // --------------------------------------------------
+  Future<void> _loadOfferToken() async {
+    final id = widget.draftId;
+    if (id == null) return;
+
+    final res = await _client
+        .from('offer_tokens')
+        .select()
+        .eq('offer_id', id)
+        .order('created_at', ascending: false)
+        .limit(1)
+        .maybeSingle();
+
+    if (!mounted) return;
+    setState(() => _offerToken = res);
+  }
+
+  // --------------------------------------------------
+  // APPROVE OFFER
+  // --------------------------------------------------
+  Future<void> _approveOffer() async {
+    final token = _offerToken;
+    if (token == null) return;
+
+    setState(() => _approvingOffer = true);
+
+    try {
+      final userId = _client.auth.currentUser?.id;
+      final df = DateFormat('dd.MM.yyyy');
+
+      await _client.from('offer_tokens').update({
+        'status': 'approved',
+        'approved_at': DateTime.now().toUtc().toIso8601String(),
+        'approved_by': userId,
+      }).eq('id', token['id']);
+
+      // Get signer name from profiles
+      String signerName = '';
+      if (userId != null) {
+        final profile = await _client
+            .from('profiles')
+            .select('name')
+            .eq('id', userId)
+            .maybeSingle();
+        signerName = profile?['name'] as String? ?? '';
+      }
+
+      final companyId = activeCompanyNotifier.value?.id;
+      final companyName = activeCompanyNotifier.value?.name ?? '';
+      final customerEmail = token['customer_email'] as String? ?? '';
+      final acceptedName = token['accepted_name'] as String? ?? '';
+      final acceptedAt = token['accepted_at'] as String?;
+      final acceptedDate = acceptedAt != null
+          ? df.format(DateTime.parse(acceptedAt))
+          : df.format(DateTime.now());
+      final approvedDate = df.format(DateTime.now());
+
+      // Generate signed PDF with both parties' signatures
+      final page = context.findAncestorStateOfType<_NewOfferPageState>();
+      debugPrint('APPROVE: page=$page, acceptedName=$acceptedName, signerName=$signerName, acceptedDate=$acceptedDate, approvedDate=$approvedDate');
+      Uint8List? signedPdf;
+      if (page != null) {
+        final roundCalc = <int, RoundCalcResult>{};
+        for (int i = 0; i < widget.offer.rounds.length; i++) {
+          roundCalc[i] = await page._calcRound(i);
+        }
+        final companySigner = signerName.isNotEmpty ? signerName : 'Coach Service Scandinavia';
+        debugPrint('APPROVE PDF: customerSignature=$acceptedName, companySignature=$companySigner');
+        signedPdf = await OfferPdfService.generatePdf(
+          widget.offer,
+          roundCalc,
+          customerSignature: acceptedName,
+          customerSignatureDate: acceptedDate,
+          companySignature: companySigner,
+          companySignatureDate: approvedDate,
+        );
+        debugPrint('APPROVE PDF generated: ${signedPdf.length} bytes');
+      } else {
+        debugPrint('APPROVE: page is NULL — cannot generate signed PDF');
+      }
+
+      if (customerEmail.isNotEmpty) {
+        final production = widget.offer.production.isNotEmpty
+            ? widget.offer.production
+            : 'Offer';
+        final signature = await EmailService.getEmailSignature(companyId: companyId);
+        final htmlBody = '''
+<div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 600px; margin: 0 auto;">
+  <div style="background: #1a1a1a; padding: 24px 32px; border-radius: 8px 8px 0 0;">
+    <h1 style="color: white; font-size: 20px; margin: 0;">Signed Offer</h1>
+    <p style="color: #aaa; font-size: 14px; margin: 4px 0 0;">$companyName</p>
+  </div>
+  <div style="background: #ffffff; padding: 28px 32px; border: 1px solid #eee; border-top: none;">
+    <p style="font-size: 15px; color: #333; line-height: 1.6;">
+      Dear $acceptedName,
+    </p>
+    <p style="font-size: 15px; color: #333; line-height: 1.6;">
+      The offer has been approved by both parties. Please find the signed version attached.
+    </p>
+    <p style="font-size: 15px; color: #333; line-height: 1.6;">
+      If you have any questions, please don't hesitate to contact us.
+    </p>
+  </div>
+  <div style="padding: 16px 32px; background: #1a1a1a; border-radius: 0 0 8px 8px;">
+    $signature
+  </div>
+</div>
+''';
+
+        if (signedPdf != null) {
+          final safeProduction = production.replaceAll(RegExp(r'[^\w\s-]'), '').replaceAll(' ', '_');
+          await EmailService.sendEmailWithAttachment(
+            to: customerEmail,
+            subject: 'Signed Offer — $production — $companyName',
+            body: htmlBody,
+            attachmentBytes: signedPdf,
+            attachmentFilename: 'Signed_Offer_$safeProduction.pdf',
+            isHtml: true,
+            companyId: companyId,
+          );
+        } else {
+          await EmailService.sendEmail(
+            to: customerEmail,
+            subject: 'Offer Confirmed — $companyName',
+            body: htmlBody,
+            isHtml: true,
+            companyId: companyId,
+          );
+        }
+      }
+
+      // Upload signed PDF to storage
+      if (signedPdf != null) {
+        final signedPath = '${widget.draftId}/signed_${token['id']}.pdf';
+        await _client.storage.from('offers-pdf').uploadBinary(
+          signedPath,
+          signedPdf,
+          fileOptions: const FileOptions(contentType: 'application/pdf', upsert: true),
+        );
+        await _client.from('offer_tokens').update({
+          'signed_pdf_path': signedPath,
+        }).eq('id', token['id']);
+      }
+
+      // Update status to confirmed on samletdata (both parties signed)
+      if (widget.draftId != null) {
+        await _client.from('samletdata').update({
+          'status': 'confirmed',
+        }).eq('draft_id', widget.draftId!);
+      }
+
+      await _loadOfferToken();
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Offer approved and signed copy sent'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to approve: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _approvingOffer = false);
+    }
+  }
+
+  // --------------------------------------------------
+  // DECLINE OFFER
+  // --------------------------------------------------
+  Future<void> _declineOffer() async {
+    final token = _offerToken;
+    if (token == null) return;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Decline offer?'),
+        content: const Text('This will decline the customer\'s acceptance and notify them by email.'),
+        actions: [
+          TextButton(onPressed: () => ctx.pop(false), child: const Text('Cancel')),
+          FilledButton(
+            onPressed: () => ctx.pop(true),
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            child: const Text('Decline'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+
+    setState(() => _approvingOffer = true);
+
+    try {
+      await _client.from('offer_tokens').update({
+        'status': 'declined',
+      }).eq('id', token['id']);
+
+      final companyId = activeCompanyNotifier.value?.id;
+      final companyName = activeCompanyNotifier.value?.name ?? '';
+      final customerEmail = token['customer_email'] as String? ?? '';
+      final acceptedName = token['accepted_name'] as String? ?? '';
+
+      if (customerEmail.isNotEmpty) {
+        final signature = await EmailService.getEmailSignature(companyId: companyId);
+        final htmlBody = '''
+<div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 600px; margin: 0 auto;">
+  <div style="background: #1a1a1a; padding: 24px 32px; border-radius: 8px 8px 0 0;">
+    <h1 style="color: white; font-size: 20px; margin: 0;">Offer Update</h1>
+    <p style="color: #aaa; font-size: 14px; margin: 4px 0 0;">$companyName</p>
+  </div>
+  <div style="background: #ffffff; padding: 28px 32px; border: 1px solid #eee; border-top: none;">
+    <p style="font-size: 15px; color: #333; line-height: 1.6;">
+      Dear $acceptedName,
+    </p>
+    <p style="font-size: 15px; color: #333; line-height: 1.6;">
+      Thank you for your interest. Unfortunately, we are unable to proceed with this offer at this time.
+    </p>
+    <p style="font-size: 15px; color: #333; line-height: 1.6;">
+      Please feel free to reach out if you have any questions.
+    </p>
+  </div>
+  <div style="padding: 16px 32px; background: #1a1a1a; border-radius: 0 0 8px 8px;">
+    $signature
+  </div>
+</div>
+''';
+
+        await EmailService.sendEmail(
+          to: customerEmail,
+          subject: 'Offer Update — $companyName',
+          body: htmlBody,
+          isHtml: true,
+          companyId: companyId,
+        );
+      }
+
+      await _loadOfferToken();
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Offer declined'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to decline: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _approvingOffer = false);
+    }
+  }
   // --------------------------------------------------
   // RESTORE
   // --------------------------------------------------
@@ -5574,6 +6170,147 @@ CurrentOfferStore.set(widget.offer);
 }
 
   // --------------------------------------------------
+  // OFFER TOKEN STATUS WIDGET
+  // --------------------------------------------------
+  Widget _buildOfferTokenStatus(ColorScheme cs) {
+    final status = _offerToken?['status'] as String? ?? 'pending';
+    final acceptedName = _offerToken?['accepted_name'] as String? ?? '';
+    final acceptedAt = _offerToken?['accepted_at'] as String? ?? '';
+
+    Color statusColor;
+    IconData statusIcon;
+    String statusText;
+
+    switch (status) {
+      case 'accepted':
+        statusColor = Colors.orange;
+        statusIcon = Icons.check_circle_outline;
+        statusText = 'Accepted by $acceptedName';
+      case 'approved':
+        statusColor = Colors.blue;
+        statusIcon = Icons.verified;
+        statusText = 'Approved';
+      case 'declined':
+        statusColor = Colors.red;
+        statusIcon = Icons.cancel_outlined;
+        statusText = 'Declined';
+      default:
+        statusColor = Colors.grey;
+        statusIcon = Icons.hourglass_empty;
+        statusText = 'Pending — waiting for customer';
+    }
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: statusColor.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: statusColor.withValues(alpha: 0.3)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(statusIcon, size: 18, color: statusColor),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  statusText,
+                  style: TextStyle(
+                    fontWeight: FontWeight.w600,
+                    color: statusColor,
+                    fontSize: 13,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          if (acceptedAt.isNotEmpty) ...[
+            const SizedBox(height: 4),
+            Text(
+              _formatDate(acceptedAt),
+              style: TextStyle(fontSize: 11, color: cs.onSurfaceVariant),
+            ),
+          ],
+          if (status == 'accepted') ...[
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                Expanded(
+                  child: FilledButton.icon(
+                    onPressed: _approvingOffer ? null : _approveOffer,
+                    icon: _approvingOffer
+                        ? const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Colors.white,
+                            ),
+                          )
+                        : const Icon(Icons.verified, size: 16),
+                    label: const Text('Approve', style: TextStyle(fontSize: 13)),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: Colors.green,
+                      padding: const EdgeInsets.symmetric(vertical: 8),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: _approvingOffer ? null : _declineOffer,
+                    icon: const Icon(Icons.close, size: 16, color: Colors.red),
+                    label: const Text('Decline', style: TextStyle(fontSize: 13, color: Colors.red)),
+                    style: OutlinedButton.styleFrom(
+                      side: const BorderSide(color: Colors.red),
+                      padding: const EdgeInsets.symmetric(vertical: 8),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
+          // Refresh button
+          const SizedBox(height: 6),
+          Align(
+            alignment: Alignment.centerRight,
+            child: InkWell(
+              onTap: _loadOfferToken,
+              borderRadius: BorderRadius.circular(4),
+              child: Padding(
+                padding: const EdgeInsets.all(4),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.refresh, size: 14, color: cs.onSurfaceVariant),
+                    const SizedBox(width: 4),
+                    Text(
+                      'Refresh',
+                      style: TextStyle(fontSize: 11, color: cs.onSurfaceVariant),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _formatDate(String iso) {
+    try {
+      final dt = DateTime.parse(iso).toLocal();
+      return '${dt.day.toString().padLeft(2, '0')}.${dt.month.toString().padLeft(2, '0')}.${dt.year} ${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
+    } catch (_) {
+      return iso;
+    }
+  }
+
+  // --------------------------------------------------
   // UI
   // --------------------------------------------------
   @override
@@ -5906,6 +6643,12 @@ SizedBox(
         label: const Text("Send offer"),
       ),
     ),
+
+    // -------- OFFER ACCEPTANCE STATUS --------
+    if (_offerToken != null) ...[
+      const SizedBox(height: 12),
+      _buildOfferTokenStatus(cs),
+    ],
 
     const SizedBox(height: 8),
 
@@ -6613,12 +7356,14 @@ class _SendOfferDialog extends StatefulWidget {
   final String initialSubject;
   final Uint8List bytes;
   final String filename;
+  final String? offerId;
 
   const _SendOfferDialog({
     required this.initialTo,
     required this.initialSubject,
     required this.bytes,
     required this.filename,
+    this.offerId,
   });
 
   @override
@@ -6671,13 +7416,90 @@ class _SendOfferDialogState extends State<_SendOfferDialog> {
     });
 
     try {
-      final body = _messageCtrl.text.trim();
+      final sb = Supabase.instance.client;
+      final companyId = activeCompanyNotifier.value?.id;
+      String? acceptUrl;
+
+      // Create offer token + upload PDF for acceptance flow
+      if (widget.offerId != null) {
+        final tokenRow = await sb.from('offer_tokens').insert({
+          'offer_id': widget.offerId,
+          'customer_email': to,
+          'status': 'pending',
+        }).select('id, token').single();
+
+        final token = tokenRow['token'] as String;
+        final pdfPath = '${widget.offerId}/$token.pdf';
+
+        await sb.storage.from('offers-pdf').uploadBinary(
+          pdfPath,
+          widget.bytes,
+          fileOptions: const FileOptions(
+            contentType: 'application/pdf',
+            upsert: true,
+          ),
+        );
+
+        await sb.from('offer_tokens')
+            .update({'pdf_path': pdfPath})
+            .eq('id', tokenRow['id']);
+
+        acceptUrl = 'https://tourflow-60890.web.app/accept-offer.html?token=$token';
+      }
+
+      // Build styled HTML email with accept button
+      final companyName = activeCompanyNotifier.value?.name ?? '';
+      final subject = _subjectCtrl.text.trim();
+      final userMessage = _messageCtrl.text.trim();
+      final signature = await EmailService.getEmailSignature(companyId: companyId);
+
+      // If user wrote a custom message, use only that + accept button + signature.
+      // Otherwise use default text.
+      final bodyContentHtml = userMessage.isNotEmpty
+          ? '<p style="font-size: 15px; line-height: 1.6; color: #333;">$userMessage</p>'
+          : '''
+    <p style="font-size: 15px; line-height: 1.6; color: #333;">Hi,</p>
+    <p style="font-size: 15px; line-height: 1.6; color: #333;">
+      Please find the offer attached as a PDF.
+    </p>''';
+
+      final acceptButtonHtml = acceptUrl != null ? '''
+    <p style="font-size: 15px; line-height: 1.6; color: #333;">
+      You can review the offer in the attachment, then accept it by clicking the button below:
+    </p>
+    <div style="text-align: center; margin: 28px 0;">
+      <a href="$acceptUrl" style="display: inline-block; padding: 14px 36px; background: #2563eb; color: white; text-decoration: none; border-radius: 8px; font-size: 16px; font-weight: 600;">
+        Accept Offer
+      </a>
+    </div>
+    <p style="font-size: 13px; color: #888; line-height: 1.5;">
+      By accepting you confirm that you agree to the terms in the offer.
+    </p>''' : '';
+
+      final htmlBody = '''
+<div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 600px; margin: 0 auto;">
+  <div style="background: #1a1a1a; padding: 24px 32px; border-radius: 8px 8px 0 0;">
+    <h1 style="color: white; font-size: 20px; margin: 0;">$subject</h1>
+    <p style="color: #aaa; font-size: 14px; margin: 4px 0 0;">$companyName</p>
+  </div>
+  <div style="background: #ffffff; padding: 28px 32px; border: 1px solid #eee; border-top: none;">
+    $bodyContentHtml
+    $acceptButtonHtml
+  </div>
+  <div style="padding: 16px 32px; background: #1a1a1a; border-radius: 0 0 8px 8px;">
+    $signature
+  </div>
+</div>
+''';
+
       await EmailService.sendEmailWithAttachment(
         to: to,
-        subject: _subjectCtrl.text.trim(),
-        body: body.isEmpty ? ' ' : body,
+        subject: subject,
+        body: htmlBody,
         attachmentBytes: widget.bytes,
         attachmentFilename: widget.filename,
+        isHtml: true,
+        companyId: companyId,
       );
 
       if (!mounted) return;

@@ -3,7 +3,9 @@
 #
 
 list(APPEND FLUTTER_PLUGIN_LIST
+  agora_rtc_engine
   app_links
+  iris_method_channel
   printing
   url_launcher_windows
 )

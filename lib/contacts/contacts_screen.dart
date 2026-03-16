@@ -1,9 +1,13 @@
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../state/active_company.dart';
 import '../ui/css_theme.dart';
+import '../widgets/agora_meeting_view.dart';
+import '../widgets/agora_meeting_stub.dart'
+    if (dart.library.js_interop) '../widgets/agora_meeting_view_web.dart';
 import 'direct_chat_screen.dart';
 
 class ContactsScreen extends StatefulWidget {
@@ -47,6 +51,78 @@ class _ContactsScreenState extends State<ContactsScreen> {
     if (mounted) setState(() => _loading = false);
   }
 
+  Future<void> _startVideoCall(String calleeId, String calleeName) async {
+    final myId = _myId;
+    if (myId.isEmpty || myId == calleeId) return;
+
+    final ids = [myId, calleeId]..sort();
+    final channelName = 'call-${ids[0].substring(0, 8)}-${ids[1].substring(0, 8)}';
+
+    final inserted = await _sb.from('video_calls').insert({
+      'caller_id': myId,
+      'callee_id': calleeId,
+      'channel_name': channelName,
+      'status': 'ringing',
+    }).select('id').single();
+    final callId = inserted['id'] as String?;
+
+    final profile = await _sb
+        .from('profiles')
+        .select('name')
+        .eq('id', myId)
+        .maybeSingle();
+    final myName = (profile?['name'] as String?) ?? 'Deltaker';
+
+    // VoIP push for iOS (native call screen) + FCM for Android
+    try {
+      await _sb.functions.invoke('voip-push', body: {
+        'callee_id': calleeId,
+        'caller_name': myName,
+        'channel_name': channelName,
+        if (callId != null) 'call_id': callId,
+      });
+      await _sb.functions.invoke('send-push', body: {
+        'user_id': calleeId,
+        'title': 'Innkommende videosamtale',
+        'body': '$myName ringer deg',
+        'type': 'video_call',
+        'channel_name': channelName,
+        if (callId != null) 'call_id': callId,
+      });
+    } catch (e) {
+      debugPrint('Video call push error: $e');
+    }
+
+    if (!mounted) return;
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => Dialog(
+        backgroundColor: Colors.transparent,
+        insetPadding: const EdgeInsets.all(24),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(16),
+          child: SizedBox(
+            width: 800,
+            height: 600,
+            child: kIsWeb
+                ? AgoraMeetingViewWeb(
+                    channelName: channelName,
+                    displayName: myName,
+                    onLeave: () => Navigator.of(ctx).pop(),
+                  )
+                : AgoraMeetingView(
+                    channelName: channelName,
+                    displayName: myName,
+                    onLeave: () => Navigator.of(ctx).pop(),
+                  ),
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Padding(
@@ -82,6 +158,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
                             _ContactCard(
                               contact: _contacts[i],
                               onUpdated: _load,
+                              onVideoCall: _startVideoCall,
                             ),
                       ),
           ),
@@ -98,8 +175,13 @@ class _ContactsScreenState extends State<ContactsScreen> {
 class _ContactCard extends StatelessWidget {
   final Map<String, dynamic> contact;
   final VoidCallback onUpdated;
+  final void Function(String id, String name) onVideoCall;
 
-  const _ContactCard({required this.contact, required this.onUpdated});
+  const _ContactCard({
+    required this.contact,
+    required this.onUpdated,
+    required this.onVideoCall,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -196,6 +278,13 @@ class _ContactCard extends StatelessWidget {
                 ],
               ],
             ),
+          ),
+
+          // Video call button
+          IconButton(
+            tooltip: 'Videosamtale',
+            icon: Icon(Icons.videocam, size: 22, color: Colors.blue.shade700),
+            onPressed: () => onVideoCall(peerId, name),
           ),
 
           // Edit button

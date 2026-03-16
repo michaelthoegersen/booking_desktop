@@ -75,8 +75,8 @@ class _MgmtMessagesPageState extends State<MgmtMessagesPage>
                   unselectedLabelColor: Colors.black45,
                   indicatorColor: Colors.black,
                   tabs: const [
-                    Tab(text: 'Gig'),
-                    Tab(text: 'Samtale'),
+                    Tab(text: 'DM'),
+                    Tab(text: 'Aktivitet'),
                   ],
                 ),
               ),
@@ -86,16 +86,7 @@ class _MgmtMessagesPageState extends State<MgmtMessagesPage>
                 child: TabBarView(
                   controller: _tabCtrl,
                   children: [
-                    // Tab 1: Gig messages
-                    _GigThreadList(
-                      selectedGigId: _selectedGigId,
-                      onSelect: (gigId) {
-                        setState(() => _selectedGigId = gigId);
-                        _markGigAsRead(gigId);
-                      },
-                    ),
-
-                    // Tab 2: DM + Groups
+                    // Tab 1: DM + Groups
                     _ChatThreadList(
                       selectedKey: _selectedChatKey,
                       onSelect: (key) =>
@@ -104,6 +95,15 @@ class _MgmtMessagesPageState extends State<MgmtMessagesPage>
                         if (_selectedChatKey == key) {
                           setState(() => _selectedChatKey = null);
                         }
+                      },
+                    ),
+
+                    // Tab 2: Aktivitet messages
+                    _GigThreadList(
+                      selectedGigId: _selectedGigId,
+                      onSelect: (gigId) {
+                        setState(() => _selectedGigId = gigId);
+                        _markGigAsRead(gigId);
                       },
                     ),
                   ],
@@ -118,15 +118,7 @@ class _MgmtMessagesPageState extends State<MgmtMessagesPage>
         // Right panel: conversation view
         Expanded(
           child: _tabCtrl.index == 0
-              ? _selectedGigId == null
-                  ? const Center(
-                      child: Text('Velg en samtale',
-                          style: TextStyle(color: Colors.black45)))
-                  : _GigChatView(
-                      key: ValueKey(_selectedGigId),
-                      gigId: _selectedGigId!,
-                    )
-              : _selectedChatKey == null
+              ? _selectedChatKey == null
                   ? const Center(
                       child: Text('Velg en samtale',
                           style: TextStyle(color: Colors.black45)))
@@ -138,7 +130,15 @@ class _MgmtMessagesPageState extends State<MgmtMessagesPage>
                       : _GroupChatView(
                           key: ValueKey(_selectedChatKey),
                           groupId: _selectedChatKey!.substring(6),
-                        ),
+                        )
+              : _selectedGigId == null
+                  ? const Center(
+                      child: Text('Velg en samtale',
+                          style: TextStyle(color: Colors.black45)))
+                  : _GigChatView(
+                      key: ValueKey(_selectedGigId),
+                      gigId: _selectedGigId!,
+                    ),
         ),
       ],
     );
@@ -1018,6 +1018,7 @@ class _DmChatViewState extends State<_DmChatView> with MentionMixin {
   String? _senderName;
   String? _editingMessageId;
   Map<String, dynamic>? _replyTo;
+  DateTime? _peerLastReadAt;
 
   @override
   void initState() {
@@ -1038,7 +1039,27 @@ class _DmChatViewState extends State<_DmChatView> with MentionMixin {
     initMentionCandidates([
       MentionCandidate(id: widget.peerId, name: _peerName ?? ''),
     ]);
+    // Load peer's read cursor (when they last read MY messages)
+    _loadPeerReadCursor();
     if (mounted) setState(() {});
+  }
+
+  Future<void> _loadPeerReadCursor() async {
+    try {
+      final myId = _sb.auth.currentUser?.id;
+      if (myId == null) return;
+      final row = await _sb
+          .from('dm_read_cursors')
+          .select('last_read_at')
+          .eq('user_id', widget.peerId)
+          .eq('peer_id', myId)
+          .maybeSingle();
+      if (row != null && mounted) {
+        setState(() {
+          _peerLastReadAt = DateTime.parse(row['last_read_at'] as String);
+        });
+      }
+    } catch (_) {}
   }
 
   @override
@@ -1267,6 +1288,23 @@ class _DmChatViewState extends State<_DmChatView> with MentionMixin {
                       style: TextStyle(color: Colors.black45)),
                 );
               }
+              // Find the last message sent by me that the peer has read
+              String? lastReadMsgId;
+              if (_peerLastReadAt != null) {
+                for (final m in messages) {
+                  if (m['sender_id'] == myId) {
+                    final ca = m['created_at'] as String?;
+                    if (ca != null) {
+                      final dt = DateTime.parse(ca);
+                      if (!dt.isAfter(_peerLastReadAt!)) {
+                        lastReadMsgId = m['id'] as String?;
+                        break; // messages are reverse-sorted, first match is latest read
+                      }
+                    }
+                  }
+                }
+              }
+
               return ListView.separated(
                 controller: _scrollController,
                 reverse: true,
@@ -1295,6 +1333,7 @@ class _DmChatViewState extends State<_DmChatView> with MentionMixin {
                     replyMsg: replyMsg,
                     onReply: () => _startReply(msg),
                     onEdit: isMine ? () => _startEdit(msg) : null,
+                    showRead: isMine && msg['id'] == lastReadMsgId,
                   );
                 },
               );
@@ -1929,7 +1968,7 @@ class _GigChatView extends StatefulWidget {
   State<_GigChatView> createState() => _GigChatViewState();
 }
 
-class _GigChatViewState extends State<_GigChatView> {
+class _GigChatViewState extends State<_GigChatView> with MentionMixin {
   final _sb = Supabase.instance.client;
   final _controller = TextEditingController();
   final _scrollController = ScrollController();
@@ -1941,7 +1980,9 @@ class _GigChatViewState extends State<_GigChatView> {
   @override
   void initState() {
     super.initState();
+    _controller.addListener(() => onMentionTextChanged(_controller));
     _loadGig();
+    _loadMentionCandidates();
   }
 
   Future<void> _loadGig() async {
@@ -1951,6 +1992,27 @@ class _GigChatViewState extends State<_GigChatView> {
         .eq('id', widget.gigId)
         .maybeSingle();
     if (mounted) setState(() => _gig = gig);
+  }
+
+  Future<void> _loadMentionCandidates() async {
+    try {
+      final companyId = activeCompanyNotifier.value?.id;
+      if (companyId == null) return;
+      final rows = await _sb.rpc(
+        'get_company_member_profiles',
+        params: {'p_company_id': companyId},
+      );
+      final myId = _sb.auth.currentUser?.id;
+      final candidates = (rows as List)
+          .where((r) => r['id'] != myId)
+          .map((r) => MentionCandidate(
+                id: r['id'] as String,
+                name: r['name'] as String? ?? '',
+              ))
+          .where((c) => c.name.isNotEmpty)
+          .toList();
+      if (mounted) initMentionCandidates(candidates);
+    } catch (_) {}
   }
 
   @override
@@ -2000,6 +2062,7 @@ class _GigChatViewState extends State<_GigChatView> {
       } else {
         final user = _sb.auth.currentUser;
         final name = user?.userMetadata?['name'] as String? ?? 'Admin';
+        final mentions = List<String>.from(mentionedUserIds);
         await _sb.from('gig_messages').insert({
           'gig_id': widget.gigId,
           'user_id': user?.id,
@@ -2007,7 +2070,9 @@ class _GigChatViewState extends State<_GigChatView> {
           'message': text,
           'is_admin': true,
           if (_replyTo != null) 'reply_to_id': _replyTo!['id'],
+          if (mentions.isNotEmpty) 'mentioned_user_ids': mentions,
         });
+        clearMentions();
         setState(() => _replyTo = null);
 
         // Push notification to gig participants
@@ -2128,6 +2193,11 @@ class _GigChatViewState extends State<_GigChatView> {
             },
           ),
         ),
+        // Mention suggestions
+        MentionOverlay(
+          suggestions: mentionSuggestions,
+          onSelect: (c) => insertMention(_controller, c),
+        ),
         _ChatInput(
           controller: _controller,
           sending: _sending,
@@ -2155,6 +2225,7 @@ class _Bubble extends StatelessWidget {
   final Map<String, dynamic>? replyMsg;
   final VoidCallback? onReply;
   final VoidCallback? onEdit;
+  final bool showRead;
 
   const _Bubble({
     required this.message,
@@ -2165,6 +2236,7 @@ class _Bubble extends StatelessWidget {
     this.replyMsg,
     this.onReply,
     this.onEdit,
+    this.showRead = false,
   });
 
   @override
@@ -2177,7 +2249,8 @@ class _Bubble extends StatelessWidget {
       child: ConstrainedBox(
         constraints: BoxConstraints(maxWidth: maxWidth),
         child: GestureDetector(
-          onLongPress: (onReply != null || onEdit != null) ? () => _showContextMenu(context) : null,
+          onSecondaryTapUp: (details) => _showContextMenu(context),
+          onLongPress: () => _showContextMenu(context),
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
             decoration: BoxDecoration(
@@ -2265,6 +2338,11 @@ class _Bubble extends StatelessWidget {
                             color: isAdmin ? Colors.white38 : Colors.black38,
                           )),
                       ],
+                      if (showRead && isAdmin) ...[
+                        const SizedBox(width: 6),
+                        Icon(Icons.done_all, size: 14,
+                          color: Colors.blue.shade300),
+                      ],
                     ],
                   ),
                 ],
@@ -2288,18 +2366,28 @@ class _Bubble extends StatelessWidget {
       ),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       items: [
+        const PopupMenuItem<String>(
+          value: 'copy',
+          child: Row(children: [Icon(Icons.copy, size: 18), SizedBox(width: 8), Text('Kopier')]),
+        ),
         if (onReply != null)
-          PopupMenuItem<String>(
+          const PopupMenuItem<String>(
             value: 'reply',
-            child: Row(children: const [Icon(Icons.reply, size: 18), SizedBox(width: 8), Text('Svar')]),
+            child: Row(children: [Icon(Icons.reply, size: 18), SizedBox(width: 8), Text('Svar')]),
           ),
         if (onEdit != null)
-          PopupMenuItem<String>(
+          const PopupMenuItem<String>(
             value: 'edit',
-            child: Row(children: const [Icon(Icons.edit, size: 18), SizedBox(width: 8), Text('Rediger')]),
+            child: Row(children: [Icon(Icons.edit, size: 18), SizedBox(width: 8), Text('Rediger')]),
           ),
       ],
     ).then((value) {
+      if (value == 'copy') {
+        Clipboard.setData(ClipboardData(text: message));
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Kopiert'), duration: Duration(seconds: 1)),
+        );
+      }
       if (value == 'reply') onReply?.call();
       if (value == 'edit') onEdit?.call();
     });

@@ -145,6 +145,8 @@ class _GigCard extends StatelessWidget {
     final city = gig['city'] as String? ?? '';
     final gigType = gig['type'] as String? ?? 'gig';
     final isRehearsal = gigType == 'rehearsal';
+    final status = gig['status'] as String? ?? 'inquiry';
+    final isCancelled = status == 'cancelled';
 
     String dateLabel = '';
     if (dateFrom != null) {
@@ -179,7 +181,7 @@ class _GigCard extends StatelessWidget {
         decoration: BoxDecoration(
           color: cs.surfaceContainerLowest,
           borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: cs.outlineVariant),
+          border: Border.all(color: isCancelled ? Colors.red.withValues(alpha: 0.3) : cs.outlineVariant),
         ),
         child: Row(
           children: [
@@ -188,46 +190,67 @@ class _GigCard extends StatelessWidget {
               width: 90,
               child: Text(
                 dateLabel,
-                style: const TextStyle(
+                style: TextStyle(
                   fontWeight: FontWeight.w700,
                   fontSize: 13,
+                  decoration: isCancelled ? TextDecoration.lineThrough : null,
+                  color: isCancelled ? cs.onSurfaceVariant : null,
                 ),
               ),
             ),
             const SizedBox(width: 12),
 
-            // Type badge
-            Container(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-              decoration: BoxDecoration(
-                color: isRehearsal
-                    ? Colors.purple.withValues(alpha: 0.12)
-                    : Colors.blue.withValues(alpha: 0.12),
-                borderRadius: BorderRadius.circular(999),
-              ),
-              child: Text(
-                isRehearsal ? 'Øvelse' : 'Gig',
-                style: TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w700,
-                  color: isRehearsal ? Colors.purple : Colors.blue,
+            // Type badge (hidden when cancelled)
+            if (!isCancelled)
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  color: isRehearsal
+                      ? Colors.purple.withValues(alpha: 0.12)
+                      : Colors.blue.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(999),
+                ),
+                child: Text(
+                  isRehearsal ? 'Øvelse' : 'Gig',
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                    color: isRehearsal ? Colors.purple : Colors.blue,
+                  ),
                 ),
               ),
-            ),
-            const SizedBox(width: 12),
+            if (!isCancelled) const SizedBox(width: 12),
 
             // Title
             Expanded(
               child: Text(
                 title.isNotEmpty ? title : dateLabel,
-                style: const TextStyle(fontWeight: FontWeight.w700),
+                style: TextStyle(
+                  fontWeight: FontWeight.w700,
+                  decoration: isCancelled ? TextDecoration.lineThrough : null,
+                  color: isCancelled ? cs.onSurfaceVariant : null,
+                ),
                 overflow: TextOverflow.ellipsis,
               ),
             ),
 
-            // Availability status
-            Icon(availIcon, color: availColor, size: 22),
+            // Cancelled badge or availability status
+            if (isCancelled)
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  color: Colors.red.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(999),
+                  border: Border.all(color: Colors.red.withValues(alpha: 0.3)),
+                ),
+                child: const Text(
+                  'Avlyst',
+                  style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Colors.red),
+                ),
+              )
+            else
+              Icon(availIcon, color: availColor, size: 22),
           ],
         ),
       ),
