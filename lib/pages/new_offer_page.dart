@@ -10,6 +10,7 @@ import 'package:intl/intl.dart';
 import '../services/calendar_sync_service.dart';
 import '../supabase_clients.dart';
 import '../models/app_settings.dart';
+import '../models/ferry_definition.dart';
 import '../models/offer_draft.dart';
 import 'package:tourflow/services/trip_calculator.dart';
 import '../services/offer_pdf_service.dart';
@@ -361,6 +362,9 @@ if (r.flightCost > 0) {
     final start = round.startLocation;
     double totalLegKm = 0;
 
+    final ferries = SettingsStore.current.ferries;
+    final hasTrailer = round.trailer;
+
     for (int i = 0; i < entries.length; i++) {
       final e = entries[i];
       final dateStr = "${e.date.day.toString().padLeft(2, '0')}.${e.date.month.toString().padLeft(2, '0')}";
@@ -371,6 +375,7 @@ if (r.flightCost > 0) {
       final extra = i < r.extraPerLeg.length ? r.extraPerLeg[i] : '';
       final travel = i < r.hasTravelBefore.length && r.hasTravelBefore[i];
       final noDd = i < r.noDDrivePerLeg.length && r.noDDrivePerLeg[i];
+      final ferryRaw = i < round.ferryPerLeg.length ? round.ferryPerLeg[i] : null;
 
       totalLegKm += km;
 
@@ -381,6 +386,26 @@ if (r.flightCost > 0) {
       if (extra.isNotEmpty) b.writeln("    extra:  $extra");
       if (travel) b.writeln("    ⚡ travel-before merge");
       if (noDd) b.writeln("    🚫 no D.Drive");
+
+      // Ferry / bridge for this leg
+      if (ferryRaw != null && ferryRaw.trim().isNotEmpty) {
+        final parts = ferryRaw.split(RegExp(r'[&,/]')).map((p) => p.trim()).where((p) => p.isNotEmpty);
+        for (final part in parts) {
+          final normalizedPart = part.toLowerCase().replaceAll(RegExp(r'[\s\-–&/]'), '');
+          FerryDefinition? match;
+          for (final f in ferries) {
+            final normalizedFerry = f.name.toLowerCase().replaceAll(RegExp(r'[\s\-–&/]'), '');
+            if (normalizedPart.contains(normalizedFerry) || normalizedFerry.contains(normalizedPart)) {
+              match = f;
+              break;
+            }
+          }
+          final isBridge = part.toLowerCase().contains('bro') || part.toLowerCase().contains('bridge');
+          final price = match != null ? (hasTrailer && match.trailerPrice != null ? match.trailerPrice! : match.price) : 0.0;
+          final icon = isBridge ? '🌉' : '⛴';
+          b.writeln("    $icon ${isBridge ? 'bridge' : 'ferry'}: $part  ${price > 0 ? _nok(price) : '(unknown price)'}");
+        }
+      }
 
       // Country km for this leg
       if (i < entries.length) {
@@ -459,6 +484,107 @@ if (r.flightCost > 0) {
     b.writeln("  Countries counted as tollable:");
     b.writeln("    Norway (NO), Denmark (DK), Finland (FI),");
     b.writeln("    Poland (PL), etc. — all except SE and DE.");
+
+    // ── FOREIGN VAT KM BREAKDOWN ──
+    // Aggregate country km from all legs in this round
+    final Map<String, double> roundCountryKm = {};
+    for (final e in entries) {
+      e.countryKm.forEach((country, km) {
+        if (km > 0) {
+          roundCountryKm[country] = (roundCountryKm[country] ?? 0) + km;
+        }
+      });
+    }
+
+    // Filter to countries that have a VAT rate
+    final vatCountries = roundCountryKm.entries
+        .where((e) => (_vatRates[e.key] ?? 0) > 0)
+        .toList()
+      ..sort((a, b) => b.value.compareTo(a.value));
+
+    if (vatCountries.isNotEmpty) {
+      final countryKmSum = roundCountryKm.values.fold<double>(0, (a, b) => a + b);
+      final unattributedKm = totalLegKm - countryKmSum;
+
+      b.writeln("");
+      b.writeln("─────────────────────────────────────");
+      b.writeln("FOREIGN VAT — KM PER COUNTRY:");
+      b.writeln("");
+      b.writeln("  Total driven km:       ${totalLegKm.toStringAsFixed(1)} km");
+      b.writeln("  Country-attributed km: ${countryKmSum.toStringAsFixed(1)} km");
+      if (unattributedKm.abs() > 0.5) {
+        b.writeln("  ⚠ UNATTRIBUTED:        ${unattributedKm.toStringAsFixed(1)} km");
+      }
+      b.writeln("");
+
+      for (final e in vatCountries) {
+        final rate = ((_vatRates[e.key] ?? 0) * 100);
+        final share = totalLegKm > 0 ? (e.value / totalLegKm * 100) : 0.0;
+        b.writeln("  ${e.key.padRight(6)} ${e.value.toStringAsFixed(1).padLeft(8)} km   (${share.toStringAsFixed(1)}%)   VAT ${rate.toStringAsFixed(rate == rate.roundToDouble() ? 0 : 1)}%");
+      }
+
+      final vatTotal = vatCountries.fold<double>(0, (sum, e) => sum + e.value);
+      b.writeln("  ${''.padRight(6)} ${'─' * 8}");
+      b.writeln("  ${'Total'.padRight(6)} ${vatTotal.toStringAsFixed(1).padLeft(8)} km");
+
+      // Show countries with 0% VAT for reference
+      final noVatCountries = roundCountryKm.entries
+          .where((e) => (_vatRates[e.key] ?? 0) <= 0 && e.value > 0)
+          .toList()
+        ..sort((a, b) => b.value.compareTo(a.value));
+      if (noVatCountries.isNotEmpty) {
+        b.writeln("");
+        b.writeln("  No foreign VAT:");
+        for (final e in noVatCountries) {
+          final share = totalLegKm > 0 ? (e.value / totalLegKm * 100) : 0.0;
+          b.writeln("  ${e.key.padRight(6)} ${e.value.toStringAsFixed(1).padLeft(8)} km   (${share.toStringAsFixed(1)}%)");
+        }
+      }
+
+      // ── FULL VAT CALCULATION PER COUNTRY ──
+      // basePrice = totalCost − ferryCost − bridgeCost − tollCost
+      final basePrice = r.totalCost - r.ferryCost - r.bridgeCost - r.tollCost;
+
+      b.writeln("");
+      b.writeln("─────────────────────────────────────");
+      b.writeln("FOREIGN VAT — FULL CALCULATION:");
+      b.writeln("");
+      b.writeln("  Base price (excl ferry/bridge/toll):");
+      b.writeln("    totalCost − ferryCost − bridgeCost − tollCost");
+      b.writeln("    ${_nok(r.totalCost)} − ${_nok(r.ferryCost)} − ${_nok(r.bridgeCost)} − ${_nok(r.tollCost)}");
+      b.writeln("    = ${_nok(basePrice)}");
+      b.writeln("");
+      b.writeln("  Total driven km:      ${totalLegKm.toStringAsFixed(1)} km");
+      b.writeln("  Country-attributed:   ${countryKmSum.toStringAsFixed(1)} km");
+      if ((totalLegKm - countryKmSum).abs() > 0.5) {
+        b.writeln("  Unattributed:         ${(totalLegKm - countryKmSum).toStringAsFixed(1)} km");
+      }
+      b.writeln("");
+      b.writeln("  Formula: share = countryKm / totalDrivenKm");
+      b.writeln("           VAT   = basePrice × share × vatRate");
+      b.writeln("");
+
+      double totalVatAmount = 0;
+      for (final e in vatCountries) {
+        final rate = _vatRates[e.key] ?? 0;
+        final ratePct = (rate * 100);
+        final share = e.value / totalLegKm;
+        final vat = basePrice * share * rate;
+        totalVatAmount += vat;
+
+        b.writeln("  ${e.key}:");
+        b.writeln("    km:       ${e.value.toStringAsFixed(1)}");
+        b.writeln("    share:    ${e.value.toStringAsFixed(1)} / ${totalLegKm.toStringAsFixed(1)} = ${(share * 100).toStringAsFixed(2)}%");
+        b.writeln("    VAT:      ${_nok(basePrice)} × ${share.toStringAsFixed(4)} × ${ratePct.toStringAsFixed(ratePct == ratePct.roundToDouble() ? 0 : 1)}%");
+        b.writeln("            = ${_nok(basePrice)} × ${(share * rate).toStringAsFixed(6)}");
+        b.writeln("            = ${_nok(vat)}");
+        b.writeln("");
+      }
+
+      b.writeln("  ${'─' * 37}");
+      b.writeln("  Total foreign VAT:  ${_nok(totalVatAmount)}");
+      b.writeln("  Total incl VAT:     ${_nok(r.totalCost + totalVatAmount)}");
+    }
 
     b.writeln("");
     b.writeln("═══════════════════════════════════════");
@@ -2057,8 +2183,9 @@ Map<String, double> _collectAllCountryKm() {
 Map<String, double> _calculateForeignVat({
   required double basePrice,
   required Map<String, double> countryKm,
+  double? totalDrivenKm,
 }) {
-  final totalKm =
+  final totalKm = totalDrivenKm ??
       countryKm.values.fold<double>(0, (a, b) => a + b);
 
   if (totalKm == 0) return {};
@@ -2818,7 +2945,7 @@ Future<void> _sendOffer() async {
         ? "UnknownProduction"
         : offer.production.trim();
     final safeProduction = _safeFolderName(production);
-    final todayStamp = DateFormat("yyyyMMdd_HHmmss").format(DateTime.now());
+    final todayStamp = DateFormat("yyyyMMdd").format(DateTime.now());
     final filename = "Offer Nightliner $safeProduction $todayStamp.pdf";
 
     // Last opp til Supabase Storage
@@ -4462,14 +4589,17 @@ Future<void> _openCreateInvoiceDialog() async {
   }
 
   double grandTotal = 0;
+  double allDrivenKm = 0;
   for (final res in _roundCalcCache.values) {
     grandTotal += res.totalCost;
+    allDrivenKm += res.legKm.fold<double>(0, (a, b) => a + b);
   }
 
   final countryKm = _collectAllCountryKm();
   final vatBreakdown = _calculateForeignVat(
     basePrice: grandTotal,
     countryKm: countryKm,
+    totalDrivenKm: allDrivenKm,
   );
   final totalInclVat =
       grandTotal + vatBreakdown.values.fold(0.0, (a, b) => a + b);
@@ -4623,11 +4753,17 @@ if (offer.pricingModel == 'svensk') {
 final basePrice =
     allRoundsTotal - allRoundsFerry - allRoundsBridge - allRoundsToll;
 
+double allDrivenKmForVat = 0;
+for (final r in _roundCalcCache.values) {
+  allDrivenKmForVat += r.legKm.fold<double>(0, (a, b) => a + b);
+}
+
 final countryKm = _collectAllCountryKm();
 
 final foreignVatMap = _calculateForeignVat(
   basePrice: basePrice,
   countryKm: countryKm,
+  totalDrivenKm: allDrivenKmForVat,
 );
 
 // allRoundsTotal is excl VAT. Foreign VAT is added on top.

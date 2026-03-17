@@ -1,10 +1,10 @@
+import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'dart:typed_data';
 import 'package:flutter/foundation.dart' show kIsWeb, debugPrint;
 import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
-import 'package:mailer/mailer.dart' as mailer;
-import 'package:mailer/smtp_server.dart' as smtp;
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../models/offer_draft.dart';
@@ -246,6 +246,15 @@ class EmailService {
   // SEND VIA SMTP (Domeneshop etc.)
   // --------------------------------------------------
 
+  // --------------------------------------------------
+  // RAW SMTP SENDER — bypasses mailer package to ensure
+  // all line endings are CRLF (RFC 5321 compliance).
+  // The mailer package produces bare LFs that Office 365
+  // rejects when relaying to AOL/Yahoo.
+  // --------------------------------------------------
+
+  static const _crlf = '\r\n';
+
   static Future<void> _sendViaSmtp({
     required SmtpAccount account,
     required String to,
@@ -254,54 +263,195 @@ class EmailService {
     List<({String filename, Uint8List bytes})>? attachments,
     bool isHtml = false,
   }) async {
-    final server = smtp.SmtpServer(
-      account.smtpHost,
-      port: account.smtpPort,
-      username: account.email,
-      password: account.password,
-      ssl: account.smtpPort == 465,
-      ignoreBadCertificate: true,
-      allowInsecure: true,
-    );
-
-    final fromAddr = account.displayName.isNotEmpty
-        ? mailer.Address(account.email, account.displayName)
-        : mailer.Address(account.email);
-
-    // Support comma- or semicolon-separated recipients
     final recipients = to
         .split(RegExp(r'[,;]'))
         .map((a) => a.trim())
         .where((a) => a.isNotEmpty)
         .toList();
 
-    final message = mailer.Message()
-      ..from = fromAddr
-      ..subject = subject;
+    // Build the raw MIME message with strict CRLF line endings
+    final mime = _buildMimeMessage(
+      from: account.email,
+      displayName: account.displayName,
+      recipients: recipients,
+      subject: subject,
+      body: body,
+      isHtml: isHtml,
+      attachments: attachments,
+    );
 
-    for (final r in recipients) {
-      message.recipients.add(r);
-    }
+    // Connect and send via raw SMTP
+    await _rawSmtpSend(
+      host: account.smtpHost,
+      port: account.smtpPort,
+      username: account.email,
+      password: account.password,
+      useSsl: account.smtpPort == 465,
+      from: account.email,
+      recipients: recipients,
+      mimeData: mime,
+    );
+  }
 
-    if (isHtml) {
-      message.html = body;
-    } else {
-      message.text = body;
-    }
+  /// Build a complete MIME message as a string with CRLF line endings.
+  static String _buildMimeMessage({
+    required String from,
+    required String displayName,
+    required List<String> recipients,
+    required String subject,
+    required String body,
+    required bool isHtml,
+    List<({String filename, Uint8List bytes})>? attachments,
+  }) {
+    final buf = StringBuffer();
+    final boundary = 'boundary-${DateTime.now().millisecondsSinceEpoch}';
+    final hasAttachments = attachments != null && attachments.isNotEmpty;
 
-    if (attachments != null) {
-      for (final a in attachments) {
-        message.attachments.add(
-          mailer.StreamAttachment(
-            Stream.value(a.bytes),
-            'application/octet-stream',
-            fileName: a.filename,
-          ),
-        );
+    // Headers
+    final fromHeader = displayName.isNotEmpty
+        ? '"$displayName" <$from>'
+        : from;
+    buf.write('From: $fromHeader$_crlf');
+    buf.write('To: ${recipients.join(', ')}$_crlf');
+    buf.write('Subject: ${_encodeHeader(subject)}$_crlf');
+    buf.write('MIME-Version: 1.0$_crlf');
+    buf.write('Date: ${_rfc2822Date(DateTime.now())}$_crlf');
+
+    if (hasAttachments) {
+      buf.write('Content-Type: multipart/mixed; boundary="$boundary"$_crlf');
+      buf.write(_crlf);
+      // Body part
+      buf.write('--$boundary$_crlf');
+      buf.write('Content-Type: ${isHtml ? 'text/html' : 'text/plain'}; charset="utf-8"$_crlf');
+      buf.write('Content-Transfer-Encoding: base64$_crlf');
+      buf.write(_crlf);
+      buf.write(_base64Wrap(utf8.encode(body)));
+      buf.write(_crlf);
+
+      // Attachment parts
+      for (final a in attachments!) {
+        buf.write('--$boundary$_crlf');
+        buf.write('Content-Type: application/pdf; name="${a.filename}"$_crlf');
+        buf.write('Content-Transfer-Encoding: base64$_crlf');
+        buf.write('Content-Disposition: attachment; filename="${a.filename}"$_crlf');
+        buf.write(_crlf);
+        buf.write(_base64Wrap(a.bytes));
+        buf.write(_crlf);
       }
+      buf.write('--$boundary--$_crlf');
+    } else {
+      buf.write('Content-Type: ${isHtml ? 'text/html' : 'text/plain'}; charset="utf-8"$_crlf');
+      buf.write('Content-Transfer-Encoding: base64$_crlf');
+      buf.write(_crlf);
+      buf.write(_base64Wrap(utf8.encode(body)));
+      buf.write(_crlf);
     }
 
-    await mailer.send(message, server);
+    return buf.toString();
+  }
+
+  /// Base64-encode bytes and wrap lines at 76 chars with CRLF.
+  static String _base64Wrap(List<int> bytes) {
+    final encoded = base64Encode(bytes);
+    final buf = StringBuffer();
+    for (var i = 0; i < encoded.length; i += 76) {
+      final end = (i + 76 < encoded.length) ? i + 76 : encoded.length;
+      buf.write(encoded.substring(i, end));
+      buf.write(_crlf);
+    }
+    return buf.toString();
+  }
+
+  /// Encode a header value using RFC 2047 if it contains non-ASCII.
+  static String _encodeHeader(String value) {
+    if (value.codeUnits.every((c) => c < 128)) return value;
+    return '=?utf-8?B?${base64Encode(utf8.encode(value))}?=';
+  }
+
+  /// Format a DateTime as RFC 2822.
+  static String _rfc2822Date(DateTime dt) {
+    const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+                    'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    final offset = dt.timeZoneOffset;
+    final sign = offset.isNegative ? '-' : '+';
+    final hh = offset.inHours.abs().toString().padLeft(2, '0');
+    final mm = (offset.inMinutes.abs() % 60).toString().padLeft(2, '0');
+    return '${days[dt.weekday - 1]}, ${dt.day} ${months[dt.month - 1]} ${dt.year} '
+           '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}:${dt.second.toString().padLeft(2, '0')} '
+           '$sign$hh$mm';
+  }
+
+  /// Send a raw MIME message via SMTP socket, ensuring strict CRLF.
+  static Future<void> _rawSmtpSend({
+    required String host,
+    required int port,
+    required String username,
+    required String password,
+    required bool useSsl,
+    required String from,
+    required List<String> recipients,
+    required String mimeData,
+  }) async {
+    final conn = SmtpConnection();
+    await conn.connect(host, port, useSsl: useSsl);
+
+    try {
+      // Read greeting
+      await conn.readResponse();
+
+      // EHLO
+      var resp = await conn.sendCmd('EHLO tourflow.app');
+
+      // STARTTLS if not already SSL
+      if (!useSsl && resp.contains('STARTTLS')) {
+        await conn.sendCmd('STARTTLS');
+        await conn.upgradeToTls(host);
+        resp = await conn.sendCmd('EHLO tourflow.app');
+      }
+
+      // AUTH LOGIN
+      await conn.sendCmd('AUTH LOGIN');
+      await conn.sendCmd(base64Encode(utf8.encode(username)));
+      final authResp = await conn.sendCmd(base64Encode(utf8.encode(password)));
+      if (!authResp.startsWith('235')) {
+        throw Exception('SMTP auth failed: $authResp');
+      }
+
+      // MAIL FROM
+      final fromResp = await conn.sendCmd('MAIL FROM:<$from>');
+      if (!fromResp.startsWith('250')) {
+        throw Exception('MAIL FROM failed: $fromResp');
+      }
+
+      // RCPT TO
+      for (final r in recipients) {
+        final rcptResp = await conn.sendCmd('RCPT TO:<$r>');
+        if (!rcptResp.startsWith('250')) {
+          throw Exception('RCPT TO failed for $r: $rcptResp');
+        }
+      }
+
+      // DATA
+      final dataResp = await conn.sendCmd('DATA');
+      if (!dataResp.startsWith('354')) {
+        throw Exception('DATA command failed: $dataResp');
+      }
+
+      // Send the MIME message — final safety pass for bare LFs
+      final safeData = mimeData.replaceAll('\r\n', '\n').replaceAll('\n', '\r\n');
+      conn.write(safeData);
+      // End with <CRLF>.<CRLF>
+      final endResp = await conn.sendCmd('$_crlf.');
+      if (!endResp.startsWith('250')) {
+        throw Exception('Message rejected: $endResp');
+      }
+
+      // QUIT
+      try { await conn.sendCmd('QUIT'); } catch (_) {}
+    } finally {
+      conn.close();
+    }
   }
 
   static Future<void> _sendViaEdgeFunction({
@@ -717,5 +867,116 @@ class EmailService {
     buf.writeln('Michael Thøgersen');
 
     await sendEmail(to: to, subject: subject, body: buf.toString());
+  }
+}
+
+/// SMTP socket connection with persistent listener + Completer-based reads.
+/// Single listener is canceled and re-attached during STARTTLS upgrade.
+class SmtpConnection {
+  static const _crlf = '\r\n';
+  Socket? _socket;
+  StreamSubscription<Uint8List>? _sub;
+  final _buffer = StringBuffer();
+  Completer<String>? _waiting;
+
+  Future<void> connect(String host, int port, {required bool useSsl}) async {
+    if (useSsl) {
+      _socket = await SecureSocket.connect(host, port,
+          context: SecurityContext.defaultContext,
+          onBadCertificate: (_) => true);
+    } else {
+      _socket = await Socket.connect(host, port);
+    }
+    _attachListener();
+  }
+
+  void _attachListener() {
+    _sub = _socket!.listen(
+      (data) {
+        _buffer.write(String.fromCharCodes(data));
+        _checkComplete();
+      },
+      onError: (e) {
+        if (_waiting != null && !_waiting!.isCompleted) {
+          _waiting!.completeError(e);
+          _waiting = null;
+        }
+      },
+      onDone: () {
+        if (_waiting != null && !_waiting!.isCompleted) {
+          if (_buffer.isNotEmpty) {
+            _waiting!.complete(_buffer.toString());
+            _buffer.clear();
+          } else {
+            _waiting!.completeError(Exception('SMTP connection closed'));
+          }
+          _waiting = null;
+        }
+      },
+    );
+  }
+
+  void _checkComplete() {
+    if (_waiting == null || _waiting!.isCompleted) return;
+    final text = _buffer.toString();
+    if (_isCompleteResponse(text)) {
+      _buffer.clear();
+      _waiting!.complete(text);
+      _waiting = null;
+    }
+  }
+
+  static bool _isCompleteResponse(String text) {
+    if (text.isEmpty) return false;
+    final lines = text.split(RegExp(r'\r?\n'));
+    for (var i = lines.length - 1; i >= 0; i--) {
+      if (lines[i].isEmpty) continue;
+      return RegExp(r'^\d{3}( |$)').hasMatch(lines[i]);
+    }
+    return false;
+  }
+
+  Future<String> readResponse() {
+    final text = _buffer.toString();
+    if (_isCompleteResponse(text)) {
+      _buffer.clear();
+      return Future.value(text);
+    }
+    _waiting = Completer<String>();
+    return _waiting!.future.timeout(
+      const Duration(seconds: 30),
+      onTimeout: () { throw Exception('SMTP response timeout'); },
+    );
+  }
+
+  void write(String data) {
+    _socket!.write(data);
+  }
+
+  Future<String> sendCmd(String cmd) async {
+    _socket!.write('$cmd$_crlf');
+    await _socket!.flush();
+    return readResponse();
+  }
+
+  /// Upgrade to TLS after STARTTLS.
+  /// IMPORTANT: SecureSocket.secure() must be called BEFORE canceling
+  /// the old subscription, because cancel() shuts down the socket's
+  /// read side at the OS level, which would kill the TLS handshake.
+  Future<void> upgradeToTls(String host) async {
+    final oldSub = _sub;
+    _sub = null;
+    // Upgrade first — works at native socket level, doesn't conflict
+    // with the Dart-level Stream subscription
+    _socket = await SecureSocket.secure(_socket!,
+        host: host, onBadCertificate: (_) => true);
+    // Now safe to cancel old subscription (socket is already upgraded)
+    try { await oldSub?.cancel(); } catch (_) {}
+    _attachListener();
+  }
+
+  void close() {
+    _sub?.cancel();
+    try { _socket?.destroy(); } catch (_) {}
   }
 }

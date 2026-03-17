@@ -172,9 +172,20 @@ static List<pw.Widget> _buildTableForIndexes(
   if (showGrandTotal && grandTotal > 0) {
     // VAT base = total excluding ferry, bridge and toll (same as new_offer_page)
     final vatBase = grandTotal - grandFerry - grandBridge - grandToll;
+
+    // Total driven km from all rounds (not just country-attributed km)
+    double allDrivenKm = 0;
+    for (final roundIndex in visibleRounds) {
+      final result = calc[roundIndex];
+      if (result != null) {
+        allDrivenKm += result.legKm.fold<double>(0, (a, b) => a + b);
+      }
+    }
+
     final vatMap = _calculateForeignVat(
       basePrice: vatBase,
       countryKm: allCountryKm,
+      totalDrivenKm: allDrivenKm,
     );
 
     // grandTotal is excl VAT. Foreign VAT is added on top.
@@ -386,12 +397,14 @@ static List<pw.Widget> _buildTotalSection({
   required Map<String, double> countryKm,
   required pw.Font regular,
   required pw.Font bold,
+  double? totalDrivenKm,
 }) {
   if (grandTotal <= 0) return [];
 
   final vatMap = _calculateForeignVat(
     basePrice: grandTotal,
     countryKm: countryKm,
+    totalDrivenKm: totalDrivenKm,
   );
 
   // grandTotal is excl VAT. Foreign VAT is added on top.
@@ -1039,10 +1052,11 @@ static const Map<String, double> _vatRates = {
 static Map<String, double> _calculateForeignVat({
   required double basePrice,
   required Map<String, double> countryKm,
+  double? totalDrivenKm,
 }) {
   if (basePrice <= 0 || countryKm.isEmpty) return {};
 
-  final totalKm =
+  final totalKm = totalDrivenKm ??
       countryKm.values.fold<double>(0, (a, b) => a + b);
 
   if (totalKm <= 0) return {};

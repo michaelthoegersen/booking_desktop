@@ -317,7 +317,28 @@ Deno.serve(async (req) => {
         .map((m: any) => m.user_id)
         .filter((uid: string) => uid !== sender_id);
 
-      const title = `${sender_name} (gig chat)`;
+      // Fetch gig name for notification title
+      let gigLabel = 'Gig chat';
+      if (gig_id) {
+        const { data: gig } = await supabase
+          .from('gigs')
+          .select('venue_name, city, date_from')
+          .eq('id', gig_id)
+          .maybeSingle();
+        if (gig) {
+          const parts: string[] = [];
+          if (gig.date_from) {
+            const d = new Date(gig.date_from);
+            parts.push(`${d.getDate()}.${d.getMonth() + 1}`);
+          }
+          if (gig.venue_name) parts.push(gig.venue_name);
+          if (parts.length > 0) {
+            gigLabel = parts.join(' · ');
+          }
+        }
+      }
+
+      const title = `${sender_name} · ${gigLabel}`;
       const mentionSet = new Set<string>(mentioned_user_ids ?? []);
       const mentionedRecipients = recipientIds.filter((uid: string) => mentionSet.has(uid));
       const normalRecipients = recipientIds.filter((uid: string) => !mentionSet.has(uid));

@@ -1,6 +1,6 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
-import 'package:mailer/mailer.dart' as mailer;
-import 'package:mailer/smtp_server.dart' as smtp;
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../services/email_service.dart';
@@ -1346,6 +1346,37 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
   // SMTP account management
   // --------------------------------------------------
 
+  /// Test SMTP credentials by connecting and authenticating via raw socket.
+  static Future<void> _testSmtpCredentials({
+    required String host,
+    required int port,
+    required String username,
+    required String password,
+    required bool useSsl,
+  }) async {
+    // Reuse EmailService's internal SMTP connection for testing
+    final conn = SmtpConnection();
+    await conn.connect(host, port, useSsl: useSsl);
+    try {
+      await conn.readResponse();
+      var resp = await conn.sendCmd('EHLO tourflow.app');
+      if (!useSsl && resp.contains('STARTTLS')) {
+        await conn.sendCmd('STARTTLS');
+        await conn.upgradeToTls(host);
+        resp = await conn.sendCmd('EHLO tourflow.app');
+      }
+      await conn.sendCmd('AUTH LOGIN');
+      await conn.sendCmd(base64Encode(utf8.encode(username)));
+      final authResp = await conn.sendCmd(base64Encode(utf8.encode(password)));
+      if (!authResp.startsWith('235')) {
+        throw Exception('Authentication failed: $authResp');
+      }
+      try { await conn.sendCmd('QUIT'); } catch (_) {}
+    } finally {
+      conn.close();
+    }
+  }
+
   Future<void> _showAddSmtpDialog() async {
     final emailCtrl = TextEditingController();
     final passwordCtrl = TextEditingController();
@@ -1480,16 +1511,13 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
                           });
                           try {
                             final port = int.tryParse(portCtrl.text) ?? 587;
-                            final server = smtp.SmtpServer(
-                              hostCtrl.text.trim(),
+                            await _testSmtpCredentials(
+                              host: hostCtrl.text.trim(),
                               port: port,
                               username: emailCtrl.text.trim(),
                               password: passwordCtrl.text,
-                              ssl: port == 465,
-                              ignoreBadCertificate: true,
-                              allowInsecure: true,
+                              useSsl: port == 465,
                             );
-                            await mailer.checkCredentials(server);
                             setDialogState(() {
                               testOk = true;
                               saving = false;

@@ -1384,6 +1384,61 @@ class _PdfVersionsDialogState extends State<_PdfVersionsDialog> {
     return OfferStorageService.getPdfUrl(path);
   }
 
+  Future<void> _deleteToken(Map<String, dynamic> token) async {
+    final tokenId = token['id'] as String;
+    final email = token['customer_email'] as String? ?? '';
+    final status = token['status'] as String? ?? 'pending';
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete PDF version?'),
+        content: Text(
+          'This will delete the PDF sent to $email and remove the offer token.\n\n'
+          '${status == 'approved' ? '⚠ This version is signed by both parties!' : status == 'accepted' ? '⚠ This version has been accepted by the customer!' : ''}',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+
+    try {
+      // Delete PDF from storage
+      final pdfPath = token['pdf_path'] as String?;
+      final signedPath = token['signed_pdf_path'] as String?;
+      final paths = <String>[
+        if (pdfPath != null) pdfPath,
+        if (signedPath != null) signedPath,
+      ];
+      if (paths.isNotEmpty) {
+        await _sb.storage.from('offers-pdf').remove(paths);
+      }
+
+      // Delete token row
+      await _sb.from('offer_tokens').delete().eq('id', tokenId);
+
+      // Refresh list
+      await _load();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error deleting: $e')),
+        );
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final hasOfferPdf = widget.offerPdfPath != null;
@@ -1481,6 +1536,13 @@ class _PdfVersionsDialogState extends State<_PdfVersionsDialog> {
                                           onPressed: () => widget.onViewPdf(_pdfUrl(signedPath!)),
                                         ),
                                       ),
+                                    Tooltip(
+                                      message: 'Delete',
+                                      child: IconButton(
+                                        icon: Icon(Icons.delete_outline, size: 18, color: Colors.grey.shade400),
+                                        onPressed: () => _deleteToken(token),
+                                      ),
+                                    ),
                                   ],
                                 ),
                               ),

@@ -49,11 +49,12 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const { to, subject, body, contentType, attachment, attachments } = await req.json() as {
+    const { to, subject, body, contentType, from, attachment, attachments } = await req.json() as {
       to: string;
       subject: string;
       body: string;
       contentType?: string;
+      from?: string;
       attachment?: { name: string; contentBytes: string };
       attachments?: { name: string; contentBytes: string }[];
     };
@@ -79,9 +80,13 @@ Deno.serve(async (req) => {
       .filter((a: string) => a.length > 0)
       .map((a: string) => ({ emailAddress: { address: a } }));
 
+    // Use the requested sender or fall back to default
+    const sender = from || SENDER;
+
     const message: Record<string, unknown> = {
       subject,
       body: { contentType: contentType === 'HTML' ? 'HTML' : 'Text', content: body },
+      from: { emailAddress: { address: sender } },
       toRecipients: recipients,
     };
 
@@ -104,7 +109,7 @@ Deno.serve(async (req) => {
     }
 
     const sendRes = await fetch(
-      `https://graph.microsoft.com/v1.0/users/${SENDER}/sendMail`,
+      `https://graph.microsoft.com/v1.0/users/${sender}/sendMail`,
       {
         method: 'POST',
         headers: {
