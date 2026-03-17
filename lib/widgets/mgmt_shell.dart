@@ -302,6 +302,7 @@ class _MgmtSideNavState extends State<_MgmtSideNav> {
   bool _showTours = true;
   int _unreadMessages = 0;
   int _pendingAgreements = 0;
+  int _pendingExpenses = 0;
   RealtimeChannel? _channel;
   Timer? _pollTimer;
 
@@ -311,6 +312,7 @@ class _MgmtSideNavState extends State<_MgmtSideNav> {
     _loadFlags();
     _loadUnreadMessages();
     _loadPendingAgreements();
+    _loadPendingExpenses();
     companyFlagsNotifier.addListener(_onFlagsChanged);
     mgmtUnreadNotifier.addListener(_loadUnreadMessages);
     activeCompanyNotifier.addListener(_onCompanyChanged);
@@ -340,10 +342,17 @@ class _MgmtSideNavState extends State<_MgmtSideNav> {
           table: 'agreement_tokens',
           callback: (_) => _loadPendingAgreements(),
         )
+        .onPostgresChanges(
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: 'expenses',
+          callback: (_) => _loadPendingExpenses(),
+        )
         .subscribe();
     _pollTimer = Timer.periodic(const Duration(seconds: 15), (_) {
       _loadUnreadMessages();
       _loadPendingAgreements();
+      _loadPendingExpenses();
     });
   }
 
@@ -361,6 +370,7 @@ class _MgmtSideNavState extends State<_MgmtSideNav> {
     _loadFlags();
     _loadUnreadMessages();
     _loadPendingAgreements();
+    _loadPendingExpenses();
   }
 
   Future<void> _loadUnreadMessages() async {
@@ -460,6 +470,21 @@ class _MgmtSideNavState extends State<_MgmtSideNav> {
     }
   }
 
+  Future<void> _loadPendingExpenses() async {
+    try {
+      final companyId = activeCompanyNotifier.value?.id;
+      if (companyId == null) return;
+      final rows = await _sb
+          .from('expenses')
+          .select('id')
+          .eq('company_id', companyId)
+          .eq('status', 'pending');
+      if (mounted) setState(() => _pendingExpenses = (rows as List).length);
+    } catch (e) {
+      debugPrint('Pending expenses badge error: $e');
+    }
+  }
+
   void _onFlagsChanged() {
     if (!mounted) return;
     setState(() {
@@ -555,6 +580,12 @@ class _MgmtSideNavState extends State<_MgmtSideNav> {
                       icon: Icons.receipt_long_rounded,
                       label: 'Gigghyrer',
                       route: '/m/gig-hire',
+                    ),
+                    _MgmtNavItem(
+                      icon: Icons.receipt_outlined,
+                      label: 'Utlegg',
+                      route: '/m/expenses',
+                      badge: _pendingExpenses,
                     ),
                     _MgmtNavItem(
                       icon: Icons.account_balance_rounded,

@@ -31,6 +31,7 @@ class _MgmtDashboardPageState extends State<MgmtDashboardPage> {
   List<Map<String, dynamic>> _upcomingEvents = [];
   List<Map<String, dynamic>> _activeTours = [];
   List<Map<String, dynamic>> _pendingBusRequests = [];
+  int _pendingExpenseCount = 0;
 
   @override
   void initState() {
@@ -175,6 +176,18 @@ class _MgmtDashboardPageState extends State<MgmtDashboardPage> {
         _pendingBusRequests = [];
       }
 
+      // Pending expenses
+      try {
+        final expRows = await _sb
+            .from('expenses')
+            .select('id')
+            .eq('company_id', _companyId!)
+            .eq('status', 'pending');
+        _pendingExpenseCount = (expRows as List).length;
+      } catch (_) {
+        _pendingExpenseCount = 0;
+      }
+
     } catch (e) {
       debugPrint('Dashboard load error: $e');
     }
@@ -255,6 +268,38 @@ class _MgmtDashboardPageState extends State<MgmtDashboardPage> {
                                 ))
                             .toList(),
                       ),
+                  ],
+
+                  // Pending expenses
+                  if (_pendingExpenseCount > 0) ...[
+                    const SizedBox(height: 24),
+                    GestureDetector(
+                      onTap: () => context.go('/m/expenses'),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                        decoration: BoxDecoration(
+                          color: Colors.orange.withValues(alpha: 0.08),
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(color: Colors.orange.withValues(alpha: 0.3)),
+                        ),
+                        child: Row(
+                          children: [
+                            const Icon(Icons.receipt_outlined, size: 22, color: Colors.orange),
+                            const SizedBox(width: 12),
+                            Text(
+                              '$_pendingExpenseCount ventende utlegg',
+                              style: const TextStyle(
+                                fontSize: 15,
+                                fontWeight: FontWeight.w700,
+                                color: Colors.orange,
+                              ),
+                            ),
+                            const Spacer(),
+                            const Icon(Icons.arrow_forward_ios, size: 14, color: Colors.orange),
+                          ],
+                        ),
+                      ),
+                    ),
                   ],
 
                   if (_showBusRequests) ...[

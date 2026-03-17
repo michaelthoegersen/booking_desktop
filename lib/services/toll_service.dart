@@ -125,7 +125,7 @@ class TollService {
   /// [thresholdMeters] is the max distance from the route for a station to count.
   static TollResult calculateTolls(
     List<List<double>> routePoints, {
-    double thresholdMeters = 80,
+    double thresholdMeters = 50,
     bool useRushPrice = false,
   }) {
     final stations = _cached ?? [];
@@ -133,23 +133,33 @@ class TollService {
       return const TollResult(totalCost: 0, passedStations: []);
     }
 
+    // Tight threshold (30m): only matches stations directly on the road
+    // being driven, not on nearby ramps or parallel roads.
+    //
+    // Geo-dedup (300m): NVDB has multiple objects per physical station
+    // (per lane/direction). These are < 100m apart. Separate toll stations
+    // are always > 500m apart even in cities.
+    const geoDedupMeters = 300.0;
+
     final passed = <TollStation>[];
-    final passedIds = <int>{};
 
     // Sample every N-th point to keep it fast
-    final step = max(1, routePoints.length ~/ 500);
+    const step = 1; // check every point — accuracy over speed
 
     for (var i = 0; i < routePoints.length; i += step) {
       final pLat = routePoints[i][0];
       final pLon = routePoints[i][1];
 
       for (final s in stations) {
-        if (passedIds.contains(s.id)) continue;
         final dist = _haversineMeters(pLat, pLon, s.lat, s.lon);
-        if (dist <= thresholdMeters) {
-          passed.add(s);
-          passedIds.add(s.id);
-        }
+        if (dist > thresholdMeters) continue;
+
+        // Skip if too close to an already-matched station (same bomsnitt)
+        final isDuplicate = passed.any((p) =>
+            _haversineMeters(p.lat, p.lon, s.lat, s.lon) < geoDedupMeters);
+        if (isDuplicate) continue;
+
+        passed.add(s);
       }
     }
 

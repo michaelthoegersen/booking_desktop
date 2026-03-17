@@ -37,6 +37,7 @@ import 'pages/mgmt/mgmt_settings_page.dart';
 import 'pages/mgmt/mgmt_gig_offers_page.dart';
 import 'pages/mgmt/gig_offer_page.dart';
 import 'pages/mgmt/mgmt_gig_hire_admin_page.dart';
+import 'pages/mgmt/mgmt_expenses_page.dart';
 import 'pages/mgmt/mgmt_dropbox_page.dart';
 import 'pages/mgmt/mgmt_economy_page.dart';
 import 'pages/mgmt/mgmt_meetings_page.dart';
@@ -439,6 +440,10 @@ class BookingApp extends StatelessWidget {
             GoRoute(
               path: '/m/gig-hire',
               builder: (_, __) => const MgmtGigHireAdminPage(),
+            ),
+            GoRoute(
+              path: '/m/expenses',
+              builder: (_, __) => const MgmtExpensesPage(),
             ),
             GoRoute(
               path: '/m/offers',

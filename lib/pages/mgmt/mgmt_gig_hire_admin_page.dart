@@ -139,10 +139,27 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
         for (final p in profiles) p['id'] as String: p['name'] as String? ?? ''
       };
 
-      // 6. Build entries — one per person per gig
+      // 6. Fetch approved expenses per gig
+      final expenseRows = List<Map<String, dynamic>>.from(
+        await _sb
+            .from('expenses')
+            .select('gig_id, user_id, amount')
+            .inFilter('gig_id', gigIds)
+            .eq('status', 'approved'),
+      );
+      // Map: gigId|userId → total expenses
+      final expenseMap = <String, double>{};
+      for (final e in expenseRows) {
+        final key = '${e['gig_id']}|${e['user_id']}';
+        expenseMap[key] = (expenseMap[key] ?? 0) +
+            ((e['amount'] as num?)?.toDouble() ?? 0);
+      }
+
+      // 7. Build entries — one per person per gig
       final entries = <Map<String, dynamic>>[];
       for (final g in grouped.values) {
         final gigId = g['gig_id'] as String;
+        final userId = g['user_id'] as String;
         final gig = gigMap[gigId];
         final offer = offerByGig[gigId];
 
@@ -152,10 +169,12 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
             (offer?['extra_show_fee'] as num?)?.toDouble() ?? 0.0;
         final numShows = (g['show_ids'] as Set<String>).length;
         final effectiveShows = numShows > 0 ? numShows : 1;
-        final amount = creoFee +
+        final hireFee = creoFee +
             (effectiveShows > 1
                 ? extraShowFee * (effectiveShows - 1)
                 : 0);
+        final expenseTotal = expenseMap['$gigId|$userId'] ?? 0.0;
+        final amount = hireFee + expenseTotal;
 
         entries.add({
           'lineup_ids': g['lineup_ids'],
@@ -167,6 +186,8 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
           'name': nameMap[g['user_id']] ?? '',
           'section': g['section'] ?? '',
           'num_shows': effectiveShows,
+          'hire_fee': hireFee,
+          'expense_total': expenseTotal,
           'amount': amount,
           'crew_invoiced_at': g['crew_invoiced_at'],
           'crew_paid_at': g['crew_paid_at'],
@@ -465,14 +486,29 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
                                     textAlign: TextAlign.center,
                                   ),
                                 ),
-                                // Amount
+                                // Amount (with expense breakdown)
                                 SizedBox(
-                                  width: 90,
-                                  child: Text(
-                                    _formatAmount(amount),
-                                    style: const TextStyle(
-                                        fontWeight: FontWeight.w700),
-                                    textAlign: TextAlign.right,
+                                  width: 120,
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.end,
+                                    children: [
+                                      Text(
+                                        _formatAmount(amount),
+                                        style: const TextStyle(
+                                            fontWeight: FontWeight.w700),
+                                        textAlign: TextAlign.right,
+                                      ),
+                                      if ((e['expense_total'] as double?) != null &&
+                                          (e['expense_total'] as double) > 0)
+                                        Text(
+                                          'herav utlegg: ${_formatAmount(e['expense_total'] as double)}',
+                                          style: TextStyle(
+                                            fontSize: 10,
+                                            color: cs.onSurfaceVariant,
+                                          ),
+                                          textAlign: TextAlign.right,
+                                        ),
+                                    ],
                                   ),
                                 ),
                                 const SizedBox(width: 16),
