@@ -3,7 +3,7 @@
 // Used when admin creates a new gig, etc.
 //
 // Payload:
-//   { company_id, title, body, exclude_user_id? }
+//   { company_id, title, body, exclude_user_id?, gig_id?, role_filter? }
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
@@ -77,7 +77,7 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const { company_id, title, body = '', exclude_user_id, gig_id } = await req.json();
+    const { company_id, title, body = '', exclude_user_id, gig_id, role_filter, type: notifType = 'gig' } = await req.json();
 
     if (!company_id || !title) {
       return new Response(
@@ -91,11 +91,17 @@ Deno.serve(async (req) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
     );
 
-    // 1. Get all company members
-    const { data: members, error: membersError } = await supabase
+    // 1. Get company members (optionally filtered by role)
+    let query = supabase
       .from('company_members')
-      .select('user_id')
+      .select('user_id, role')
       .eq('company_id', company_id);
+
+    if (role_filter) {
+      query = query.eq('role', role_filter);
+    }
+
+    const { data: members, error: membersError } = await query;
 
     if (membersError) {
       console.error('Error fetching members:', membersError);
@@ -123,7 +129,7 @@ Deno.serve(async (req) => {
       title,
       body,
       read: false,
-      type: 'gig',
+      type: notifType,
       ...(gig_id ? { gig_id } : {}),
     }));
 
