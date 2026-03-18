@@ -113,12 +113,18 @@ class ChatService {
   // Reactions (tour messages use gig_message_reactions table)
   // -------------------------------------------------------------------
 
+  /// Set reaction (one emoji per user — replaces previous).
   static Future<void> addReaction(String messageId, String emoji) async {
-    await _sb.from('gig_message_reactions').upsert({
+    final uid = _sb.auth.currentUser!.id;
+    await _sb.from('gig_message_reactions')
+        .delete()
+        .eq('message_id', messageId)
+        .eq('user_id', uid);
+    await _sb.from('gig_message_reactions').insert({
       'message_id': messageId,
-      'user_id': _sb.auth.currentUser!.id,
+      'user_id': uid,
       'emoji': emoji,
-    }, onConflict: 'message_id,user_id,emoji');
+    });
   }
 
   static Future<void> removeReaction(String messageId, String emoji) async {
