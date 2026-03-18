@@ -293,6 +293,7 @@ class _GigOfferPageState extends State<GigOfferPage> {
               entry.venueCtrl.text = gig['venue_name'] ?? '';
               entry.cityCtrl.text = gig['city'] ?? '';
               entry.countryCtrl.text = gig['country'] ?? 'NO';
+              entry.isRehearsal = gig['type'] == 'rehearsal';
 
               // Load per-date show selection from gig_shows
               if (_shows.isNotEmpty) {
@@ -793,7 +794,7 @@ class _GigOfferPageState extends State<GigOfferPage> {
         final entry = _dateEntries[entryIdx];
         return {
           'company_id': _companyId,
-          'type': 'gig',
+          'type': entry.isRehearsal ? 'rehearsal' : 'gig',
           'date_from': entry.dateFrom != null ? df.format(entry.dateFrom!) : null,
           'date_to': entry.dateTo != null ? df.format(entry.dateTo!) : null,
           'status': _gigStatus,
@@ -1342,6 +1343,17 @@ class _GigOfferPageState extends State<GigOfferPage> {
                             isDense: true,
                             contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 10),
                           ),
+                        ),
+                      ),
+                      const SizedBox(width: 4),
+                      // Rehearsal toggle
+                      Tooltip(
+                        message: 'Prøve/øvelse',
+                        child: FilterChip(
+                          label: const Text('Prøve', style: TextStyle(fontSize: 11)),
+                          selected: entry.isRehearsal,
+                          onSelected: (v) => setState(() => entry.isRehearsal = v),
+                          visualDensity: VisualDensity.compact,
                         ),
                       ),
                       // Remove button (only when 2+ entries)
@@ -3552,6 +3564,7 @@ class _DateEntry {
   String? gigId;
   DateTime? dateFrom;
   DateTime? dateTo;
+  bool isRehearsal = false;
   final venueCtrl = TextEditingController();
   final cityCtrl = TextEditingController();
   final countryCtrl = TextEditingController(text: 'NO');
