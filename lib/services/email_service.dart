@@ -152,10 +152,14 @@ class EmailService {
     bool useSmtp = true,
     String? companyId,
   }) async {
-    if (useSmtp && !kIsWeb) {
+    if (useSmtp) {
       final account = await getDefaultSmtpAccount(companyId: companyId);
       if (account != null) {
-        await _sendViaSmtp(account: account, to: to, subject: subject, body: body, isHtml: isHtml);
+        if (kIsWeb) {
+          await _sendViaSmtpEdgeFunction(account: account, to: to, subject: subject, body: body, isHtml: isHtml);
+        } else {
+          await _sendViaSmtp(account: account, to: to, subject: subject, body: body, isHtml: isHtml);
+        }
         return;
       }
     }
@@ -166,11 +170,8 @@ class EmailService {
       );
       if (sent) return;
     }
-    if (kIsWeb) {
-      await _sendViaEdgeFunction(to: to, subject: subject, body: body, isHtml: isHtml);
-    } else {
-      await _sendViaMicrosoftDirect(to: to, subject: subject, body: body, isHtml: isHtml);
-    }
+    // No SMTP or OAuth configured — throw instead of using michael@nttas.com
+    throw Exception('E-post er ikke konfigurert. Legg til en SMTP-konto i Innstillinger.');
   }
 
   static Future<void> sendEmailWithAttachment({
@@ -205,46 +206,75 @@ class EmailService {
     bool useSmtp = true,
     String? companyId,
   }) async {
-    if (useSmtp && !kIsWeb) {
+    if (useSmtp) {
       final account = await getDefaultSmtpAccount(companyId: companyId);
       if (account != null) {
-        await _sendViaSmtp(
-          account: account, to: to, subject: subject, body: body,
-          attachments: attachments, isHtml: isHtml,
-        );
+        if (kIsWeb) {
+          await _sendViaSmtpEdgeFunction(
+            account: account, to: to, subject: subject, body: body,
+            attachments: attachments, isHtml: isHtml,
+          );
+        } else {
+          await _sendViaSmtp(
+            account: account, to: to, subject: subject, body: body,
+            attachments: attachments, isHtml: isHtml,
+          );
+        }
         return;
       }
     }
-    final attachmentList = attachments
-        .map((a) => {
-              'name': a.filename,
-              'contentBytes': base64Encode(a.bytes),
-            })
-        .toList();
-    // Try delegated OAuth first
+    // Try delegated OAuth
     if (!kIsWeb) {
+      final attachmentList = attachments
+          .map((a) => {
+                'name': a.filename,
+                'contentBytes': base64Encode(a.bytes),
+              })
+          .toList();
       final sent = await _trySendViaDelegated(
         to: to, subject: subject, body: body,
         attachments: attachmentList, isHtml: isHtml, companyId: companyId,
       );
       if (sent) return;
     }
-    if (kIsWeb) {
-      await _sendViaEdgeFunction(
-        to: to, subject: subject, body: body, attachments: attachmentList,
-        isHtml: isHtml,
-      );
-    } else {
-      await _sendViaMicrosoftDirect(
-        to: to, subject: subject, body: body, attachments: attachmentList,
-        isHtml: isHtml,
-      );
-    }
+    // No SMTP or OAuth configured — throw instead of using michael@nttas.com
+    throw Exception('E-post er ikke konfigurert. Legg til en SMTP-konto i Innstillinger.');
   }
 
   // --------------------------------------------------
   // SEND VIA SMTP (Domeneshop etc.)
   // --------------------------------------------------
+
+  /// Web: send SMTP via edge function (avoids CORS / raw socket issues).
+  static Future<void> _sendViaSmtpEdgeFunction({
+    required SmtpAccount account,
+    required String to,
+    required String subject,
+    required String body,
+    List<({String filename, Uint8List bytes})>? attachments,
+    bool isHtml = false,
+  }) async {
+    final sb = Supabase.instance.client;
+    final payload = <String, dynamic>{
+      'to': to,
+      'subject': subject,
+      'body': body,
+      'from': account.email,
+      'fromName': account.displayName,
+      'smtpHost': account.smtpHost,
+      'smtpPort': account.smtpPort,
+      'smtpUser': account.email,
+      'smtpPass': account.password,
+      if (isHtml) 'isHtml': true,
+    };
+    if (attachments != null && attachments.isNotEmpty) {
+      payload['attachments'] = attachments.map((a) => {
+        'filename': a.filename,
+        'content': base64Encode(a.bytes),
+      }).toList();
+    }
+    await sb.functions.invoke('send-smtp-email', body: payload);
+  }
 
   // --------------------------------------------------
   // RAW SMTP SENDER — bypasses mailer package to ensure
@@ -794,8 +824,14 @@ class EmailService {
 
   static Future<void> sendFerryBookingEmail({
     required OfferDraft offer,
+    String? companyId,
   }) async {
-    const to = 'mail@michaelthoegersen.com';
+    // Send to the company's default SMTP email (the admin who set it up)
+    final account = await getDefaultSmtpAccount(companyId: companyId);
+    if (account == null) {
+      throw Exception('E-post er ikke konfigurert. Legg til en SMTP-konto i Innstillinger.');
+    }
+    final to = account.email;
     const subject = 'Ferry booking request';
 
     // Collect all ferry legs across all rounds, grouped by date.
