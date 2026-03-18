@@ -440,11 +440,12 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
         final offerTotal = (first['offer_total'] as num?)?.toDouble() ?? 0;
 
         // Totals for this gig
-        final crewTotal = members.fold<double>(
-            0, (sum, e) => sum + ((e['amount'] as num?)?.toDouble() ?? 0));
+        final hireTotal = members.fold<double>(
+            0, (sum, e) => sum + ((e['hire_fee'] as num?)?.toDouble() ?? 0));
         final expenseTotal = members.fold<double>(
             0, (sum, e) => sum + ((e['expense_total'] as num?)?.toDouble() ?? 0));
-        final profit = offerTotal - crewTotal;
+        final gigTotal = hireTotal + expenseTotal; // total cost
+        final profit = offerTotal - gigTotal;
         final unpaidTotal = members
             .where((e) => e['crew_paid_at'] == null)
             .fold<double>(0, (sum, e) => sum + ((e['amount'] as num?)?.toDouble() ?? 0));
@@ -621,19 +622,16 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
                 ),
                 child: Column(
                   children: [
+                    _footerRow('Honorarer', hireTotal, cs),
+                    if (expenseTotal > 0)
+                      _footerRow('Utlegg', expenseTotal, cs),
+                    _footerRow('Totalt', gigTotal, cs, bold: true),
                     if (offerTotal > 0) ...[
-                      _footerRow('Tilbudspris', offerTotal, cs, bold: true),
-                      _footerRow('Honorarer', -crewTotal, cs),
-                      if (expenseTotal > 0)
-                        _footerRow('Utlegg', -expenseTotal, cs),
-                      const Divider(height: 12),
-                      _footerRow('Resultat', profit, cs,
+                      const Divider(height: 8),
+                      _footerRow('Tilbudspris', offerTotal, cs),
+                      _footerRow('Vi sitter igjen med', profit, cs,
                           bold: true,
                           color: profit >= 0 ? Colors.green : Colors.red),
-                    ] else ...[
-                      _footerRow('Honorarer totalt', crewTotal, cs, bold: true),
-                      if (expenseTotal > 0)
-                        _footerRow('Utlegg', expenseTotal, cs),
                     ],
                     // Remaining to pay
                     if (unpaidTotal > 0) ...[
