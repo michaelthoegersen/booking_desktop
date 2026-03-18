@@ -1368,6 +1368,7 @@ class _DmChatViewState extends State<_DmChatView> with MentionMixin {
                         onRemoveReaction: (emoji) => DirectChatService.removeReaction(msgId, emoji),
                         onReply: () => _startReply(msg),
                         onEdit: isMine ? () => _startEdit(msg) : null,
+                        onDelete: () => _sb.from('direct_messages').delete().eq('id', msgId),
                         showRead: isMine && msg['id'] == lastReadMsgId,
                       );
                     },
@@ -1605,6 +1606,7 @@ class _GroupChatViewState extends State<_GroupChatView> with MentionMixin {
                         onRemoveReaction: (emoji) => GroupChatService.removeReaction(msgId, emoji),
                         onReply: () => _startReply(msg),
                         onEdit: isMine ? () => _startEdit(msg) : null,
+                        onDelete: () => _sb.from('group_chat_messages').delete().eq('id', msgId),
                       );
                     },
                   );
@@ -2266,6 +2268,7 @@ class _GigChatViewState extends State<_GigChatView> with MentionMixin {
                         onRemoveReaction: (emoji) => ChatService.removeReaction(msgId, emoji),
                         onReply: () => _startReply(msg),
                         onEdit: isMine ? () => _startEdit(msg) : null,
+                        onDelete: () => _sb.from('gig_messages').delete().eq('id', msgId),
                       );
                     },
                   );
@@ -2311,6 +2314,7 @@ class _Bubble extends StatelessWidget {
   final Future<void> Function(String emoji)? onRemoveReaction;
   final VoidCallback? onReply;
   final VoidCallback? onEdit;
+  final VoidCallback? onDelete;
   final bool showRead;
 
   static const _emojiOptions = ['👍', '👎', '❤️', '😂', '😮', '😢', '😡', '🙏', '🔥', '🎉', '💯', '👀'];
@@ -2329,6 +2333,7 @@ class _Bubble extends StatelessWidget {
     this.onRemoveReaction,
     this.onReply,
     this.onEdit,
+    this.onDelete,
     this.showRead = false,
   });
 
@@ -2520,8 +2525,7 @@ class _Bubble extends StatelessWidget {
           PopupMenuItem<String>(
             enabled: false,
             padding: EdgeInsets.zero,
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
+            child: Wrap(
               children: _emojiOptions.map((emoji) {
                 return InkWell(
                   borderRadius: BorderRadius.circular(8),
@@ -2551,6 +2555,11 @@ class _Bubble extends StatelessWidget {
             value: 'edit',
             child: Row(children: [Icon(Icons.edit, size: 18), SizedBox(width: 8), Text('Rediger')]),
           ),
+        if (onDelete != null)
+          const PopupMenuItem<String>(
+            value: 'delete',
+            child: Row(children: [Icon(Icons.delete_outline, size: 18, color: Colors.red), SizedBox(width: 8), Text('Slett', style: TextStyle(color: Colors.red))]),
+          ),
       ],
     ).then((value) {
       if (value == 'copy') {
@@ -2561,6 +2570,7 @@ class _Bubble extends StatelessWidget {
       }
       if (value == 'reply') onReply?.call();
       if (value == 'edit') onEdit?.call();
+      if (value == 'delete') onDelete?.call();
     });
   }
 

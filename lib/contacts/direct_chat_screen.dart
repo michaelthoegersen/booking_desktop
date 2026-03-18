@@ -1009,8 +1009,7 @@ class _Bubble extends StatelessWidget {
         PopupMenuItem<String>(
           enabled: false,
           padding: EdgeInsets.zero,
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
+          child: Wrap(
             children: _emojiOptions.map((emoji) {
               return InkWell(
                 borderRadius: BorderRadius.circular(8),
