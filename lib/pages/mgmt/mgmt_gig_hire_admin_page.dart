@@ -181,8 +181,13 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
         final amount = hireFee + expenseTotal;
 
         // Offer total from final_calc (saved when offer is calculated)
-        final finalCalc = offer['final_calc'] as Map<String, dynamic>?;
-        final offerTotal = (finalCalc?['total'] as num?)?.toDouble() ?? 0.0;
+        double offerTotal = 0;
+        final rawCalc = offer['final_calc'];
+        if (rawCalc is Map<String, dynamic>) {
+          offerTotal = (rawCalc['total'] as num?)?.toDouble() ?? 0;
+        } else if (rawCalc is Map) {
+          offerTotal = (rawCalc['total'] as num?)?.toDouble() ?? 0;
+        }
 
         entries.add({
           'lineup_ids': g['lineup_ids'],
