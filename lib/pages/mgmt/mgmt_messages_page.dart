@@ -6,8 +6,10 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../services/direct_chat_service.dart';
 import '../../services/group_chat_service.dart';
 import '../../state/active_company.dart';
+import '../../services/chat_service.dart';
 import '../../widgets/mention_helpers.dart';
 import '../../widgets/mgmt_shell.dart' show mgmtUnreadNotifier;
+import '../../widgets/reaction_details_dialog.dart';
 
 class MgmtMessagesPage extends StatefulWidget {
   const MgmtMessagesPage({super.key});
@@ -1318,35 +1320,57 @@ class _DmChatViewState extends State<_DmChatView> with MentionMixin {
                 }
               }
 
-              return ListView.separated(
-                controller: _scrollController,
-                reverse: true,
-                padding: const EdgeInsets.all(20),
-                itemCount: messages.length,
-                separatorBuilder: (_, __) => const SizedBox(height: 8),
-                itemBuilder: (context, i) {
-                  final msg = messages[i];
-                  final isMine = msg['sender_id'] == myId;
+              final dmMsgIds = messages
+                  .map((m) => m['id']?.toString())
+                  .whereType<String>()
+                  .toList();
 
-                  Map<String, dynamic>? replyMsg;
-                  final replyToId = msg['reply_to_id'];
-                  if (replyToId != null) {
-                    replyMsg = messages.cast<Map<String, dynamic>?>().firstWhere(
-                      (m) => m?['id'] == replyToId,
-                      orElse: () => null,
-                    );
+              return StreamBuilder<List<Map<String, dynamic>>>(
+                stream: DirectChatService.streamReactions(dmMsgIds),
+                builder: (context, reactSnap) {
+                  final dmReactMap = <String, List<Map<String, dynamic>>>{};
+                  for (final r in reactSnap.data ?? []) {
+                    final mid = r['message_id'] as String? ?? '';
+                    dmReactMap.putIfAbsent(mid, () => []).add(r);
                   }
 
-                  return _Bubble(
-                    message: msg['message'] as String? ?? '',
-                    senderName: msg['sender_name'] as String? ?? '',
-                    isAdmin: isMine,
-                    createdAt: msg['created_at'] as String?,
-                    editedAt: msg['edited_at'] as String?,
-                    replyMsg: replyMsg,
-                    onReply: () => _startReply(msg),
-                    onEdit: isMine ? () => _startEdit(msg) : null,
-                    showRead: isMine && msg['id'] == lastReadMsgId,
+                  return ListView.separated(
+                    controller: _scrollController,
+                    reverse: true,
+                    padding: const EdgeInsets.all(20),
+                    itemCount: messages.length,
+                    separatorBuilder: (_, __) => const SizedBox(height: 8),
+                    itemBuilder: (context, i) {
+                      final msg = messages[i];
+                      final msgId = msg['id']?.toString() ?? '';
+                      final isMine = msg['sender_id'] == myId;
+
+                      Map<String, dynamic>? replyMsg;
+                      final replyToId = msg['reply_to_id'];
+                      if (replyToId != null) {
+                        replyMsg = messages.cast<Map<String, dynamic>?>().firstWhere(
+                          (m) => m?['id'] == replyToId,
+                          orElse: () => null,
+                        );
+                      }
+
+                      return _Bubble(
+                        messageId: msgId,
+                        message: msg['message'] as String? ?? '',
+                        senderName: msg['sender_name'] as String? ?? '',
+                        isAdmin: isMine,
+                        createdAt: msg['created_at'] as String?,
+                        editedAt: msg['edited_at'] as String?,
+                        replyMsg: replyMsg,
+                        reactions: dmReactMap[msgId] ?? [],
+                        currentUserId: myId,
+                        onAddReaction: (emoji) => DirectChatService.addReaction(msgId, emoji),
+                        onRemoveReaction: (emoji) => DirectChatService.removeReaction(msgId, emoji),
+                        onReply: () => _startReply(msg),
+                        onEdit: isMine ? () => _startEdit(msg) : null,
+                        showRead: isMine && msg['id'] == lastReadMsgId,
+                      );
+                    },
                   );
                 },
               );
@@ -1533,34 +1557,56 @@ class _GroupChatViewState extends State<_GroupChatView> with MentionMixin {
                       style: TextStyle(color: Colors.black45)),
                 );
               }
-              return ListView.separated(
-                controller: _scrollController,
-                reverse: true,
-                padding: const EdgeInsets.all(20),
-                itemCount: messages.length,
-                separatorBuilder: (_, __) => const SizedBox(height: 8),
-                itemBuilder: (context, i) {
-                  final msg = messages[i];
-                  final isMine = msg['user_id'] == myId;
+              final groupMsgIds = messages
+                  .map((m) => m['id']?.toString())
+                  .whereType<String>()
+                  .toList();
 
-                  Map<String, dynamic>? replyMsg;
-                  final replyToId = msg['reply_to_id'];
-                  if (replyToId != null) {
-                    replyMsg = messages.cast<Map<String, dynamic>?>().firstWhere(
-                      (m) => m?['id'] == replyToId,
-                      orElse: () => null,
-                    );
+              return StreamBuilder<List<Map<String, dynamic>>>(
+                stream: GroupChatService.streamReactions(groupMsgIds),
+                builder: (context, reactSnap) {
+                  final grpReactMap = <String, List<Map<String, dynamic>>>{};
+                  for (final r in reactSnap.data ?? []) {
+                    final mid = r['message_id'] as String? ?? '';
+                    grpReactMap.putIfAbsent(mid, () => []).add(r);
                   }
 
-                  return _Bubble(
-                    message: msg['message'] as String? ?? '',
-                    senderName: msg['sender_name'] as String? ?? '',
-                    isAdmin: isMine,
-                    createdAt: msg['created_at'] as String?,
-                    editedAt: msg['edited_at'] as String?,
-                    replyMsg: replyMsg,
-                    onReply: () => _startReply(msg),
-                    onEdit: isMine ? () => _startEdit(msg) : null,
+                  return ListView.separated(
+                    controller: _scrollController,
+                    reverse: true,
+                    padding: const EdgeInsets.all(20),
+                    itemCount: messages.length,
+                    separatorBuilder: (_, __) => const SizedBox(height: 8),
+                    itemBuilder: (context, i) {
+                      final msg = messages[i];
+                      final msgId = msg['id']?.toString() ?? '';
+                      final isMine = msg['user_id'] == myId;
+
+                      Map<String, dynamic>? replyMsg;
+                      final replyToId = msg['reply_to_id'];
+                      if (replyToId != null) {
+                        replyMsg = messages.cast<Map<String, dynamic>?>().firstWhere(
+                          (m) => m?['id'] == replyToId,
+                          orElse: () => null,
+                        );
+                      }
+
+                      return _Bubble(
+                        messageId: msgId,
+                        message: msg['message'] as String? ?? '',
+                        senderName: msg['sender_name'] as String? ?? '',
+                        isAdmin: isMine,
+                        createdAt: msg['created_at'] as String?,
+                        editedAt: msg['edited_at'] as String?,
+                        replyMsg: replyMsg,
+                        reactions: grpReactMap[msgId] ?? [],
+                        currentUserId: myId,
+                        onAddReaction: (emoji) => GroupChatService.addReaction(msgId, emoji),
+                        onRemoveReaction: (emoji) => GroupChatService.removeReaction(msgId, emoji),
+                        onReply: () => _startReply(msg),
+                        onEdit: isMine ? () => _startEdit(msg) : null,
+                      );
+                    },
                   );
                 },
               );
@@ -2171,35 +2217,57 @@ class _GigChatViewState extends State<_GigChatView> with MentionMixin {
                 );
               }
               final myId = _sb.auth.currentUser?.id ?? '';
-              return ListView.separated(
-                controller: _scrollController,
-                reverse: true,
-                padding: const EdgeInsets.all(20),
-                itemCount: messages.length,
-                separatorBuilder: (_, __) => const SizedBox(height: 8),
-                itemBuilder: (context, i) {
-                  final msg = messages[i];
-                  final isAdmin = msg['is_admin'] == true;
-                  final isMine = msg['user_id'] == myId;
+              final msgIds = messages
+                  .map((m) => m['id']?.toString())
+                  .whereType<String>()
+                  .toList();
 
-                  Map<String, dynamic>? replyMsg;
-                  final replyToId = msg['reply_to_id'];
-                  if (replyToId != null) {
-                    replyMsg = messages.cast<Map<String, dynamic>?>().firstWhere(
-                      (m) => m?['id'] == replyToId,
-                      orElse: () => null,
-                    );
+              return StreamBuilder<List<Map<String, dynamic>>>(
+                stream: ChatService.streamReactions(msgIds),
+                builder: (context, reactSnap) {
+                  final rMap = <String, List<Map<String, dynamic>>>{};
+                  for (final r in reactSnap.data ?? []) {
+                    final mid = r['message_id'] as String? ?? '';
+                    rMap.putIfAbsent(mid, () => []).add(r);
                   }
 
-                  return _Bubble(
-                    message: msg['message'] as String? ?? '',
-                    senderName: msg['sender_name'] as String? ?? '',
-                    isAdmin: isAdmin,
-                    createdAt: msg['created_at'] as String?,
-                    editedAt: msg['edited_at'] as String?,
-                    replyMsg: replyMsg,
-                    onReply: () => _startReply(msg),
-                    onEdit: isMine ? () => _startEdit(msg) : null,
+                  return ListView.separated(
+                    controller: _scrollController,
+                    reverse: true,
+                    padding: const EdgeInsets.all(20),
+                    itemCount: messages.length,
+                    separatorBuilder: (_, __) => const SizedBox(height: 8),
+                    itemBuilder: (context, i) {
+                      final msg = messages[i];
+                      final msgId = msg['id']?.toString() ?? '';
+                      final isAdmin = msg['is_admin'] == true;
+                      final isMine = msg['user_id'] == myId;
+
+                      Map<String, dynamic>? replyMsg;
+                      final replyToId = msg['reply_to_id'];
+                      if (replyToId != null) {
+                        replyMsg = messages.cast<Map<String, dynamic>?>().firstWhere(
+                          (m) => m?['id'] == replyToId,
+                          orElse: () => null,
+                        );
+                      }
+
+                      return _Bubble(
+                        messageId: msgId,
+                        message: msg['message'] as String? ?? '',
+                        senderName: msg['sender_name'] as String? ?? '',
+                        isAdmin: isAdmin,
+                        createdAt: msg['created_at'] as String?,
+                        editedAt: msg['edited_at'] as String?,
+                        replyMsg: replyMsg,
+                        reactions: rMap[msgId] ?? [],
+                        currentUserId: myId,
+                        onAddReaction: (emoji) => ChatService.addReaction(msgId, emoji),
+                        onRemoveReaction: (emoji) => ChatService.removeReaction(msgId, emoji),
+                        onReply: () => _startReply(msg),
+                        onEdit: isMine ? () => _startEdit(msg) : null,
+                      );
+                    },
                   );
                 },
               );
@@ -2230,23 +2298,35 @@ class _GigChatViewState extends State<_GigChatView> with MentionMixin {
 // ===========================================================================
 
 class _Bubble extends StatelessWidget {
+  final String messageId;
   final String message;
   final String senderName;
   final bool isAdmin;
   final String? createdAt;
   final String? editedAt;
   final Map<String, dynamic>? replyMsg;
+  final List<Map<String, dynamic>> reactions;
+  final String currentUserId;
+  final Future<void> Function(String emoji)? onAddReaction;
+  final Future<void> Function(String emoji)? onRemoveReaction;
   final VoidCallback? onReply;
   final VoidCallback? onEdit;
   final bool showRead;
 
+  static const _emojiOptions = ['👍', '❤️', '😂', '😮', '🙏', '🔥'];
+
   const _Bubble({
+    this.messageId = '',
     required this.message,
     required this.senderName,
     required this.isAdmin,
     this.createdAt,
     this.editedAt,
     this.replyMsg,
+    this.reactions = const [],
+    this.currentUserId = '',
+    this.onAddReaction,
+    this.onRemoveReaction,
     this.onReply,
     this.onEdit,
     this.showRead = false,
@@ -2257,11 +2337,25 @@ class _Bubble extends StatelessWidget {
     final timeStr = _fmtTime(createdAt);
     final maxWidth = MediaQuery.of(context).size.width * 0.55;
 
+    // Group reactions
+    final Map<String, _ReactionInfo> grouped = {};
+    for (final r in reactions) {
+      final emoji = r['emoji'] as String? ?? '';
+      final userId = r['user_id'] as String? ?? '';
+      grouped.putIfAbsent(emoji, () => _ReactionInfo());
+      grouped[emoji]!.count++;
+      if (userId == currentUserId) grouped[emoji]!.isMine = true;
+    }
+
     return Align(
       alignment: isAdmin ? Alignment.centerRight : Alignment.centerLeft,
       child: ConstrainedBox(
         constraints: BoxConstraints(maxWidth: maxWidth),
-        child: GestureDetector(
+        child: Column(
+          crossAxisAlignment:
+              isAdmin ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+          children: [
+        GestureDetector(
           onSecondaryTapUp: (details) => _showContextMenu(context),
           onLongPress: () => _showContextMenu(context),
           child: Container(
@@ -2363,6 +2457,49 @@ class _Bubble extends StatelessWidget {
             ),
           ),
         ),
+            // Reaction pills
+            if (grouped.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Wrap(
+                  spacing: 4,
+                  runSpacing: 4,
+                  children: grouped.entries.map((e) {
+                    final emoji = e.key;
+                    final info = e.value;
+                    return GestureDetector(
+                      onTap: () => showReactionDetailsDialog(context, reactions),
+                      onDoubleTap: () {
+                        if (info.isMine) {
+                          onRemoveReaction?.call(emoji);
+                        } else {
+                          onAddReaction?.call(emoji);
+                        }
+                      },
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: info.isMine
+                              ? Colors.blue.withValues(alpha: 0.15)
+                              : Colors.grey.withValues(alpha: 0.15),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                            color: info.isMine
+                                ? Colors.blue.withValues(alpha: 0.4)
+                                : Colors.grey.withValues(alpha: 0.3),
+                          ),
+                        ),
+                        child: Text(
+                          info.count > 1 ? '$emoji ${info.count}' : emoji,
+                          style: const TextStyle(fontSize: 13),
+                        ),
+                      ),
+                    );
+                  }).toList(),
+                ),
+              ),
+          ],
+        ),
       ),
     );
   }
@@ -2379,6 +2516,27 @@ class _Bubble extends StatelessWidget {
       ),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       items: [
+        if (onAddReaction != null)
+          PopupMenuItem<String>(
+            enabled: false,
+            padding: EdgeInsets.zero,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: _emojiOptions.map((emoji) {
+                return InkWell(
+                  borderRadius: BorderRadius.circular(8),
+                  onTap: () {
+                    Navigator.of(context).pop();
+                    onAddReaction!(emoji);
+                  },
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                    child: Text(emoji, style: const TextStyle(fontSize: 22)),
+                  ),
+                );
+              }).toList(),
+            ),
+          ),
         const PopupMenuItem<String>(
           value: 'copy',
           child: Row(children: [Icon(Icons.copy, size: 18), SizedBox(width: 8), Text('Kopier')]),
@@ -2417,4 +2575,9 @@ class _Bubble extends StatelessWidget {
       return null;
     }
   }
+}
+
+class _ReactionInfo {
+  int count = 0;
+  bool isMine = false;
 }
