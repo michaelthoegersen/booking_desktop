@@ -15,6 +15,7 @@ import '../widgets/gif_picker.dart';
 import '../widgets/mention_helpers.dart';
 import '../widgets/poll_create_dialog.dart';
 import '../widgets/reaction_details_dialog.dart';
+import '../services/presence_service.dart';
 
 class DirectChatScreen extends StatefulWidget {
   final String peerId;
@@ -58,6 +59,7 @@ class _DirectChatScreenState extends State<DirectChatScreen>
     super.initState();
     _loadSenderName();
     _loadPeerReadCursor();
+    DirectChatService.updateReadCursor(widget.peerId);
     _focusNode.onKeyEvent = _handleKeyEvent;
     _controller.addListener(() => onMentionTextChanged(_controller));
     // In a DM, the only mention candidate is the peer
@@ -303,25 +305,64 @@ class _DirectChatScreenState extends State<DirectChatScreen>
                   onPressed: () => Navigator.of(context).pop(),
                 ),
                 const SizedBox(width: 4),
-                CircleAvatar(
-                  backgroundColor: Colors.black,
-                  radius: 18,
-                  child: Text(
-                    widget.peerName.isNotEmpty
-                        ? widget.peerName[0].toUpperCase()
-                        : '?',
-                    style: const TextStyle(
-                        color: Colors.white, fontWeight: FontWeight.w700),
-                  ),
+                Stack(
+                  children: [
+                    CircleAvatar(
+                      backgroundColor: Colors.black,
+                      radius: 18,
+                      child: Text(
+                        widget.peerName.isNotEmpty
+                            ? widget.peerName[0].toUpperCase()
+                            : '?',
+                        style: const TextStyle(
+                            color: Colors.white, fontWeight: FontWeight.w700),
+                      ),
+                    ),
+                    ValueListenableBuilder<Set<String>>(
+                      valueListenable: PresenceService.onlineUsers,
+                      builder: (_, online, __) {
+                        if (!online.contains(widget.peerId)) return const SizedBox.shrink();
+                        return Positioned(
+                          right: 0,
+                          bottom: 0,
+                          child: Container(
+                            width: 12,
+                            height: 12,
+                            decoration: BoxDecoration(
+                              color: Colors.green,
+                              shape: BoxShape.circle,
+                              border: Border.all(color: Colors.white, width: 2),
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                  ],
                 ),
                 const SizedBox(width: 12),
                 Expanded(
-                  child: Text(
-                    widget.peerName,
-                    style: const TextStyle(
-                      fontWeight: FontWeight.w900,
-                      fontSize: 16,
-                    ),
+                  child: ValueListenableBuilder<Set<String>>(
+                    valueListenable: PresenceService.onlineUsers,
+                    builder: (_, online, __) {
+                      final isOnline = online.contains(widget.peerId);
+                      return Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            widget.peerName,
+                            style: const TextStyle(
+                              fontWeight: FontWeight.w900,
+                              fontSize: 16,
+                            ),
+                          ),
+                          if (isOnline)
+                            const Text(
+                              'Aktiv nå',
+                              style: TextStyle(fontSize: 11, color: Colors.green),
+                            ),
+                        ],
+                      );
+                    },
                   ),
                 ),
                 IconButton(

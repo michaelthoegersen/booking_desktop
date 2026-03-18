@@ -112,6 +112,17 @@ class DirectChatService {
         .or('and(sender_id.eq.$myId,receiver_id.eq.$peerId),and(sender_id.eq.$peerId,receiver_id.eq.$myId)');
   }
 
+  /// Update DM read cursor (called when opening a conversation).
+  static Future<void> updateReadCursor(String peerId) async {
+    final myId = _sb.auth.currentUser?.id;
+    if (myId == null) return;
+    await _sb.from('dm_read_cursors').upsert({
+      'user_id': myId,
+      'peer_id': peerId,
+      'last_read_at': DateTime.now().toUtc().toIso8601String(),
+    });
+  }
+
   // -------------------------------------------------------------------
   // Reactions
   // -------------------------------------------------------------------

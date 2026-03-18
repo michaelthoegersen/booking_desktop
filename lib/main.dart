@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 
+import 'services/presence_service.dart';
 import 'pages/login_page.dart';
 import 'pages/portal_selector_page.dart';
 import 'pages/artist_login_page.dart';
@@ -110,6 +111,9 @@ Future<void> main() async {
     await SettingsStore.loadFerries();
 
     debugPrint("Supabase initialized OK");
+
+    // Start online presence tracking
+    PresenceService.start();
   } catch (e, st) {
     debugPrint("MAIN INIT ERROR: $e");
     debugPrint("$st");
