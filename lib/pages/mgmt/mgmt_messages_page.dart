@@ -47,6 +47,19 @@ class _MgmtMessagesPageState extends State<MgmtMessagesPage>
           .update({'read_by_admin': true})
           .eq('gig_id', gigId)
           .eq('is_admin', false);
+
+      // Also clear notifications on mobile for this gig
+      final uid = _sb.auth.currentUser?.id;
+      if (uid != null) {
+        await _sb
+            .from('notifications')
+            .update({'read': true})
+            .eq('user_id', uid)
+            .eq('read', false)
+            .eq('gig_id', gigId)
+            .inFilter('type', ['gig_chat', 'chat_mention']);
+      }
+
       mgmtUnreadNotifier.value++;
     } catch (e) {
       debugPrint('Mark as read error: $e');
