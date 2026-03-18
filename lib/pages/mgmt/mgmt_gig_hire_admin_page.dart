@@ -90,7 +90,7 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
       final offers = List<Map<String, dynamic>>.from(
         await _sb
             .from('gig_offers')
-            .select('id, gig_id, creo_fee_minimum, extra_show_fee')
+            .select('id, gig_id, creo_fee_minimum, extra_show_fee, total_excl_override, total_override')
             .inFilter('gig_id', gigIds),
       );
       final offerByGig = <String, Map<String, dynamic>>{};
@@ -180,10 +180,16 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
         final expenseTotal = expenseMap['$gigId|$userId'] ?? 0.0;
         final amount = hireFee + expenseTotal;
 
+        // Offer total (what customer pays)
+        final offerTotal = (offer['total_override'] as num?)?.toDouble()
+            ?? (offer['total_excl_override'] as num?)?.toDouble()
+            ?? 0.0;
+
         entries.add({
           'lineup_ids': g['lineup_ids'],
           'lineup_id': (g['lineup_ids'] as List<String>).first,
           'gig_id': gigId,
+          'offer_id': offer['id'],
           'user_id': g['user_id'],
           'date_from': gig?['date_from'],
           'venue_name': gig?['venue_name'] ?? '',
@@ -194,6 +200,7 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
           'hire_fee': hireFee,
           'expense_total': expenseTotal,
           'amount': amount,
+          'offer_total': offerTotal,
           'crew_invoiced_at': g['crew_invoiced_at'],
           'crew_paid_at': g['crew_paid_at'],
         });
@@ -423,212 +430,251 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
                           ],
                         ),
                       )
-                    : ListView.builder(
-                        itemCount: filtered.length,
-                        itemBuilder: (context, i) {
-                          final e = filtered[i];
-                          final date = _formatDate(e['date_from'] as String?);
-                          final venue = e['venue_name'] as String? ?? '';
-                          final firma = e['customer_firma'] as String? ?? '';
-                          final name = e['name'] as String? ?? '';
-                          final section = e['section'] as String? ?? '';
-                          final amount = e['amount'] as double;
-                          final numShows = e['num_shows'] as int? ?? 1;
-                          final invoicedAt =
-                              e['crew_invoiced_at'] as String?;
-                          final paidAt = e['crew_paid_at'] as String?;
-                          final lineupIds =
-                              List<String>.from(e['lineup_ids'] as List);
-
-                          return Container(
-                            margin: const EdgeInsets.only(bottom: 8),
-                            padding: const EdgeInsets.all(16),
-                            decoration: BoxDecoration(
-                              color: cs.surfaceContainerLowest,
-                              borderRadius: BorderRadius.circular(14),
-                              border: Border.all(color: cs.outlineVariant),
-                            ),
-                            child: Row(
-                              children: [
-                                // Date
-                                SizedBox(
-                                  width: 85,
-                                  child: Text(date,
-                                      style: TextStyle(
-                                          fontSize: 13,
-                                          color: cs.onSurfaceVariant)),
-                                ),
-                                // Venue + Firma
-                                SizedBox(
-                                  width: 160,
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      Text(venue,
-                                          style: const TextStyle(
-                                              fontWeight: FontWeight.w600),
-                                          overflow: TextOverflow.ellipsis),
-                                      if (firma.isNotEmpty)
-                                        Text(firma,
-                                            style: TextStyle(
-                                                fontSize: 11,
-                                                color: cs.onSurfaceVariant),
-                                            overflow: TextOverflow.ellipsis),
-                                    ],
-                                  ),
-                                ),
-                                const SizedBox(width: 12),
-                                // Name
-                                Expanded(
-                                  child: Text(name,
-                                      style: const TextStyle(
-                                          fontWeight: FontWeight.w900)),
-                                ),
-                                // Section
-                                SizedBox(
-                                  width: 80,
-                                  child: Text(section,
-                                      style: TextStyle(
-                                          fontSize: 13,
-                                          color: cs.onSurfaceVariant)),
-                                ),
-                                // Shows count
-                                SizedBox(
-                                  width: 60,
-                                  child: Text(
-                                    '$numShows show',
-                                    style: TextStyle(
-                                        fontSize: 12,
-                                        color: cs.onSurfaceVariant),
-                                    textAlign: TextAlign.center,
-                                  ),
-                                ),
-                                // Amount (with expense breakdown)
-                                SizedBox(
-                                  width: 120,
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.end,
-                                    children: [
-                                      Text(
-                                        _formatAmount(amount),
-                                        style: const TextStyle(
-                                            fontWeight: FontWeight.w700),
-                                        textAlign: TextAlign.right,
-                                      ),
-                                      if ((e['expense_total'] as double?) != null &&
-                                          (e['expense_total'] as double) > 0)
-                                        Text(
-                                          'herav utlegg: ${_formatAmount(e['expense_total'] as double)}',
-                                          style: TextStyle(
-                                            fontSize: 10,
-                                            color: cs.onSurfaceVariant,
-                                          ),
-                                          textAlign: TextAlign.right,
-                                        ),
-                                    ],
-                                  ),
-                                ),
-                                const SizedBox(width: 16),
-                                // Crew invoiced status + action
-                                SizedBox(
-                                  width: 150,
-                                  child: invoicedAt != null
-                                      ? Row(
-                                          children: [
-                                            const Icon(Icons.check_circle,
-                                                size: 14,
-                                                color: Colors.green),
-                                            const SizedBox(width: 4),
-                                            Flexible(
-                                              child: Text(
-                                                'Fakt. ${_formatDate(invoicedAt)}',
-                                                style: const TextStyle(
-                                                    fontSize: 11,
-                                                    color: Colors.green),
-                                                overflow: TextOverflow.ellipsis,
-                                              ),
-                                            ),
-                                            InkWell(
-                                              onTap: () =>
-                                                  _clearInvoiced(lineupIds),
-                                              borderRadius:
-                                                  BorderRadius.circular(10),
-                                              child: Padding(
-                                                padding: const EdgeInsets.all(2),
-                                                child: Icon(Icons.close,
-                                                    size: 14,
-                                                    color: cs.onSurfaceVariant),
-                                              ),
-                                            ),
-                                          ],
-                                        )
-                                      : FilledButton.icon(
-                                          onPressed: () =>
-                                              _markInvoiced(lineupIds),
-                                          icon: const Icon(Icons.receipt,
-                                              size: 14),
-                                          label: const Text('Marker fakturert',
-                                              style: TextStyle(fontSize: 11)),
-                                          style: FilledButton.styleFrom(
-                                            backgroundColor: Colors.orange,
-                                            padding: const EdgeInsets.symmetric(
-                                                horizontal: 8, vertical: 6),
-                                          ),
-                                        ),
-                                ),
-                                const SizedBox(width: 12),
-                                // Paid status + action
-                                if (paidAt == null)
-                                  SizedBox(
-                                    width: 130,
-                                    child: FilledButton.icon(
-                                      onPressed: () => _markPaid(lineupIds),
-                                      icon: const Icon(Icons.check, size: 16),
-                                      label: const Text('Marker betalt',
-                                          style: TextStyle(fontSize: 12)),
-                                      style: FilledButton.styleFrom(
-                                        padding: const EdgeInsets.symmetric(
-                                            horizontal: 10, vertical: 8),
-                                      ),
-                                    ),
-                                  )
-                                else
-                                  SizedBox(
-                                    width: 130,
-                                    child: Row(
-                                      children: [
-                                        Flexible(
-                                          child: Text(
-                                            'Betalt ${_formatDate(paidAt)}',
-                                            style: TextStyle(
-                                                fontSize: 12,
-                                                color: cs.onSurfaceVariant),
-                                            overflow: TextOverflow.ellipsis,
-                                          ),
-                                        ),
-                                        InkWell(
-                                          onTap: () =>
-                                              _clearPaid(lineupIds),
-                                          borderRadius:
-                                              BorderRadius.circular(10),
-                                          child: Padding(
-                                            padding: const EdgeInsets.all(2),
-                                            child: Icon(Icons.close,
-                                                size: 14,
-                                                color: cs.onSurfaceVariant),
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                              ],
-                            ),
-                          );
-                        },
-                      ),
+                    : _buildGroupedList(filtered, cs),
           ),
         ],
       ),
+    );
+  }
+
+  Widget _buildGroupedList(List<Map<String, dynamic>> entries, ColorScheme cs) {
+    // Group by gig_id
+    final grouped = <String, List<Map<String, dynamic>>>{};
+    final gigOrder = <String>[];
+    for (final e in entries) {
+      final gigId = e['gig_id'] as String;
+      if (!grouped.containsKey(gigId)) {
+        grouped[gigId] = [];
+        gigOrder.add(gigId);
+      }
+      grouped[gigId]!.add(e);
+    }
+
+    return ListView.builder(
+      itemCount: gigOrder.length,
+      itemBuilder: (context, gi) {
+        final gigId = gigOrder[gi];
+        final members = grouped[gigId]!;
+        final first = members.first;
+        final date = _formatDate(first['date_from'] as String?);
+        final venue = first['venue_name'] as String? ?? '';
+        final firma = first['customer_firma'] as String? ?? '';
+        final offerTotal = (first['offer_total'] as num?)?.toDouble() ?? 0;
+
+        // Totals for this gig
+        final crewTotal = members.fold<double>(
+            0, (sum, e) => sum + ((e['amount'] as num?)?.toDouble() ?? 0));
+        final expenseTotal = members.fold<double>(
+            0, (sum, e) => sum + ((e['expense_total'] as num?)?.toDouble() ?? 0));
+        final profit = offerTotal - crewTotal;
+
+        return Container(
+          margin: const EdgeInsets.only(bottom: 16),
+          decoration: BoxDecoration(
+            color: cs.surfaceContainerLowest,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: cs.outlineVariant),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Gig header
+              Container(
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+                decoration: BoxDecoration(
+                  color: cs.surfaceContainerHighest.withValues(alpha: 0.5),
+                  borderRadius: const BorderRadius.vertical(top: Radius.circular(14)),
+                ),
+                child: Row(
+                  children: [
+                    Text(date,
+                        style: TextStyle(fontSize: 13, color: cs.onSurfaceVariant)),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(venue,
+                              style: const TextStyle(
+                                  fontWeight: FontWeight.w800, fontSize: 15)),
+                          if (firma.isNotEmpty)
+                            Text(firma,
+                                style: TextStyle(
+                                    fontSize: 12, color: cs.onSurfaceVariant)),
+                        ],
+                      ),
+                    ),
+                    if (offerTotal > 0)
+                      Text('Tilbud: ${_formatAmount(offerTotal)}',
+                          style: TextStyle(
+                              fontSize: 12, color: cs.onSurfaceVariant)),
+                  ],
+                ),
+              ),
+              // Member rows
+              ...members.map((e) {
+                final name = e['name'] as String? ?? '';
+                final section = e['section'] as String? ?? '';
+                final amount = (e['amount'] as num?)?.toDouble() ?? 0;
+                final numShows = e['num_shows'] as int? ?? 1;
+                final invoicedAt = e['crew_invoiced_at'] as String?;
+                final paidAt = e['crew_paid_at'] as String?;
+                final lineupIds = List<String>.from(e['lineup_ids'] as List);
+                final memberExpense = (e['expense_total'] as num?)?.toDouble() ?? 0;
+
+                return Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        flex: 3,
+                        child: Text(name,
+                            style: const TextStyle(fontWeight: FontWeight.w700)),
+                      ),
+                      SizedBox(
+                        width: 60,
+                        child: Text(section,
+                            style: TextStyle(
+                                fontSize: 12, color: cs.onSurfaceVariant)),
+                      ),
+                      SizedBox(
+                        width: 50,
+                        child: Text('$numShows show',
+                            style: TextStyle(
+                                fontSize: 11, color: cs.onSurfaceVariant),
+                            textAlign: TextAlign.center),
+                      ),
+                      SizedBox(
+                        width: 100,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.end,
+                          children: [
+                            Text(_formatAmount(amount),
+                                style: const TextStyle(fontWeight: FontWeight.w600)),
+                            if (memberExpense > 0)
+                              Text('utlegg: ${_formatAmount(memberExpense)}',
+                                  style: TextStyle(
+                                      fontSize: 10, color: cs.onSurfaceVariant)),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      SizedBox(
+                        width: 120,
+                        child: invoicedAt != null
+                            ? Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const Icon(Icons.check_circle,
+                                      size: 13, color: Colors.green),
+                                  const SizedBox(width: 3),
+                                  Flexible(
+                                    child: Text(
+                                        'Fakt. ${_formatDate(invoicedAt)}',
+                                        style: const TextStyle(
+                                            fontSize: 10, color: Colors.green),
+                                        overflow: TextOverflow.ellipsis),
+                                  ),
+                                  InkWell(
+                                    onTap: () => _clearInvoiced(lineupIds),
+                                    child: Icon(Icons.close,
+                                        size: 13, color: cs.onSurfaceVariant),
+                                  ),
+                                ],
+                              )
+                            : FilledButton.icon(
+                                onPressed: () => _markInvoiced(lineupIds),
+                                icon: const Icon(Icons.receipt, size: 12),
+                                label: const Text('Fakturert',
+                                    style: TextStyle(fontSize: 10)),
+                                style: FilledButton.styleFrom(
+                                  backgroundColor: Colors.orange,
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 6, vertical: 4),
+                                ),
+                              ),
+                      ),
+                      const SizedBox(width: 4),
+                      SizedBox(
+                        width: 110,
+                        child: paidAt != null
+                            ? Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Flexible(
+                                    child: Text(
+                                        'Betalt ${_formatDate(paidAt)}',
+                                        style: TextStyle(
+                                            fontSize: 10,
+                                            color: cs.onSurfaceVariant),
+                                        overflow: TextOverflow.ellipsis),
+                                  ),
+                                  InkWell(
+                                    onTap: () => _clearPaid(lineupIds),
+                                    child: Icon(Icons.close,
+                                        size: 13, color: cs.onSurfaceVariant),
+                                  ),
+                                ],
+                              )
+                            : FilledButton.icon(
+                                onPressed: () => _markPaid(lineupIds),
+                                icon: const Icon(Icons.check, size: 14),
+                                label: const Text('Betalt',
+                                    style: TextStyle(fontSize: 10)),
+                                style: FilledButton.styleFrom(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 6, vertical: 4),
+                                ),
+                              ),
+                      ),
+                    ],
+                  ),
+                );
+              }),
+              // Gig footer — totals
+              Container(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+                decoration: BoxDecoration(
+                  color: cs.surfaceContainerHighest.withValues(alpha: 0.3),
+                  borderRadius: const BorderRadius.vertical(bottom: Radius.circular(14)),
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    Text('Crew: ${_formatAmount(crewTotal)}',
+                        style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+                    if (expenseTotal > 0) ...[
+                      const SizedBox(width: 12),
+                      Text('Utlegg: ${_formatAmount(expenseTotal)}',
+                          style: TextStyle(fontSize: 12, color: cs.onSurfaceVariant)),
+                    ],
+                    if (offerTotal > 0) ...[
+                      const SizedBox(width: 16),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: profit >= 0
+                              ? Colors.green.withValues(alpha: 0.12)
+                              : Colors.red.withValues(alpha: 0.12),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Text(
+                          'Resultat: ${_formatAmount(profit)}',
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w700,
+                            color: profit >= 0 ? Colors.green : Colors.red,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 }
