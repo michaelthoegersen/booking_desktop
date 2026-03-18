@@ -208,11 +208,6 @@ class _CrewGigDetailPageState extends State<CrewGigDetailPage> {
   Future<void> _saveLineup(String section) async {
     final map =
         section == 'skarp' ? _selectedSkarpByShow : _selectedBassByShow;
-    await _sb
-        .from('gig_lineup')
-        .delete()
-        .eq('gig_id', widget.gigId)
-        .eq('section', section);
     final rows = <Map<String, dynamic>>[];
     for (final entry in map.entries) {
       final showId = entry.key;
@@ -225,6 +220,24 @@ class _CrewGigDetailPageState extends State<CrewGigDetailPage> {
         });
       }
     }
+    // Safety: never wipe existing lineup with empty data
+    if (rows.isEmpty) {
+      final existing = await _sb
+          .from('gig_lineup')
+          .select('id')
+          .eq('gig_id', widget.gigId)
+          .eq('section', section)
+          .limit(1);
+      if ((existing as List).isNotEmpty) {
+        debugPrint('[LINEUP] Refused to save empty lineup for $section');
+        return;
+      }
+    }
+    await _sb
+        .from('gig_lineup')
+        .delete()
+        .eq('gig_id', widget.gigId)
+        .eq('section', section);
     if (rows.isNotEmpty) {
       await _sb.from('gig_lineup').insert(rows);
     }
