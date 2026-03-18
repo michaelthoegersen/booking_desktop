@@ -91,8 +91,10 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
         await _sb
             .from('gig_offers')
             .select('id, gig_id, creo_fee_minimum, extra_show_fee, final_calc')
+            .eq('company_id', _companyId!)
             .inFilter('gig_id', gigIds),
       );
+      debugPrint('[GIG_HIRE] offers found: ${offers.length}, final_calcs: ${offers.where((o) => o['final_calc'] != null).length}');
       final offerByGig = <String, Map<String, dynamic>>{};
       for (final o in offers) {
         offerByGig[o['gig_id'] as String] = o;
@@ -183,9 +185,8 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
         // Offer total from final_calc (saved when offer is calculated)
         double offerTotal = 0;
         final rawCalc = offer['final_calc'];
-        if (rawCalc is Map<String, dynamic>) {
-          offerTotal = (rawCalc['total'] as num?)?.toDouble() ?? 0;
-        } else if (rawCalc is Map) {
+        debugPrint('[GIG_HIRE] gig=$gigId rawCalc type=${rawCalc.runtimeType} value=$rawCalc');
+        if (rawCalc is Map) {
           offerTotal = (rawCalc['total'] as num?)?.toDouble() ?? 0;
         }
 
