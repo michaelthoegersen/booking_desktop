@@ -90,7 +90,10 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
       final offers = List<Map<String, dynamic>>.from(
         await _sb
             .from('gig_offers')
-            .select('id, gig_id, creo_fee_minimum, extra_show_fee, final_calc')
+            .select('id, gig_id, creo_fee_minimum, extra_show_fee, final_calc, '
+                'markup_pct, inear_included, inear_price, transport_price, '
+                'rehearsal_performers, rehearsal_count, rehearsal_price_per_person, '
+                'rehearsal_transport, markup_on_all')
             .eq('company_id', _companyId!)
             .inFilter('gig_id', gigIds),
       );
@@ -182,12 +185,11 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
         final expenseTotal = expenseMap['$gigId|$userId'] ?? 0.0;
         final amount = hireFee + expenseTotal;
 
-        // Offer total from final_calc (saved when offer is calculated)
+        // Offer total stored per entry for use in grouped view
         double offerTotal = 0;
         final rawCalc = offer['final_calc'];
-        debugPrint('[GIG_HIRE] gig=$gigId rawCalc type=${rawCalc.runtimeType} value=$rawCalc');
-        if (rawCalc is Map) {
-          offerTotal = (rawCalc['total'] as num?)?.toDouble() ?? 0;
+        if (rawCalc is Map && rawCalc['total'] != null) {
+          offerTotal = (rawCalc['total'] as num).toDouble();
         }
 
         entries.add({
@@ -206,6 +208,7 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
           'expense_total': expenseTotal,
           'amount': amount,
           'offer_total': offerTotal,
+          'offer': offer,
           'crew_invoiced_at': g['crew_invoiced_at'],
           'crew_paid_at': g['crew_paid_at'],
         });
@@ -438,7 +441,22 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
         final date = _formatDate(first['date_from'] as String?);
         final venue = first['venue_name'] as String? ?? '';
         final firma = first['customer_firma'] as String? ?? '';
-        final offerTotal = (first['offer_total'] as num?)?.toDouble() ?? 0;
+        var offerTotal = (first['offer_total'] as num?)?.toDouble() ?? 0;
+
+        // Fallback: estimate from lineup fees + markup if final_calc wasn't saved
+        if (offerTotal == 0) {
+          final offer = first['offer'] as Map<String, dynamic>?;
+          if (offer != null) {
+            final gigHire = members.fold<double>(
+                0, (s, e) => s + ((e['hire_fee'] as num?)?.toDouble() ?? 0));
+            final markupPct = (offer['markup_pct'] as num?)?.toDouble() ?? 0;
+            final inear = offer['inear_included'] == true
+                ? ((offer['inear_price'] as num?)?.toDouble() ?? 0) : 0.0;
+            final transport = (offer['transport_price'] as num?)?.toDouble() ?? 0;
+            final subtotal = gigHire + inear + transport;
+            offerTotal = subtotal + (subtotal * markupPct);
+          }
+        }
 
         // Totals for this gig
         final hireTotal = members.fold<double>(
