@@ -801,7 +801,7 @@ class _Bubble extends StatelessWidget {
     this.showRead = false,
   });
 
-  static const _emojiOptions = ['👍', '❤️', '😂', '😮', '🙏', '🔥'];
+  static const _emojiOptions = ['👍', '👎', '❤️', '😂', '😮', '😢', '😡', '🙏', '🔥', '🎉', '💯', '👀'];
 
   @override
   Widget build(BuildContext context) {

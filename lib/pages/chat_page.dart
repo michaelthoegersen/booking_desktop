@@ -959,7 +959,7 @@ class _DesktopBubble extends StatelessWidget {
   final String messageType;
   final String? attachmentUrl;
 
-  static const _emojiOptions = ['👍', '❤️', '😂', '😮', '🙏', '🔥'];
+  static const _emojiOptions = ['👍', '👎', '❤️', '😂', '😮', '😢', '😡', '🙏', '🔥', '🎉', '💯', '👀'];
 
   const _DesktopBubble({
     required this.messageId,

@@ -2313,7 +2313,7 @@ class _Bubble extends StatelessWidget {
   final VoidCallback? onEdit;
   final bool showRead;
 
-  static const _emojiOptions = ['👍', '❤️', '😂', '😮', '🙏', '🔥'];
+  static const _emojiOptions = ['👍', '👎', '❤️', '😂', '😮', '😢', '😡', '🙏', '🔥', '🎉', '💯', '👀'];
 
   const _Bubble({
     this.messageId = '',
