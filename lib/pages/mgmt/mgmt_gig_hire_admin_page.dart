@@ -54,7 +54,7 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
       final gigs = List<Map<String, dynamic>>.from(
         await _sb
             .from('gigs')
-            .select('id, date_from, venue_name')
+            .select('id, date_from, venue_name, customer_firma')
             .eq('company_id', _companyId!),
       );
       if (gigs.isEmpty) {
@@ -184,6 +184,7 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
           'user_id': g['user_id'],
           'date_from': gig?['date_from'],
           'venue_name': gig?['venue_name'] ?? '',
+          'customer_firma': gig?['customer_firma'] ?? '',
           'name': nameMap[g['user_id']] ?? '',
           'section': g['section'] ?? '',
           'num_shows': effectiveShows,
@@ -425,6 +426,7 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
                           final e = filtered[i];
                           final date = _formatDate(e['date_from'] as String?);
                           final venue = e['venue_name'] as String? ?? '';
+                          final firma = e['customer_firma'] as String? ?? '';
                           final name = e['name'] as String? ?? '';
                           final section = e['section'] as String? ?? '';
                           final amount = e['amount'] as double;
@@ -453,13 +455,24 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
                                           fontSize: 13,
                                           color: cs.onSurfaceVariant)),
                                 ),
-                                // Venue
+                                // Venue + Firma
                                 SizedBox(
-                                  width: 140,
-                                  child: Text(venue,
-                                      style: const TextStyle(
-                                          fontWeight: FontWeight.w600),
-                                      overflow: TextOverflow.ellipsis),
+                                  width: 160,
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(venue,
+                                          style: const TextStyle(
+                                              fontWeight: FontWeight.w600),
+                                          overflow: TextOverflow.ellipsis),
+                                      if (firma.isNotEmpty)
+                                        Text(firma,
+                                            style: TextStyle(
+                                                fontSize: 11,
+                                                color: cs.onSurfaceVariant),
+                                            overflow: TextOverflow.ellipsis),
+                                    ],
+                                  ),
                                 ),
                                 const SizedBox(width: 12),
                                 // Name
