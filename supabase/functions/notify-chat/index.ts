@@ -270,25 +270,35 @@ Deno.serve(async (req) => {
         .maybeSingle();
       const groupName = groupRow?.name ?? '';
 
+      // Fetch muted users for this group
+      const { data: mutedRows } = await supabase
+        .from('muted_chats')
+        .select('user_id')
+        .eq('group_id', group_id);
+      const mutedSet = new Set<string>((mutedRows ?? []).map((r: any) => r.user_id));
+
       recipientIds = (members ?? [])
         .map((m: any) => m.user_id)
         .filter((uid: string) => uid !== sender_id);
 
       const mentionSet = new Set<string>(mentioned_user_ids ?? []);
+      // Mentioned users ALWAYS get notified (even if muted)
       const mentionedRecipients = recipientIds.filter((uid: string) => mentionSet.has(uid));
-      const normalRecipients = recipientIds.filter((uid: string) => !mentionSet.has(uid));
+      // Normal recipients: exclude muted users
+      const normalRecipients = recipientIds.filter((uid: string) => !mentionSet.has(uid) && !mutedSet.has(uid));
 
       const groupExtra = { chat_type: 'group', group_id, group_name: groupName };
+      const groupTitle = groupName ? `${sender_name} · ${groupName}` : sender_name;
 
       let totalResult = { notifications: 0, push: 0 };
       if (mentionedRecipients.length > 0) {
         const mentionPreview = `${sender_name} nevnte deg: ${preview}`;
-        const r = await sendPushBatch(supabase, mentionedRecipients, sender_name, mentionPreview, sender_id, 'chat_mention', undefined, groupExtra);
+        const r = await sendPushBatch(supabase, mentionedRecipients, groupTitle, mentionPreview, sender_id, 'chat_mention', undefined, groupExtra);
         totalResult.notifications += r.notifications;
         totalResult.push += r.push;
       }
       if (normalRecipients.length > 0) {
-        const r = await sendPushBatch(supabase, normalRecipients, sender_name, preview, sender_id, 'chat_group', undefined, groupExtra);
+        const r = await sendPushBatch(supabase, normalRecipients, groupTitle, preview, sender_id, 'chat_group', undefined, groupExtra);
         totalResult.notifications += r.notifications;
         totalResult.push += r.push;
       }
@@ -317,6 +327,13 @@ Deno.serve(async (req) => {
         .map((m: any) => m.user_id)
         .filter((uid: string) => uid !== sender_id);
 
+      // Fetch muted users for this gig
+      const { data: mutedGigRows } = await supabase
+        .from('muted_chats')
+        .select('user_id')
+        .eq('gig_id', gig_id);
+      const mutedGigSet = new Set<string>((mutedGigRows ?? []).map((r: any) => r.user_id));
+
       // Fetch gig name for notification title
       let gigLabel = 'Gig chat';
       if (gig_id) {
@@ -340,8 +357,10 @@ Deno.serve(async (req) => {
 
       const title = `${sender_name} · ${gigLabel}`;
       const mentionSet = new Set<string>(mentioned_user_ids ?? []);
+      // Mentioned users ALWAYS get notified (even if muted)
       const mentionedRecipients = recipientIds.filter((uid: string) => mentionSet.has(uid));
-      const normalRecipients = recipientIds.filter((uid: string) => !mentionSet.has(uid));
+      // Normal recipients: exclude muted users
+      const normalRecipients = recipientIds.filter((uid: string) => !mentionSet.has(uid) && !mutedGigSet.has(uid));
 
       const gigExtra = { chat_type: 'gig' };
 
