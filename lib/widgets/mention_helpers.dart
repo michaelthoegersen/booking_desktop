@@ -83,8 +83,13 @@ mixin MentionMixin<T extends StatefulWidget> on State<T> {
   List<MentionCandidate> mentionSuggestions = [];
   List<MentionCandidate> _allCandidates = [];
 
+  static const _allId = '__all__';
+
   void initMentionCandidates(List<MentionCandidate> candidates) {
-    _allCandidates = candidates;
+    _allCandidates = [
+      const MentionCandidate(id: _allId, name: 'alle'),
+      ...candidates,
+    ];
   }
 
   /// Call this from the TextEditingController listener.
@@ -141,7 +146,13 @@ mixin MentionMixin<T extends StatefulWidget> on State<T> {
     final newCursor = atIndex + candidate.name.length + 2; // @Name + space
     controller.selection = TextSelection.collapsed(offset: newCursor);
 
-    if (!mentionedUserIds.contains(candidate.id)) {
+    if (candidate.id == _allId) {
+      for (final c in _allCandidates) {
+        if (c.id != _allId && !mentionedUserIds.contains(c.id)) {
+          mentionedUserIds.add(c.id);
+        }
+      }
+    } else if (!mentionedUserIds.contains(candidate.id)) {
       mentionedUserIds.add(candidate.id);
     }
     setState(() => mentionSuggestions = []);
