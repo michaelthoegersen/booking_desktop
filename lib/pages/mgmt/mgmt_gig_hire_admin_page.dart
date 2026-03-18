@@ -162,9 +162,10 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
         final userId = g['user_id'] as String;
         final gig = gigMap[gigId];
         final offer = offerByGig[gigId];
+        if (offer == null) continue; // skip gigs without an offer
 
         final creoFee =
-            (offer?['creo_fee_minimum'] as num?)?.toDouble() ?? 0.0;
+            (offer['creo_fee_minimum'] as num?)?.toDouble() ?? 0.0;
         final extraShowFee =
             (offer?['extra_show_fee'] as num?)?.toDouble() ?? 0.0;
         final numShows = (g['show_ids'] as Set<String>).length;
