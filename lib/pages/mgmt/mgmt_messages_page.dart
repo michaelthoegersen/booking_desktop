@@ -9,6 +9,7 @@ import '../../state/active_company.dart';
 import '../../services/chat_service.dart';
 import '../../widgets/mention_helpers.dart';
 import '../../widgets/mgmt_shell.dart' show mgmtUnreadNotifier;
+import '../../widgets/chat_media_content.dart';
 import '../../widgets/reaction_details_dialog.dart';
 
 class MgmtMessagesPage extends StatefulWidget {
@@ -1369,6 +1370,8 @@ class _DmChatViewState extends State<_DmChatView> with MentionMixin {
                         onReply: () => _startReply(msg),
                         onEdit: isMine ? () => _startEdit(msg) : null,
                         onDelete: () => _sb.from('direct_messages').delete().eq('id', msgId),
+                        messageType: msg['message_type'] as String? ?? 'text',
+                        attachmentUrl: msg['attachment_url'] as String?,
                         showRead: isMine && msg['id'] == lastReadMsgId,
                       );
                     },
@@ -1607,6 +1610,8 @@ class _GroupChatViewState extends State<_GroupChatView> with MentionMixin {
                         onReply: () => _startReply(msg),
                         onEdit: isMine ? () => _startEdit(msg) : null,
                         onDelete: () => _sb.from('group_chat_messages').delete().eq('id', msgId),
+                        messageType: msg['message_type'] as String? ?? 'text',
+                        attachmentUrl: msg['attachment_url'] as String?,
                       );
                     },
                   );
@@ -2269,6 +2274,8 @@ class _GigChatViewState extends State<_GigChatView> with MentionMixin {
                         onReply: () => _startReply(msg),
                         onEdit: isMine ? () => _startEdit(msg) : null,
                         onDelete: () => _sb.from('gig_messages').delete().eq('id', msgId),
+                        messageType: msg['message_type'] as String? ?? 'text',
+                        attachmentUrl: msg['attachment_url'] as String?,
                       );
                     },
                   );
@@ -2315,6 +2322,8 @@ class _Bubble extends StatelessWidget {
   final VoidCallback? onReply;
   final VoidCallback? onEdit;
   final VoidCallback? onDelete;
+  final String messageType;
+  final String? attachmentUrl;
   final bool showRead;
 
   static const _emojiOptions = ['👍', '👎', '❤️', '😂', '😮', '😢', '😡', '🙏', '🔥', '🎉', '💯', '👀'];
@@ -2334,6 +2343,8 @@ class _Bubble extends StatelessWidget {
     this.onReply,
     this.onEdit,
     this.onDelete,
+    this.messageType = 'text',
+    this.attachmentUrl,
     this.showRead = false,
   });
 
@@ -2416,19 +2427,14 @@ class _Bubble extends StatelessWidget {
                     ),
                   ),
                 ],
-                Text.rich(
-                  TextSpan(
-                    children: buildMentionSpans(
-                      message,
-                      TextStyle(
-                        fontSize: 14,
-                        color: isAdmin ? Colors.white : Colors.black87,
-                      ),
-                    ),
-                    style: TextStyle(
-                      fontSize: 14,
-                      color: isAdmin ? Colors.white : Colors.black87,
-                    ),
+                ChatMediaContent(
+                  messageType: messageType,
+                  message: message,
+                  attachmentUrl: attachmentUrl,
+                  isMine: isAdmin,
+                  textStyle: TextStyle(
+                    fontSize: 14,
+                    color: isAdmin ? Colors.white : Colors.black87,
                   ),
                 ),
                 if (timeStr != null) ...[
