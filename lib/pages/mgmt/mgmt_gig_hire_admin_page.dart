@@ -90,7 +90,7 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
       final offers = List<Map<String, dynamic>>.from(
         await _sb
             .from('gig_offers')
-            .select('id, gig_id, creo_fee_minimum, extra_show_fee, total_excl_override, total_override')
+            .select('id, gig_id, creo_fee_minimum, extra_show_fee, final_calc')
             .inFilter('gig_id', gigIds),
       );
       final offerByGig = <String, Map<String, dynamic>>{};
@@ -180,10 +180,9 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
         final expenseTotal = expenseMap['$gigId|$userId'] ?? 0.0;
         final amount = hireFee + expenseTotal;
 
-        // Offer total (what customer pays)
-        final offerTotal = (offer['total_override'] as num?)?.toDouble()
-            ?? (offer['total_excl_override'] as num?)?.toDouble()
-            ?? 0.0;
+        // Offer total from final_calc (saved when offer is calculated)
+        final finalCalc = offer['final_calc'] as Map<String, dynamic>?;
+        final offerTotal = (finalCalc?['total'] as num?)?.toDouble() ?? 0.0;
 
         entries.add({
           'lineup_ids': g['lineup_ids'],
@@ -345,46 +344,23 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
-    final filtered = _filtered;
-    final total = _totalOutstanding;
+    final totalOutstanding = _entries
+        .where((e) => e['crew_paid_at'] == null)
+        .fold(0.0, (sum, e) => sum + ((e['amount'] as num?)?.toDouble() ?? 0));
+    final totalAll = _entries
+        .fold(0.0, (sum, e) => sum + ((e['amount'] as num?)?.toDouble() ?? 0));
 
     return Padding(
       padding: const EdgeInsets.all(18),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Header
-          Row(
-            children: [
-              Text('Gigghyrer',
-                  style: Theme.of(context).textTheme.headlineMedium),
-              const Spacer(),
-              SizedBox(
-                width: 180,
-                child: DropdownButtonFormField<String>(
-                  initialValue: _filter,
-                  isDense: true,
-                  decoration: const InputDecoration(
-                    isDense: true,
-                    contentPadding:
-                        EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                  ),
-                  items: const [
-                    DropdownMenuItem(
-                        value: 'outstanding', child: Text('Utestående')),
-                    DropdownMenuItem(value: 'archive', child: Text('Arkiv')),
-                  ],
-                  onChanged: (v) {
-                    if (v != null) setState(() => _filter = v);
-                  },
-                ),
-              ),
-            ],
-          ),
+          Text('Gigghyrer',
+              style: Theme.of(context).textTheme.headlineMedium),
           const SizedBox(height: 12),
 
-          // Total outstanding
-          if (_filter == 'outstanding')
+          // Summary bar
+          if (_entries.isNotEmpty)
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               margin: const EdgeInsets.only(bottom: 12),
@@ -398,11 +374,13 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
                   const Icon(Icons.account_balance_wallet_rounded, size: 20),
                   const SizedBox(width: 10),
                   Text(
-                    'Totalt utestående: ${_formatAmount(total)}',
-                    style: const TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w900,
-                    ),
+                    'Utestående: ${_formatAmount(totalOutstanding)}',
+                    style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w900),
+                  ),
+                  const SizedBox(width: 20),
+                  Text(
+                    'Totalt: ${_formatAmount(totalAll)}',
+                    style: TextStyle(fontSize: 13, color: cs.onSurfaceVariant),
                   ),
                 ],
               ),
@@ -412,7 +390,7 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
           Expanded(
             child: _loading
                 ? const Center(child: CircularProgressIndicator())
-                : filtered.isEmpty
+                : _entries.isEmpty
                     ? Center(
                         child: Column(
                           mainAxisSize: MainAxisSize.min,
@@ -420,17 +398,12 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
                             Icon(Icons.receipt_long_rounded,
                                 size: 48, color: cs.onSurfaceVariant),
                             const SizedBox(height: 12),
-                            Text(
-                              _filter == 'outstanding'
-                                  ? 'Ingen utestående gigghyrer'
-                                  : 'Ingen betalte gigghyrer',
-                              style:
-                                  TextStyle(color: cs.onSurfaceVariant),
-                            ),
+                            Text('Ingen gigghyrer',
+                                style: TextStyle(color: cs.onSurfaceVariant)),
                           ],
                         ),
                       )
-                    : _buildGroupedList(filtered, cs),
+                    : _buildGroupedList(_entries, cs),
           ),
         ],
       ),
@@ -467,6 +440,9 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
         final expenseTotal = members.fold<double>(
             0, (sum, e) => sum + ((e['expense_total'] as num?)?.toDouble() ?? 0));
         final profit = offerTotal - crewTotal;
+        final unpaidTotal = members
+            .where((e) => e['crew_paid_at'] == null)
+            .fold<double>(0, (sum, e) => sum + ((e['amount'] as num?)?.toDouble() ?? 0));
 
         return Container(
           margin: const EdgeInsets.only(bottom: 16),
@@ -631,40 +607,47 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
                   ),
                 );
               }),
-              // Gig footer — totals
+              // Gig footer — full economy breakdown
               Container(
                 padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
                 decoration: BoxDecoration(
                   color: cs.surfaceContainerHighest.withValues(alpha: 0.3),
                   borderRadius: const BorderRadius.vertical(bottom: Radius.circular(14)),
                 ),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.end,
+                child: Column(
                   children: [
-                    Text('Crew: ${_formatAmount(crewTotal)}',
-                        style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
-                    if (expenseTotal > 0) ...[
-                      const SizedBox(width: 12),
-                      Text('Utlegg: ${_formatAmount(expenseTotal)}',
-                          style: TextStyle(fontSize: 12, color: cs.onSurfaceVariant)),
-                    ],
                     if (offerTotal > 0) ...[
-                      const SizedBox(width: 16),
+                      _footerRow('Tilbudspris', offerTotal, cs, bold: true),
+                      _footerRow('Honorarer', -crewTotal, cs),
+                      if (expenseTotal > 0)
+                        _footerRow('Utlegg', -expenseTotal, cs),
+                      const Divider(height: 12),
+                      _footerRow('Resultat', profit, cs,
+                          bold: true,
+                          color: profit >= 0 ? Colors.green : Colors.red),
+                    ] else ...[
+                      _footerRow('Honorarer totalt', crewTotal, cs, bold: true),
+                      if (expenseTotal > 0)
+                        _footerRow('Utlegg', expenseTotal, cs),
+                    ],
+                    // Remaining to pay
+                    if (unpaidTotal > 0) ...[
+                      const SizedBox(height: 4),
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                        width: double.infinity,
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                         decoration: BoxDecoration(
-                          color: profit >= 0
-                              ? Colors.green.withValues(alpha: 0.12)
-                              : Colors.red.withValues(alpha: 0.12),
+                          color: Colors.orange.withValues(alpha: 0.12),
                           borderRadius: BorderRadius.circular(8),
                         ),
                         child: Text(
-                          'Resultat: ${_formatAmount(profit)}',
-                          style: TextStyle(
+                          'Gjenstår å betale: ${_formatAmount(unpaidTotal)}',
+                          style: const TextStyle(
                             fontSize: 13,
                             fontWeight: FontWeight.w700,
-                            color: profit >= 0 ? Colors.green : Colors.red,
+                            color: Colors.orange,
                           ),
+                          textAlign: TextAlign.right,
                         ),
                       ),
                     ],
@@ -675,6 +658,30 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
           ),
         );
       },
+    );
+  }
+
+  Widget _footerRow(String label, double amount, ColorScheme cs,
+      {bool bold = false, Color? color}) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 1),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(label,
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: bold ? FontWeight.w700 : FontWeight.w400,
+                color: color ?? cs.onSurface,
+              )),
+          Text(_formatAmount(amount.abs()),
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: bold ? FontWeight.w700 : FontWeight.w400,
+                color: color ?? cs.onSurface,
+              )),
+        ],
+      ),
     );
   }
 }
