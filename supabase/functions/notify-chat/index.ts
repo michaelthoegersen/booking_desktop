@@ -224,9 +224,19 @@ Deno.serve(async (req) => {
           { status: 400, headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' } },
         );
       }
+      // Check if receiver has muted this sender
+      const { data: mutedDmRows } = await supabase
+        .from('muted_chats')
+        .select('user_id')
+        .eq('user_id', receiver_id)
+        .eq('peer_id', sender_id);
+      const dmMuted = (mutedDmRows ?? []).length > 0;
+
       const mentionSet = new Set<string>(mentioned_user_ids ?? []);
+      // Mentioned users always get notified
       const mentionedRecipients = [receiver_id].filter((uid: string) => mentionSet.has(uid));
-      const normalRecipients = [receiver_id].filter((uid: string) => !mentionSet.has(uid));
+      // Normal: skip if muted
+      const normalRecipients = [receiver_id].filter((uid: string) => !mentionSet.has(uid) && !dmMuted);
 
       const dmExtra = { chat_type: 'dm', peer_id: sender_id, peer_name: sender_name };
 

@@ -5,6 +5,7 @@ import 'package:intl/intl.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../services/chat_attachment_service.dart';
+import '../services/mute_service.dart';
 import '../services/direct_chat_service.dart';
 import '../services/poll_service.dart';
 import '../state/active_company.dart';
@@ -364,6 +365,21 @@ class _DirectChatScreenState extends State<DirectChatScreen>
                       );
                     },
                   ),
+                ),
+                IconButton(
+                  icon: Icon(
+                    MuteService.isPeerMuted(widget.peerId)
+                        ? Icons.notifications_off
+                        : Icons.notifications_active,
+                    size: 18,
+                  ),
+                  tooltip: MuteService.isPeerMuted(widget.peerId)
+                      ? 'Slå på varsler'
+                      : 'Demp varsler',
+                  onPressed: () async {
+                    await MuteService.togglePeer(widget.peerId);
+                    setState(() {});
+                  },
                 ),
                 IconButton(
                   icon: const Icon(Icons.person_add_rounded, size: 20),
