@@ -50,12 +50,15 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
         return;
       }
 
-      // 1. Gigs for this company
+      // 1. Gigs for this company — only past/today (not future)
+      final today = DateTime.now();
+      final todayStr = '${today.year}-${today.month.toString().padLeft(2, '0')}-${today.day.toString().padLeft(2, '0')}';
       final gigs = List<Map<String, dynamic>>.from(
         await _sb
             .from('gigs')
             .select('id, date_from, venue_name, customer_firma')
-            .eq('company_id', _companyId!),
+            .eq('company_id', _companyId!)
+            .lte('date_from', todayStr),
       );
       if (gigs.isEmpty) {
         setState(() {
