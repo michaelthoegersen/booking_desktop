@@ -13,6 +13,7 @@ import '../widgets/chat_attach_menu.dart';
 import '../widgets/chat_media_content.dart';
 import '../widgets/gif_picker.dart';
 import '../widgets/mention_helpers.dart';
+import '../widgets/reaction_details_dialog.dart';
 import '../widgets/poll_create_dialog.dart';
 
 class ChatPage extends StatefulWidget {
@@ -736,37 +737,60 @@ class _ThreadViewState extends State<_ThreadView> with MentionMixin {
               }
 
               final myId = Supabase.instance.client.auth.currentUser?.id ?? '';
-              return ListView.separated(
-                controller: _scrollController,
-                reverse: true,
-                padding: const EdgeInsets.all(20),
-                itemCount: messages.length,
-                separatorBuilder: (_, __) => const SizedBox(height: 8),
-                itemBuilder: (context, i) {
-                  final msg = messages[i];
-                  final isAdmin = msg['is_admin'] == true;
-                  final isMine = msg['user_id'] == myId;
+              final messageIds = messages
+                  .map((m) => m['id']?.toString())
+                  .whereType<String>()
+                  .toList();
 
-                  Map<String, dynamic>? replyMsg;
-                  final replyToId = msg['reply_to_id'];
-                  if (replyToId != null) {
-                    replyMsg = messages.cast<Map<String, dynamic>?>().firstWhere(
-                      (m) => m?['id'] == replyToId,
-                      orElse: () => null,
-                    );
+              return StreamBuilder<List<Map<String, dynamic>>>(
+                stream: ChatService.streamReactions(messageIds),
+                builder: (context, reactSnap) {
+                  final reactionsMap = <String, List<Map<String, dynamic>>>{};
+                  for (final r in reactSnap.data ?? []) {
+                    final mid = r['message_id'] as String? ?? '';
+                    reactionsMap.putIfAbsent(mid, () => []).add(r);
                   }
 
-                  return _DesktopBubble(
-                    message: msg['message'] as String,
-                    senderName: msg['sender_name'] as String,
-                    isAdmin: isAdmin,
-                    createdAt: msg['created_at'] as String?,
-                    editedAt: msg['edited_at'] as String?,
-                    replyMsg: replyMsg,
-                    onReply: () => _startReply(msg),
-                    onEdit: isMine ? () => _startEdit(msg) : null,
-                    messageType: msg['message_type'] as String? ?? 'text',
-                    attachmentUrl: msg['attachment_url'] as String?,
+                  return ListView.separated(
+                    controller: _scrollController,
+                    reverse: true,
+                    padding: const EdgeInsets.all(20),
+                    itemCount: messages.length,
+                    separatorBuilder: (_, __) => const SizedBox(height: 8),
+                    itemBuilder: (context, i) {
+                      final msg = messages[i];
+                      final msgId = msg['id']?.toString() ?? '';
+                      final isAdmin = msg['is_admin'] == true;
+                      final isMine = msg['user_id'] == myId;
+                      final reactions = reactionsMap[msgId] ?? [];
+
+                      Map<String, dynamic>? replyMsg;
+                      final replyToId = msg['reply_to_id'];
+                      if (replyToId != null) {
+                        replyMsg = messages.cast<Map<String, dynamic>?>().firstWhere(
+                          (m) => m?['id'] == replyToId,
+                          orElse: () => null,
+                        );
+                      }
+
+                      return _DesktopBubble(
+                        messageId: msgId,
+                        message: msg['message'] as String,
+                        senderName: msg['sender_name'] as String,
+                        isAdmin: isAdmin,
+                        createdAt: msg['created_at'] as String?,
+                        editedAt: msg['edited_at'] as String?,
+                        replyMsg: replyMsg,
+                        reactions: reactions,
+                        currentUserId: myId,
+                        onAddReaction: (emoji) => ChatService.addReaction(msgId, emoji),
+                        onRemoveReaction: (emoji) => ChatService.removeReaction(msgId, emoji),
+                        onReply: () => _startReply(msg),
+                        onEdit: isMine ? () => _startEdit(msg) : null,
+                        messageType: msg['message_type'] as String? ?? 'text',
+                        attachmentUrl: msg['attachment_url'] as String?,
+                      );
+                    },
                   );
                 },
               );
@@ -919,24 +943,36 @@ class _ThreadViewState extends State<_ThreadView> with MentionMixin {
 }
 
 class _DesktopBubble extends StatelessWidget {
+  final String messageId;
   final String message;
   final String senderName;
   final bool isAdmin;
   final String? createdAt;
   final String? editedAt;
   final Map<String, dynamic>? replyMsg;
+  final List<Map<String, dynamic>> reactions;
+  final String currentUserId;
+  final Future<void> Function(String emoji) onAddReaction;
+  final Future<void> Function(String emoji) onRemoveReaction;
   final VoidCallback? onReply;
   final VoidCallback? onEdit;
   final String messageType;
   final String? attachmentUrl;
 
+  static const _emojiOptions = ['👍', '❤️', '😂', '😮', '🙏', '🔥'];
+
   const _DesktopBubble({
+    required this.messageId,
     required this.message,
     required this.senderName,
     required this.isAdmin,
     this.createdAt,
     this.editedAt,
     this.replyMsg,
+    this.reactions = const [],
+    this.currentUserId = '',
+    required this.onAddReaction,
+    required this.onRemoveReaction,
     this.onReply,
     this.onEdit,
     this.messageType = 'text',
@@ -948,11 +984,25 @@ class _DesktopBubble extends StatelessWidget {
     final timeStr = _fmtTime(createdAt);
     final maxWidth = MediaQuery.of(context).size.width * 0.55;
 
+    // Group reactions
+    final Map<String, _ReactionInfo> grouped = {};
+    for (final r in reactions) {
+      final emoji = r['emoji'] as String? ?? '';
+      final userId = r['user_id'] as String? ?? '';
+      grouped.putIfAbsent(emoji, () => _ReactionInfo());
+      grouped[emoji]!.count++;
+      if (userId == currentUserId) grouped[emoji]!.isMine = true;
+    }
+
     return Align(
       alignment: isAdmin ? Alignment.centerRight : Alignment.centerLeft,
       child: ConstrainedBox(
         constraints: BoxConstraints(maxWidth: maxWidth),
-        child: GestureDetector(
+        child: Column(
+          crossAxisAlignment:
+              isAdmin ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+          children: [
+        GestureDetector(
           onSecondaryTapUp: (details) => _showContextMenu(context),
           onLongPress: () => _showContextMenu(context),
           child: Container(
@@ -1060,6 +1110,49 @@ class _DesktopBubble extends StatelessWidget {
             ),
           ),
         ),
+            // Reaction pills
+            if (grouped.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Wrap(
+                  spacing: 4,
+                  runSpacing: 4,
+                  children: grouped.entries.map((e) {
+                    final emoji = e.key;
+                    final info = e.value;
+                    return GestureDetector(
+                      onTap: () => showReactionDetailsDialog(context, reactions),
+                      onDoubleTap: () {
+                        if (info.isMine) {
+                          onRemoveReaction(emoji);
+                        } else {
+                          onAddReaction(emoji);
+                        }
+                      },
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: info.isMine
+                              ? Colors.blue.withValues(alpha: 0.15)
+                              : Colors.grey.withValues(alpha: 0.15),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                            color: info.isMine
+                                ? Colors.blue.withValues(alpha: 0.4)
+                                : Colors.grey.withValues(alpha: 0.3),
+                          ),
+                        ),
+                        child: Text(
+                          info.count > 1 ? '$emoji ${info.count}' : emoji,
+                          style: const TextStyle(fontSize: 13),
+                        ),
+                      ),
+                    );
+                  }).toList(),
+                ),
+              ),
+          ],
+        ),
       ),
     );
   }
@@ -1076,6 +1169,26 @@ class _DesktopBubble extends StatelessWidget {
       ),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       items: [
+        PopupMenuItem<String>(
+          enabled: false,
+          padding: EdgeInsets.zero,
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: _emojiOptions.map((emoji) {
+              return InkWell(
+                borderRadius: BorderRadius.circular(8),
+                onTap: () {
+                  Navigator.of(context).pop();
+                  onAddReaction(emoji);
+                },
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                  child: Text(emoji, style: const TextStyle(fontSize: 22)),
+                ),
+              );
+            }).toList(),
+          ),
+        ),
         const PopupMenuItem<String>(
           value: 'copy',
           child: Row(children: [Icon(Icons.copy, size: 18), SizedBox(width: 8), Text('Kopier')]),
@@ -1115,4 +1228,9 @@ class _DesktopBubble extends StatelessWidget {
       return null;
     }
   }
+}
+
+class _ReactionInfo {
+  int count = 0;
+  bool isMine = false;
 }

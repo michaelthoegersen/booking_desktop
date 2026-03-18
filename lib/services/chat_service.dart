@@ -109,6 +109,37 @@ class ChatService {
     readEventNotifier.value++;
   }
 
+  // -------------------------------------------------------------------
+  // Reactions (tour messages use gig_message_reactions table)
+  // -------------------------------------------------------------------
+
+  static Future<void> addReaction(String messageId, String emoji) async {
+    await _sb.from('gig_message_reactions').upsert({
+      'message_id': messageId,
+      'user_id': _sb.auth.currentUser!.id,
+      'emoji': emoji,
+    }, onConflict: 'message_id,user_id,emoji');
+  }
+
+  static Future<void> removeReaction(String messageId, String emoji) async {
+    await _sb
+        .from('gig_message_reactions')
+        .delete()
+        .eq('message_id', messageId)
+        .eq('user_id', _sb.auth.currentUser!.id)
+        .eq('emoji', emoji);
+  }
+
+  static Stream<List<Map<String, dynamic>>> streamReactions(
+      List<String> messageIds) {
+    if (messageIds.isEmpty) return Stream.value([]);
+    return _sb
+        .from('gig_message_reactions')
+        .stream(primaryKey: ['id']).map((rows) => rows
+            .where((r) => messageIds.contains(r['message_id'] as String?))
+            .toList());
+  }
+
   // Antall uleste (fra sjåfører)
   static Future<int> unreadCount() async {
     final res = await _sb

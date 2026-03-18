@@ -14,6 +14,7 @@ import '../widgets/chat_media_content.dart';
 import '../widgets/gif_picker.dart';
 import '../widgets/mention_helpers.dart';
 import '../widgets/poll_create_dialog.dart';
+import '../widgets/reaction_details_dialog.dart';
 
 class DirectChatScreen extends StatefulWidget {
   final String peerId;
@@ -913,7 +914,8 @@ class _Bubble extends StatelessWidget {
                     final emoji = e.key;
                     final info = e.value;
                     return GestureDetector(
-                      onTap: () {
+                      onTap: () => showReactionDetailsDialog(context, reactions),
+                      onDoubleTap: () {
                         if (info.isMine) {
                           onRemoveReaction(emoji);
                         } else {

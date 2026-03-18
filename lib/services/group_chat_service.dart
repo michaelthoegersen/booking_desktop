@@ -168,6 +168,37 @@ class GroupChatService {
     );
   }
 
+  // -------------------------------------------------------------------
+  // Reactions
+  // -------------------------------------------------------------------
+
+  static Future<void> addReaction(String messageId, String emoji) async {
+    await _sb.from('group_message_reactions').upsert({
+      'message_id': messageId,
+      'user_id': _sb.auth.currentUser!.id,
+      'emoji': emoji,
+    }, onConflict: 'message_id,user_id,emoji');
+  }
+
+  static Future<void> removeReaction(String messageId, String emoji) async {
+    await _sb
+        .from('group_message_reactions')
+        .delete()
+        .eq('message_id', messageId)
+        .eq('user_id', _sb.auth.currentUser!.id)
+        .eq('emoji', emoji);
+  }
+
+  static Stream<List<Map<String, dynamic>>> streamReactions(
+      List<String> messageIds) {
+    if (messageIds.isEmpty) return Stream.value([]);
+    return _sb
+        .from('group_message_reactions')
+        .stream(primaryKey: ['id']).map((rows) => rows
+            .where((r) => messageIds.contains(r['message_id'] as String?))
+            .toList());
+  }
+
   /// Fjern et medlem fra gruppen.
   static Future<void> removeMember(String groupId, String userId) async {
     await _sb
