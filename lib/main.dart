@@ -488,6 +488,12 @@ class BookingApp extends StatelessWidget {
               ),
             ),
             GoRoute(
+              path: '/m/meetings/:id/edit',
+              builder: (_, s) => MeetingWizardPage(
+                editMeetingId: s.pathParameters['id'],
+              ),
+            ),
+            GoRoute(
               path: '/m/meetings/:id/live',
               builder: (_, s) => MeetingLivePage(
                 meetingId: s.pathParameters['id']!,

@@ -9,7 +9,8 @@ import '../../services/meeting_service.dart';
 import '../../state/active_company.dart';
 
 class MeetingWizardPage extends StatefulWidget {
-  const MeetingWizardPage({super.key});
+  final String? editMeetingId;
+  const MeetingWizardPage({super.key, this.editMeetingId});
 
   @override
   State<MeetingWizardPage> createState() => _MeetingWizardPageState();
@@ -39,11 +40,66 @@ class _MeetingWizardPageState extends State<MeetingWizardPage> {
 
   String? get _companyId => activeCompanyNotifier.value?.id;
 
+  String? _existingMeetingId;
+
   @override
   void initState() {
     super.initState();
     _loadMembers();
     _loadTemplates();
+    if (widget.editMeetingId != null) {
+      _existingMeetingId = widget.editMeetingId;
+      _loadExistingMeeting();
+    }
+  }
+
+  Future<void> _loadExistingMeeting() async {
+    try {
+      final sb = MeetingService.client;
+      final meeting = await sb
+          .from('meetings')
+          .select()
+          .eq('id', _existingMeetingId!)
+          .single();
+
+      _titleCtrl.text = meeting['title'] ?? '';
+      _date = meeting['date'] != null ? DateTime.tryParse(meeting['date']) : null;
+      _startTimeCtrl.text = meeting['start_time'] ?? '';
+      _endTimeCtrl.text = meeting['end_time'] ?? '';
+      _addressCtrl.text = meeting['address'] ?? '';
+      _postalCodeCtrl.text = meeting['postal_code'] ?? '';
+      _cityCtrl.text = meeting['city'] ?? '';
+      _commentCtrl.text = meeting['comment'] ?? '';
+
+      // Load participants
+      final participants = await sb
+          .from('meeting_participants')
+          .select('user_id')
+          .eq('meeting_id', _existingMeetingId!);
+      for (final p in (participants as List)) {
+        _selectedUserIds.add(p['user_id'] as String);
+      }
+
+      // Load agenda items
+      final items = await sb
+          .from('meeting_agenda_items')
+          .select('*')
+          .eq('meeting_id', _existingMeetingId!)
+          .order('sort_order');
+      for (final item in (items as List)) {
+        final draft = _AgendaItemDraft();
+        draft.titleCtrl.text = item['title'] ?? '';
+        draft.descCtrl.text = item['description'] ?? '';
+        draft.type = item['item_type'] ?? 'none';
+        draft.assignedTo = item['assigned_to'] as String?;
+        draft.existingId = item['id'] as String?;
+        _agendaItems.add(draft);
+      }
+
+      if (mounted) setState(() {});
+    } catch (e) {
+      debugPrint('Load existing meeting error: $e');
+    }
   }
 
   @override
@@ -160,27 +216,51 @@ class _MeetingWizardPageState extends State<MeetingWizardPage> {
     setState(() => _saving = true);
 
     try {
-      // 1. Create meeting
-      final meeting = await MeetingService.createMeeting(
-        companyId: _companyId!,
-        title: _titleCtrl.text.trim(),
-        date: DateFormat('yyyy-MM-dd').format(_date!),
-        startTime: _startTimeCtrl.text.isNotEmpty ? '${_startTimeCtrl.text}:00' : null,
-        endTime: _endTimeCtrl.text.isNotEmpty ? '${_endTimeCtrl.text}:00' : null,
-        address: _addressCtrl.text.trim().isNotEmpty ? _addressCtrl.text.trim() : null,
-        postalCode: _postalCodeCtrl.text.trim().isNotEmpty ? _postalCodeCtrl.text.trim() : null,
-        city: _cityCtrl.text.trim().isNotEmpty ? _cityCtrl.text.trim() : null,
-        comment: _commentCtrl.text.trim().isNotEmpty ? _commentCtrl.text.trim() : null,
-      );
+      final isEdit = _existingMeetingId != null;
+      String meetingId;
 
-      final meetingId = meeting['id'] as String;
+      if (isEdit) {
+        // Update existing meeting
+        meetingId = _existingMeetingId!;
+        await MeetingService.client.from('meetings').update({
+          'title': _titleCtrl.text.trim(),
+          'date': DateFormat('yyyy-MM-dd').format(_date!),
+          'start_time': _startTimeCtrl.text.isNotEmpty ? '${_startTimeCtrl.text.substring(0, 5)}:00' : null,
+          'end_time': _endTimeCtrl.text.isNotEmpty ? '${_endTimeCtrl.text.substring(0, 5)}:00' : null,
+          'address': _addressCtrl.text.trim().isNotEmpty ? _addressCtrl.text.trim() : null,
+          'postal_code': _postalCodeCtrl.text.trim().isNotEmpty ? _postalCodeCtrl.text.trim() : null,
+          'city': _cityCtrl.text.trim().isNotEmpty ? _cityCtrl.text.trim() : null,
+          'comment': _commentCtrl.text.trim().isNotEmpty ? _commentCtrl.text.trim() : null,
+        }).eq('id', meetingId);
+      } else {
+        // Create new meeting
+        final meeting = await MeetingService.createMeeting(
+          companyId: _companyId!,
+          title: _titleCtrl.text.trim(),
+          date: DateFormat('yyyy-MM-dd').format(_date!),
+          startTime: _startTimeCtrl.text.isNotEmpty ? '${_startTimeCtrl.text}:00' : null,
+          endTime: _endTimeCtrl.text.isNotEmpty ? '${_endTimeCtrl.text}:00' : null,
+          address: _addressCtrl.text.trim().isNotEmpty ? _addressCtrl.text.trim() : null,
+          postalCode: _postalCodeCtrl.text.trim().isNotEmpty ? _postalCodeCtrl.text.trim() : null,
+          city: _cityCtrl.text.trim().isNotEmpty ? _cityCtrl.text.trim() : null,
+          comment: _commentCtrl.text.trim().isNotEmpty ? _commentCtrl.text.trim() : null,
+        );
+        meetingId = meeting['id'] as String;
+      }
 
-      // 2. Add participants
+      // 2. Set participants (replace all)
       if (_selectedUserIds.isNotEmpty) {
         await MeetingService.setParticipants(meetingId, _selectedUserIds.toList());
       }
 
-      // 3. Add agenda items + files
+      // 3. Agenda items — delete old and re-add for simplicity
+      if (isEdit) {
+        await MeetingService.client
+            .from('meeting_agenda_items')
+            .delete()
+            .eq('meeting_id', meetingId);
+      }
+
       for (int i = 0; i < _agendaItems.length; i++) {
         final draft = _agendaItems[i];
         if (draft.titleCtrl.text.trim().isEmpty) continue;
@@ -194,7 +274,7 @@ class _MeetingWizardPageState extends State<MeetingWizardPage> {
           sortOrder: i,
         );
 
-        // Upload files
+        // Upload new files
         for (final file in draft.files) {
           await MeetingService.uploadAgendaFile(
             agendaItemId: agendaItem['id'] as String,
@@ -205,8 +285,10 @@ class _MeetingWizardPageState extends State<MeetingWizardPage> {
         }
       }
 
-      // 4. Finalize
-      await MeetingService.updateStatus(meetingId, 'finalized');
+      // 4. Finalize (only for new meetings)
+      if (!isEdit) {
+        await MeetingService.updateStatus(meetingId, 'finalized');
+      }
 
       if (mounted) {
         context.go('/m/meetings/$meetingId');
@@ -289,7 +371,7 @@ class _MeetingWizardPageState extends State<MeetingWizardPage> {
                   child: _saving
                       ? const SizedBox(width: 18, height: 18,
                           child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                      : const Text('Ferdigstill møte'),
+                      : Text(_existingMeetingId != null ? 'Lagre endringer' : 'Ferdigstill møte'),
                 ),
             ],
           ),
@@ -725,6 +807,7 @@ class _AgendaItemDraft {
   final descCtrl = TextEditingController();
   String type = 'none';
   String? assignedTo;
+  String? existingId;
   bool isCollapsed = false;
   final List<({String name, Uint8List bytes, String contentType})> files = [];
 }

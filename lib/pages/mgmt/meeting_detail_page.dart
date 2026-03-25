@@ -528,6 +528,7 @@ class _MeetingDetailPageState extends State<MeetingDetailPage> {
               final i = entry.key;
               final item = entry.value;
               final itemTitle = item['title'] ?? '';
+              final sakNumber = item['sak_number'] as String?;
               final itemType = item['item_type'] ?? 'none';
               final description = item['description'] ?? '';
               final assignedTo = item['assigned_to'] != null
@@ -556,7 +557,7 @@ class _MeetingDetailPageState extends State<MeetingDetailPage> {
                   children: [
                     Row(
                       children: [
-                        Text('${i + 1}. $itemTitle',
+                        Text('${sakNumber ?? '${i + 1}'}. $itemTitle',
                             style: const TextStyle(
                                 fontSize: 15, fontWeight: FontWeight.w700)),
                         const Spacer(),

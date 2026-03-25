@@ -5,6 +5,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 class MeetingService {
   static final _sb = Supabase.instance.client;
+  static SupabaseClient get client => _sb;
 
   // ---------------------------------------------------------------
   // MEETINGS CRUD
@@ -122,6 +123,33 @@ class MeetingService {
     String? assignedTo,
     int sortOrder = 0,
   }) async {
+    // Generate sak_number: YYYY-N (auto-increment per year per company)
+    String? sakNumber;
+    try {
+      final meeting = await _sb.from('meetings').select('company_id, date').eq('id', meetingId).single();
+      final year = meeting['date'] != null
+          ? DateTime.parse(meeting['date']).year.toString()
+          : DateTime.now().year.toString();
+      final companyId = meeting['company_id'] as String;
+
+      final existing = await _sb
+          .from('meeting_agenda_items')
+          .select('sak_number')
+          .not('sak_number', 'is', null)
+          .order('sak_number', ascending: false)
+          .limit(100);
+
+      int maxNum = 0;
+      for (final row in (existing as List)) {
+        final sn = row['sak_number'] as String? ?? '';
+        if (sn.startsWith('$year-')) {
+          final num = int.tryParse(sn.substring(year.length + 1)) ?? 0;
+          if (num > maxNum) maxNum = num;
+        }
+      }
+      sakNumber = '$year-${maxNum + 1}';
+    } catch (_) {}
+
     final res = await _sb.from('meeting_agenda_items').insert({
       'meeting_id': meetingId,
       'title': title,
@@ -129,6 +157,7 @@ class MeetingService {
       'description': description,
       'assigned_to': assignedTo,
       'sort_order': sortOrder,
+      if (sakNumber != null) 'sak_number': sakNumber,
     }).select().single();
     return res;
   }
