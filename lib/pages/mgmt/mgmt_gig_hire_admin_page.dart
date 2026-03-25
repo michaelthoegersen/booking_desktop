@@ -267,7 +267,7 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
           .from('gig_lineup')
           .update({'crew_invoiced_at': iso})
           .inFilter('id', lineupIds);
-      await _load();
+      _updateLocalEntries(lineupIds, 'crew_invoiced_at', iso);
     } catch (e) {
       debugPrint('Mark invoiced error: $e');
       if (mounted) {
@@ -287,7 +287,7 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
           .from('gig_lineup')
           .update({'crew_invoiced_at': null})
           .inFilter('id', lineupIds);
-      _load();
+      _updateLocalEntries(lineupIds, 'crew_invoiced_at', null);
     } catch (e) {
       debugPrint('Clear invoiced error: $e');
     }
@@ -299,7 +299,7 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
           .from('gig_lineup')
           .update({'crew_paid_at': null})
           .inFilter('id', lineupIds);
-      _load();
+      _updateLocalEntries(lineupIds, 'crew_paid_at', null);
     } catch (e) {
       debugPrint('Clear paid error: $e');
     }
@@ -322,7 +322,7 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
           .from('gig_lineup')
           .update({'crew_paid_at': iso})
           .inFilter('id', lineupIds);
-      await _load();
+      _updateLocalEntries(lineupIds, 'crew_paid_at', iso);
     } catch (e) {
       debugPrint('Mark paid error: $e');
       if (mounted) {
@@ -334,6 +334,18 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
         );
       }
     }
+  }
+
+  void _updateLocalEntries(List<String> lineupIds, String field, String? value) {
+    final idSet = lineupIds.toSet();
+    setState(() {
+      for (final entry in _entries) {
+        final entryLineupIds = List<String>.from(entry['lineup_ids'] as List);
+        if (entryLineupIds.any((id) => idSet.contains(id))) {
+          entry[field] = value;
+        }
+      }
+    });
   }
 
   String _formatAmount(double amount) {
