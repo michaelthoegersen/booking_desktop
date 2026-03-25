@@ -147,20 +147,29 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
         for (final p in profiles) p['id'] as String: p['name'] as String? ?? ''
       };
 
-      // 6. Fetch approved expenses per gig
+      // 6. Fetch approved expenses per gig (personal expenses)
       final expenseRows = List<Map<String, dynamic>>.from(
         await _sb
             .from('expenses')
-            .select('gig_id, user_id, amount')
+            .select('gig_id, user_id, amount, expense_type')
             .inFilter('gig_id', gigIds)
             .eq('status', 'approved'),
       );
-      // Map: gigId|userId → total expenses
+      // Map: gigId|userId → total personal expenses
       final expenseMap = <String, double>{};
+      // Map: gigId → total company card expenses
+      final companyCardMap = <String, double>{};
       for (final e in expenseRows) {
-        final key = '${e['gig_id']}|${e['user_id']}';
-        expenseMap[key] = (expenseMap[key] ?? 0) +
-            ((e['amount'] as num?)?.toDouble() ?? 0);
+        final type = e['expense_type'] as String? ?? 'receipt';
+        if (type == 'company_card') {
+          final gid = e['gig_id'] as String;
+          companyCardMap[gid] = (companyCardMap[gid] ?? 0) +
+              ((e['amount'] as num?)?.toDouble() ?? 0);
+        } else {
+          final key = '${e['gig_id']}|${e['user_id']}';
+          expenseMap[key] = (expenseMap[key] ?? 0) +
+              ((e['amount'] as num?)?.toDouble() ?? 0);
+        }
       }
 
       // 7. Build entries — one per person per gig
@@ -223,6 +232,7 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
           'amount': amount,
           'offer_total': offerTotal,
           'offer': offer,
+          'company_card_total': companyCardMap[gigId] ?? 0.0,
           'crew_invoiced_at': g['crew_invoiced_at'],
           'crew_paid_at': g['crew_paid_at'],
         });
@@ -554,7 +564,8 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
             0, (sum, e) => sum + ((e['hire_fee'] as num?)?.toDouble() ?? 0));
         final expenseTotal = members.fold<double>(
             0, (sum, e) => sum + ((e['expense_total'] as num?)?.toDouble() ?? 0));
-        final gigTotal = hireTotal + expenseTotal; // total cost
+        final companyCardTotal = (first['company_card_total'] as num?)?.toDouble() ?? 0;
+        final gigTotal = hireTotal + expenseTotal + companyCardTotal;
         final profit = offerTotal - gigTotal;
         final unpaidTotal = members
             .where((e) => e['crew_paid_at'] == null)
@@ -740,6 +751,8 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
                     _footerRow('Honorarer', hireTotal, cs),
                     if (expenseTotal > 0)
                       _footerRow('Utlegg', expenseTotal, cs),
+                    if (companyCardTotal > 0)
+                      _footerRow('Firmakort', companyCardTotal, cs),
                     _footerRow('Totalt', gigTotal, cs, bold: true),
                     if (offerTotal > 0) ...[
                       const Divider(height: 8),
