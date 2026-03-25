@@ -450,11 +450,18 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
             final gigHire = members.fold<double>(
                 0, (s, e) => s + ((e['hire_fee'] as num?)?.toDouble() ?? 0));
             final markupPct = (offer['markup_pct'] as num?)?.toDouble() ?? 0;
+            final markupOnAll = offer['markup_on_all'] == true;
             final inear = offer['inear_included'] == true
                 ? ((offer['inear_price'] as num?)?.toDouble() ?? 0) : 0.0;
             final transport = (offer['transport_price'] as num?)?.toDouble() ?? 0;
-            final subtotal = gigHire + inear + transport;
-            offerTotal = subtotal + (subtotal * markupPct);
+            final rehPerf = (offer['rehearsal_performers'] as num?)?.toInt() ?? 0;
+            final rehCount = (offer['rehearsal_count'] as num?)?.toInt() ?? 0;
+            final rehPrice = (offer['rehearsal_price_per_person'] as num?)?.toDouble() ?? 0;
+            final rehTransport = (offer['rehearsal_transport'] as num?)?.toDouble() ?? 0;
+            final rehearsalTotal = (rehPerf * rehCount * rehPrice) + rehTransport;
+            final subtotal = gigHire + inear + transport + rehearsalTotal;
+            final markupBase = markupOnAll ? subtotal : gigHire;
+            offerTotal = subtotal + (markupBase * markupPct);
           }
         }
 
@@ -509,6 +516,11 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
                       Text('Tilbud: ${_formatAmount(offerTotal)}',
                           style: TextStyle(
                               fontSize: 12, color: cs.onSurfaceVariant)),
+                    if (offerTotal > 0 && first['offer'] != null && (first['offer'] as Map)['final_calc'] == null)
+                      Tooltip(
+                        message: 'Estimert — åpne og lagre tilbudet for nøyaktig total',
+                        child: Icon(Icons.warning_amber, size: 16, color: Colors.orange),
+                      ),
                   ],
                 ),
               ),
