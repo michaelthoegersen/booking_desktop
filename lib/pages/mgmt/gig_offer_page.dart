@@ -2766,10 +2766,19 @@ class _GigOfferPageState extends State<GigOfferPage> {
           _calcRowInfo('Opptredener totalt', '$_totalAppearances'),
           const Divider(height: 24),
           _editableCalcRow('performer_fees', 'Utøverhyrer', _performerFees),
-          _editableCalcRow('complete_konto', 'CompleteKonto', _completeKonto,
-              pct: _completePct),
-          _editableCalcRow('booking_honorar', 'BookingHonorar', _bookingHonorar,
-              pct: _bookingPct),
+          () {
+            final markupBase = _markupOnAll
+                ? (_performerFees + _inearTotal + (_transportPrice * _dateEntries.length) + _rehearsalTransport + _rehearsalTotal)
+                : _performerFees;
+            final ckVal = _ov('complete_konto', _completeKonto);
+            final bhVal = _ov('booking_honorar', _bookingHonorar);
+            final ckPct = markupBase > 0 ? ckVal / markupBase : 0.0;
+            final bhPct = markupBase > 0 ? bhVal / markupBase : 0.0;
+            return Column(children: [
+              _editableCalcRow('complete_konto', 'CompleteKonto', _completeKonto, pct: ckPct),
+              _editableCalcRow('booking_honorar', 'BookingHonorar', _bookingHonorar, pct: bhPct),
+            ]);
+          }(),
           if (_inearIncluded)
             _editableCalcRow('inear', 'In-Ear', _inearTotal)
           else
@@ -2922,7 +2931,9 @@ class _GigOfferPageState extends State<GigOfferPage> {
     );
   }
 
-  /// Show inline edit dialog for a calc row override
+  /// Show inline edit dialog for a calc row override.
+  /// For booking_honorar/complete_konto: adjusting one auto-adjusts the other
+  /// to keep total markup constant.
   void _editOverride(String key, double currentValue) {
     final ctrl = TextEditingController(text: _nf.format(currentValue));
     showDialog(
@@ -2940,11 +2951,7 @@ class _GigOfferPageState extends State<GigOfferPage> {
               suffixText: 'kr',
             ),
             onSubmitted: (_) {
-              final parsed = double.tryParse(
-                  ctrl.text.replaceAll(RegExp(r'[^0-9.]'), ''));
-              if (parsed != null) {
-                setState(() => _overrides[key] = parsed);
-              }
+              _applyOverride(key, ctrl.text);
               Navigator.pop(ctx);
             },
           ),
@@ -2952,18 +2959,19 @@ class _GigOfferPageState extends State<GigOfferPage> {
         actions: [
           TextButton(
             onPressed: () {
-              setState(() => _overrides.remove(key));
+              setState(() {
+                _overrides.remove(key);
+                // Also reset the linked field
+                if (key == 'booking_honorar') _overrides.remove('complete_konto');
+                if (key == 'complete_konto') _overrides.remove('booking_honorar');
+              });
               Navigator.pop(ctx);
             },
             child: const Text('Tilbakestill'),
           ),
           FilledButton(
             onPressed: () {
-              final parsed = double.tryParse(
-                  ctrl.text.replaceAll(RegExp(r'[^0-9.]'), ''));
-              if (parsed != null) {
-                setState(() => _overrides[key] = parsed);
-              }
+              _applyOverride(key, ctrl.text);
               Navigator.pop(ctx);
             },
             child: const Text('OK'),
@@ -2971,6 +2979,23 @@ class _GigOfferPageState extends State<GigOfferPage> {
         ],
       ),
     );
+  }
+
+  void _applyOverride(String key, String rawText) {
+    final parsed = double.tryParse(rawText.replaceAll(RegExp(r'[^0-9.]'), ''));
+    if (parsed == null) return;
+
+    setState(() {
+      _overrides[key] = parsed;
+
+      // Keep total markup constant: BookingHonorar + CompleteKonto = total markup
+      final totalMarkup = _completeKonto + _bookingHonorar;
+      if (key == 'booking_honorar') {
+        _overrides['complete_konto'] = totalMarkup - parsed;
+      } else if (key == 'complete_konto') {
+        _overrides['booking_honorar'] = totalMarkup - parsed;
+      }
+    });
   }
 
   // ────────────────────────────────────────────────────────────────────────────
