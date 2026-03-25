@@ -327,15 +327,45 @@ Deno.serve(async (req) => {
         );
       }
 
-      // Send to all company members (gig chat is visible to all)
-      const { data: members } = await supabase
-        .from('company_members')
-        .select('user_id')
-        .eq('company_id', company_id);
+      // Check if lineup is locked — if so, only notify locked crew + admins
+      const { data: gigInfo } = await supabase
+        .from('gigs')
+        .select('lineup_locked_skarp, lineup_locked_bass')
+        .eq('id', gig_id)
+        .maybeSingle();
 
-      recipientIds = (members ?? [])
-        .map((m: any) => m.user_id)
-        .filter((uid: string) => uid !== sender_id);
+      const hasLockedLineup = gigInfo?.lineup_locked_skarp || gigInfo?.lineup_locked_bass;
+
+      if (hasLockedLineup && gig_id) {
+        // Get locked lineup members
+        const { data: lineupRows } = await supabase
+          .from('gig_lineup')
+          .select('user_id')
+          .eq('gig_id', gig_id);
+        const lineupUserIds = new Set<string>((lineupRows ?? []).map((r: any) => r.user_id));
+
+        // Also include admins (they always get gig chat notifications)
+        const { data: adminMembers } = await supabase
+          .from('company_members')
+          .select('user_id')
+          .eq('company_id', company_id)
+          .in('role', ['admin', 'management']);
+        for (const m of (adminMembers ?? [])) {
+          lineupUserIds.add(m.user_id);
+        }
+
+        recipientIds = [...lineupUserIds].filter((uid: string) => uid !== sender_id);
+      } else {
+        // No locked lineup — notify all company members
+        const { data: members } = await supabase
+          .from('company_members')
+          .select('user_id')
+          .eq('company_id', company_id);
+
+        recipientIds = (members ?? [])
+          .map((m: any) => m.user_id)
+          .filter((uid: string) => uid !== sender_id);
+      }
 
       // Fetch muted users for this gig
       const { data: mutedGigRows } = await supabase
