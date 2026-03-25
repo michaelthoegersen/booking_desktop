@@ -942,11 +942,34 @@ class _GigOfferPageState extends State<GigOfferPage> {
         }
         activeGigIds.add(entry.gigId!);
 
-        // ── Sync gig_shows per gig (per-date show selection) ────────
-        await _sb.from('gig_shows').delete().eq('gig_id', entry.gigId!);
+        // ── Sync gig_shows per gig — preserve existing IDs to avoid
+        // breaking gig_lineup.show_id references ────────────────────
+        final existingShows = await _sb
+            .from('gig_shows')
+            .select('id, sort_order')
+            .eq('gig_id', entry.gigId!)
+            .order('sort_order');
+        final existingShowIds = <int, String>{};
+        for (final s in (existingShows as List)) {
+          existingShowIds[s['sort_order'] as int] = s['id'] as String;
+        }
+
         final dateShows = _showsForDate(i);
-        if (dateShows.isNotEmpty) {
-          await _sb.from('gig_shows').insert(gigShowRows(entry.gigId!, i));
+        final newRows = gigShowRows(entry.gigId!, i);
+
+        for (final row in newRows) {
+          final sortOrder = row['sort_order'] as int;
+          final existingId = existingShowIds.remove(sortOrder);
+          if (existingId != null) {
+            // Update existing — preserves ID so lineup.show_id stays valid
+            await _sb.from('gig_shows').update(row).eq('id', existingId);
+          } else {
+            await _sb.from('gig_shows').insert(row);
+          }
+        }
+        // Delete shows that were removed (no lineup should reference these)
+        for (final orphanId in existingShowIds.values) {
+          await _sb.from('gig_shows').delete().eq('id', orphanId);
         }
       }
 
