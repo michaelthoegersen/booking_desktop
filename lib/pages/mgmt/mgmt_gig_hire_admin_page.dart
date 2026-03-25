@@ -164,24 +164,38 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
       }
 
       // 7. Build entries — one per person per gig
+      // Stian Skog always gets BookingHonorar
+      const stianUserId = 'b1d06003-e856-4122-a747-301e4b7cd068';
+
       final entries = <Map<String, dynamic>>[];
+      // Track which gigs Stian is already in lineup for
+      final stianGigs = <String>{};
+
       for (final g in grouped.values) {
         final gigId = g['gig_id'] as String;
         final userId = g['user_id'] as String;
         final gig = gigMap[gigId];
         final offer = offerByGig[gigId];
-        if (offer == null) continue; // skip gigs without an offer
+        if (offer == null) continue;
+
+        if (userId == stianUserId) stianGigs.add(gigId);
 
         final creoFee =
             (offer['creo_fee_minimum'] as num?)?.toDouble() ?? 0.0;
         final extraShowFee =
-            (offer?['extra_show_fee'] as num?)?.toDouble() ?? 0.0;
+            (offer['extra_show_fee'] as num?)?.toDouble() ?? 0.0;
         final numShows = (g['show_ids'] as Set<String>).length;
         final effectiveShows = numShows > 0 ? numShows : 1;
-        final hireFee = creoFee +
+        double hireFee = creoFee +
             (effectiveShows > 1
                 ? extraShowFee * (effectiveShows - 1)
                 : 0);
+
+        // Add BookingHonorar to Stian's hire
+        if (userId == stianUserId) {
+          hireFee += _getBookingHonorar(offer);
+        }
+
         final expenseTotal = expenseMap['$gigId|$userId'] ?? 0.0;
         final amount = hireFee + expenseTotal;
 
@@ -211,6 +225,43 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
           'offer': offer,
           'crew_invoiced_at': g['crew_invoiced_at'],
           'crew_paid_at': g['crew_paid_at'],
+        });
+      }
+
+      // Add Stian's BookingHonorar for gigs where he's NOT in lineup
+      for (final gigId in offerByGig.keys) {
+        if (stianGigs.contains(gigId)) continue;
+        final offer = offerByGig[gigId]!;
+        final bookingHonorar = _getBookingHonorar(offer);
+        if (bookingHonorar <= 0) continue;
+        final gig = gigMap[gigId];
+        if (gig == null) continue;
+
+        double offerTotal = 0;
+        final rawCalc = offer['final_calc'];
+        if (rawCalc is Map && rawCalc['total'] != null) {
+          offerTotal = (rawCalc['total'] as num).toDouble();
+        }
+
+        entries.add({
+          'lineup_ids': <String>[],
+          'lineup_id': '',
+          'gig_id': gigId,
+          'offer_id': offer['id'],
+          'user_id': stianUserId,
+          'date_from': gig['date_from'],
+          'venue_name': gig['venue_name'] ?? '',
+          'customer_firma': gig['customer_firma'] ?? '',
+          'name': nameMap[stianUserId] ?? 'Stian Skog',
+          'section': 'booking',
+          'num_shows': 0,
+          'hire_fee': bookingHonorar,
+          'expense_total': 0.0,
+          'amount': bookingHonorar,
+          'offer_total': offerTotal,
+          'offer': offer,
+          'crew_invoiced_at': null,
+          'crew_paid_at': null,
         });
       }
 
@@ -334,6 +385,27 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
         );
       }
     }
+  }
+
+  double _getBookingHonorar(Map<String, dynamic> offer) {
+    final rawCalc = offer['final_calc'];
+    if (rawCalc is Map) {
+      final lines = rawCalc['lines'] as List?;
+      if (lines != null) {
+        for (final line in lines) {
+          if ((line['label'] as String?)?.contains('BookingHonorar') == true) {
+            return (line['amount'] as num?)?.toDouble() ?? 0;
+          }
+        }
+      }
+    }
+    // Fallback: half of total markup
+    final markupPct = (offer['markup_pct'] as num?)?.toDouble() ?? 0;
+    if (markupPct > 0) {
+      final creo = (offer['creo_fee_minimum'] as num?)?.toDouble() ?? 0;
+      return creo * (markupPct / 2);
+    }
+    return 0;
   }
 
   void _updateLocalEntries(List<String> lineupIds, String field, String? value) {
@@ -656,53 +728,6 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
                   ),
                 );
               }),
-              // BookingHonorar row for Stian (always, from final_calc or offer markup)
-              () {
-                double bookingHonorar = 0;
-                final offer = first['offer'] as Map<String, dynamic>?;
-                final rawCalc = offer?['final_calc'];
-                if (rawCalc is Map) {
-                  final lines = rawCalc['lines'] as List?;
-                  if (lines != null) {
-                    for (final line in lines) {
-                      if ((line['label'] as String?)?.contains('BookingHonorar') == true) {
-                        bookingHonorar = (line['amount'] as num?)?.toDouble() ?? 0;
-                      }
-                    }
-                  }
-                }
-                // Fallback: estimate from markup
-                if (bookingHonorar == 0 && offer != null) {
-                  final markupPct = (offer['markup_pct'] as num?)?.toDouble() ?? 0;
-                  if (markupPct > 0) {
-                    bookingHonorar = hireTotal * (markupPct / 2); // BookingHonorar = half of total markup
-                  }
-                }
-
-                if (bookingHonorar > 0) {
-                  return Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-                    child: Row(
-                      children: [
-                        const Expanded(
-                          flex: 3,
-                          child: Text('Stian Skog (BookingHonorar)',
-                              style: TextStyle(fontWeight: FontWeight.w600, fontStyle: FontStyle.italic)),
-                        ),
-                        SizedBox(
-                          width: 100,
-                          child: Text(_formatAmount(bookingHonorar),
-                              style: const TextStyle(fontWeight: FontWeight.w600),
-                              textAlign: TextAlign.right),
-                        ),
-                        const SizedBox(width: 242), // space for buttons
-                      ],
-                    ),
-                  );
-                }
-                return const SizedBox.shrink();
-              }(),
-
               // Gig footer — full economy breakdown
               Container(
                 padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
