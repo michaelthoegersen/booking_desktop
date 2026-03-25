@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -63,11 +65,13 @@ class _DirectChatScreenState extends State<DirectChatScreen>
     DirectChatService.updateReadCursor(widget.peerId);
     _focusNode.onKeyEvent = _handleKeyEvent;
     _controller.addListener(() => onMentionTextChanged(_controller));
-    // In a DM, the only mention candidate is the peer
     initMentionCandidates([
       MentionCandidate(id: widget.peerId, name: widget.peerName),
     ]);
+    _readCursorTimer = Timer.periodic(const Duration(seconds: 5), (_) => _loadPeerReadCursor());
   }
+
+  Timer? _readCursorTimer;
 
   KeyEventResult _handleKeyEvent(FocusNode node, KeyEvent event) {
     if (event is KeyDownEvent &&
@@ -105,6 +109,7 @@ class _DirectChatScreenState extends State<DirectChatScreen>
 
   @override
   void dispose() {
+    _readCursorTimer?.cancel();
     _controller.dispose();
     _scrollController.dispose();
     _focusNode.dispose();
