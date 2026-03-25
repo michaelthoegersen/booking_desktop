@@ -573,92 +573,126 @@ class _MeetingWizardPageState extends State<MeetingWizardPage> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Row(
-                    children: [
-                      ReorderableDragStartListener(
-                        index: i,
-                        child: const MouseRegion(
-                          cursor: SystemMouseCursors.grab,
-                          child: Icon(Icons.drag_handle, size: 20, color: Colors.grey),
+                  // Header row — always visible
+                  GestureDetector(
+                    onTap: () => setState(() => item.isCollapsed = !item.isCollapsed),
+                    child: Row(
+                      children: [
+                        ReorderableDragStartListener(
+                          index: i,
+                          child: const MouseRegion(
+                            cursor: SystemMouseCursors.grab,
+                            child: Icon(Icons.drag_handle, size: 20, color: Colors.grey),
+                          ),
                         ),
-                      ),
-                      const SizedBox(width: 8),
-                      Text('Sak ${i + 1}',
-                          style: const TextStyle(fontWeight: FontWeight.w700)),
-                      const Spacer(),
-                      // Type dropdown
-                      DropdownButton<String>(
-                        value: item.type,
-                        underline: const SizedBox(),
-                        isDense: true,
-                        items: const [
-                          DropdownMenuItem(value: 'none', child: Text('Ingen type')),
-                          DropdownMenuItem(value: 'information', child: Text('Informasjon')),
-                          DropdownMenuItem(value: 'decision', child: Text('Beslutning')),
-                          DropdownMenuItem(value: 'other', child: Text('Annet')),
+                        const SizedBox(width: 8),
+                        Icon(
+                          item.isCollapsed ? Icons.expand_more : Icons.expand_less,
+                          size: 20, color: Colors.grey,
+                        ),
+                        const SizedBox(width: 4),
+                        Expanded(
+                          child: Text(
+                            item.titleCtrl.text.isNotEmpty
+                                ? 'Sak ${i + 1}: ${item.titleCtrl.text}'
+                                : 'Sak ${i + 1}',
+                            style: const TextStyle(fontWeight: FontWeight.w700),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        if (!item.isCollapsed) ...[
+                          DropdownButton<String>(
+                            value: item.type,
+                            underline: const SizedBox(),
+                            isDense: true,
+                            items: const [
+                              DropdownMenuItem(value: 'none', child: Text('Ingen type')),
+                              DropdownMenuItem(value: 'information', child: Text('Informasjonssak')),
+                              DropdownMenuItem(value: 'decision', child: Text('Vedtakssak')),
+                              DropdownMenuItem(value: 'other', child: Text('Annet')),
+                            ],
+                            onChanged: (v) => setState(() => item.type = v ?? 'none'),
+                          ),
+                          const SizedBox(width: 8),
                         ],
-                        onChanged: (v) => setState(() => item.type = v ?? 'none'),
+                        IconButton(
+                          icon: const Icon(Icons.close, size: 18),
+                          onPressed: () => setState(() {
+                            _agendaItems[i].titleCtrl.dispose();
+                            _agendaItems[i].descCtrl.dispose();
+                            _agendaItems.removeAt(i);
+                          }),
+                        ),
+                      ],
+                    ),
+                  ),
+                  // Collapsible content
+                  if (!item.isCollapsed) ...[
+                    const SizedBox(height: 8),
+                    TextField(
+                      controller: item.titleCtrl,
+                      decoration: _dec('Tittel'),
+                    ),
+                    const SizedBox(height: 8),
+                    TextField(
+                      controller: item.descCtrl,
+                      decoration: _dec('Beskrivelse (valgfri)'),
+                      maxLines: 2,
+                    ),
+                    const SizedBox(height: 8),
+                    DropdownButton<String?>(
+                      value: item.assignedTo,
+                      hint: const Text('Ansvarlig'),
+                      underline: const SizedBox(),
+                      isDense: true,
+                      items: [
+                        const DropdownMenuItem(value: null, child: Text('Tildeling')),
+                        ..._allMembers.map((m) => DropdownMenuItem(
+                              value: m['id'] as String,
+                              child: Text(m['name'] as String? ?? 'Ukjent'),
+                            )),
+                      ],
+                      onChanged: (v) => setState(() => item.assignedTo = v),
+                    ),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 4,
+                      children: [
+                        ...item.files.asMap().entries.map((e) => Chip(
+                              label: Text(e.value.name, style: const TextStyle(fontSize: 12)),
+                              deleteIcon: const Icon(Icons.close, size: 14),
+                              onDeleted: () => setState(() => item.files.removeAt(e.key)),
+                            )),
+                        ActionChip(
+                          avatar: const Icon(Icons.attach_file, size: 16),
+                          label: const Text('Legg til filer'),
+                          onPressed: () => _pickFiles(i),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: TextButton.icon(
+                        onPressed: () => setState(() => item.isCollapsed = true),
+                        icon: const Icon(Icons.check, size: 16),
+                        label: const Text('Lagre', style: TextStyle(fontSize: 12)),
                       ),
-                      const SizedBox(width: 8),
-                      IconButton(
-                        icon: const Icon(Icons.close, size: 18),
-                        onPressed: () => setState(() {
-                          _agendaItems[i].titleCtrl.dispose();
-                          _agendaItems[i].descCtrl.dispose();
-                          _agendaItems.removeAt(i);
-                        }),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  TextField(
-                    controller: item.titleCtrl,
-                    decoration: _dec('Tittel'),
-                  ),
-                  const SizedBox(height: 8),
-                  TextField(
-                    controller: item.descCtrl,
-                    decoration: _dec('Beskrivelse (valgfri)'),
-                    maxLines: 2,
-                  ),
-                  const SizedBox(height: 8),
-                  // Assigned to
-                  DropdownButton<String?>(
-                    value: item.assignedTo,
-                    hint: const Text('Ansvarlig'),
-                    underline: const SizedBox(),
-                    isDense: true,
-                    items: [
-                      const DropdownMenuItem(value: null, child: Text('Ingen')),
-                      ..._allMembers.map((m) => DropdownMenuItem(
-                            value: m['id'] as String,
-                            child: Text(m['name'] as String? ?? 'Ukjent'),
-                          )),
-                    ],
-                    onChanged: (v) => setState(() => item.assignedTo = v),
-                  ),
-                  const SizedBox(height: 8),
-                  // Files
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 4,
-                    children: [
-                      ...item.files.asMap().entries.map((e) => Chip(
-                            label: Text(e.value.name, style: const TextStyle(fontSize: 12)),
-                            deleteIcon: const Icon(Icons.close, size: 14),
-                            onDeleted: () => setState(() => item.files.removeAt(e.key)),
-                          )),
-                      ActionChip(
-                        avatar: const Icon(Icons.attach_file, size: 16),
-                        label: const Text('Legg til filer'),
-                        onPressed: () => _pickFiles(i),
-                      ),
-                    ],
-                  ),
+                    ),
+                  ],
                 ],
               ),
             );
           },
+        ),
+        const SizedBox(height: 12),
+        Center(
+          child: FilledButton.icon(
+            onPressed: _addAgendaItem,
+            icon: const Icon(Icons.add, size: 18),
+            label: const Text('Opprett ny sak'),
+          ),
         ),
       ],
     );
@@ -691,5 +725,6 @@ class _AgendaItemDraft {
   final descCtrl = TextEditingController();
   String type = 'none';
   String? assignedTo;
+  bool isCollapsed = false;
   final List<({String name, Uint8List bytes, String contentType})> files = [];
 }

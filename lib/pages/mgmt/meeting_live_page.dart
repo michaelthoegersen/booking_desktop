@@ -187,8 +187,8 @@ class _MeetingLivePageState extends State<MeetingLivePage> {
         currentItem['meeting_agenda_files'] ?? []);
 
     final typeLabel = const {
-      'information': 'Informasjon',
-      'decision': 'Beslutning',
+      'information': 'Informasjonssak',
+      'decision': 'Vedtakssak',
       'other': 'Annet',
     }[itemType];
 

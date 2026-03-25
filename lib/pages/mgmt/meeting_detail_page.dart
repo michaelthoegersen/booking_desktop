@@ -210,6 +210,12 @@ class _MeetingDetailPageState extends State<MeetingDetailPage> {
         );
       }
 
+      // Save timestamp
+      await _sb.from('meetings').update({
+        'invitation_sent_at': DateTime.now().toUtc().toIso8601String(),
+      }).eq('id', widget.meetingId);
+      await _load();
+
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Innkalling sendt!')),
@@ -395,6 +401,22 @@ class _MeetingDetailPageState extends State<MeetingDetailPage> {
             ),
             const SizedBox(height: 24),
 
+            // Innkalling sent timestamp
+            if (_meeting!['invitation_sent_at'] != null)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: Row(
+                  children: [
+                    const Icon(Icons.check_circle, size: 16, color: Colors.green),
+                    const SizedBox(width: 6),
+                    Text(
+                      'Innkalling sendt ${DateFormat('dd.MM.yyyy HH:mm').format(DateTime.parse(_meeting!['invitation_sent_at']).toLocal())}',
+                      style: const TextStyle(fontSize: 13, color: Colors.green),
+                    ),
+                  ],
+                ),
+              ),
+
             // Action buttons
             Row(
               children: [
@@ -406,6 +428,14 @@ class _MeetingDetailPageState extends State<MeetingDetailPage> {
                   ),
                   const SizedBox(width: 12),
                 ],
+                // Edit button — always available except when completed
+                if (status != 'completed')
+                  OutlinedButton.icon(
+                    onPressed: () => context.go('/m/meetings/${widget.meetingId}/edit'),
+                    icon: const Icon(Icons.edit, size: 18),
+                    label: const Text('Rediger'),
+                  ),
+                if (status != 'completed') const SizedBox(width: 12),
                 if (status == 'finalized')
                   FilledButton.icon(
                     onPressed: _startMeeting,
@@ -508,8 +538,8 @@ class _MeetingDetailPageState extends State<MeetingDetailPage> {
                   item['meeting_agenda_files'] ?? []);
 
               final typeLabel = const {
-                'information': 'Informasjon',
-                'decision': 'Beslutning',
+                'information': 'Informasjonssak',
+                'decision': 'Vedtakssak',
                 'other': 'Annet',
               }[itemType];
 
