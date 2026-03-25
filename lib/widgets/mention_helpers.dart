@@ -1,23 +1,46 @@
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 
-/// Parse message text and highlight @mentions with bold + blue.
+/// Parse message text and highlight @mentions (bold blue) and URLs (underline, tappable).
 List<TextSpan> buildMentionSpans(String text, TextStyle baseStyle) {
-  final mentionRegex = RegExp(r'@[\w\u00C0-\u024F]+');
+  final pattern = RegExp(
+    r'(@[\w\u00C0-\u024F]+)|(https?://[^\s<>]+)',
+  );
   final spans = <TextSpan>[];
   int lastEnd = 0;
-  for (final match in mentionRegex.allMatches(text)) {
+
+  for (final match in pattern.allMatches(text)) {
     if (match.start > lastEnd) {
       spans.add(TextSpan(text: text.substring(lastEnd, match.start)));
     }
-    spans.add(TextSpan(
-      text: match.group(0),
-      style: baseStyle.copyWith(
-        fontWeight: FontWeight.w700,
-        color: Colors.blue,
-      ),
-    ));
+
+    final mention = match.group(1);
+    final url = match.group(2);
+
+    if (mention != null) {
+      spans.add(TextSpan(
+        text: mention,
+        style: baseStyle.copyWith(
+          fontWeight: FontWeight.w700,
+          color: Colors.blue,
+        ),
+      ));
+    } else if (url != null) {
+      spans.add(TextSpan(
+        text: url,
+        style: baseStyle.copyWith(
+          color: Colors.blue,
+          decoration: TextDecoration.underline,
+        ),
+        recognizer: TapGestureRecognizer()
+          ..onTap = () => launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication),
+      ));
+    }
+
     lastEnd = match.end;
   }
+
   if (lastEnd < text.length) {
     spans.add(TextSpan(text: text.substring(lastEnd)));
   }
