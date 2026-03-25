@@ -656,6 +656,53 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
                   ),
                 );
               }),
+              // BookingHonorar row for Stian (always, from final_calc or offer markup)
+              () {
+                double bookingHonorar = 0;
+                final offer = first['offer'] as Map<String, dynamic>?;
+                final rawCalc = offer?['final_calc'];
+                if (rawCalc is Map) {
+                  final lines = rawCalc['lines'] as List?;
+                  if (lines != null) {
+                    for (final line in lines) {
+                      if ((line['label'] as String?)?.contains('BookingHonorar') == true) {
+                        bookingHonorar = (line['amount'] as num?)?.toDouble() ?? 0;
+                      }
+                    }
+                  }
+                }
+                // Fallback: estimate from markup
+                if (bookingHonorar == 0 && offer != null) {
+                  final markupPct = (offer['markup_pct'] as num?)?.toDouble() ?? 0;
+                  if (markupPct > 0) {
+                    bookingHonorar = hireTotal * (markupPct / 2); // BookingHonorar = half of total markup
+                  }
+                }
+
+                if (bookingHonorar > 0) {
+                  return Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                    child: Row(
+                      children: [
+                        const Expanded(
+                          flex: 3,
+                          child: Text('Stian Skog (BookingHonorar)',
+                              style: TextStyle(fontWeight: FontWeight.w600, fontStyle: FontStyle.italic)),
+                        ),
+                        SizedBox(
+                          width: 100,
+                          child: Text(_formatAmount(bookingHonorar),
+                              style: const TextStyle(fontWeight: FontWeight.w600),
+                              textAlign: TextAlign.right),
+                        ),
+                        const SizedBox(width: 242), // space for buttons
+                      ],
+                    ),
+                  );
+                }
+                return const SizedBox.shrink();
+              }(),
+
               // Gig footer — full economy breakdown
               Container(
                 padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
