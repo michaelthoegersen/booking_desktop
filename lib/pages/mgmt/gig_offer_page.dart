@@ -185,6 +185,12 @@ class _GigOfferPageState extends State<GigOfferPage> {
     _transportToCtrl.dispose();
     _transportViaCtrl.dispose();
     _rehearsalTransportCtrl.dispose();
+    _hyreDaysCtrl.dispose();
+    _hyreDayRateCtrl.dispose();
+    _hyreInclKmCtrl.dispose();
+    _hyreExtraKmCtrl.dispose();
+    _hyreFuelCtrl.dispose();
+    _hyreDieselCtrl.dispose();
     super.dispose();
   }
 
@@ -203,6 +209,31 @@ class _GigOfferPageState extends State<GigOfferPage> {
           .eq('active', true)
           .order('sort_order');
       _showTypes = List<Map<String, dynamic>>.from(types);
+
+      // Load pricing defaults from company settings
+      final companyRow = await _sb
+          .from('companies')
+          .select('pricing_defaults')
+          .eq('id', companyId!)
+          .maybeSingle();
+      final pd = companyRow?['pricing_defaults'] as Map<String, dynamic>? ?? {};
+      if (pd.isNotEmpty) {
+        _creoFeeMinimum = (pd['creo_fee_minimum'] as num?)?.toDouble() ?? _creoFeeMinimum;
+        _extraShowFee = (pd['extra_show_fee'] as num?)?.toDouble() ?? _extraShowFee;
+        _markupPct = (pd['markup_pct'] as num?)?.toDouble() ?? _markupPct;
+        _inearPrice = (pd['inear_price'] as num?)?.toDouble() ?? _inearPrice;
+        _transportPricePerKm = (pd['transport_price_per_km'] as num?)?.toDouble() ?? _transportPricePerKm;
+        _hyreDayRate = (pd['hyre_day_rate'] as num?)?.toDouble() ?? _hyreDayRate;
+        _hyreIncludedKmPerDay = (pd['hyre_included_km'] as num?)?.toDouble() ?? _hyreIncludedKmPerDay;
+        _hyreExtraKmRate = (pd['hyre_extra_km_rate'] as num?)?.toDouble() ?? _hyreExtraKmRate;
+        _hyreFuelPerMil = (pd['hyre_fuel_per_mil'] as num?)?.toDouble() ?? _hyreFuelPerMil;
+        _hyreDieselPrice = (pd['hyre_diesel_price'] as num?)?.toDouble() ?? _hyreDieselPrice;
+        _hyreDayRateCtrl.text = _hyreDayRate.round().toString();
+        _hyreInclKmCtrl.text = _hyreIncludedKmPerDay.round().toString();
+        _hyreExtraKmCtrl.text = _hyreExtraKmRate % 1 == 0 ? _hyreExtraKmRate.round().toString() : _hyreExtraKmRate.toStringAsFixed(2);
+        _hyreFuelCtrl.text = _hyreFuelPerMil.toStringAsFixed(2);
+        _hyreDieselCtrl.text = _hyreDieselPrice.round().toString();
+      }
 
       _loadCompanies();
 
@@ -429,8 +460,8 @@ class _GigOfferPageState extends State<GigOfferPage> {
         }
       }
 
-      // If no shows yet, seed from catalog
-      if (_shows.isEmpty) {
+      // Shows start empty — user adds via + button
+      if (false) {
         _shows = _showTypes.map((t) {
           return _OfferShow(
             showTypeId: t['id'] as String?,
@@ -643,19 +674,29 @@ class _GigOfferPageState extends State<GigOfferPage> {
         final distMeters = route['distanceMeters'] as num? ?? 0;
         final km = (distMeters / 1000).round();
 
-        // Calculate tolls from polyline (if stations are loaded)
-        final polyline = route['polyline'] as String?;
+        // Calculate tolls from route coordinates
         List<TollStation> tollHits = [];
+        List<List<double>>? routeCoords;
+
+        // Desktop: decode polyline. Web: use rawPoints directly.
+        final polyline = route['polyline'] as String?;
+        final rawPoints = route['rawPoints'] as List?;
         if (polyline != null && polyline.isNotEmpty) {
-          // Wait for toll stations with a timeout
+          final points = PolylineDecoder.decode(polyline);
+          routeCoords = points.map((p) => [p.lat, p.lng]).toList();
+        } else if (rawPoints != null && rawPoints.isNotEmpty) {
+          routeCoords = rawPoints
+              .map((p) => [(p as List)[0] as double, p[1] as double])
+              .toList();
+        }
+
+        if (routeCoords != null && routeCoords.isNotEmpty) {
           try {
             await TollService.loadStations()
                 .timeout(const Duration(seconds: 10));
           } catch (_) {
             debugPrint('Toll stations timeout — skipping tolls');
           }
-          final points = PolylineDecoder.decode(polyline);
-          final routeCoords = points.map((p) => [p.lat, p.lng]).toList();
           final tollResult = TollService.calculateTolls(routeCoords);
           tollHits = tollResult.passedStations;
         }
@@ -1000,10 +1041,20 @@ class _GigOfferPageState extends State<GigOfferPage> {
       }).toList();
       await _sb.from('gig_offer_gigs').insert(junctionRows);
 
-      // ── 5. Delete removed gigs ────────────────────────────────────────────
+      // ── 5. Delete removed gigs (ONLY if they have no lineup data) ──────
       final removedGigIds = _originalGigIds.difference(activeGigIds);
       for (final gid in removedGigIds) {
-        await _sb.from('gigs').delete().eq('id', gid);
+        // Safety: never delete a gig that has lineup entries
+        final lineupCheck = await _sb
+            .from('gig_lineup')
+            .select('id')
+            .eq('gig_id', gid)
+            .limit(1);
+        if ((lineupCheck as List).isEmpty) {
+          await _sb.from('gigs').delete().eq('id', gid);
+        } else {
+          debugPrint('[OFFER SAVE] Refused to delete gig $gid — has lineup data');
+        }
       }
       _originalGigIds = Set.from(activeGigIds);
 
@@ -1066,6 +1117,136 @@ class _GigOfferPageState extends State<GigOfferPage> {
       }
     }
     if (mounted) setState(() => _saving = false);
+  }
+
+  // ────────────────────────────────────────────────────────────────────────────
+  // CREATE NEW SHOW TYPE
+  // ────────────────────────────────────────────────────────────────────────────
+
+  Future<void> _createNewShowType() async {
+    final nameCtrl = TextEditingController();
+    final drummersCtrl = TextEditingController(text: '0');
+    final dancersCtrl = TextEditingController(text: '0');
+    final othersCtrl = TextEditingController(text: '0');
+    final priceCtrl = TextEditingController(text: '0');
+
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Ny showtype'),
+        content: SizedBox(
+          width: 360,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: nameCtrl,
+                autofocus: true,
+                decoration: const InputDecoration(labelText: 'Navn'),
+              ),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: drummersCtrl,
+                      keyboardType: TextInputType.number,
+                      decoration: const InputDecoration(labelText: 'Trommeslagere'),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: TextField(
+                      controller: dancersCtrl,
+                      keyboardType: TextInputType.number,
+                      decoration: const InputDecoration(labelText: 'Dansere'),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: TextField(
+                      controller: othersCtrl,
+                      keyboardType: TextInputType.number,
+                      decoration: const InputDecoration(labelText: 'Andre'),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: priceCtrl,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(labelText: 'Standardpris'),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Avbryt')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Opprett')),
+        ],
+      ),
+    );
+
+    if (result != true) {
+      nameCtrl.dispose();
+      drummersCtrl.dispose();
+      dancersCtrl.dispose();
+      othersCtrl.dispose();
+      priceCtrl.dispose();
+      return;
+    }
+
+    final name = nameCtrl.text.trim();
+    final drummers = int.tryParse(drummersCtrl.text) ?? 0;
+    final dancers = int.tryParse(dancersCtrl.text) ?? 0;
+    final others = int.tryParse(othersCtrl.text) ?? 0;
+    final price = double.tryParse(priceCtrl.text.replaceAll(RegExp(r'[^0-9.]'), '')) ?? 0;
+
+    nameCtrl.dispose();
+    drummersCtrl.dispose();
+    dancersCtrl.dispose();
+    othersCtrl.dispose();
+    priceCtrl.dispose();
+
+    if (name.isEmpty) return;
+
+    try {
+      // Save to show_types table (persists in Settings)
+      final inserted = await _sb.from('show_types').insert({
+        'company_id': _companyId,
+        'name': name,
+        'drummers': drummers,
+        'dancers': dancers,
+        'others': others,
+        'price': price.round(),
+        'sort_order': _showTypes.length,
+        'active': true,
+      }).select().single();
+
+      // Add to local show types list
+      _showTypes.add(inserted);
+
+      // Also add to current offer's shows
+      setState(() {
+        _shows.add(_OfferShow(
+          showTypeId: inserted['id'] as String?,
+          showName: name,
+          drummers: drummers,
+          dancers: dancers,
+          others: others,
+          selected: true,
+          sortOrder: _shows.length,
+        ));
+        _recalc();
+      });
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Feil: $e')),
+        );
+      }
+    }
   }
 
   // ────────────────────────────────────────────────────────────────────────────
@@ -1174,8 +1355,10 @@ class _GigOfferPageState extends State<GigOfferPage> {
                         _buildCustomerCard(),
                         const SizedBox(height: 20),
                         _buildShowsCard(),
-                        const SizedBox(height: 20),
-                        _buildRehearsalsCard(),
+                        if (_shows.isNotEmpty) ...[
+                          const SizedBox(height: 20),
+                          _buildRehearsalsCard(),
+                        ],
                         const SizedBox(height: 20),
                         _buildPriceParamsCard(),
                         const SizedBox(height: 20),
@@ -1516,60 +1699,110 @@ class _GigOfferPageState extends State<GigOfferPage> {
 
   Widget _buildShowsCard() {
     final cs = Theme.of(context).colorScheme;
+    final existing = _shows.map((s) => s.showTypeId).toSet();
+    final available =
+        _showTypes.where((t) => !existing.contains(t['id'])).toList();
+
     return _card(
       title: 'Shows',
       child: Column(
         children: [
           _tf(_showDescCtrl, 'Showbeskrivelse', maxLines: 2),
-          const SizedBox(height: 12),
-          Padding(
-            padding: const EdgeInsets.only(bottom: 6),
-            child: Row(
-              children: [
-                const SizedBox(width: 36),
-                Expanded(
-                    child: Text('Show',
-                        style: TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w700,
-                            color: cs.onSurfaceVariant))),
-                SizedBox(
-                    width: 50,
-                    child: Text('T',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w700,
-                            color: cs.onSurfaceVariant))),
-                SizedBox(
-                    width: 50,
-                    child: Text('D',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w700,
-                            color: cs.onSurfaceVariant))),
-                SizedBox(
-                    width: 50,
-                    child: Text('A',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w700,
-                            color: cs.onSurfaceVariant))),
-                const SizedBox(width: 36),
-              ],
+          if (_shows.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            Padding(
+              padding: const EdgeInsets.only(bottom: 6),
+              child: Row(
+                children: [
+                  const SizedBox(width: 36),
+                  Expanded(
+                      child: Text('Show',
+                          style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w700,
+                              color: cs.onSurfaceVariant))),
+                  SizedBox(
+                      width: 50,
+                      child: Text('T',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w700,
+                              color: cs.onSurfaceVariant))),
+                  SizedBox(
+                      width: 50,
+                      child: Text('D',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w700,
+                              color: cs.onSurfaceVariant))),
+                  SizedBox(
+                      width: 50,
+                      child: Text('A',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w700,
+                              color: cs.onSurfaceVariant))),
+                  const SizedBox(width: 36),
+                ],
+              ),
             ),
-          ),
-          ..._shows.asMap().entries.map((e) => _showRow(e.key, e.value)),
+            ..._shows.asMap().entries.map((e) => _showRow(e.key, e.value)),
+          ],
           const SizedBox(height: 8),
           Align(
             alignment: Alignment.centerLeft,
-            child: TextButton.icon(
-              onPressed: _addShowDialog,
-              icon: const Icon(Icons.add, size: 16),
-              label:
-                  const Text('Legg til show', style: TextStyle(fontSize: 13)),
+            child: PopupMenuButton<String>(
+              onSelected: (v) {
+                if (v == '_new') {
+                  _createNewShowType();
+                } else {
+                  final t = available.firstWhere((t) => t['id'] == v, orElse: () => {});
+                  if (t.isNotEmpty) {
+                    setState(() {
+                      _shows.add(_OfferShow(
+                        showTypeId: t['id'] as String?,
+                        showName: t['name'] as String? ?? '',
+                        drummers: (t['drummers'] as num?)?.toInt() ?? 0,
+                        dancers: (t['dancers'] as num?)?.toInt() ?? 0,
+                        others: (t['others'] as num?)?.toInt() ?? 0,
+                        selected: true,
+                        sortOrder: _shows.length,
+                      ));
+                      _recalc();
+                    });
+                  }
+                }
+              },
+              itemBuilder: (_) => [
+                ...available.map((t) => PopupMenuItem(
+                      value: t['id'] as String,
+                      child: Text(t['name'] as String? ?? ''),
+                    )),
+                if (available.isNotEmpty) const PopupMenuDivider(),
+                const PopupMenuItem(
+                  value: '_new',
+                  child: Row(
+                    children: [
+                      Icon(Icons.add_circle_outline, size: 16),
+                      SizedBox(width: 8),
+                      Text('Ny showtype...', style: TextStyle(fontWeight: FontWeight.w600)),
+                    ],
+                  ),
+                ),
+              ],
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.add, size: 16, color: cs.primary),
+                  const SizedBox(width: 4),
+                  Text('Legg til show',
+                    style: TextStyle(fontSize: 13, color: cs.primary),
+                  ),
+                ],
+              ),
             ),
           ),
         ],
@@ -1844,321 +2077,427 @@ class _GigOfferPageState extends State<GigOfferPage> {
   // PRISPARAMETRE
   // ────────────────────────────────────────────────────────────────────────────
 
+  bool _priceParamsExpanded = false;
+  final Set<String> _transportModes = {}; // 'privatbil', 'hyrebil', 'manuelt'
+
+  // Hyre (varebil) pricing
+  int _hyreDays = 1;
+  double _hyreDayRate = 399;
+  double _hyreIncludedKmPerDay = 150;
+  double _hyreExtraKmRate = 3.50;
+  double _hyreFuelPerMil = 0.70; // L per 10km
+  double _hyreDieselPrice = 25.0; // kr/L
+  final _hyreDaysCtrl = TextEditingController(text: '1');
+  final _hyreDayRateCtrl = TextEditingController(text: '399');
+  final _hyreInclKmCtrl = TextEditingController(text: '150');
+  final _hyreExtraKmCtrl = TextEditingController(text: '3.50');
+  final _hyreFuelCtrl = TextEditingController(text: '0.70');
+  final _hyreDieselCtrl = TextEditingController(text: '25');
+
+  Widget _hyreRateRow(String label, TextEditingController ctrl, ValueChanged<double> onChanged) {
+    final cs = Theme.of(context).colorScheme;
+    return Row(
+      children: [
+        SizedBox(width: 120, child: Text(label, style: TextStyle(fontSize: 12, color: cs.onSurfaceVariant))),
+        SizedBox(
+          width: 80,
+          child: TextField(
+            controller: ctrl,
+            textAlign: TextAlign.right,
+            style: const TextStyle(fontSize: 12),
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            decoration: const InputDecoration(isDense: true, contentPadding: EdgeInsets.symmetric(horizontal: 6, vertical: 4)),
+            onChanged: (v) {
+              final p = double.tryParse(v.replaceAll(',', '.'));
+              if (p != null) setState(() => onChanged(p));
+            },
+          ),
+        ),
+      ],
+    );
+  }
+
+  Future<void> _saveHyreRate(String key, double value) async {
+    if (_companyId == null) return;
+    try {
+      final row = await _sb.from('companies').select('pricing_defaults').eq('id', _companyId!).maybeSingle();
+      final pd = (row?['pricing_defaults'] as Map<String, dynamic>?) ?? {};
+      pd[key] = value;
+      await _sb.from('companies').update({'pricing_defaults': pd}).eq('id', _companyId!);
+    } catch (e) {
+      debugPrint('Save hyre rate error: $e');
+    }
+  }
+
+  double get _hyreRentalCost {
+    final dayCost = _hyreDays * _hyreDayRate;
+    final includedKm = _hyreDays * _hyreIncludedKmPerDay;
+    final extraKm = (_transportKm - includedKm).clamp(0, 999999).toDouble();
+    final kmCost = extraKm * _hyreExtraKmRate;
+    return dayCost + kmCost;
+  }
+
+  double get _hyreFuelCost {
+    final mil = _transportKm / 10.0;
+    return mil * _hyreFuelPerMil * _hyreDieselPrice;
+  }
+
+  double get _hyreTotal => _hyreRentalCost + _hyreFuelCost + _tollCost;
+
+  double get _privatbilTotal => _transportTotal + _tollCost;
+
+  void _recalcTransportPrice() {
+    _recalc(); // recompute _transportTotal, _tollCost etc.
+    double total = 0;
+    if (_transportModes.contains('privatbil')) total += _privatbilTotal;
+    if (_transportModes.contains('hyrebil')) total += _hyreTotal;
+    _transportPrice = total;
+    _transportPriceCtrl.text = _nf.format(_transportPrice);
+    setState(() {});
+  }
+
   Widget _buildPriceParamsCard() {
     final cs = Theme.of(context).colorScheme;
     return _card(
-      title: 'Prisparametre',
+      title: '',
       child: Column(
         children: [
-          _paramRow('Creo-hyre min.', _creoFeeMinimum, (v) {
-            _creoFeeMinimum = v;
-            setState(() => _recalc());
-          }),
-          _paramRow('Tillegg pr. show', _extraShowFee, (v) {
-            _extraShowFee = v;
-            setState(() => _recalc());
-          }),
-          _paramRowPct('Påslag', _markupPct, (v) {
-            _markupPct = v;
-            setState(() => _recalc());
-          }),
-          Padding(
-            padding: const EdgeInsets.only(bottom: 8),
-            child: Row(
-              children: [
-                SizedBox(
-                  width: 24,
-                  height: 24,
-                  child: Checkbox(
-                    value: _markupOnAll,
-                    onChanged: (v) {
-                      setState(() {
-                        _markupOnAll = v ?? false;
-                        _recalc();
-                      });
-                    },
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Text('Påslag på alt (inkl. transport, in-ear, prøver)',
-                    style: TextStyle(fontSize: 12, color: cs.onSurfaceVariant)),
-              ],
-            ),
-          ),
-          // In-ear
-          Padding(
-            padding: const EdgeInsets.only(bottom: 8),
-            child: Row(
-              children: [
-                SizedBox(
-                  width: 140,
-                  child: Row(
-                    children: [
-                      Text('In-Ear',
-                          style: TextStyle(
-                              fontSize: 13, color: cs.onSurfaceVariant)),
-                      const SizedBox(width: 6),
-                      SizedBox(
-                        width: 24,
-                        height: 24,
-                        child: Checkbox(
-                          value: _inearIncluded,
-                          onChanged: (v) {
-                            setState(() {
-                              _inearIncluded = v ?? false;
-                              _recalc();
-                            });
-                          },
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                SizedBox(
-                  width: 120,
-                  child: TextFormField(
-                    key: const ValueKey('param_inear_price'),
-                    initialValue: _nf.format(_inearPrice),
-                    style: const TextStyle(fontSize: 13),
-                    textAlign: TextAlign.right,
-                    keyboardType: TextInputType.number,
-                    decoration: const InputDecoration(
-                      isDense: true,
-                      contentPadding:
-                          EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                    ),
-                    onChanged: (v) {
-                      final parsed = double.tryParse(
-                          v.replaceAll(RegExp(r'[^0-9.]'), ''));
-                      if (parsed != null) {
-                        _inearPrice = parsed;
-                        setState(() => _recalc());
-                      }
-                    },
-                  ),
-                ),
-              ],
-            ),
-          ),
-          // ── Transport price ──
-          Padding(
-            padding: const EdgeInsets.only(top: 4, bottom: 4),
-            child: Row(
-              children: [
-                SizedBox(
-                  width: 140,
-                  child: Text('Transport',
-                      style: TextStyle(fontSize: 13, color: cs.onSurfaceVariant)),
-                ),
-                SizedBox(
-                  width: 120,
-                  child: TextField(
-                    controller: _transportPriceCtrl,
-                    style: const TextStyle(fontSize: 13),
-                    textAlign: TextAlign.right,
-                    keyboardType: TextInputType.number,
-                    decoration: const InputDecoration(
-                      isDense: true,
-                      contentPadding:
-                          EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                    ),
-                    onChanged: (v) {
-                      final parsed = double.tryParse(
-                          v.replaceAll(RegExp(r'[^0-9.]'), ''));
-                      if (parsed != null) {
-                        _transportPrice = parsed;
-                        setState(() => _recalc());
-                      }
-                    },
-                  ),
-                ),
-              ],
-            ),
-          ),
-          // ── Transport (Privatbil) — collapsible ──
-          const Divider(height: 20),
+          // ── Collapsable Prisparametre ──
           GestureDetector(
-            onTap: () => setState(() => _privatbilExpanded = !_privatbilExpanded),
+            onTap: () => setState(() => _priceParamsExpanded = !_priceParamsExpanded),
             child: Row(
               children: [
-                Icon(
-                  _privatbilExpanded ? Icons.expand_less : Icons.expand_more,
-                  size: 20,
-                ),
+                Icon(_priceParamsExpanded ? Icons.expand_less : Icons.expand_more, size: 20),
                 const SizedBox(width: 4),
-                const Text('Transport (privatbil)',
-                    style: TextStyle(fontWeight: FontWeight.w900, fontSize: 13)),
+                const Text('Prisparametre', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 14)),
               ],
             ),
           ),
-          if (_privatbilExpanded) ...[
+          if (_priceParamsExpanded) ...[
+            const SizedBox(height: 12),
+            _paramRow('Creo-hyre min.', _creoFeeMinimum, (v) {
+              _creoFeeMinimum = v;
+              setState(() => _recalc());
+            }),
+            _paramRow('Tillegg pr. show', _extraShowFee, (v) {
+              _extraShowFee = v;
+              setState(() => _recalc());
+            }),
+            _paramRowPct('Påslag', _markupPct, (v) {
+              _markupPct = v;
+              setState(() => _recalc());
+            }),
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Row(
+                children: [
+                  SizedBox(
+                    width: 24, height: 24,
+                    child: Checkbox(
+                      value: _markupOnAll,
+                      onChanged: (v) {
+                        setState(() { _markupOnAll = v ?? false; _recalc(); });
+                      },
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Text('Påslag på alt (inkl. transport, in-ear, prøver)',
+                      style: TextStyle(fontSize: 12, color: cs.onSurfaceVariant)),
+                ],
+              ),
+            ),
+            // In-ear
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Row(
+                children: [
+                  SizedBox(
+                    width: 140,
+                    child: Row(
+                      children: [
+                        Text('In-Ear', style: TextStyle(fontSize: 13, color: cs.onSurfaceVariant)),
+                        const SizedBox(width: 6),
+                        SizedBox(width: 24, height: 24,
+                          child: Checkbox(
+                            value: _inearIncluded,
+                            onChanged: (v) { setState(() { _inearIncluded = v ?? false; _recalc(); }); },
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  SizedBox(
+                    width: 120,
+                    child: TextFormField(
+                      key: const ValueKey('param_inear_price'),
+                      initialValue: _nf.format(_inearPrice),
+                      style: const TextStyle(fontSize: 13),
+                      textAlign: TextAlign.right,
+                      keyboardType: TextInputType.number,
+                      decoration: const InputDecoration(isDense: true, contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 8)),
+                      onChanged: (v) {
+                        final parsed = double.tryParse(v.replaceAll(RegExp(r'[^0-9.]'), ''));
+                        if (parsed != null) { _inearPrice = parsed; setState(() => _recalc()); }
+                      },
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            // Playback toggle
+            SwitchListTile(
+              title: const Text('Playback fra oss', style: TextStyle(fontSize: 13)),
+              value: _playbackFromUs,
+              onChanged: (v) => setState(() => _playbackFromUs = v),
+              contentPadding: EdgeInsets.zero,
+              dense: true,
+            ),
+          ],
+
+          // ── Transport section ──
+          const Divider(height: 24),
+          const Text('Transport', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 14)),
           const SizedBox(height: 8),
-          TextField(
-            controller: _transportFromCtrl,
-            decoration: const InputDecoration(
-              labelText: 'Fra',
-              prefixIcon: Icon(Icons.trip_origin, size: 18),
-              isDense: true,
-            ),
-          ),
+          // Route (always visible)
+          TextField(controller: _transportFromCtrl, decoration: const InputDecoration(labelText: 'Fra', prefixIcon: Icon(Icons.trip_origin, size: 18), isDense: true)),
           const SizedBox(height: 6),
-          TextField(
-            controller: _transportViaCtrl,
-            decoration: const InputDecoration(
-              labelText: 'Via (kommaseparert)',
-              prefixIcon: Icon(Icons.more_horiz, size: 18),
-              isDense: true,
-            ),
-          ),
+          TextField(controller: _transportViaCtrl, decoration: const InputDecoration(labelText: 'Via (kommaseparert)', prefixIcon: Icon(Icons.more_horiz, size: 18), isDense: true)),
           const SizedBox(height: 6),
-          TextField(
-            controller: _transportToCtrl,
-            decoration: const InputDecoration(
-              labelText: 'Til',
-              prefixIcon: Icon(Icons.location_on, size: 18),
-              isDense: true,
-            ),
-          ),
+          TextField(controller: _transportToCtrl, decoration: const InputDecoration(labelText: 'Til', prefixIcon: Icon(Icons.location_on, size: 18), isDense: true)),
           const SizedBox(height: 6),
           Row(
             children: [
-              const Text('Antall:', style: TextStyle(fontSize: 13)),
+              const Text('Antall biler:', style: TextStyle(fontSize: 13)),
               const SizedBox(width: 8),
               SizedBox(
-                width: 60,
+                width: 50,
                 child: TextFormField(
                   key: ValueKey('route_persons_$_routePersons'),
                   initialValue: '$_routePersons',
                   decoration: const InputDecoration(isDense: true),
                   keyboardType: TextInputType.number,
                   textAlign: TextAlign.center,
-                  onChanged: (v) {
-                    final parsed = int.tryParse(v);
-                    if (parsed != null && parsed > 0) {
-                      _routePersons = parsed;
-                    }
-                  },
+                  onChanged: (v) { final p = int.tryParse(v); if (p != null && p > 0) _routePersons = p; },
                 ),
               ),
               const SizedBox(width: 12),
               GestureDetector(
                 onTap: () => setState(() => _routeReturn = !_routeReturn),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(
-                      _routeReturn ? Icons.check_box : Icons.check_box_outline_blank,
-                      size: 20,
-                    ),
-                    const SizedBox(width: 4),
-                    const Text('Tur/retur', style: TextStyle(fontSize: 13)),
-                  ],
-                ),
+                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                  Icon(_routeReturn ? Icons.check_box : Icons.check_box_outline_blank, size: 20),
+                  const SizedBox(width: 4),
+                  const Text('Tur/retur', style: TextStyle(fontSize: 13)),
+                ]),
               ),
               const Spacer(),
               FilledButton.icon(
                 onPressed: _routeLoading ? null : _lookupRoute,
                 icon: _routeLoading
-                    ? const SizedBox(
-                        width: 16,
-                        height: 16,
-                        child:
-                            CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-                      )
+                    ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
                     : const Icon(Icons.route, size: 18),
                 label: const Text('Beregn rute'),
               ),
             ],
           ),
           const SizedBox(height: 8),
+          _paramRow('Km totalt', _transportKm.toDouble(), (v) {
+            _transportKm = v.round();
+            _recalc();
+            if (_transportModes.isNotEmpty) _recalcTransportPrice();
+            setState(() {});
+          }, integer: true),
+          if (_tollStations.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Text('Bom: ${_nf.format(_tollCost)} kr (${_tollStations.length} stasjoner)', style: TextStyle(fontSize: 12, color: cs.onSurfaceVariant)),
+            ),
+          // Transport total — always visible, editable
           Padding(
-            padding: const EdgeInsets.only(bottom: 8),
+            padding: const EdgeInsets.symmetric(vertical: 4),
             child: Row(
               children: [
-                SizedBox(
-                  width: 140,
-                  child: Text('Km totalt',
-                      style: TextStyle(fontSize: 13, color: cs.onSurfaceVariant)),
-                ),
+                SizedBox(width: 140, child: Text('Transportpris', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: cs.onSurface))),
                 SizedBox(
                   width: 120,
-                  child: TextFormField(
-                    key: ValueKey('transport_km_$_transportKm'),
-                    initialValue: '$_transportKm',
-                    style: const TextStyle(fontSize: 13),
+                  child: TextField(
+                    controller: _transportPriceCtrl,
+                    style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w900),
                     textAlign: TextAlign.right,
                     keyboardType: TextInputType.number,
-                    decoration: const InputDecoration(
-                      isDense: true,
-                      contentPadding:
-                          EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                    decoration: const InputDecoration(isDense: true, contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 8)),
+                    onChanged: (v) {
+                      final parsed = double.tryParse(v.replaceAll(RegExp(r'[^0-9.]'), ''));
+                      if (parsed != null) { _transportPrice = parsed; setState(() => _recalc()); }
+                    },
+                  ),
+                ),
+                const SizedBox(width: 6),
+                Text('kr', style: TextStyle(fontSize: 12, color: cs.onSurfaceVariant)),
+              ],
+            ),
+          ),
+          // Add transport type
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              if (_transportModes.isNotEmpty)
+                Wrap(spacing: 6, children: _transportModes.map((mode) {
+                  final label = const {'privatbil': 'Privatbil', 'hyrebil': 'Hyre varebil'}[mode] ?? mode;
+                  return Chip(
+                    avatar: Icon(const {'privatbil': Icons.directions_car, 'hyrebil': Icons.local_taxi}[mode] ?? Icons.help, size: 16),
+                    label: Text(label, style: const TextStyle(fontSize: 12)),
+                    deleteIcon: const Icon(Icons.close, size: 14),
+                    onDeleted: () { setState(() => _transportModes.remove(mode)); _recalcTransportPrice(); },
+                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap, visualDensity: VisualDensity.compact,
+                  );
+                }).toList()),
+              const SizedBox(width: 8),
+              PopupMenuButton<String>(
+                icon: Icon(Icons.add_circle_outline, size: 20, color: cs.primary),
+                tooltip: 'Legg til',
+                onSelected: (mode) { setState(() => _transportModes.add(mode)); _recalcTransportPrice(); },
+                itemBuilder: (_) => [
+                  if (!_transportModes.contains('privatbil'))
+                    const PopupMenuItem(value: 'privatbil', child: Row(children: [Icon(Icons.directions_car, size: 18), SizedBox(width: 8), Text('Privatbil')])),
+                  if (!_transportModes.contains('hyrebil'))
+                    const PopupMenuItem(value: 'hyrebil', child: Row(children: [Icon(Icons.local_taxi, size: 18), SizedBox(width: 8), Text('Hyre varebil')])),
+                ],
+              ),
+            ],
+          ),
+
+          // ── Privatbil beregning ──
+          if (_transportModes.contains('privatbil')) ...[
+            const SizedBox(height: 12),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: cs.surfaceContainerHighest.withValues(alpha: 0.3),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: cs.outlineVariant),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('Privatbil', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
+                  const SizedBox(height: 8),
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: Row(
+                      children: [
+                        const Expanded(child: Text('Kr/km', style: TextStyle(fontSize: 13))),
+                        _rateChip('3,50', 3.50),
+                        const SizedBox(width: 4),
+                        _rateChip('5,30', 5.30),
+                        const SizedBox(width: 8),
+                        SizedBox(
+                          width: 80,
+                          child: TextFormField(
+                            key: ValueKey('kr_km_${_transportPricePerKm.toStringAsFixed(2)}'),
+                            initialValue: _transportPricePerKm % 1 == 0 ? _transportPricePerKm.toInt().toString() : _transportPricePerKm.toStringAsFixed(2),
+                            decoration: const InputDecoration(isDense: true),
+                            keyboardType: TextInputType.number,
+                            textAlign: TextAlign.end,
+                            onChanged: (v) {
+                              final parsed = double.tryParse(v.replaceAll(',', '.').replaceAll(RegExp(r'[^0-9.]'), ''));
+                              if (parsed != null) { _transportPricePerKm = parsed; _recalcTransportPrice(); }
+                            },
+                          ),
+                        ),
+                      ],
                     ),
-                    onChanged: (v) {
-                      final parsed = int.tryParse(
-                          v.replaceAll(RegExp(r'[^0-9]'), ''));
-                      if (parsed != null) {
-                        _transportKm = parsed;
-                        _recalc();
-                        _syncTransportFromPrivatbil();
-                        setState(() {});
-                      }
-                    },
                   ),
-                ),
-              ],
-            ),
-          ),
-          // Rate selector
-          Padding(
-            padding: const EdgeInsets.only(bottom: 8),
-            child: Row(
-              children: [
-                const Expanded(
-                  child: Text('Kr/km', style: TextStyle(fontSize: 13)),
-                ),
-                _rateChip('3,50', 3.50),
-                const SizedBox(width: 4),
-                _rateChip('5,30', 5.30),
-                const SizedBox(width: 8),
-                SizedBox(
-                  width: 80,
-                  child: TextFormField(
-                    key: ValueKey('kr_km_${_transportPricePerKm.toStringAsFixed(2)}'),
-                    initialValue: _transportPricePerKm % 1 == 0
-                        ? _transportPricePerKm.toInt().toString()
-                        : _transportPricePerKm.toStringAsFixed(2),
-                    decoration: const InputDecoration(isDense: true),
-                    keyboardType: TextInputType.number,
-                    textAlign: TextAlign.end,
-                    onChanged: (v) {
-                      final parsed = double.tryParse(
-                          v.replaceAll(',', '.').replaceAll(RegExp(r'[^0-9.]'), ''));
-                      if (parsed != null) {
-                        _transportPricePerKm = parsed;
-                        _recalc();
-                        _syncTransportFromPrivatbil();
-                        setState(() {});
-                      }
-                    },
+                  Row(
+                    children: [
+                      Text('${_nf.format(_transportKm)} km × ${_transportPricePerKm.toStringAsFixed(2)} kr',
+                          style: TextStyle(fontSize: 12, color: cs.onSurfaceVariant)),
+                      if (_tollCost > 0) Text(' + ${_nf.format(_tollCost)} bom',
+                          style: TextStyle(fontSize: 12, color: cs.onSurfaceVariant)),
+                      const Spacer(),
+                      Text('${_nf.format(_privatbilTotal)} kr', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700)),
+                    ],
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
-          ),
           ],
-          // Playback toggle
-          SwitchListTile(
-            title: const Text('Playback fra oss',
-                style: TextStyle(fontSize: 13)),
-            value: _playbackFromUs,
-            onChanged: (v) => setState(() => _playbackFromUs = v),
-            contentPadding: EdgeInsets.zero,
-            dense: true,
-          ),
+
+          // ── Hyre varebil beregning ──
+          if (_transportModes.contains('hyrebil')) ...[
+            const SizedBox(height: 12),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: cs.surfaceContainerHighest.withValues(alpha: 0.3),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: cs.outlineVariant),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('Hyre varebil', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      SizedBox(width: 80, child: Text('Dager', style: TextStyle(fontSize: 13, color: cs.onSurfaceVariant))),
+                      SizedBox(width: 60, child: TextField(
+                        controller: _hyreDaysCtrl, textAlign: TextAlign.center,
+                        keyboardType: TextInputType.number, style: const TextStyle(fontSize: 13),
+                        decoration: const InputDecoration(isDense: true, contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 6)),
+                        onChanged: (v) { final d = int.tryParse(v); if (d != null && d > 0) { _hyreDays = d; _recalcTransportPrice(); } },
+                      )),
+                      const SizedBox(width: 8),
+                      Text('× ${_nf.format(_hyreDayRate)} kr/dag', style: TextStyle(fontSize: 12, color: cs.onSurfaceVariant)),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  Builder(builder: (_) {
+                    final included = (_hyreDays * _hyreIncludedKmPerDay).round();
+                    final extra = (_transportKm - included).clamp(0, 999999);
+                    final extraCost = extra * _hyreExtraKmRate;
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Inkl: $included km  ·  ${_transportKm > included ? 'Extra: $extra km × ${_hyreExtraKmRate.toStringAsFixed(2)} kr = ${_nf.format(extraCost)} kr' : 'Innenfor inkludert km'}',
+                          style: TextStyle(fontSize: 12, color: cs.onSurfaceVariant),
+                        ),
+                      ],
+                    );
+                  }),
+                  Text('Drivstoff: ${(_transportKm / 10).toStringAsFixed(1)} mil × ${_hyreFuelPerMil.toStringAsFixed(2)} L × ${_nf.format(_hyreDieselPrice)} kr = ${_nf.format(_hyreFuelCost)} kr', style: TextStyle(fontSize: 12, color: cs.onSurfaceVariant)),
+                  if (_tollCost > 0)
+                    Text('Bom: ${_nf.format(_tollCost)} kr', style: TextStyle(fontSize: 12, color: cs.onSurfaceVariant)),
+                  const SizedBox(height: 6),
+                  Text('${_nf.format(_hyreTotal)} kr', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700)),
+                  // Collapsible rate settings
+                  ExpansionTile(
+                    title: Text('Satser', style: TextStyle(fontSize: 12, color: cs.onSurfaceVariant)),
+                    tilePadding: EdgeInsets.zero,
+                    childrenPadding: const EdgeInsets.only(bottom: 8),
+                    children: [
+                      _hyreRateRow('Dagspris', _hyreDayRateCtrl, (v) { _hyreDayRate = v; _saveHyreRate('hyre_day_rate', v); _recalcTransportPrice(); }),
+                      const SizedBox(height: 4),
+                      _hyreRateRow('Inkl. km/dag', _hyreInclKmCtrl, (v) { _hyreIncludedKmPerDay = v; _saveHyreRate('hyre_included_km', v); _recalcTransportPrice(); }),
+                      const SizedBox(height: 4),
+                      _hyreRateRow('Extra kr/km', _hyreExtraKmCtrl, (v) { _hyreExtraKmRate = v; _saveHyreRate('hyre_extra_km_rate', v); _recalcTransportPrice(); }),
+                      const SizedBox(height: 4),
+                      _hyreRateRow('L/mil', _hyreFuelCtrl, (v) { _hyreFuelPerMil = v; _saveHyreRate('hyre_fuel_per_mil', v); _recalcTransportPrice(); }),
+                      const SizedBox(height: 4),
+                      _hyreRateRow('Diesel kr/L', _hyreDieselCtrl, (v) { _hyreDieselPrice = v; _saveHyreRate('hyre_diesel_price', v); _recalcTransportPrice(); }),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ],
         ],
       ),
     );
   }
+
 
   Widget _rateChip(String label, double rate) {
     final cs = Theme.of(context).colorScheme;
@@ -2166,9 +2505,7 @@ class _GigOfferPageState extends State<GigOfferPage> {
     return GestureDetector(
       onTap: () {
         _transportPricePerKm = rate;
-        _recalc();
-        _syncTransportFromPrivatbil();
-        setState(() {});
+        _recalcTransportPrice();
       },
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
@@ -2207,7 +2544,7 @@ class _GigOfferPageState extends State<GigOfferPage> {
           SizedBox(
             width: 120,
             child: TextFormField(
-              key: ValueKey('param_$label'),
+              key: ValueKey('param_${label}_${integer ? value.round() : value}'),
               initialValue:
                   integer ? '${value.round()}' : _nf.format(value),
               style: const TextStyle(fontSize: 13),
@@ -3174,7 +3511,7 @@ class _GigOfferPageState extends State<GigOfferPage> {
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// CUSTOMER PICKER
+// CUSTOMER PICKER — unified search (database + Brreg in one field)
 // ──────────────────────────────────────────────────────────────────────────────
 
 class _CustomerPicker extends StatelessWidget {
@@ -3211,89 +3548,64 @@ class _CustomerPicker extends StatelessWidget {
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     final selected = selectedCompany;
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.center,
-      children: [
-        Expanded(
-          child: GestureDetector(
-            onTap: loading ? null : () => _openPicker(context),
-            child: Container(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
-              decoration: BoxDecoration(
-                border: Border.all(color: cs.outlineVariant),
-                borderRadius: BorderRadius.circular(8),
+    return GestureDetector(
+      onTap: loading ? null : () => _openPicker(context),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+        decoration: BoxDecoration(
+          border: Border.all(color: cs.outlineVariant),
+          borderRadius: BorderRadius.circular(8),
+          color: loading
+              ? Colors.black.withValues(alpha: 0.04)
+              : Colors.transparent,
+        ),
+        child: Row(
+          children: [
+            Icon(Icons.search,
+                size: 18,
                 color: loading
-                    ? Colors.black.withValues(alpha: 0.04)
-                    : Colors.transparent,
-              ),
-              child: Row(
-                children: [
-                  Icon(Icons.business_outlined,
-                      size: 18,
-                      color: loading
-                          ? cs.onSurfaceVariant
-                          : Theme.of(context).colorScheme.primary),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: loading
-                        ? Text('Laster kunder…',
-                            style: TextStyle(color: cs.onSurfaceVariant))
-                        : selected != null
-                            ? Column(
-                                crossAxisAlignment:
-                                    CrossAxisAlignment.start,
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Text(
-                                      selected['name'] as String? ?? '',
-                                      style: const TextStyle(
-                                          fontWeight: FontWeight.w700)),
-                                  if ((selected['city'] as String?) !=
-                                      null)
-                                    Text(selected['city'] as String,
-                                        style: TextStyle(
-                                            fontSize: 12,
-                                            color: cs.onSurfaceVariant)),
-                                ],
-                              )
-                            : Text('Velg kunde…',
-                                style: TextStyle(
-                                    color: cs.onSurfaceVariant)),
-                  ),
-                  if (selected != null)
-                    IconButton(
-                        icon: const Icon(Icons.close, size: 18),
-                        tooltip: 'Fjern kunde',
-                        onPressed: onClear)
-                  else
-                    Icon(Icons.arrow_drop_down,
-                        color: cs.onSurfaceVariant),
-                ],
-              ),
+                    ? cs.onSurfaceVariant
+                    : cs.primary),
+            const SizedBox(width: 10),
+            Expanded(
+              child: loading
+                  ? Text('Laster kunder…',
+                      style: TextStyle(color: cs.onSurfaceVariant))
+                  : selected != null
+                      ? Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(selected['name'] as String? ?? '',
+                                style: const TextStyle(
+                                    fontWeight: FontWeight.w700)),
+                            if ((selected['city'] as String?) != null)
+                              Text(
+                                  '${selected['city']}${selected['org_nr'] != null ? '  ·  ${selected['org_nr']}' : ''}',
+                                  style: TextStyle(
+                                      fontSize: 12,
+                                      color: cs.onSurfaceVariant)),
+                          ],
+                        )
+                      : Text('Søk kunde (lagrede + Brreg)…',
+                          style: TextStyle(color: cs.onSurfaceVariant)),
             ),
-          ),
+            if (selected != null)
+              IconButton(
+                  icon: const Icon(Icons.close, size: 18),
+                  tooltip: 'Fjern kunde',
+                  onPressed: onClear)
+            else
+              Icon(Icons.arrow_drop_down, color: cs.onSurfaceVariant),
+          ],
         ),
-        const SizedBox(width: 8),
-        Tooltip(
-          message: 'Ny kunde',
-          child: FilledButton.tonalIcon(
-            onPressed: loading ? null : onNewCompany,
-            icon: const Icon(Icons.add, size: 18),
-            label: const Text('Ny kunde'),
-            style: FilledButton.styleFrom(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
-            ),
-          ),
-        ),
-      ],
+      ),
     );
   }
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// CUSTOMER PICKER DIALOG
+// CUSTOMER PICKER DIALOG — unified search (database + Brreg in one field)
 // ──────────────────────────────────────────────────────────────────────────────
 
 class _CustomerPickerDialog extends StatefulWidget {
@@ -3308,41 +3620,32 @@ class _CustomerPickerDialog extends StatefulWidget {
   State<_CustomerPickerDialog> createState() => _CustomerPickerDialogState();
 }
 
-class _CustomerPickerDialogState extends State<_CustomerPickerDialog>
-    with SingleTickerProviderStateMixin {
-  late final TabController _tabCtrl;
+class _CustomerPickerDialogState extends State<_CustomerPickerDialog> {
   final _searchCtrl = TextEditingController();
   String _query = '';
 
-  // Brreg
-  final _brregCtrl = TextEditingController();
   Timer? _brregDebounce;
   List<BrregCompany> _brregResults = [];
   bool _brregSearching = false;
   bool _brregCreating = false;
 
   @override
-  void initState() {
-    super.initState();
-    _tabCtrl = TabController(length: 2, vsync: this);
-  }
-
-  @override
   void dispose() {
-    _tabCtrl.dispose();
     _searchCtrl.dispose();
-    _brregCtrl.dispose();
     _brregDebounce?.cancel();
     super.dispose();
   }
 
-  void _onBrregSearch(String query) {
+  void _onSearch(String query) {
+    setState(() => _query = query);
+
+    // Also search Brreg (debounced)
     _brregDebounce?.cancel();
-    if (query.trim().isEmpty) {
+    if (query.trim().length < 2) {
       setState(() => _brregResults = []);
       return;
     }
-    _brregDebounce = Timer(const Duration(milliseconds: 400), () async {
+    _brregDebounce = Timer(const Duration(milliseconds: 500), () async {
       setState(() => _brregSearching = true);
       try {
         final cleaned = query.replaceAll(RegExp(r'\s'), '');
@@ -3369,11 +3672,22 @@ class _CustomerPickerDialogState extends State<_CustomerPickerDialog>
     });
   }
 
-  /// Create a company in DB from Brreg data and return it as the selection.
   Future<void> _selectBrreg(BrregCompany c) async {
     setState(() => _brregCreating = true);
     try {
       final sb = Supabase.instance.client;
+      // Check if company already exists by org_nr
+      final existing = await sb
+          .from('companies')
+          .select('*')
+          .eq('org_nr', c.orgNr)
+          .maybeSingle();
+
+      if (existing != null) {
+        if (mounted) Navigator.pop(context, existing);
+        return;
+      }
+
       final inserted = await sb.from('companies').insert({
         'name': c.name,
         'org_nr': c.orgNr,
@@ -3383,7 +3697,7 @@ class _CustomerPickerDialogState extends State<_CustomerPickerDialog>
         'country': c.country,
         if (widget.ownerCompanyId != null)
           'owner_company_id': widget.ownerCompanyId,
-      }).select().single();
+      }).select('*, contacts!contacts_company_id_fkey(id, name, phone, email)').single();
 
       if (mounted) Navigator.pop(context, inserted);
     } catch (e) {
@@ -3400,7 +3714,9 @@ class _CustomerPickerDialogState extends State<_CustomerPickerDialog>
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
-    final filtered = _query.isEmpty
+
+    // Filter local companies
+    final localFiltered = _query.isEmpty
         ? widget.companies
         : widget.companies.where((c) {
             final name = (c['name'] as String? ?? '').toLowerCase();
@@ -3410,139 +3726,133 @@ class _CustomerPickerDialogState extends State<_CustomerPickerDialog>
             return name.contains(q) || city.contains(q) || orgNr.contains(q);
           }).toList();
 
+    // Filter out Brreg results that match already-saved companies
+    final savedOrgNrs = widget.companies
+        .map((c) => (c['org_nr'] as String? ?? '').trim())
+        .where((o) => o.isNotEmpty)
+        .toSet();
+    final brregFiltered = _brregResults
+        .where((b) => !savedOrgNrs.contains(b.orgNr))
+        .toList();
+
+    final hasLocal = localFiltered.isNotEmpty;
+    final hasBrreg = brregFiltered.isNotEmpty;
+
     return AlertDialog(
-      title: const Text('Velg kunde'),
+      title: const Text('Søk kunde'),
       contentPadding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
       content: SizedBox(
         width: 520,
-        height: 460,
+        height: 500,
         child: Column(
           children: [
-            TabBar(
-              controller: _tabCtrl,
-              tabs: const [
-                Tab(text: 'Eksisterende'),
-                Tab(text: 'Søk i Brreg'),
-              ],
+            TextField(
+              controller: _searchCtrl,
+              autofocus: true,
+              decoration: InputDecoration(
+                hintText: 'Firmanavn, by eller org.nr…',
+                prefixIcon: const Icon(Icons.search),
+                suffixIcon: _brregSearching
+                    ? const Padding(
+                        padding: EdgeInsets.all(12),
+                        child: SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        ),
+                      )
+                    : null,
+              ),
+              onChanged: _onSearch,
             ),
-            const SizedBox(height: 8),
-            Expanded(
-              child: TabBarView(
-                controller: _tabCtrl,
-                children: [
-                  // ── Tab 1: existing companies ──
-                  Column(
-                    children: [
-                      TextField(
-                        controller: _searchCtrl,
-                        autofocus: true,
-                        decoration: const InputDecoration(
-                          hintText: 'Søk på navn eller by…',
-                          prefixIcon: Icon(Icons.search),
+            const SizedBox(height: 12),
+            if (_brregCreating)
+              const Expanded(
+                child: Center(child: CircularProgressIndicator()),
+              )
+            else
+              Expanded(
+                child: (!hasLocal && !hasBrreg)
+                    ? Center(
+                        child: Text(
+                          _query.isEmpty
+                              ? 'Skriv for å søke blant lagrede kunder og i Brreg'
+                              : 'Ingen treff',
+                          style: TextStyle(color: cs.onSurfaceVariant),
                         ),
-                        onChanged: (v) => setState(() => _query = v),
-                      ),
-                      const SizedBox(height: 8),
-                      Expanded(
-                        child: filtered.isEmpty
-                            ? Center(
-                                child: Text('Ingen treff',
-                                    style: TextStyle(
-                                        color: cs.onSurfaceVariant)))
-                            : ListView.builder(
-                                itemCount: filtered.length,
-                                itemBuilder: (ctx, i) {
-                                  final c = filtered[i];
-                                  return ListTile(
-                                    dense: true,
-                                    leading: const Icon(
-                                        Icons.business_outlined,
-                                        size: 18),
-                                    title: Text(
-                                        c['name'] as String? ?? '',
-                                        style: const TextStyle(
-                                            fontWeight: FontWeight.w700)),
-                                    subtitle: (c['city'] as String?) !=
-                                            null
-                                        ? Text(c['city'] as String,
-                                            style: TextStyle(
-                                                fontSize: 12,
-                                                color:
-                                                    cs.onSurfaceVariant))
-                                        : null,
-                                    onTap: () =>
-                                        Navigator.pop(ctx, c),
-                                  );
-                                },
+                      )
+                    : ListView(
+                        children: [
+                          // ── Saved companies ──
+                          if (hasLocal) ...[
+                            Padding(
+                              padding: const EdgeInsets.only(
+                                  left: 8, top: 4, bottom: 4),
+                              child: Text(
+                                'Lagrede kunder',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w700,
+                                  color: cs.onSurfaceVariant,
+                                  letterSpacing: 0.5,
+                                ),
                               ),
-                      ),
-                    ],
-                  ),
-
-                  // ── Tab 2: Brreg search ──
-                  Column(
-                    children: [
-                      TextField(
-                        controller: _brregCtrl,
-                        decoration: InputDecoration(
-                          hintText: 'Firmanavn eller org.nr…',
-                          prefixIcon: const Icon(Icons.search),
-                          suffixIcon: _brregSearching
-                              ? const Padding(
-                                  padding: EdgeInsets.all(12),
-                                  child: SizedBox(
-                                    width: 18,
-                                    height: 18,
-                                    child: CircularProgressIndicator(
-                                        strokeWidth: 2),
-                                  ),
-                                )
-                              : null,
-                        ),
-                        onChanged: _onBrregSearch,
-                      ),
-                      const SizedBox(height: 8),
-                      if (_brregCreating)
-                        const Expanded(
-                          child: Center(
-                              child: CircularProgressIndicator()),
-                        )
-                      else
-                        Expanded(
-                          child: _brregResults.isEmpty
-                              ? Center(
-                                  child: Text(
-                                    _brregCtrl.text.isEmpty
-                                        ? 'Søk etter bedrift i Enhetsregisteret'
-                                        : 'Ingen treff',
+                            ),
+                            ...localFiltered.map((c) => ListTile(
+                                  dense: true,
+                                  leading: const Icon(
+                                      Icons.business_outlined,
+                                      size: 18),
+                                  title: Text(
+                                      c['name'] as String? ?? '',
+                                      style: const TextStyle(
+                                          fontWeight: FontWeight.w700)),
+                                  subtitle: Text(
+                                    [
+                                      c['city'] as String? ?? '',
+                                      c['org_nr'] as String? ?? '',
+                                    ].where((s) => s.isNotEmpty).join('  ·  '),
                                     style: TextStyle(
+                                        fontSize: 12,
                                         color: cs.onSurfaceVariant),
                                   ),
-                                )
-                              : ListView.builder(
-                                  itemCount: _brregResults.length,
-                                  itemBuilder: (ctx, i) {
-                                    final c = _brregResults[i];
-                                    return ListTile(
-                                      dense: true,
-                                      leading: const Icon(
-                                          Icons.language, size: 18),
-                                      title: Text(c.name,
-                                          style: const TextStyle(
-                                              fontWeight:
-                                                  FontWeight.w700)),
-                                      subtitle: Text(
-                                          '${c.orgNr}  ·  ${c.city ?? ''}'),
-                                      onTap: () => _selectBrreg(c),
-                                    );
-                                  },
+                                  onTap: () => Navigator.pop(context, c),
+                                )),
+                          ],
+
+                          // ── Brreg results ──
+                          if (hasBrreg) ...[
+                            if (hasLocal) const Divider(height: 16),
+                            Padding(
+                              padding: const EdgeInsets.only(
+                                  left: 8, top: 4, bottom: 4),
+                              child: Text(
+                                'Fra Enhetsregisteret (Brreg)',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w700,
+                                  color: cs.onSurfaceVariant,
+                                  letterSpacing: 0.5,
                                 ),
-                        ),
-                    ],
-                  ),
-                ],
+                              ),
+                            ),
+                            ...brregFiltered.map((c) => ListTile(
+                                  dense: true,
+                                  leading: Icon(Icons.language,
+                                      size: 18, color: cs.primary),
+                                  title: Text(c.name,
+                                      style: const TextStyle(
+                                          fontWeight: FontWeight.w700)),
+                                  subtitle: Text(
+                                      '${c.orgNr}  ·  ${c.city ?? ''}'),
+                                  trailing: Icon(Icons.add_circle_outline,
+                                      size: 18, color: cs.primary),
+                                  onTap: () => _selectBrreg(c),
+                                )),
+                          ],
+                        ],
+                      ),
               ),
-            ),
           ],
         ),
       ),
