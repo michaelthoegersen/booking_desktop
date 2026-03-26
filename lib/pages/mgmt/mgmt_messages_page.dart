@@ -954,10 +954,12 @@ class _GroupList extends StatelessWidget {
       builder: (context, snapshot) {
         final companyId = activeCompanyNotifier.value?.id;
         final allGroups = snapshot.data ?? [];
-        // Filter groups by active company
+        debugPrint('[GROUPS] companyId=$companyId, allGroups=${allGroups.length}, first=${allGroups.isNotEmpty ? allGroups.first : "empty"}');
+        // Strict filter: only show groups matching active company
         final groups = allGroups.where((g) {
           final gCompanyId = g['company_id'] as String?;
-          return gCompanyId == null || gCompanyId == companyId;
+          if (companyId == null) return true;
+          return gCompanyId == companyId;
         }).toList();
         if (groups.isEmpty) return const SizedBox.shrink();
 
@@ -1903,6 +1905,7 @@ class _GigThreadListState extends State<_GigThreadList> {
         final allMessages = snapshot.data ?? [];
 
         // Filter to only gigs belonging to active company
+        debugPrint('[GIG_CHAT] companyGigIds=${_companyGigIds.length}, allMessages=${allMessages.length}');
         final messages = allMessages
             .where((m) => _companyGigIds.contains(m['gig_id'] as String?))
             .toList();
