@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../services/email_service.dart';
 import '../../services/reiseregning_pdf_helper.dart';
@@ -701,22 +702,29 @@ class _MgmtExpensesPageState extends State<MgmtExpensesPage> {
                             child: Center(child: CircularProgressIndicator()),
                           );
                         },
-                        errorBuilder: (_, __, ___) => Container(
-                          height: 120,
-                          width: double.infinity,
-                          decoration: BoxDecoration(
-                            color: Colors.grey[200],
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          child: const Center(
-                            child: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(Icons.broken_image, color: Colors.grey, size: 32),
-                                SizedBox(height: 4),
-                                Text('Kunne ikke laste bilde',
-                                    style: TextStyle(color: Colors.grey)),
-                              ],
+                        errorBuilder: (_, __, ___) => InkWell(
+                          onTap: () => launchUrl(Uri.parse(receiptSignedUrl!)),
+                          child: Container(
+                            height: 120,
+                            width: double.infinity,
+                            decoration: BoxDecoration(
+                              color: Colors.grey[100],
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: Center(
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(
+                                    receiptPath!.contains('.pdf') ? Icons.picture_as_pdf : Icons.attach_file,
+                                    color: Colors.blue,
+                                    size: 36,
+                                  ),
+                                  const SizedBox(height: 8),
+                                  const Text('Åpne kvittering',
+                                      style: TextStyle(color: Colors.blue, fontWeight: FontWeight.w600)),
+                                ],
+                              ),
                             ),
                           ),
                         ),
