@@ -18,6 +18,7 @@ import '../pages/issues_page.dart';
 import '../pages/settings_page.dart';
 import '../pages/routes_admin_page.dart';
 import '../pages/chat_page.dart';
+import '../pages/mgmt/mgmt_messages_page.dart';
 import '../pages/archive_page.dart';
 import '../services/chat_service.dart';
 import '../pages/bus_requests_page.dart';
@@ -143,7 +144,7 @@ class _AppShellState extends State<AppShell> {
       case '/issues':
         return IssuesPage();
       case '/chat':
-        return ChatPage();
+        return const MgmtMessagesPage();
       case '/settings':
         return SettingsPage();
       case '/routes':

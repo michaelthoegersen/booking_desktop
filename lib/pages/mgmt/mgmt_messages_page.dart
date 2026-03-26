@@ -90,9 +90,9 @@ class _MgmtMessagesPageState extends State<MgmtMessagesPage>
                   labelColor: Colors.black,
                   unselectedLabelColor: Colors.black45,
                   indicatorColor: Colors.black,
-                  tabs: const [
-                    Tab(text: 'DM'),
-                    Tab(text: 'Aktivitet'),
+                  tabs: [
+                    const Tab(text: 'DM'),
+                    Tab(text: activeCompanyNotifier.value?.isCss == true ? 'Gigger' : 'Aktivitet'),
                   ],
                 ),
               ),
