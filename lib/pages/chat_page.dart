@@ -760,7 +760,6 @@ class _ThreadViewState extends State<_ThreadView> with MentionMixin {
                     itemBuilder: (context, i) {
                       final msg = messages[i];
                       final msgId = msg['id']?.toString() ?? '';
-                      final isAdmin = msg['is_admin'] == true;
                       final isMine = msg['user_id'] == myId;
                       final reactions = reactionsMap[msgId] ?? [];
 
@@ -777,7 +776,7 @@ class _ThreadViewState extends State<_ThreadView> with MentionMixin {
                         messageId: msgId,
                         message: msg['message'] as String,
                         senderName: msg['sender_name'] as String,
-                        isAdmin: isAdmin,
+                        isAdmin: isMine,
                         createdAt: msg['created_at'] as String?,
                         editedAt: msg['edited_at'] as String?,
                         replyMsg: replyMsg,

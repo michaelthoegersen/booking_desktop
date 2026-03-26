@@ -2015,7 +2015,12 @@ class _GigThreadTile extends StatelessWidget {
   String? _fmtTime(String? iso) {
     if (iso == null) return null;
     try {
-      return DateFormat('HH:mm').format(DateTime.parse(iso).toLocal());
+      final dt = DateTime.parse(iso).toLocal();
+      final now = DateTime.now();
+      if (dt.year == now.year && dt.month == now.month && dt.day == now.day) {
+        return DateFormat('HH:mm').format(dt);
+      }
+      return DateFormat('dd.MM.yyyy HH:mm').format(dt);
     } catch (_) {
       return null;
     }
@@ -2247,7 +2252,6 @@ class _GigChatViewState extends State<_GigChatView> with MentionMixin {
                     itemBuilder: (context, i) {
                       final msg = messages[i];
                       final msgId = msg['id']?.toString() ?? '';
-                      final isAdmin = msg['is_admin'] == true;
                       final isMine = msg['user_id'] == myId;
 
                       Map<String, dynamic>? replyMsg;
@@ -2263,7 +2267,7 @@ class _GigChatViewState extends State<_GigChatView> with MentionMixin {
                         messageId: msgId,
                         message: msg['message'] as String? ?? '',
                         senderName: msg['sender_name'] as String? ?? '',
-                        isAdmin: isAdmin,
+                        isAdmin: isMine,
                         createdAt: msg['created_at'] as String?,
                         editedAt: msg['edited_at'] as String?,
                         replyMsg: replyMsg,
@@ -2586,7 +2590,12 @@ class _Bubble extends StatelessWidget {
   String? _fmtTime(String? iso) {
     if (iso == null) return null;
     try {
-      return DateFormat('HH:mm').format(DateTime.parse(iso).toLocal());
+      final dt = DateTime.parse(iso).toLocal();
+      final now = DateTime.now();
+      if (dt.year == now.year && dt.month == now.month && dt.day == now.day) {
+        return DateFormat('HH:mm').format(dt);
+      }
+      return DateFormat('dd.MM.yyyy HH:mm').format(dt);
     } catch (_) {
       return null;
     }
