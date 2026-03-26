@@ -614,17 +614,21 @@ class _MgmtExpensesPageState extends State<MgmtExpensesPage> {
     final receiptPath = e['receipt_url'] as String?;
     final rejectionReason = e['rejection_reason'] as String? ?? '';
 
-    // Get URL for receipt
+    // Get URL for receipt (try signed URL first, fall back to public)
     String? receiptSignedUrl;
     if (receiptPath != null && receiptPath.isNotEmpty) {
       try {
-        receiptSignedUrl = _sb.storage
+        receiptSignedUrl = await _sb.storage
             .from('expense-receipts')
-            .getPublicUrl(receiptPath);
-        debugPrint('Receipt URL: $receiptSignedUrl');
-      } catch (err) {
-        debugPrint('Receipt URL error: $err');
+            .createSignedUrl(receiptPath, 3600);
+      } catch (_) {
+        try {
+          receiptSignedUrl = _sb.storage
+              .from('expense-receipts')
+              .getPublicUrl(receiptPath);
+        } catch (_) {}
       }
+      debugPrint('Receipt URL: $receiptSignedUrl (path: $receiptPath)');
     }
 
     if (!mounted) return;
