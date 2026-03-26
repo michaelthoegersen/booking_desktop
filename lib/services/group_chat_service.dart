@@ -9,13 +9,15 @@ class GroupChatService {
   /// Opprett ny gruppe + legg til creator og valgte medlemmer.
   static Future<String> createGroup(
     String name,
-    List<String> memberIds,
-  ) async {
+    List<String> memberIds, {
+    String? companyId,
+  }) async {
     final myId = _sb.auth.currentUser!.id;
 
     final res = await _sb.from('group_chats').insert({
       'name': name,
       'created_by': myId,
+      if (companyId != null) 'company_id': companyId,
     }).select('id').single();
 
     final groupId = res['id'] as String;

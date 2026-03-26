@@ -186,6 +186,9 @@ class _ChatThreadListState extends State<_ChatThreadList> {
 
   final Map<String, Map<String, dynamic>> _profileCache = {};
 
+  // Company member IDs for filtering DMs
+  Set<String> _companyMemberIds = {};
+
   // Read cursors for unread badges
   Map<String, DateTime> _dmCursors = {};
   Map<String, DateTime> _groupCursors = {};
@@ -194,14 +197,33 @@ class _ChatThreadListState extends State<_ChatThreadList> {
   @override
   void initState() {
     super.initState();
+    _loadCompanyMembers();
     _loadCursors();
+    activeCompanyNotifier.addListener(_loadCompanyMembers);
     mgmtUnreadNotifier.addListener(_loadCursors);
   }
 
   @override
   void dispose() {
     mgmtUnreadNotifier.removeListener(_loadCursors);
+    activeCompanyNotifier.removeListener(_loadCompanyMembers);
     super.dispose();
+  }
+
+  Future<void> _loadCompanyMembers() async {
+    final companyId = activeCompanyNotifier.value?.id;
+    if (companyId == null) return;
+    try {
+      final rows = await _sb
+          .from('company_members')
+          .select('user_id')
+          .eq('company_id', companyId);
+      if (mounted) {
+        setState(() {
+          _companyMemberIds = (rows as List).map((r) => r['user_id'] as String).toSet();
+        });
+      }
+    } catch (_) {}
   }
 
   Future<void> _loadCursors() async {
@@ -522,6 +544,7 @@ class _ChatThreadListState extends State<_ChatThreadList> {
                         final groupId = await GroupChatService.createGroup(
                           nameCtrl.text.trim(),
                           selected.toList(),
+                          companyId: activeCompanyNotifier.value?.id,
                         );
                         if (ctx.mounted) Navigator.pop(ctx);
                         widget.onSelect('group:$groupId');
@@ -627,6 +650,7 @@ class _ChatThreadListState extends State<_ChatThreadList> {
                   onSelect: _handleSelect,
                   onDeleteConversation:
                       isAdmin ? confirmDeleteDm : null,
+                  companyMemberIds: _companyMemberIds,
                   dmCursors: _dmCursors,
                 ),
 
@@ -658,6 +682,7 @@ class _DmList extends StatelessWidget {
   final void Function(String) onSelect;
   final void Function(String peerId)? onDeleteConversation;
   final Map<String, DateTime> dmCursors;
+  final Set<String> companyMemberIds;
 
   const _DmList({
     required this.myId,
@@ -666,6 +691,7 @@ class _DmList extends StatelessWidget {
     required this.onSelect,
     this.onDeleteConversation,
     this.dmCursors = const {},
+    this.companyMemberIds = const {},
   });
 
   @override
@@ -681,6 +707,8 @@ class _DmList extends StatelessWidget {
           final senderId = msg['sender_id'] as String? ?? '';
           final receiverId = msg['receiver_id'] as String? ?? '';
           final peerId = senderId == myId ? receiverId : senderId;
+          // Only show DMs with members of the active company
+          if (companyMemberIds.isNotEmpty && !companyMemberIds.contains(peerId)) continue;
           grouped.putIfAbsent(peerId, () => []).add(msg);
         }
 
@@ -924,7 +952,13 @@ class _GroupList extends StatelessWidget {
     return StreamBuilder<List<Map<String, dynamic>>>(
       stream: GroupChatService.streamMyGroups(),
       builder: (context, snapshot) {
-        final groups = snapshot.data ?? [];
+        final companyId = activeCompanyNotifier.value?.id;
+        final allGroups = snapshot.data ?? [];
+        // Filter groups by active company
+        final groups = allGroups.where((g) {
+          final gCompanyId = g['company_id'] as String?;
+          return gCompanyId == null || gCompanyId == companyId;
+        }).toList();
         if (groups.isEmpty) return const SizedBox.shrink();
 
         return Column(
