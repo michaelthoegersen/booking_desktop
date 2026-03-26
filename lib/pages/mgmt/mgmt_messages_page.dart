@@ -1813,7 +1813,7 @@ class _ChatInputState extends State<_ChatInput> {
 // Gig thread list (existing functionality, unchanged)
 // ===========================================================================
 
-class _GigThreadList extends StatelessWidget {
+class _GigThreadList extends StatefulWidget {
   final String? selectedGigId;
   final void Function(String gigId) onSelect;
 
@@ -1821,19 +1821,58 @@ class _GigThreadList extends StatelessWidget {
       {required this.selectedGigId, required this.onSelect});
 
   @override
+  State<_GigThreadList> createState() => _GigThreadListState();
+}
+
+class _GigThreadListState extends State<_GigThreadList> {
+  final _sb = Supabase.instance.client;
+  Set<String> _companyGigIds = {};
+
+  @override
+  void initState() {
+    super.initState();
+    _loadCompanyGigs();
+    activeCompanyNotifier.addListener(_loadCompanyGigs);
+  }
+
+  @override
+  void dispose() {
+    activeCompanyNotifier.removeListener(_loadCompanyGigs);
+    super.dispose();
+  }
+
+  Future<void> _loadCompanyGigs() async {
+    final companyId = activeCompanyNotifier.value?.id;
+    if (companyId == null) return;
+    try {
+      final gigs = await _sb.from('gigs').select('id').eq('company_id', companyId);
+      if (mounted) {
+        setState(() {
+          _companyGigIds = (gigs as List).map((g) => g['id'] as String).toSet();
+        });
+      }
+    } catch (_) {}
+  }
+
+  @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
-    final sb = Supabase.instance.client;
 
     return StreamBuilder<List<Map<String, dynamic>>>(
-      stream: sb
+      stream: _sb
           .from('gig_messages')
           .stream(primaryKey: ['id']).order('created_at'),
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Center(child: CircularProgressIndicator());
         }
-        final messages = snapshot.data ?? [];
+        final allMessages = snapshot.data ?? [];
+
+        // Filter to only gigs belonging to active company
+        final messages = allMessages
+            .where((m) => _companyGigIds.contains(m['gig_id'] as String?))
+            .toList();
+
         if (messages.isEmpty) {
           return const Center(
             child: Padding(
@@ -1865,7 +1904,7 @@ class _GigThreadList extends StatelessWidget {
             final gigId = threads[i].key;
             final msgs = threads[i].value;
             final last = msgs.last;
-            final isSelected = selectedGigId == gigId;
+            final isSelected = widget.selectedGigId == gigId;
             final unread = msgs
                 .where((r) =>
                     r['is_admin'] != true && r['read_by_admin'] != true)
@@ -1879,7 +1918,7 @@ class _GigThreadList extends StatelessWidget {
               messageCount: msgs.length,
               unreadCount: unread,
               isSelected: isSelected,
-              onTap: () => onSelect(gigId),
+              onTap: () => widget.onSelect(gigId),
             );
           },
         );
