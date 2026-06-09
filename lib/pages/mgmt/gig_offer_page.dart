@@ -14,6 +14,7 @@ import '../../services/polyline_decoder.dart';
 import '../../services/toll_service.dart';
 import '../../services/tripletex_service.dart';
 import '../../state/active_company.dart';
+import '../../state/role_labels.dart';
 import '../../state/settings_store.dart';
 import '../../widgets/new_company_dialog.dart';
 
@@ -24,8 +25,18 @@ import '../../widgets/new_company_dialog.dart';
 class GigOfferPage extends StatefulWidget {
   final String? offerId;
   final String? gigId;
+  /// When true (set via `?approve=1` query param), the page auto-triggers
+  /// the approve+sign flow once the offer + agreement have loaded. Used so
+  /// the "Godkjenn" button on the offer list card doesn't need to duplicate
+  /// the approval logic.
+  final bool autoApprove;
 
-  const GigOfferPage({super.key, this.offerId, this.gigId});
+  const GigOfferPage({
+    super.key,
+    this.offerId,
+    this.gigId,
+    this.autoApprove = false,
+  });
 
   @override
   State<GigOfferPage> createState() => _GigOfferPageState();
@@ -56,9 +67,23 @@ class _GigOfferPageState extends State<GigOfferPage> {
   final _addressCtrl = TextEditingController();
   bool _invoiceOnEhf = false;
 
+  // Alternative invoice recipient (overrides customer fields when enabled)
+  bool _altInvoiceEnabled = false;
+  final _altInvFirmaCtrl = TextEditingController();
+  final _altInvNameCtrl = TextEditingController();
+  final _altInvEmailCtrl = TextEditingController();
+  final _altInvPhoneCtrl = TextEditingController();
+  final _altInvOrgNrCtrl = TextEditingController();
+  final _altInvAddressCtrl = TextEditingController();
+  bool _altInvoiceOnEhf = false;
+
   // ── Multi-date entries ───────────────────────────────────────────────────
   List<_DateEntry> _dateEntries = [_DateEntry()];
   Set<String> _originalGigIds = {}; // track gigs loaded at start for deletion
+
+  // Selected index in the Tidsplan card — switches which date's times are
+  // shown/edited.
+  int _scheduleSelectedIdx = 0;
 
   // ── Status ──────────────────────────────────────────────────────────────
   String _gigStatus = 'inquiry';
@@ -111,6 +136,7 @@ class _GigOfferPageState extends State<GigOfferPage> {
 
   // ── Shows ─────────────────────────────────────────────────────────────────
   List<_OfferShow> _shows = [];
+  List<_OfferExtra> _extras = [];
   List<Map<String, dynamic>> _showTypes = [];
 
   // ── Rehearsals ──────────────────────────────────────────────────────────
@@ -154,7 +180,15 @@ class _GigOfferPageState extends State<GigOfferPage> {
     super.initState();
     _offerId = widget.offerId;
     _gigId = widget.gigId;
-    _load();
+    _load().then((_) {
+      if (!mounted) return;
+      if (widget.autoApprove &&
+          _agreement != null &&
+          _agreement!['status'] == 'accepted' &&
+          !_approvingAgreement) {
+        _approveAgreement();
+      }
+    });
   }
 
   @override
@@ -165,7 +199,14 @@ class _GigOfferPageState extends State<GigOfferPage> {
     _phoneCtrl.dispose();
     _orgNrCtrl.dispose();
     _addressCtrl.dispose();
+    _altInvFirmaCtrl.dispose();
+    _altInvNameCtrl.dispose();
+    _altInvEmailCtrl.dispose();
+    _altInvPhoneCtrl.dispose();
+    _altInvOrgNrCtrl.dispose();
+    _altInvAddressCtrl.dispose();
     for (final e in _dateEntries) { e.dispose(); }
+    for (final e in _extras) { e.dispose(); }
     _responsibleCtrl.dispose();
     _meetingTimeCtrl.dispose();
     _getInTimeCtrl.dispose();
@@ -292,6 +333,16 @@ class _GigOfferPageState extends State<GigOfferPage> {
             .map((r) => _OfferShow.fromMap(r as Map<String, dynamic>))
             .toList();
 
+        // Load extra cost line items (Ekstrakostnader)
+        final extrasJson = offer['extras'];
+        if (extrasJson is List) {
+          for (final e in _extras) { e.dispose(); }
+          _extras = extrasJson
+              .whereType<Map>()
+              .map((m) => _OfferExtra.fromMap(Map<String, dynamic>.from(m)))
+              .toList();
+        }
+
         // Load multi-date entries from junction table
         final junctionRows = await _sb
             .from('gig_offer_gigs')
@@ -325,21 +376,36 @@ class _GigOfferPageState extends State<GigOfferPage> {
               entry.cityCtrl.text = gig['city'] ?? '';
               entry.countryCtrl.text = gig['country'] ?? 'NO';
               entry.isRehearsal = gig['type'] == 'rehearsal';
+              entry.meetingTimeCtrl.text = gig['meeting_time'] ?? '';
+              entry.getInTimeCtrl.text = gig['get_in_time'] ?? '';
+              entry.rehearsalTimeCtrl.text = gig['rehearsal_time'] ?? '';
+              entry.performanceTimeCtrl.text = gig['performance_time'] ?? '';
+              entry.getOutTimeCtrl.text = gig['get_out_time'] ?? '';
+              entry.meetingNotesCtrl.text = gig['meeting_notes'] ?? '';
 
-              // Load per-date show selection from gig_shows
+              // Load per-date show selection from gig_shows. Match on
+              // show_type_id when present; fall back to show_name so
+              // custom shows with null type_id still show as checked.
               if (_shows.isNotEmpty) {
                 final gigShows = await _sb
                     .from('gig_shows')
-                    .select('show_type_id')
+                    .select('show_type_id, show_name')
                     .eq('gig_id', jGigId);
-                final gigShowTypeIds = (gigShows as List)
-                    .map((r) => r['show_type_id'] as String?)
-                    .where((id) => id != null)
-                    .toSet();
-                // Map to indices in _shows
+                final gigShowTypeIds = <String>{};
+                final gigShowNames = <String>{};
+                for (final r in (gigShows as List)) {
+                  final tid = r['show_type_id'] as String?;
+                  final nm = (r['show_name'] as String? ?? '').trim();
+                  if (tid != null) gigShowTypeIds.add(tid);
+                  if (nm.isNotEmpty) gigShowNames.add(nm);
+                }
                 entry.selectedShowIndices = {};
                 for (int si = 0; si < _shows.length; si++) {
-                  if (gigShowTypeIds.contains(_shows[si].showTypeId)) {
+                  final s = _shows[si];
+                  final byType = s.showTypeId != null &&
+                      gigShowTypeIds.contains(s.showTypeId);
+                  final byName = gigShowNames.contains(s.showName.trim());
+                  if (byType || byName) {
                     entry.selectedShowIndices!.add(si);
                   }
                 }
@@ -390,6 +456,12 @@ class _GigOfferPageState extends State<GigOfferPage> {
             _dateEntries[0].venueCtrl.text = gig['venue_name'] ?? '';
             _dateEntries[0].cityCtrl.text = gig['city'] ?? '';
             _dateEntries[0].countryCtrl.text = gig['country'] ?? 'NO';
+            _dateEntries[0].meetingTimeCtrl.text = gig['meeting_time'] ?? '';
+            _dateEntries[0].getInTimeCtrl.text = gig['get_in_time'] ?? '';
+            _dateEntries[0].rehearsalTimeCtrl.text = gig['rehearsal_time'] ?? '';
+            _dateEntries[0].performanceTimeCtrl.text = gig['performance_time'] ?? '';
+            _dateEntries[0].getOutTimeCtrl.text = gig['get_out_time'] ?? '';
+            _dateEntries[0].meetingNotesCtrl.text = gig['meeting_notes'] ?? '';
           }
 
           // Load gig shows if we don't have offer shows yet
@@ -410,6 +482,8 @@ class _GigOfferPageState extends State<GigOfferPage> {
                 selected: true,
                 sortOrder: (m['sort_order'] as num?)?.toInt() ?? 0,
                 ekstrainnslag: m['ekstrainnslag'] as String? ?? '',
+                price: (m['price'] as num?)?.toDouble() ?? 0,
+                priceIsCustom: m['price_is_custom'] == true,
               );
             }).toList();
           }
@@ -435,6 +509,12 @@ class _GigOfferPageState extends State<GigOfferPage> {
           _dateEntries[0].venueCtrl.text = gig['venue_name'] ?? '';
           _dateEntries[0].cityCtrl.text = gig['city'] ?? '';
           _dateEntries[0].countryCtrl.text = gig['country'] ?? 'NO';
+          _dateEntries[0].meetingTimeCtrl.text = gig['meeting_time'] ?? '';
+          _dateEntries[0].getInTimeCtrl.text = gig['get_in_time'] ?? '';
+          _dateEntries[0].rehearsalTimeCtrl.text = gig['rehearsal_time'] ?? '';
+          _dateEntries[0].performanceTimeCtrl.text = gig['performance_time'] ?? '';
+          _dateEntries[0].getOutTimeCtrl.text = gig['get_out_time'] ?? '';
+          _dateEntries[0].meetingNotesCtrl.text = gig['meeting_notes'] ?? '';
         }
 
         // Load gig shows
@@ -455,6 +535,8 @@ class _GigOfferPageState extends State<GigOfferPage> {
               selected: true,
               sortOrder: (m['sort_order'] as num?)?.toInt() ?? 0,
               ekstrainnslag: m['ekstrainnslag'] as String? ?? '',
+              price: (m['price'] as num?)?.toDouble() ?? 0,
+              priceIsCustom: m['price_is_custom'] == true,
             );
           }).toList();
         }
@@ -477,17 +559,33 @@ class _GigOfferPageState extends State<GigOfferPage> {
 
       _recalc();
 
-      // Load agreement status for the first gig
-      final firstGigId = _dateEntries.first.gigId;
-      if (firstGigId != null) {
-        final agr = await _sb
+      // Load agreement status across all gigs in this offer (tokens may sit
+      // on any sibling depending on which gig was canonical at send time).
+      // Prefer the most recent approved/accepted token over a newer pending
+      // one — re-sending creates a fresh pending token that would otherwise
+      // mask an existing customer acceptance.
+      final gigIds = _dateEntries
+          .map((e) => e.gigId)
+          .whereType<String>()
+          .toList();
+      if (gigIds.isNotEmpty) {
+        final all = await _sb
             .from('agreement_tokens')
             .select()
-            .eq('gig_id', firstGigId)
-            .order('created_at', ascending: false)
-            .limit(1)
-            .maybeSingle();
-        _agreement = agr;
+            .inFilter('gig_id', gigIds)
+            .order('created_at', ascending: false);
+        final list = List<Map<String, dynamic>>.from(all as List);
+        Map<String, dynamic>? pick;
+        for (final r in list) {
+          if (r['status'] == 'approved') { pick = r; break; }
+        }
+        if (pick == null) {
+          for (final r in list) {
+            if (r['status'] == 'accepted') { pick = r; break; }
+          }
+        }
+        pick ??= list.isNotEmpty ? list.first : null;
+        _agreement = pick;
       }
 
     } catch (e) {
@@ -504,6 +602,14 @@ class _GigOfferPageState extends State<GigOfferPage> {
     _orgNrCtrl.text = gig['customer_org_nr'] ?? '';
     _addressCtrl.text = gig['customer_address'] ?? '';
     _invoiceOnEhf = gig['invoice_on_ehf'] == true;
+    _altInvoiceEnabled = gig['alt_invoice_enabled'] == true;
+    _altInvFirmaCtrl.text = gig['alt_invoice_firma'] ?? '';
+    _altInvNameCtrl.text = gig['alt_invoice_name'] ?? '';
+    _altInvEmailCtrl.text = gig['alt_invoice_email'] ?? '';
+    _altInvPhoneCtrl.text = gig['alt_invoice_phone'] ?? '';
+    _altInvOrgNrCtrl.text = gig['alt_invoice_org_nr'] ?? '';
+    _altInvAddressCtrl.text = gig['alt_invoice_address'] ?? '';
+    _altInvoiceOnEhf = gig['alt_invoice_on_ehf'] == true;
     // venue/city/country/dateFrom/dateTo are now per _DateEntry
     _gigStatus = gig['status'] as String? ?? 'inquiry';
     _responsibleCtrl.text = gig['responsible'] ?? '';
@@ -742,19 +848,37 @@ class _GigOfferPageState extends State<GigOfferPage> {
         .toList();
   }
 
-  /// Calculate performer fees for a list of shows
+  /// Calculate performer fees for a list of shows.
+  ///
+  /// Shows with `priceIsCustom = true` use their stored price as-is.
+  /// All other shows fall back to the CREO formula:
+  /// - main show (most performers) : performers × creoFeeMinimum
+  /// - extra shows                 : performers × extraShowFee
   double _calcPerformerFees(List<_OfferShow> shows) {
     if (shows.isEmpty) return 0;
-    int mainShowPerf = 0;
-    int totalApp = 0;
-    for (final s in shows) {
-      final perf = s.drummers + s.dancers + s.others;
-      if (perf > mainShowPerf) mainShowPerf = perf;
-      totalApp += perf;
+
+    // Find main show (highest performer count). Ties → first index.
+    int mainIdx = 0;
+    int mainPerf = 0;
+    for (int i = 0; i < shows.length; i++) {
+      final perf = shows[i].drummers + shows[i].dancers + shows[i].others;
+      if (perf > mainPerf) {
+        mainPerf = perf;
+        mainIdx = i;
+      }
     }
-    final mainFees = mainShowPerf * _creoFeeMinimum;
-    final extraFees = (totalApp - mainShowPerf) * _extraShowFee;
-    return mainFees + extraFees;
+
+    double total = 0;
+    for (int i = 0; i < shows.length; i++) {
+      final s = shows[i];
+      if (s.priceIsCustom) {
+        total += s.price;
+        continue;
+      }
+      final perf = s.drummers + s.dancers + s.others;
+      total += perf * (i == mainIdx ? _creoFeeMinimum : _extraShowFee);
+    }
+    return total;
   }
 
   void _recalc() {
@@ -772,12 +896,19 @@ class _GigOfferPageState extends State<GigOfferPage> {
         if (perf > mainPerf) mainPerf = perf;
         dateApp += perf;
       }
+      // Skip rehearsal dates from performer fees and appearance count —
+      // those are priced via the separate "Prøver" parameters.
+      if (_dateEntries[d].isRehearsal) {
+        if (mainPerf > _totalPerformers) _totalPerformers = mainPerf;
+        continue;
+      }
       _performerFees += _calcPerformerFees(dateShows);
       _totalAppearances += dateApp;
       if (mainPerf > _totalPerformers) _totalPerformers = mainPerf;
     }
 
-    _inearTotal = _inearIncluded ? _inearPrice * _dateEntries.length : 0;
+    // In-ear is a one-off cost — counted once regardless of date count.
+    _inearTotal = _inearIncluded ? _inearPrice : 0;
 
     // Privatbil sub-values (for display only)
     _transportTotal = _transportKm * _transportPricePerKm;
@@ -789,15 +920,24 @@ class _GigOfferPageState extends State<GigOfferPage> {
     _rehearsalTotal = _rehearsalPerformers * _rehearsalCount * _rehearsalPricePerPerson;
 
     // Subtotal before markup
-    // Transport = gig transport × dates + rehearsal transport
-    final totalTransport = (_transportPrice * _dateEntries.length) + _rehearsalTransport;
+    // Transport = gig transport × performance dates only + rehearsal transport.
+    // Rehearsal dates use the separate rehearsal_transport parameter.
+    final numPerformanceDates = _dateEntries
+        .where((e) => !e.isRehearsal)
+        .length;
+    final totalTransport =
+        (_transportPrice * numPerformanceDates) + _rehearsalTransport;
     final subtotalBeforeMarkup = _performerFees + _inearTotal +
         totalTransport + _rehearsalTotal;
 
     // Markup
+    // Default: markup on everything except in-ear
+    // _markupOnAll checked: markup only on performer fees (shows + rehearsals)
     _completePct = _markupPct / 2;
     _bookingPct = _markupPct / 2;
-    final markupBase = _markupOnAll ? subtotalBeforeMarkup : _performerFees;
+    final markupBase = _markupOnAll
+        ? (_performerFees + _rehearsalTotal)  // only show/rehearsal fees
+        : (_performerFees + totalTransport + _rehearsalTotal);  // everything except in-ear
     _completeKonto = markupBase * _completePct;
     _bookingHonorar = markupBase * _bookingPct;
   }
@@ -849,14 +989,24 @@ class _GigOfferPageState extends State<GigOfferPage> {
           'customer_org_nr': n(_orgNrCtrl.text),
           'customer_address': n(_addressCtrl.text),
           'invoice_on_ehf': _invoiceOnEhf,
+          'alt_invoice_enabled': _altInvoiceEnabled,
+          'alt_invoice_firma': n(_altInvFirmaCtrl.text),
+          'alt_invoice_name': n(_altInvNameCtrl.text),
+          'alt_invoice_email': n(_altInvEmailCtrl.text),
+          'alt_invoice_phone': n(_altInvPhoneCtrl.text),
+          'alt_invoice_org_nr': n(_altInvOrgNrCtrl.text),
+          'alt_invoice_address': n(_altInvAddressCtrl.text),
+          'alt_invoice_on_ehf': _altInvoiceOnEhf,
           'responsible': n(_responsibleCtrl.text),
           'show_desc': n(_showDescCtrl.text),
-          'meeting_time': n(_meetingTimeCtrl.text),
-          'get_in_time': n(_getInTimeCtrl.text),
-          'rehearsal_time': n(_rehearsalTimeCtrl.text),
-          'performance_time': n(_performanceTimeCtrl.text),
-          'get_out_time': n(_getOutTimeCtrl.text),
-          'meeting_notes': n(_meetingNotesCtrl.text),
+          // Per-date times — read from the entry's own controllers so each
+          // gig keeps its own Tidsplan rather than sharing one set globally.
+          'meeting_time': n(entry.meetingTimeCtrl.text),
+          'get_in_time': n(entry.getInTimeCtrl.text),
+          'rehearsal_time': n(entry.rehearsalTimeCtrl.text),
+          'performance_time': n(entry.performanceTimeCtrl.text),
+          'get_out_time': n(entry.getOutTimeCtrl.text),
+          'meeting_notes': n(entry.meetingNotesCtrl.text),
           'stage_shape': n(_stageShapeCtrl.text),
           'stage_size': n(_stageSizeCtrl.text),
           'stage_notes': n(_stageNotesCtrl.text),
@@ -893,9 +1043,12 @@ class _GigOfferPageState extends State<GigOfferPage> {
         return dateShows.asMap().entries.map((e) {
           final s = e.value;
           final showPerf = s.drummers + s.dancers + s.others;
-          final showPrice = e.key == dateMainIdx
-              ? showPerf * _creoFeeMinimum
-              : showPerf * _extraShowFee;
+          // Custom price wins; otherwise fall back to CREO formula.
+          final showPrice = s.priceIsCustom
+              ? s.price
+              : (e.key == dateMainIdx
+                  ? showPerf * _creoFeeMinimum
+                  : showPerf * _extraShowFee);
           return {
             'gig_id': gigId,
             'show_type_id': s.showTypeId,
@@ -904,6 +1057,7 @@ class _GigOfferPageState extends State<GigOfferPage> {
             'dancers': s.dancers,
             'others': s.others,
             'price': showPrice.round(),
+            'price_is_custom': s.priceIsCustom,
             'sort_order': e.key,
             'ekstrainnslag': s.ekstrainnslag.isNotEmpty ? s.ekstrainnslag : null,
           };
@@ -943,32 +1097,69 @@ class _GigOfferPageState extends State<GigOfferPage> {
         activeGigIds.add(entry.gigId!);
 
         // ── Sync gig_shows per gig — preserve existing IDs to avoid
-        // breaking gig_lineup.show_id references ────────────────────
+        // breaking gig_lineup.show_id references. Match on show_type_id
+        // (the actual show identity) rather than sort_order, otherwise
+        // adding a second show overwrites the first when their positions
+        // shift.
+        // ── Sync gig_shows per gig — preserve existing IDs to avoid
+        // breaking gig_lineup.show_id references. Match on show_type_id
+        // → show_name → sort_order in that priority. Each existing row id
+        // can only be reused once.
         final existingShows = await _sb
             .from('gig_shows')
-            .select('id, sort_order')
+            .select('id, show_type_id, show_name, sort_order')
             .eq('gig_id', entry.gigId!)
             .order('sort_order');
-        final existingShowIds = <int, String>{};
+        final existingByType = <String, String>{};
+        final existingByName = <String, String>{};
+        final existingByOrder = <int, String>{};
         for (final s in (existingShows as List)) {
-          existingShowIds[s['sort_order'] as int] = s['id'] as String;
+          final typeId = s['show_type_id'] as String?;
+          final name = (s['show_name'] as String? ?? '').trim();
+          if (typeId != null) existingByType[typeId] = s['id'] as String;
+          if (name.isNotEmpty) existingByName[name] = s['id'] as String;
+          existingByOrder[s['sort_order'] as int? ?? -1] = s['id'] as String;
         }
 
-        final dateShows = _showsForDate(i);
         final newRows = gigShowRows(entry.gigId!, i);
+        final usedIds = <String>{};
 
         for (final row in newRows) {
-          final sortOrder = row['sort_order'] as int;
-          final existingId = existingShowIds.remove(sortOrder);
+          final typeId = row['show_type_id'] as String?;
+          final name = (row['show_name'] as String? ?? '').trim();
+          String? existingId;
+          if (typeId != null && existingByType.containsKey(typeId)) {
+            final candidate = existingByType[typeId];
+            if (candidate != null && !usedIds.contains(candidate)) {
+              existingId = candidate;
+            }
+          }
+          if (existingId == null &&
+              name.isNotEmpty &&
+              existingByName.containsKey(name)) {
+            final candidate = existingByName[name];
+            if (candidate != null && !usedIds.contains(candidate)) {
+              existingId = candidate;
+            }
+          }
+          if (existingId == null) {
+            final sortOrder = row['sort_order'] as int;
+            final candidate = existingByOrder[sortOrder];
+            if (candidate != null && !usedIds.contains(candidate)) {
+              existingId = candidate;
+            }
+          }
           if (existingId != null) {
-            // Update existing — preserves ID so lineup.show_id stays valid
+            usedIds.add(existingId);
             await _sb.from('gig_shows').update(row).eq('id', existingId);
           } else {
             await _sb.from('gig_shows').insert(row);
           }
         }
-        // Delete shows that were removed (no lineup should reference these)
-        for (final orphanId in existingShowIds.values) {
+        final allExistingIds = (existingShows as List)
+            .map((s) => s['id'] as String)
+            .toSet();
+        for (final orphanId in allExistingIds.difference(usedIds)) {
           await _sb.from('gig_shows').delete().eq('id', orphanId);
         }
       }
@@ -986,6 +1177,14 @@ class _GigOfferPageState extends State<GigOfferPage> {
         'customer_phone': n(_phoneCtrl.text),
         'customer_org_nr': n(_orgNrCtrl.text),
         'customer_address': n(_addressCtrl.text),
+        'alt_invoice_enabled': _altInvoiceEnabled,
+        'alt_invoice_firma': n(_altInvFirmaCtrl.text),
+        'alt_invoice_name': n(_altInvNameCtrl.text),
+        'alt_invoice_email': n(_altInvEmailCtrl.text),
+        'alt_invoice_phone': n(_altInvPhoneCtrl.text),
+        'alt_invoice_org_nr': n(_altInvOrgNrCtrl.text),
+        'alt_invoice_address': n(_altInvAddressCtrl.text),
+        'alt_invoice_on_ehf': _altInvoiceOnEhf,
         'creo_fee_minimum': _creoFeeMinimum,
         'extra_show_fee': _extraShowFee,
         'markup_pct': _markupPct,
@@ -999,6 +1198,10 @@ class _GigOfferPageState extends State<GigOfferPage> {
         'rehearsal_price_per_person': _rehearsalPricePerPerson > 0 ? _rehearsalPricePerPerson : null,
         'rehearsal_transport': _rehearsalTransport > 0 ? _rehearsalTransport : null,
         'markup_on_all': _markupOnAll,
+        'extras': _extras
+            .where((e) => e.name.trim().isNotEmpty)
+            .map((e) => e.toMap())
+            .toList(),
         'calc_overrides': _overrides.isNotEmpty ? _overrides : null,
         'final_calc': {
           'lines': _pdfCalcLines
@@ -1014,10 +1217,37 @@ class _GigOfferPageState extends State<GigOfferPage> {
 
       // Set invoiced_at when status changes to 'invoiced' for the first time
       if (_gigStatus == 'invoiced' && _invoicedAt == null) {
+        // Ask for due days
+        final dueDaysCtrl = TextEditingController(text: '30');
+        final dueDays = await showDialog<int>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            title: const Text('Forfall på vår faktura'),
+            content: TextField(
+              controller: dueDaysCtrl,
+              autofocus: true,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(
+                labelText: 'Antall dager forfall',
+                suffixText: 'dager',
+              ),
+              onSubmitted: (v) => Navigator.pop(ctx, int.tryParse(v)),
+            ),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Avbryt')),
+              FilledButton(onPressed: () => Navigator.pop(ctx, int.tryParse(dueDaysCtrl.text)), child: const Text('OK')),
+            ],
+          ),
+        );
+        dueDaysCtrl.dispose();
+        if (dueDays == null) {
+          if (mounted) setState(() => _saving = false);
+          return;
+        }
         final ts = DateTime.now().toUtc().toIso8601String();
         offerData['invoiced_at'] = ts;
+        offerData['invoice_due_days'] = dueDays;
         _invoicedAt = DateTime.now().toUtc();
-        debugPrint('>>> invoiced_at SET to $ts for offer $_offerId');
       }
 
       if (_offerId != null) {
@@ -1168,32 +1398,35 @@ class _GigOfferPageState extends State<GigOfferPage> {
                 decoration: const InputDecoration(labelText: 'Navn'),
               ),
               const SizedBox(height: 12),
-              Row(
-                children: [
-                  Expanded(
-                    child: TextField(
-                      controller: drummersCtrl,
-                      keyboardType: TextInputType.number,
-                      decoration: const InputDecoration(labelText: 'Trommeslagere'),
+              ValueListenableBuilder<RoleLabels>(
+                valueListenable: roleLabelsNotifier,
+                builder: (_, labels, __) => Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: drummersCtrl,
+                        keyboardType: TextInputType.number,
+                        decoration: InputDecoration(labelText: labels.role1),
+                      ),
                     ),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: TextField(
-                      controller: dancersCtrl,
-                      keyboardType: TextInputType.number,
-                      decoration: const InputDecoration(labelText: 'Dansere'),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: TextField(
+                        controller: dancersCtrl,
+                        keyboardType: TextInputType.number,
+                        decoration: InputDecoration(labelText: labels.role2),
+                      ),
                     ),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: TextField(
-                      controller: othersCtrl,
-                      keyboardType: TextInputType.number,
-                      decoration: const InputDecoration(labelText: 'Andre'),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: TextField(
+                        controller: othersCtrl,
+                        keyboardType: TextInputType.number,
+                        decoration: InputDecoration(labelText: labels.role3),
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
               const SizedBox(height: 12),
               TextField(
@@ -1383,6 +1616,8 @@ class _GigOfferPageState extends State<GigOfferPage> {
                           _buildRehearsalsCard(),
                         ],
                         const SizedBox(height: 20),
+                        _buildExtrasCard(),
+                        const SizedBox(height: 20),
                         _buildPriceParamsCard(),
                         const SizedBox(height: 20),
                         _buildScheduleCard(),
@@ -1558,7 +1793,10 @@ class _GigOfferPageState extends State<GigOfferPage> {
                         child: FilterChip(
                           label: const Text('Prøve', style: TextStyle(fontSize: 11)),
                           selected: entry.isRehearsal,
-                          onSelected: (v) => setState(() => entry.isRehearsal = v),
+                          onSelected: (v) => setState(() {
+                            entry.isRehearsal = v;
+                            _recalc();
+                          }),
                           visualDensity: VisualDensity.compact,
                         ),
                       ),
@@ -1711,6 +1949,51 @@ class _GigOfferPageState extends State<GigOfferPage> {
             contentPadding: EdgeInsets.zero,
             dense: true,
           ),
+          // Alternativ fakturamottaker: kunde og fakturamottaker er ulike
+          SwitchListTile(
+            title: const Text('Alternativ fakturamottaker',
+                style: TextStyle(fontSize: 13)),
+            subtitle: const Text(
+              'Send faktura til en annen enn kunden',
+              style: TextStyle(fontSize: 11),
+            ),
+            value: _altInvoiceEnabled,
+            onChanged: (v) => setState(() => _altInvoiceEnabled = v),
+            contentPadding: EdgeInsets.zero,
+            dense: true,
+          ),
+          AnimatedSize(
+            duration: const Duration(milliseconds: 180),
+            curve: Curves.easeOut,
+            child: _altInvoiceEnabled
+                ? Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        _row2(_tf(_altInvFirmaCtrl, 'Faktura: Firma'),
+                            _tf(_altInvOrgNrCtrl, 'Faktura: Org.nr')),
+                        const SizedBox(height: 12),
+                        _row2(_tf(_altInvNameCtrl, 'Faktura: Kontaktperson'),
+                            _tf(_altInvPhoneCtrl, 'Faktura: Telefon')),
+                        const SizedBox(height: 12),
+                        _row2(_tf(_altInvEmailCtrl, 'Faktura: E-post'),
+                            _tf(_altInvAddressCtrl, 'Faktura: Adresse')),
+                        const SizedBox(height: 4),
+                        SwitchListTile(
+                          title: const Text('Faktura på EHF',
+                              style: TextStyle(fontSize: 13)),
+                          value: _altInvoiceOnEhf,
+                          onChanged: (v) =>
+                              setState(() => _altInvoiceOnEhf = v),
+                          contentPadding: EdgeInsets.zero,
+                          dense: true,
+                        ),
+                      ],
+                    ),
+                  )
+                : const SizedBox.shrink(),
+          ),
         ],
       ),
     );
@@ -1833,6 +2116,108 @@ class _GigOfferPageState extends State<GigOfferPage> {
     );
   }
 
+  Widget _buildExtrasCard() {
+    final cs = Theme.of(context).colorScheme;
+    return _card(
+      title: 'Ekstrakostnader',
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (_extras.isEmpty)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 4),
+              child: Text(
+                'Legg til kostnader som skal med i tilbud og avtale — '
+                'f.eks. komponering for en produksjon. Kall dem hva du vil.',
+                style: TextStyle(fontSize: 12, color: cs.onSurfaceVariant),
+              ),
+            ),
+          ..._extras.asMap().entries.map((e) => _extraRow(e.key, e.value)),
+          const SizedBox(height: 8),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: InkWell(
+              onTap: () => setState(() {
+                _extras.add(_OfferExtra());
+                _recalc();
+              }),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 4),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.add, size: 16, color: cs.primary),
+                    const SizedBox(width: 4),
+                    Text('Legg til ekstrakostnad',
+                        style: TextStyle(fontSize: 13, color: cs.primary)),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _extraRow(int index, _OfferExtra e) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 6),
+      child: Row(
+        children: [
+          Expanded(
+            child: TextField(
+              controller: e.nameCtrl,
+              style: const TextStyle(fontSize: 13),
+              decoration: const InputDecoration(
+                isDense: true,
+                hintText: 'Beskrivelse (f.eks. Komponering for produksjon)',
+                hintStyle: TextStyle(fontSize: 12),
+                border: OutlineInputBorder(),
+                contentPadding:
+                    EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+              ),
+              onChanged: (_) => setState(() => _recalc()),
+            ),
+          ),
+          const SizedBox(width: 8),
+          SizedBox(
+            width: 120,
+            child: TextField(
+              controller: e.amountCtrl,
+              textAlign: TextAlign.right,
+              keyboardType:
+                  const TextInputType.numberWithOptions(decimal: true),
+              style: const TextStyle(fontSize: 13),
+              decoration: const InputDecoration(
+                isDense: true,
+                suffixText: 'kr',
+                border: OutlineInputBorder(),
+                contentPadding:
+                    EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+              ),
+              onChanged: (v) {
+                final parsed =
+                    double.tryParse(v.replaceAll(RegExp(r'[^0-9.]'), ''));
+                _extras[index].amount = parsed ?? 0;
+                setState(() => _recalc());
+              },
+            ),
+          ),
+          IconButton(
+            icon: const Icon(Icons.close, size: 18),
+            visualDensity: VisualDensity.compact,
+            tooltip: 'Fjern',
+            onPressed: () => setState(() {
+              _extras.removeAt(index).dispose();
+              _recalc();
+            }),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _showRow(int index, _OfferShow s) {
     final cs = Theme.of(context).colorScheme;
     return Padding(
@@ -1854,13 +2239,25 @@ class _GigOfferPageState extends State<GigOfferPage> {
                 ),
               ),
               Expanded(
-                child: Text(s.showName,
-                    style: TextStyle(
-                      fontSize: 13,
-                      color: s.selected ? cs.onSurface : cs.onSurfaceVariant,
-                      fontWeight:
-                          s.selected ? FontWeight.w600 : FontWeight.normal,
-                    )),
+                child: TextField(
+                  key: ValueKey('show_name_${s.id ?? index}'),
+                  controller:
+                      TextEditingController(text: s.showName)
+                        ..selection = TextSelection.collapsed(
+                            offset: s.showName.length),
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: s.selected ? cs.onSurface : cs.onSurfaceVariant,
+                    fontWeight:
+                        s.selected ? FontWeight.w600 : FontWeight.normal,
+                  ),
+                  decoration: const InputDecoration(
+                    isDense: true,
+                    border: InputBorder.none,
+                    contentPadding: EdgeInsets.symmetric(vertical: 6),
+                  ),
+                  onChanged: (v) => _shows[index].showName = v,
+                ),
               ),
               _miniNumberField(
                 key: ValueKey('show_${index}_d'),
@@ -2224,7 +2621,7 @@ class _GigOfferPageState extends State<GigOfferPage> {
                     ),
                   ),
                   const SizedBox(width: 8),
-                  Text('Påslag på alt (inkl. transport, in-ear, prøver)',
+                  Text('Påslag kun på hyrer (show + prøver)',
                       style: TextStyle(fontSize: 12, color: cs.onSurfaceVariant)),
                 ],
               ),
@@ -2632,21 +3029,100 @@ class _GigOfferPageState extends State<GigOfferPage> {
   // ────────────────────────────────────────────────────────────────────────────
 
   Widget _buildScheduleCard() {
+    final cs = Theme.of(context).colorScheme;
+    final df = DateFormat('dd.MM');
+    // Sort entries chronologically for the chip list, but remember the
+    // original index so the selected entry stays correct on edits.
+    final indexed = List.generate(_dateEntries.length, (i) => i)
+      ..sort((a, b) {
+        final ad = _dateEntries[a].dateFrom;
+        final bd = _dateEntries[b].dateFrom;
+        if (ad == null && bd == null) return 0;
+        if (ad == null) return 1;
+        if (bd == null) return -1;
+        return ad.compareTo(bd);
+      });
+    if (_scheduleSelectedIdx >= _dateEntries.length) {
+      _scheduleSelectedIdx = 0;
+    }
+    final selected = _dateEntries.isEmpty
+        ? _DateEntry()
+        : _dateEntries[_scheduleSelectedIdx];
+
     return _card(
       title: 'Tidsplan',
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _tf(_meetingTimeCtrl, 'Oppmøte', maxLines: null),
-          const SizedBox(height: 12),
-          _tf(_getInTimeCtrl, 'Get-in', maxLines: null),
-          const SizedBox(height: 12),
-          _tf(_rehearsalTimeCtrl, 'Prøver', maxLines: null),
-          const SizedBox(height: 12),
-          _tf(_performanceTimeCtrl, 'Opptreden', maxLines: null),
-          const SizedBox(height: 12),
-          _tf(_getOutTimeCtrl, 'Get-out', maxLines: null),
-          const SizedBox(height: 12),
-          _tf(_meetingNotesCtrl, 'Oppmøtenotat', maxLines: null),
+          if (_dateEntries.length > 1)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: Wrap(
+                spacing: 6,
+                runSpacing: 6,
+                children: indexed.map((i) {
+                  final entry = _dateEntries[i];
+                  final isCurrent = i == _scheduleSelectedIdx;
+                  final dateStr = entry.dateFrom != null
+                      ? df.format(entry.dateFrom!)
+                      : '?';
+                  final venue = entry.venueCtrl.text.trim();
+                  final label = venue.isNotEmpty
+                      ? '$dateStr · $venue${entry.isRehearsal ? ' (Prøve)' : ''}'
+                      : '$dateStr${entry.isRehearsal ? ' (Prøve)' : ''}';
+                  final chip = Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 10, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: isCurrent
+                          ? Colors.black
+                          : cs.surfaceContainerHigh,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Text(
+                      label,
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: isCurrent
+                            ? FontWeight.w700
+                            : FontWeight.w400,
+                        color: isCurrent
+                            ? Colors.white
+                            : cs.onSurfaceVariant,
+                      ),
+                    ),
+                  );
+                  return InkWell(
+                    borderRadius: BorderRadius.circular(8),
+                    onTap: () =>
+                        setState(() => _scheduleSelectedIdx = i),
+                    child: chip,
+                  );
+                }).toList(),
+              ),
+            ),
+          // Use a key so changing selection rebuilds the inputs with the
+          // controllers from the newly-selected entry.
+          KeyedSubtree(
+            key: ValueKey('schedule_${selected.gigId ?? _scheduleSelectedIdx}'),
+            child: Column(
+              children: [
+                _tf(selected.meetingTimeCtrl, 'Oppmøte', maxLines: null),
+                const SizedBox(height: 12),
+                _tf(selected.getInTimeCtrl, 'Get-in', maxLines: null),
+                const SizedBox(height: 12),
+                _tf(selected.rehearsalTimeCtrl, 'Prøver', maxLines: null),
+                const SizedBox(height: 12),
+                _tf(selected.performanceTimeCtrl, 'Opptreden',
+                    maxLines: null),
+                const SizedBox(height: 12),
+                _tf(selected.getOutTimeCtrl, 'Get-out', maxLines: null),
+                const SizedBox(height: 12),
+                _tf(selected.meetingNotesCtrl, 'Oppmøtenotat',
+                    maxLines: null),
+              ],
+            ),
+          ),
         ],
       ),
     );
@@ -2699,9 +3175,15 @@ class _GigOfferPageState extends State<GigOfferPage> {
   double _ov(String key, double calculated) =>
       _overrides.containsKey(key) ? _overrides[key]! : calculated;
 
-  /// Combined transport: gig × dates + rehearsal transport
+  /// Combined transport: gig × performance dates only + rehearsal transport.
+  /// Rehearsal dates use the separate rehearsal_transport parameter.
   double get _totalTransport =>
-      (_transportPrice * _dateEntries.length) + _rehearsalTransport;
+      (_transportPrice * _dateEntries.where((e) => !e.isRehearsal).length) +
+      _rehearsalTransport;
+
+  /// Sum of all extra cost line items (Ekstrakostnader). Face value — no markup.
+  double get _extrasTotal =>
+      _extras.fold(0.0, (s, e) => s + (e.name.trim().isEmpty ? 0 : e.amount));
 
   /// The total using overrides where applicable
   double get _effectiveTotal {
@@ -2711,7 +3193,7 @@ class _GigOfferPageState extends State<GigOfferPage> {
     final ie = _ov('inear', _inearTotal);
     final tr = _ov('transport', _totalTransport);
     final rh = _ov('rehearsal', _rehearsalTotal);
-    return perf + ck + bh + ie + tr + rh;
+    return perf + ck + bh + ie + tr + rh + _extrasTotal;
   }
 
   /// Build the calc lines for the PDF (mirrors the calc card exactly)
@@ -2722,27 +3204,130 @@ class _GigOfferPageState extends State<GigOfferPage> {
     (label: 'In-Ear', amount: _ov('inear', _inearTotal)),
     (label: 'Transport', amount: _ov('transport', _totalTransport)),
     (label: 'Prøver', amount: _ov('rehearsal', _rehearsalTotal)),
+    // Ekstrakostnader — each as its own named line (face value, no markup).
+    for (final e in _extras)
+      if (e.name.trim().isNotEmpty) (label: e.name.trim(), amount: e.amount),
   ];
 
   /// The final total for the PDF (respects total override)
   double get _pdfTotal =>
       _overrides.containsKey('total') ? _overrides['total']! : _effectiveTotal;
 
-  /// Date entries formatted for the PDF
-  List<({String date, String venue})> get _pdfDateEntries {
+  /// Date entries formatted for the PDF (fetches per-date times from gigs)
+  Future<
+          List<
+              ({
+                String date,
+                String venue,
+                bool isRehearsal,
+                List<String> shows,
+                List<double> showPrices,
+                String getIn,
+                String rehearsalTime,
+                String performance,
+                String getOut,
+              })>>
+      _pdfDateEntries() async {
     final df = DateFormat('dd.MM.yyyy');
-    return _dateEntries.map((e) {
+    final timesByGig = <String, Map<String, dynamic>>{};
+    final gigIds = _dateEntries
+        .map((e) => e.gigId)
+        .whereType<String>()
+        .toList();
+    if (gigIds.isNotEmpty) {
+      try {
+        final rows = await _sb
+            .from('gigs')
+            .select(
+                'id, get_in_time, rehearsal_time, performance_time, get_out_time')
+            .inFilter('id', gigIds);
+        for (final r in (rows as List)) {
+          timesByGig[r['id'] as String] = Map<String, dynamic>.from(r as Map);
+        }
+      } catch (e) {
+        debugPrint('Load offer-date times error: $e');
+      }
+    }
+
+    final entries = <({
+      String date,
+      String venue,
+      bool isRehearsal,
+      List<String> shows,
+      List<double> showPrices,
+      String getIn,
+      String rehearsalTime,
+      String performance,
+      String getOut,
+      String sortKey,
+    })>[];
+    for (int i = 0; i < _dateEntries.length; i++) {
+      final e = _dateEntries[i];
       final dateStr = e.dateFrom != null ? df.format(e.dateFrom!) : '';
       final venue = [e.venueCtrl.text, e.cityCtrl.text, e.countryCtrl.text]
           .where((s) => s.isNotEmpty)
           .join(', ');
-      return (date: dateStr, venue: venue);
-    }).toList();
+      // Compute per-show raw prices for this date using main/extra CREO logic.
+      final dateShows = _showsForDate(i);
+      int mainIdx = 0;
+      int mainPerf = -1;
+      for (int j = 0; j < dateShows.length; j++) {
+        final p = dateShows[j].drummers +
+            dateShows[j].dancers +
+            dateShows[j].others;
+        if (p > mainPerf) {
+          mainPerf = p;
+          mainIdx = j;
+        }
+      }
+      final showNames = <String>[];
+      final showPrices = <double>[];
+      for (int j = 0; j < dateShows.length; j++) {
+        final s = dateShows[j];
+        final name = s.showName.trim();
+        if (name.isEmpty) continue;
+        final perf = s.drummers + s.dancers + s.others;
+        final rawPrice = s.priceIsCustom
+            ? s.price
+            : perf * (j == mainIdx ? _creoFeeMinimum : _extraShowFee);
+        showNames.add(name);
+        showPrices.add(rawPrice);
+      }
+      final t = e.gigId != null ? (timesByGig[e.gigId!] ?? const {}) : const {};
+      entries.add((
+        date: dateStr,
+        venue: venue,
+        isRehearsal: e.isRehearsal,
+        shows: showNames,
+        showPrices: showPrices,
+        getIn: (t['get_in_time'] as String? ?? '').trim(),
+        rehearsalTime: (t['rehearsal_time'] as String? ?? '').trim(),
+        performance: (t['performance_time'] as String? ?? '').trim(),
+        getOut: (t['get_out_time'] as String? ?? '').trim(),
+        sortKey: e.dateFrom?.toIso8601String() ?? '',
+      ));
+    }
+    entries.sort((a, b) => a.sortKey.compareTo(b.sortKey));
+    return entries
+        .map((e) => (
+              date: e.date,
+              venue: e.venue,
+              isRehearsal: e.isRehearsal,
+              shows: e.shows,
+              showPrices: e.showPrices,
+              getIn: e.getIn,
+              rehearsalTime: e.rehearsalTime,
+              performance: e.performance,
+              getOut: e.getOut,
+            ))
+        .toList();
   }
 
   Widget _buildCalcCard() {
     final cs = Theme.of(context).colorScheme;
-    final transportGig = _transportPrice * _dateEntries.length;
+    final numPerfDates =
+        _dateEntries.where((e) => !e.isRehearsal).length;
+    final transportGig = _transportPrice * numPerfDates;
     final transportCombined = transportGig + _rehearsalTransport;
     return Container(
       width: double.infinity,
@@ -2768,8 +3353,8 @@ class _GigOfferPageState extends State<GigOfferPage> {
           _editableCalcRow('performer_fees', 'Utøverhyrer', _performerFees),
           () {
             final markupBase = _markupOnAll
-                ? (_performerFees + _inearTotal + (_transportPrice * _dateEntries.length) + _rehearsalTransport + _rehearsalTotal)
-                : _performerFees;
+                ? (_performerFees + _rehearsalTotal)
+                : (_performerFees + transportCombined + _rehearsalTotal);
             final ckVal = _ov('complete_konto', _completeKonto);
             final bhVal = _ov('booking_honorar', _bookingHonorar);
             final ckPct = markupBase > 0 ? ckVal / markupBase : 0.0;
@@ -2789,13 +3374,13 @@ class _GigOfferPageState extends State<GigOfferPage> {
             _calcRowInfo('Transport', '–'),
           // Transport breakdown hint
           if (transportCombined > 0) ...[
-            if (_dateEntries.length > 1 || _rehearsalTransport > 0)
+            if (numPerfDates > 1 || _rehearsalTransport > 0)
               Padding(
                 padding: const EdgeInsets.only(bottom: 4),
                 child: Text(
                   [
-                    if (_transportPrice > 0)
-                      'Gig: ${_nf.format(_transportPrice)}${_dateEntries.length > 1 ? ' × ${_dateEntries.length}' : ''}',
+                    if (_transportPrice > 0 && numPerfDates > 0)
+                      'Gig: ${_nf.format(_transportPrice)}${numPerfDates > 1 ? ' × $numPerfDates' : ''}',
                     if (_rehearsalTransport > 0)
                       'Prøver: ${_nf.format(_rehearsalTransport)}',
                   ].join('  ·  '),
@@ -2814,6 +3399,9 @@ class _GigOfferPageState extends State<GigOfferPage> {
           ],
           if (_rehearsalTotal > 0)
             _editableCalcRow('rehearsal', 'Prøver', _rehearsalTotal),
+          for (final e in _extras)
+            if (e.name.trim().isNotEmpty)
+              _calcRowInfo(e.name.trim(), '${_nf.format(e.amount)} kr'),
           const Divider(height: 24),
           GestureDetector(
             onDoubleTap: () => _editOverride('total', _effectiveTotal),
@@ -3306,6 +3894,7 @@ class _GigOfferPageState extends State<GigOfferPage> {
           : df.format(DateTime.now());
       final approvedDate = df.format(DateTime.now());
 
+      final entries = await _pdfDateEntries();
       final signedResult = await IntensjonsavtalePdfService.generate(
         gig: gigMap,
         shows: showMaps,
@@ -3315,7 +3904,8 @@ class _GigOfferPageState extends State<GigOfferPage> {
         companySignatureDate: approvedDate,
         calcLines: _pdfCalcLines,
         calcTotal: _pdfTotal,
-        dateEntries: _pdfDateEntries,
+        dateEntries: entries,
+        markupOnAll: _markupOnAll,
       );
 
       // Send signed PDF to customer
@@ -3926,6 +4516,14 @@ class _DateEntry {
   final venueCtrl = TextEditingController();
   final cityCtrl = TextEditingController();
   final countryCtrl = TextEditingController(text: 'NO');
+  // Per-date times (Tidsplan). When the entry is linked to an existing
+  // gig, these are loaded from the gig and saved back per-gig.
+  final meetingTimeCtrl = TextEditingController();
+  final getInTimeCtrl = TextEditingController();
+  final rehearsalTimeCtrl = TextEditingController();
+  final performanceTimeCtrl = TextEditingController();
+  final getOutTimeCtrl = TextEditingController();
+  final meetingNotesCtrl = TextEditingController();
   /// Indices into the parent's _shows list that are selected for this date.
   /// null means "use all selected shows" (default for new entries).
   Set<int>? selectedShowIndices;
@@ -3933,6 +4531,12 @@ class _DateEntry {
     venueCtrl.dispose();
     cityCtrl.dispose();
     countryCtrl.dispose();
+    meetingTimeCtrl.dispose();
+    getInTimeCtrl.dispose();
+    rehearsalTimeCtrl.dispose();
+    performanceTimeCtrl.dispose();
+    getOutTimeCtrl.dispose();
+    meetingNotesCtrl.dispose();
   }
 }
 
@@ -3951,6 +4555,11 @@ class _OfferShow {
   int sortOrder;
   String ekstrainnslag;
 
+  /// Custom price override. Only honoured when [priceIsCustom] is true.
+  /// When false, calculations fall back to CREO × performers.
+  double price;
+  bool priceIsCustom;
+
   _OfferShow({
     this.id,
     this.showTypeId,
@@ -3961,6 +4570,8 @@ class _OfferShow {
     this.selected = true,
     this.sortOrder = 0,
     this.ekstrainnslag = '',
+    this.price = 0,
+    this.priceIsCustom = false,
   });
 
   factory _OfferShow.fromMap(Map<String, dynamic> m) {
@@ -3974,6 +4585,36 @@ class _OfferShow {
       selected: m['selected'] == true,
       sortOrder: (m['sort_order'] as num?)?.toInt() ?? 0,
       ekstrainnslag: m['ekstrainnslag'] as String? ?? '',
+      price: (m['price'] as num?)?.toDouble() ?? 0,
+      priceIsCustom: m['price_is_custom'] == true,
     );
+  }
+}
+
+/// A free-text extra cost line on an offer (e.g. "Komponering for produksjon").
+/// Stored as a {name, amount} object in gig_offers.extras and rendered on
+/// equal footing with shows in the price summary. Face value — no markup.
+class _OfferExtra {
+  final TextEditingController nameCtrl;
+  final TextEditingController amountCtrl;
+  double amount;
+
+  _OfferExtra({String name = '', this.amount = 0})
+      : nameCtrl = TextEditingController(text: name),
+        amountCtrl = TextEditingController(
+            text: amount == 0 ? '' : NumberFormat('#,##0', 'nb_NO').format(amount));
+
+  String get name => nameCtrl.text;
+
+  factory _OfferExtra.fromMap(Map<String, dynamic> m) => _OfferExtra(
+        name: m['name'] as String? ?? '',
+        amount: (m['amount'] as num?)?.toDouble() ?? 0,
+      );
+
+  Map<String, dynamic> toMap() => {'name': name.trim(), 'amount': amount};
+
+  void dispose() {
+    nameCtrl.dispose();
+    amountCtrl.dispose();
   }
 }
