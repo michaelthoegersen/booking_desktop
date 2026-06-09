@@ -137,6 +137,8 @@ class _GigOfferPageState extends State<GigOfferPage> {
   // ── Shows ─────────────────────────────────────────────────────────────────
   List<_OfferShow> _shows = [];
   List<_OfferExtra> _extras = [];
+  // Company roster (id + name) for the Ekstrakostnader member picker.
+  List<Map<String, dynamic>> _roster = [];
   List<Map<String, dynamic>> _showTypes = [];
 
   // ── Rehearsals ──────────────────────────────────────────────────────────
@@ -206,7 +208,6 @@ class _GigOfferPageState extends State<GigOfferPage> {
     _altInvOrgNrCtrl.dispose();
     _altInvAddressCtrl.dispose();
     for (final e in _dateEntries) { e.dispose(); }
-    for (final e in _extras) { e.dispose(); }
     _responsibleCtrl.dispose();
     _meetingTimeCtrl.dispose();
     _getInTimeCtrl.dispose();
@@ -250,6 +251,16 @@ class _GigOfferPageState extends State<GigOfferPage> {
           .eq('active', true)
           .order('sort_order');
       _showTypes = List<Map<String, dynamic>>.from(types);
+
+      // Load company roster for the Ekstrakostnader member picker
+      final rosterRows = await _sb
+          .from('profiles')
+          .select('id, name')
+          .eq('company_id', companyId);
+      _roster = List<Map<String, dynamic>>.from(rosterRows)
+        ..sort((a, b) => (a['name'] as String? ?? '')
+            .toLowerCase()
+            .compareTo((b['name'] as String? ?? '').toLowerCase()));
 
       // Load pricing defaults from company settings
       final companyRow = await _sb
@@ -336,7 +347,6 @@ class _GigOfferPageState extends State<GigOfferPage> {
         // Load extra cost line items (Ekstrakostnader)
         final extrasJson = offer['extras'];
         if (extrasJson is List) {
-          for (final e in _extras) { e.dispose(); }
           _extras = extrasJson
               .whereType<Map>()
               .map((m) => _OfferExtra.fromMap(Map<String, dynamic>.from(m)))
@@ -2128,19 +2138,17 @@ class _GigOfferPageState extends State<GigOfferPage> {
               padding: const EdgeInsets.only(bottom: 4),
               child: Text(
                 'Legg til kostnader som skal med i tilbud og avtale — '
-                'f.eks. komponering for en produksjon. Kall dem hva du vil.',
+                'f.eks. komponering for en produksjon. Du velger selv hvem '
+                'pengene skal gå til på gigghyra.',
                 style: TextStyle(fontSize: 12, color: cs.onSurfaceVariant),
               ),
             ),
-          ..._extras.asMap().entries.map((e) => _extraRow(e.key, e.value)),
+          ..._extras.asMap().entries.map((e) => _extraSummaryRow(e.key, e.value)),
           const SizedBox(height: 8),
           Align(
             alignment: Alignment.centerLeft,
             child: InkWell(
-              onTap: () => setState(() {
-                _extras.add(_OfferExtra());
-                _recalc();
-              }),
+              onTap: () => _showExtraDialog(),
               child: Padding(
                 padding: const EdgeInsets.symmetric(vertical: 4),
                 child: Row(
@@ -2160,62 +2168,228 @@ class _GigOfferPageState extends State<GigOfferPage> {
     );
   }
 
-  Widget _extraRow(int index, _OfferExtra e) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 6),
-      child: Row(
-        children: [
-          Expanded(
-            child: TextField(
-              controller: e.nameCtrl,
-              style: const TextStyle(fontSize: 13),
-              decoration: const InputDecoration(
-                isDense: true,
-                hintText: 'Beskrivelse (f.eks. Komponering for produksjon)',
-                hintStyle: TextStyle(fontSize: 12),
-                border: OutlineInputBorder(),
-                contentPadding:
-                    EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+  Widget _extraSummaryRow(int index, _OfferExtra e) {
+    final cs = Theme.of(context).colorScheme;
+    return InkWell(
+      onTap: () => _showExtraDialog(index: index),
+      borderRadius: BorderRadius.circular(8),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 6),
+        child: Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    e.name.trim().isEmpty ? '(uten navn)' : e.name.trim(),
+                    style: const TextStyle(
+                        fontSize: 13, fontWeight: FontWeight.w600),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(e.allocationLabel(),
+                      style:
+                          TextStyle(fontSize: 11, color: cs.onSurfaceVariant)),
+                ],
               ),
-              onChanged: (_) => setState(() => _recalc()),
             ),
-          ),
-          const SizedBox(width: 8),
-          SizedBox(
-            width: 120,
-            child: TextField(
-              controller: e.amountCtrl,
-              textAlign: TextAlign.right,
-              keyboardType:
-                  const TextInputType.numberWithOptions(decimal: true),
-              style: const TextStyle(fontSize: 13),
-              decoration: const InputDecoration(
-                isDense: true,
-                suffixText: 'kr',
-                border: OutlineInputBorder(),
-                contentPadding:
-                    EdgeInsets.symmetric(horizontal: 10, vertical: 10),
-              ),
-              onChanged: (v) {
-                final parsed =
-                    double.tryParse(v.replaceAll(RegExp(r'[^0-9.]'), ''));
-                _extras[index].amount = parsed ?? 0;
-                setState(() => _recalc());
-              },
+            const SizedBox(width: 8),
+            Text('${_nf.format(e.amount)} kr',
+                style:
+                    const TextStyle(fontSize: 13, fontWeight: FontWeight.w700)),
+            IconButton(
+              icon: const Icon(Icons.close, size: 18),
+              visualDensity: VisualDensity.compact,
+              tooltip: 'Fjern',
+              onPressed: () => setState(() {
+                _extras.removeAt(index);
+                _recalc();
+              }),
             ),
-          ),
-          IconButton(
-            icon: const Icon(Icons.close, size: 18),
-            visualDensity: VisualDensity.compact,
-            tooltip: 'Fjern',
-            onPressed: () => setState(() {
-              _extras.removeAt(index).dispose();
-              _recalc();
-            }),
-          ),
-        ],
+          ],
+        ),
       ),
     );
+  }
+
+  /// Popup for adding/editing an extra cost and choosing how it is paid out.
+  Future<void> _showExtraDialog({int? index}) async {
+    final editing = index != null;
+    final src = editing ? _extras[index] : _OfferExtra();
+    final nameCtrl = TextEditingController(text: src.name);
+    final amountCtrl = TextEditingController(
+        text: src.amount == 0 ? '' : _nf.format(src.amount));
+    final memberAmountCtrl = TextEditingController(
+        text: src.memberAmount == 0 ? '' : _nf.format(src.memberAmount));
+    String allocation = src.allocation;
+    final rosterIds = _roster.map((m) => m['id'] as String?).toSet();
+    String? memberId = rosterIds.contains(src.memberId) ? src.memberId : null;
+    String? memberName = src.memberName;
+
+    double parseNum(String v) =>
+        double.tryParse(v.replaceAll(RegExp(r'[^0-9.]'), '')) ?? 0;
+
+    final result = await showDialog<_OfferExtra>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setLocal) {
+          final amount = parseNum(amountCtrl.text);
+          final memAmt = parseNum(memberAmountCtrl.text).clamp(0.0, amount);
+          return AlertDialog(
+            title: Text(editing ? 'Rediger ekstrakostnad' : 'Ny ekstrakostnad'),
+            content: SizedBox(
+              width: 380,
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    TextField(
+                      controller: nameCtrl,
+                      autofocus: true,
+                      decoration: const InputDecoration(
+                        labelText: 'Beskrivelse',
+                        hintText: 'F.eks. Komponering for produksjon',
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: amountCtrl,
+                      keyboardType: const TextInputType.numberWithOptions(
+                          decimal: true),
+                      decoration: const InputDecoration(
+                        labelText: 'Beløp',
+                        suffixText: 'kr',
+                      ),
+                      onChanged: (_) => setLocal(() {}),
+                    ),
+                    const SizedBox(height: 18),
+                    const Text('Fordeling av utbetaling (gigghyre)',
+                        style: TextStyle(
+                            fontWeight: FontWeight.w700, fontSize: 13)),
+                    const SizedBox(height: 4),
+                    RadioListTile<String>(
+                      value: 'group',
+                      groupValue: allocation,
+                      contentPadding: EdgeInsets.zero,
+                      dense: true,
+                      title: const Text('Fordeles på gruppa (som show)'),
+                      onChanged: (v) => setLocal(() => allocation = v!),
+                    ),
+                    RadioListTile<String>(
+                      value: 'member',
+                      groupValue: allocation,
+                      contentPadding: EdgeInsets.zero,
+                      dense: true,
+                      title: const Text('Hele beløpet til ett medlem'),
+                      onChanged: (v) => setLocal(() => allocation = v!),
+                    ),
+                    RadioListTile<String>(
+                      value: 'split',
+                      groupValue: allocation,
+                      contentPadding: EdgeInsets.zero,
+                      dense: true,
+                      title: const Text('Splitt: medlem + resten til gruppa'),
+                      onChanged: (v) => setLocal(() => allocation = v!),
+                    ),
+                    if (allocation == 'member' || allocation == 'split') ...[
+                      const SizedBox(height: 8),
+                      DropdownButtonFormField<String>(
+                        initialValue: memberId,
+                        isExpanded: true,
+                        decoration: const InputDecoration(labelText: 'Medlem'),
+                        items: _roster
+                            .map((m) => DropdownMenuItem(
+                                  value: m['id'] as String,
+                                  child: Text(m['name'] as String? ?? ''),
+                                ))
+                            .toList(),
+                        onChanged: (v) => setLocal(() {
+                          memberId = v;
+                          final match = _roster.firstWhere(
+                              (m) => m['id'] == v,
+                              orElse: () => const {});
+                          memberName = match['name'] as String?;
+                        }),
+                      ),
+                    ],
+                    if (allocation == 'split') ...[
+                      const SizedBox(height: 8),
+                      TextField(
+                        controller: memberAmountCtrl,
+                        keyboardType: const TextInputType.numberWithOptions(
+                            decimal: true),
+                        decoration: InputDecoration(
+                          labelText: 'Til medlemmet',
+                          suffixText: 'kr',
+                          helperText: amount > 0
+                              ? 'Gruppa får ${_nf.format(amount - memAmt)} kr'
+                              : null,
+                        ),
+                        onChanged: (_) => setLocal(() {}),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('Avbryt'),
+              ),
+              FilledButton(
+                onPressed: () {
+                  final nm = nameCtrl.text.trim();
+                  final amt = parseNum(amountCtrl.text);
+                  if (nm.isEmpty || amt <= 0) {
+                    ScaffoldMessenger.of(ctx).showSnackBar(const SnackBar(
+                        content: Text('Fyll inn beskrivelse og beløp')));
+                    return;
+                  }
+                  if ((allocation == 'member' || allocation == 'split') &&
+                      memberId == null) {
+                    ScaffoldMessenger.of(ctx).showSnackBar(const SnackBar(
+                        content: Text('Velg medlem')));
+                    return;
+                  }
+                  final mAmt = allocation == 'split'
+                      ? parseNum(memberAmountCtrl.text).clamp(0.0, amt)
+                      : (allocation == 'member' ? amt : 0.0);
+                  Navigator.pop(
+                    ctx,
+                    _OfferExtra(
+                      name: nm,
+                      amount: amt,
+                      allocation: allocation,
+                      memberId: allocation == 'group' ? null : memberId,
+                      memberName: allocation == 'group' ? null : memberName,
+                      memberAmount: mAmt.toDouble(),
+                    ),
+                  );
+                },
+                child: const Text('Lagre'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+
+    nameCtrl.dispose();
+    amountCtrl.dispose();
+    memberAmountCtrl.dispose();
+
+    if (result != null) {
+      setState(() {
+        if (editing) {
+          _extras[index] = result;
+        } else {
+          _extras.add(result);
+        }
+        _recalc();
+      });
+    }
   }
 
   Widget _showRow(int index, _OfferShow s) {
@@ -4592,29 +4766,60 @@ class _OfferShow {
 }
 
 /// A free-text extra cost line on an offer (e.g. "Komponering for produksjon").
-/// Stored as a {name, amount} object in gig_offers.extras and rendered on
-/// equal footing with shows in the price summary. Face value — no markup.
+/// Stored as a {name, amount, allocation, ...} object in gig_offers.extras and
+/// rendered on equal footing with shows in the price summary. Face value — no
+/// markup. [amount] is always the customer-facing price regardless of how it is
+/// allocated to band members on the payout side.
+///
+/// Allocation (only affects gigghyre/payout, never the customer price):
+///   'group'  — distributed to the whole lineup like show money (weighted by
+///              each member's show hire).
+///   'member' — the whole amount goes to [memberId] (added to their gigghyre).
+///   'split'  — [memberAmount] goes to [memberId], the remainder to the group.
 class _OfferExtra {
-  final TextEditingController nameCtrl;
-  final TextEditingController amountCtrl;
+  String name;
   double amount;
+  String allocation; // 'group' | 'member' | 'split'
+  String? memberId;
+  String? memberName;
+  double memberAmount; // 'split' only: kr to the member; group gets the rest
 
-  _OfferExtra({String name = '', this.amount = 0})
-      : nameCtrl = TextEditingController(text: name),
-        amountCtrl = TextEditingController(
-            text: amount == 0 ? '' : NumberFormat('#,##0', 'nb_NO').format(amount));
-
-  String get name => nameCtrl.text;
+  _OfferExtra({
+    this.name = '',
+    this.amount = 0,
+    this.allocation = 'group',
+    this.memberId,
+    this.memberName,
+    this.memberAmount = 0,
+  });
 
   factory _OfferExtra.fromMap(Map<String, dynamic> m) => _OfferExtra(
         name: m['name'] as String? ?? '',
         amount: (m['amount'] as num?)?.toDouble() ?? 0,
+        allocation: m['allocation'] as String? ?? 'group',
+        memberId: m['member_id'] as String?,
+        memberName: m['member_name'] as String?,
+        memberAmount: (m['member_amount'] as num?)?.toDouble() ?? 0,
       );
 
-  Map<String, dynamic> toMap() => {'name': name.trim(), 'amount': amount};
+  Map<String, dynamic> toMap() => {
+        'name': name.trim(),
+        'amount': amount,
+        'allocation': allocation,
+        if (memberId != null) 'member_id': memberId,
+        if (memberName != null) 'member_name': memberName,
+        if (allocation == 'split') 'member_amount': memberAmount,
+      };
 
-  void dispose() {
-    nameCtrl.dispose();
-    amountCtrl.dispose();
+  /// Short human description of the payout allocation, for the summary row.
+  String allocationLabel() {
+    switch (allocation) {
+      case 'member':
+        return 'Hele beløpet → ${memberName ?? 'medlem'}';
+      case 'split':
+        return '${memberName ?? 'medlem'} + resten til gruppa';
+      default:
+        return 'Fordeles på gruppa (som show)';
+    }
   }
 }

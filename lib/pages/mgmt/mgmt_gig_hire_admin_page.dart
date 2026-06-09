@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../state/active_company.dart';
 // ──────────────────────────────────────────────────────────────────────────────
@@ -22,6 +23,13 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
   List<Map<String, dynamic>> _entries = [];
   String _filter = 'outstanding'; // 'outstanding' or 'archive'
 
+  // Bank balance
+  double? _bankBalance;
+  String? _bankCurrency;
+  DateTime? _bankUpdatedAt;
+  bool _bankLoading = false;
+  bool _bankConnected = false;
+
   String? get _companyId => activeCompanyNotifier.value?.id;
 
   @override
@@ -29,6 +37,7 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
     super.initState();
     activeCompanyNotifier.addListener(_onCompanyChanged);
     _load();
+    _loadBankBalance();
   }
 
   @override
@@ -37,7 +46,10 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
     super.dispose();
   }
 
-  void _onCompanyChanged() => _load();
+  void _onCompanyChanged() {
+    _load();
+    _loadBankBalance();
+  }
 
   Future<void> _load() async {
     setState(() => _loading = true);
@@ -56,7 +68,7 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
       final gigs = List<Map<String, dynamic>>.from(
         await _sb
             .from('gigs')
-            .select('id, date_from, venue_name, customer_firma')
+            .select('id, date_from, venue_name, customer_firma, type')
             .eq('company_id', _companyId!)
             .lte('date_from', todayStr),
       );
@@ -93,7 +105,7 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
             .select('id, gig_id, creo_fee_minimum, extra_show_fee, final_calc, '
                 'markup_pct, inear_included, inear_price, transport_price, '
                 'rehearsal_performers, rehearsal_count, rehearsal_price_per_person, '
-                'rehearsal_transport, markup_on_all')
+                'rehearsal_transport, markup_on_all, extras')
             .eq('company_id', _companyId!)
             .inFilter('gig_id', gigIds),
       );
@@ -199,6 +211,9 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
             (effectiveShows > 1
                 ? extraShowFee * (effectiveShows - 1)
                 : 0);
+        // Base show hire (before BookingHonorar) — used as the weight when an
+        // extra cost is distributed to the group "same as show".
+        final showHire = hireFee;
 
         // Add BookingHonorar to Stian's hire
         if (userId == stianUserId) {
@@ -228,8 +243,10 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
           'section': g['section'] ?? '',
           'num_shows': effectiveShows,
           'hire_fee': hireFee,
+          'show_hire': showHire,
           'expense_total': expenseTotal,
           'amount': amount,
+          'extra_total': 0.0,
           'offer_total': offerTotal,
           'offer': offer,
           'company_card_total': companyCardMap[gigId] ?? 0.0,
@@ -266,12 +283,143 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
           'section': 'booking',
           'num_shows': 0,
           'hire_fee': bookingHonorar,
+          'show_hire': 0.0,
           'expense_total': 0.0,
           'amount': bookingHonorar,
+          'extra_total': 0.0,
           'offer_total': offerTotal,
           'offer': offer,
           'crew_invoiced_at': null,
           'crew_paid_at': null,
+        });
+      }
+
+      // ── Ekstrakostnader → gigghyre allocation ───────────────────────────
+      // Each offer's extras are paid out ONCE, attached to the offer's first
+      // show date (not a rehearsal). Allocation per extra:
+      //   group  → distributed to that gig's lineup, weighted by show hire
+      //   member → whole amount to the chosen member
+      //   split  → member_amount to the member, remainder to the group
+      final offersById = <String, Map<String, dynamic>>{};
+      final gigIdsByOffer = <String, List<String>>{};
+      offerByGig.forEach((gid, off) {
+        final oid = off['id'] as String;
+        offersById[oid] = off;
+        (gigIdsByOffer[oid] ??= <String>[]).add(gid);
+      });
+
+      for (final oid in offersById.keys) {
+        final offer = offersById[oid]!;
+        final extrasRaw = offer['extras'];
+        if (extrasRaw is! List || extrasRaw.isEmpty) continue;
+
+        // First show date for this offer (non-rehearsal, earliest date).
+        final showGigs = (gigIdsByOffer[oid] ?? const <String>[])
+            .map((gid) => gigMap[gid])
+            .whereType<Map<String, dynamic>>()
+            .where((g) => (g['type'] as String?) != 'rehearsal')
+            .toList()
+          ..sort((a, b) => (a['date_from'] as String? ?? '')
+              .compareTo(b['date_from'] as String? ?? ''));
+        if (showGigs.isEmpty) continue;
+        final firstGigId = showGigs.first['id'] as String;
+
+        // Tally group vs per-member portions across all extras.
+        double groupTotal = 0;
+        final memberExtras = <String, double>{};
+        final memberNames = <String, String>{};
+        for (final raw in extrasRaw) {
+          if (raw is! Map) continue;
+          final amount = (raw['amount'] as num?)?.toDouble() ?? 0;
+          if (amount <= 0) continue;
+          final alloc = raw['allocation'] as String? ?? 'group';
+          final memberId = raw['member_id'] as String?;
+          double memberAmount;
+          if (alloc == 'member' && memberId != null) {
+            memberAmount = amount;
+          } else if (alloc == 'split' && memberId != null) {
+            memberAmount = ((raw['member_amount'] as num?)?.toDouble() ?? 0)
+                .clamp(0.0, amount);
+          } else {
+            memberAmount = 0;
+          }
+          groupTotal += amount - memberAmount;
+          if (memberAmount > 0 && memberId != null) {
+            memberExtras[memberId] =
+                (memberExtras[memberId] ?? 0) + memberAmount;
+            final nm = raw['member_name'] as String?;
+            if (nm != null && nm.isNotEmpty) memberNames[memberId] = nm;
+          }
+        }
+
+        // Member rows on the first show gig.
+        final gigEntries =
+            entries.where((e) => e['gig_id'] == firstGigId).toList();
+
+        // Distribute the group portion, weighted by each member's show hire.
+        if (groupTotal > 0 && gigEntries.isNotEmpty) {
+          double totalShowHire = 0;
+          for (final e in gigEntries) {
+            totalShowHire += (e['show_hire'] as num?)?.toDouble() ?? 0;
+          }
+          for (final e in gigEntries) {
+            final w = (e['show_hire'] as num?)?.toDouble() ?? 0;
+            final share = totalShowHire > 0
+                ? groupTotal * (w / totalShowHire)
+                : groupTotal / gigEntries.length;
+            e['hire_fee'] = (e['hire_fee'] as num).toDouble() + share;
+            e['amount'] = (e['amount'] as num).toDouble() + share;
+            e['extra_total'] =
+                ((e['extra_total'] as num?)?.toDouble() ?? 0) + share;
+          }
+        }
+
+        // Apply per-member portions (added to the chosen member's gigghyre).
+        memberExtras.forEach((memberId, extraAmt) {
+          Map<String, dynamic>? target;
+          for (final e in entries) {
+            if (e['gig_id'] == firstGigId && e['user_id'] == memberId) {
+              target = e;
+              break;
+            }
+          }
+          if (target != null) {
+            target['hire_fee'] = (target['hire_fee'] as num).toDouble() + extraAmt;
+            target['amount'] = (target['amount'] as num).toDouble() + extraAmt;
+            target['extra_total'] =
+                ((target['extra_total'] as num?)?.toDouble() ?? 0) + extraAmt;
+          } else {
+            // Member not in this gig's lineup — add a standalone payout row.
+            final gig = gigMap[firstGigId];
+            double offerTotal = 0;
+            final rawCalc = offer['final_calc'];
+            if (rawCalc is Map && rawCalc['total'] != null) {
+              offerTotal = (rawCalc['total'] as num).toDouble();
+            }
+            entries.add({
+              'lineup_ids': <String>[],
+              'lineup_id': '',
+              'gig_id': firstGigId,
+              'offer_id': offer['id'],
+              'user_id': memberId,
+              'date_from': gig?['date_from'],
+              'venue_name': gig?['venue_name'] ?? '',
+              'customer_firma': gig?['customer_firma'] ?? '',
+              'name': nameMap[memberId] ?? memberNames[memberId] ?? '',
+              'section': 'ekstra',
+              'num_shows': 0,
+              'hire_fee': extraAmt,
+              'show_hire': 0.0,
+              'expense_total': 0.0,
+              'amount': extraAmt,
+              'extra_total': extraAmt,
+              'offer_total': offerTotal,
+              'offer': offer,
+              'company_card_total': companyCardMap[firstGigId] ?? 0.0,
+              'crew_invoiced_at': null,
+              'crew_paid_at': null,
+            });
+          }
         });
       }
 
@@ -296,6 +444,77 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
       }
     }
     if (mounted) setState(() => _loading = false);
+  }
+
+  // ── Bank balance ─────────────────────────────────────────────────────────
+  Future<void> _loadBankBalance() async {
+    if (_companyId == null) return;
+    if (mounted) setState(() => _bankLoading = true);
+
+    // First try cached balance from DB (fast, no edge function call)
+    try {
+      final row = await _sb
+          .from('company_bank_accounts')
+          .select('balance, currency, balance_updated_at')
+          .eq('company_id', _companyId!)
+          .order('created_at')
+          .limit(1)
+          .maybeSingle();
+      if (row != null) {
+        _bankBalance = (row['balance'] as num?)?.toDouble();
+        _bankCurrency = row['currency'] as String? ?? 'NOK';
+        final updStr = row['balance_updated_at'] as String?;
+        _bankUpdatedAt = updStr != null ? DateTime.tryParse(updStr) : null;
+        _bankConnected = true;
+      }
+    } catch (_) {
+      // Table might not exist yet — silently ignore
+    }
+
+    // Then try live balance from edge function (slower, but fresh)
+    if (_bankConnected) {
+      try {
+        final res = await _sb.functions.invoke('bank-balance', body: {
+          'company_id': _companyId,
+        });
+        final data = res.data;
+        if (data is Map<String, dynamic> && data['accounts'] != null) {
+          final accounts = data['accounts'] as List;
+          if (accounts.isNotEmpty) {
+            final first = accounts[0] as Map<String, dynamic>;
+            _bankBalance = (first['balance'] as num?)?.toDouble();
+            _bankCurrency = first['currency'] as String? ?? 'NOK';
+            final updStr = first['updated_at'] as String?;
+            _bankUpdatedAt = updStr != null ? DateTime.tryParse(updStr) : null;
+          }
+        }
+      } catch (e) {
+        debugPrint('Bank balance refresh error (using cached): $e');
+      }
+    }
+
+    if (mounted) setState(() => _bankLoading = false);
+  }
+
+  Future<void> _connectBank() async {
+    if (_companyId == null) return;
+    try {
+      final res = await _sb.functions.invoke('bank-connect-company', body: {
+        'company_id': _companyId,
+        'institution_id': 'DNB',
+      });
+      final data = res.data as Map<String, dynamic>?;
+      final link = data?['link'] as String?;
+      if (link != null) {
+        await launchUrl(Uri.parse(link));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Feil ved banktilkobling: $e'), backgroundColor: Colors.red),
+        );
+      }
+    }
   }
 
   List<Map<String, dynamic>> get _filtered {
@@ -461,6 +680,75 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
           Text('Gigghyrer',
               style: Theme.of(context).textTheme.headlineMedium),
           const SizedBox(height: 12),
+
+          // Bank balance bar
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            margin: const EdgeInsets.only(bottom: 12),
+            decoration: BoxDecoration(
+              color: _bankConnected && _bankBalance != null
+                  ? (_bankBalance! >= 0
+                      ? Colors.green.shade900.withOpacity(0.15)
+                      : Colors.red.shade900.withOpacity(0.15))
+                  : cs.surfaceContainerLowest,
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(
+                color: _bankConnected && _bankBalance != null
+                    ? (_bankBalance! >= 0 ? Colors.green.shade700 : Colors.red.shade700)
+                    : cs.outlineVariant,
+              ),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.account_balance_rounded, size: 20),
+                const SizedBox(width: 10),
+                if (_bankLoading)
+                  const SizedBox(
+                    width: 14, height: 14,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                else if (_bankConnected && _bankBalance != null) ...[
+                  Text(
+                    'DNB Saldo: ${_formatAmount(_bankBalance!)}',
+                    style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w900,
+                      color: _bankBalance! >= 0 ? Colors.green.shade300 : Colors.red.shade300,
+                    ),
+                  ),
+                  if (_bankUpdatedAt != null) ...[
+                    const SizedBox(width: 12),
+                    Text(
+                      'Oppdatert ${DateFormat('dd.MM HH:mm').format(_bankUpdatedAt!.toLocal())}',
+                      style: TextStyle(fontSize: 11, color: cs.onSurfaceVariant),
+                    ),
+                  ],
+                  const Spacer(),
+                  IconButton(
+                    icon: const Icon(Icons.refresh, size: 18),
+                    onPressed: _loadBankBalance,
+                    tooltip: 'Oppdater saldo',
+                    constraints: const BoxConstraints(),
+                    padding: EdgeInsets.zero,
+                  ),
+                ] else ...[
+                  Text(
+                    'DNB bedriftskonto',
+                    style: TextStyle(fontSize: 13, color: cs.onSurfaceVariant),
+                  ),
+                  const Spacer(),
+                  FilledButton.icon(
+                    onPressed: _connectBank,
+                    icon: const Icon(Icons.link, size: 16),
+                    label: const Text('Koble til DNB', style: TextStyle(fontSize: 12)),
+                    style: FilledButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(horizontal: 12),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
 
           // Summary bar
           if (_entries.isNotEmpty)
@@ -629,6 +917,7 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
                 final paidAt = e['crew_paid_at'] as String?;
                 final lineupIds = List<String>.from(e['lineup_ids'] as List);
                 final memberExpense = (e['expense_total'] as num?)?.toDouble() ?? 0;
+                final extraTotal = (e['extra_total'] as num?)?.toDouble() ?? 0;
 
                 return Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
@@ -659,6 +948,10 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
                           children: [
                             Text(_formatAmount(amount),
                                 style: const TextStyle(fontWeight: FontWeight.w600)),
+                            if (extraTotal > 0)
+                              Text('ekstra: ${_formatAmount(extraTotal)}',
+                                  style: TextStyle(
+                                      fontSize: 10, color: cs.onSurfaceVariant)),
                             if (memberExpense > 0)
                               Text('utlegg: ${_formatAmount(memberExpense)}',
                                   style: TextStyle(
