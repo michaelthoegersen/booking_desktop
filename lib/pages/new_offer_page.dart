@@ -30,6 +30,8 @@ import '../services/email_service.dart';
 
 // ✅ NY: bruker routes db for autocomplete + route lookup
 import '../services/routes_service.dart';
+import '../services/toll_service.dart';
+import '../services/google_routes_service.dart';
 import '../services/km_se_updater.dart';
 import '../services/customers_service.dart';
 import '../state/current_offer_store.dart';
@@ -41,7 +43,10 @@ import 'package:flutter/foundation.dart';
 import '../platform/pdf_saver.dart';
 import '../utils/company_vehicles.dart';
 import '../state/active_company.dart';
+import '../services/branding_service.dart';
+import '../services/email_tour_parser.dart';
 import '../utils/bus_utils.dart';
+import '../localization/s.dart';
 // ignore: avoid_web_libraries_in_flutter
 
 class NewOfferPage extends StatefulWidget {
@@ -130,8 +135,8 @@ class _NewOfferPageState extends State<NewOfferPage> {
                 Icons.hourglass_top_outlined,
                 color: Colors.orange,
               ),
-              title: const Text(
-                "Waiting list",
+              title: Text(
+                S.t('waitingList'),
                 style: TextStyle(
                   color: Colors.orange,
                   fontWeight: FontWeight.w600,
@@ -345,7 +350,7 @@ if (r.flightCost > 0) {
     // ── BUS CONFIG ──
     b.writeln("");
     b.writeln("BUS CONFIG:");
-    b.writeln("  Type:     ${offer.busType.name}");
+    b.writeln("  Type:     ${offer.busType}");
     b.writeln("  Count:    ${offer.busCount}");
     b.writeln("  Trailer:  ${round.trailer ? 'YES' : 'no'}");
     b.writeln("  Pickup PM: ${round.pickupEveningFirstDay ? 'YES' : 'no'}");
@@ -368,7 +373,7 @@ if (r.flightCost > 0) {
     for (int i = 0; i < entries.length; i++) {
       final e = entries[i];
       final dateStr = "${e.date.day.toString().padLeft(2, '0')}.${e.date.month.toString().padLeft(2, '0')}";
-      final from = i == 0 ? start : entries[i - 1].location;
+      final from = _findPreviousRealLocation(entries, i, start);
       final to = e.location;
       final km = i < r.legKm.length ? r.legKm[i] : 0.0;
       final toll = i < r.tollPerLeg.length ? r.tollPerLeg[i] : 0.0;
@@ -498,11 +503,26 @@ if (r.flightCost > 0) {
 
     // Filter to countries that have a VAT rate
     final vatCountries = roundCountryKm.entries
-        .where((e) => (_vatRates[e.key] ?? 0) > 0)
+        .where((e) => _vatRateFor(e.key) > 0)
         .toList()
       ..sort((a, b) => b.value.compareTo(a.value));
 
-    if (vatCountries.isNotEmpty) {
+    final isMossTruck = activeCompanyNotifier.value?.name == 'Moss Turbusser';
+
+    if (isMossTruck && vatCountries.isNotEmpty) {
+      // Moss Turbusser: 25% MVA on the full round total, not pro-rated by km.
+      final vat = r.totalCost * 0.25;
+
+      b.writeln("");
+      b.writeln("─────────────────────────────────────");
+      b.writeln("FOREIGN VAT — 25% MVA (lastebil):");
+      b.writeln("");
+      b.writeln("  Full round total (incl ferry/bridge/toll):");
+      b.writeln("    = ${_nok(r.totalCost)}");
+      b.writeln("");
+      b.writeln("  MVA: ${_nok(r.totalCost)} × 25% = ${_nok(vat)}");
+      b.writeln("  Total incl VAT: ${_nok(r.totalCost + vat)}");
+    } else if (vatCountries.isNotEmpty) {
       final countryKmSum = roundCountryKm.values.fold<double>(0, (a, b) => a + b);
       final unattributedKm = totalLegKm - countryKmSum;
 
@@ -518,7 +538,7 @@ if (r.flightCost > 0) {
       b.writeln("");
 
       for (final e in vatCountries) {
-        final rate = ((_vatRates[e.key] ?? 0) * 100);
+        final rate = (_vatRateFor(e.key) * 100);
         final share = totalLegKm > 0 ? (e.value / totalLegKm * 100) : 0.0;
         b.writeln("  ${e.key.padRight(6)} ${e.value.toStringAsFixed(1).padLeft(8)} km   (${share.toStringAsFixed(1)}%)   VAT ${rate.toStringAsFixed(rate == rate.roundToDouble() ? 0 : 1)}%");
       }
@@ -529,7 +549,7 @@ if (r.flightCost > 0) {
 
       // Show countries with 0% VAT for reference
       final noVatCountries = roundCountryKm.entries
-          .where((e) => (_vatRates[e.key] ?? 0) <= 0 && e.value > 0)
+          .where((e) => _vatRateFor(e.key) <= 0 && e.value > 0)
           .toList()
         ..sort((a, b) => b.value.compareTo(a.value));
       if (noVatCountries.isNotEmpty) {
@@ -566,7 +586,7 @@ if (r.flightCost > 0) {
 
       double totalVatAmount = 0;
       for (final e in vatCountries) {
-        final rate = _vatRates[e.key] ?? 0;
+        final rate = _vatRateFor(e.key);
         final ratePct = (rate * 100);
         final share = e.value / totalLegKm;
         final vat = basePrice * share * rate;
@@ -596,7 +616,25 @@ if (r.flightCost > 0) {
 
   void _showDetailedCalcDialog(int roundIndex, RoundCalcResult calc) {
     final s = _effectiveSettings();
-    final text = _buildDetailedCalc(roundIndex, calc, s);
+
+    // Build detailed text for ALL rounds that have entries
+    final buf = StringBuffer();
+    final usedRounds = <int>[];
+    for (int i = 0; i < offer.rounds.length; i++) {
+      if (offer.rounds[i].entries.isNotEmpty && _roundCalcCache.containsKey(i)) {
+        usedRounds.add(i);
+      }
+    }
+
+    for (final ri in usedRounds) {
+      if (buf.isNotEmpty) {
+        buf.writeln('\n');
+      }
+      buf.write(_buildDetailedCalc(ri, _roundCalcCache[ri]!, s));
+    }
+
+    final text = buf.toString();
+
     showDialog(
       context: context,
       builder: (ctx) => Dialog(
@@ -613,7 +651,9 @@ if (r.flightCost > 0) {
                     const Icon(Icons.analytics_outlined, color: Colors.orange),
                     const SizedBox(width: 8),
                     Text(
-                      'Detailed Calc — Round ${roundIndex + 1}',
+                      usedRounds.length > 1
+                          ? S.t('showDetailedCalc')
+                          : '${S.t('detailedCalcRound')} ${roundIndex + 1}',
                       style: const TextStyle(
                         fontSize: 16,
                         fontWeight: FontWeight.bold,
@@ -648,7 +688,7 @@ if (r.flightCost > 0) {
                   alignment: Alignment.centerRight,
                   child: FilledButton(
                     onPressed: () => Navigator.of(ctx).pop(),
-                    child: const Text('Close'),
+                    child: Text(S.t('close')),
                   ),
                 ),
               ),
@@ -670,8 +710,8 @@ if (r.flightCost > 0) {
       ..sort((a, b) => a.key.compareTo(b.key));
 
     if (usedEntries.isEmpty) {
-      return const Text("No rounds calculated yet.",
-          style: TextStyle(fontFamily: "monospace", fontWeight: FontWeight.w700));
+      return Text(S.t('noRoundsCalculatedYet'),
+          style: const TextStyle(fontFamily: "monospace", fontWeight: FontWeight.w700));
     }
 
     const monoStyle = TextStyle(
@@ -893,9 +933,9 @@ if (r.flightCost > 0) {
                 style: monoStyle,
               ),
               const SizedBox(width: 4),
-              const Tooltip(
-                message: "Double-click to override",
-                child: Icon(Icons.edit, size: 13, color: Colors.grey),
+              Tooltip(
+                message: S.t('doubleClickToOverride'),
+                child: const Icon(Icons.edit, size: 13, color: Colors.grey),
               ),
             ],
           ),
@@ -903,7 +943,7 @@ if (r.flightCost > 0) {
             Padding(
               padding: const EdgeInsets.only(left: 16),
               child: Text(
-                "Calculated: ${fmt(calculatedValue)}",
+                "${S.t('calculated')}: ${fmt(calculatedValue)}",
                 style: const TextStyle(
                   fontFamily: "monospace",
                   fontSize: 11,
@@ -970,11 +1010,12 @@ Future<void> _recalcAllRounds() async {
   // 🔥 HENT BUSSER SOM ER OPPTATT – MEN IKKE DENNE DRAFTEN
   // =====================================================
 
+  // gt/lt: allow a job to start on the same day another ends
   var query = Supabase.instance.client
       .from('samletdata')
       .select('kilde,draft_id')
-      .gte('dato', start)
-      .lte('dato', end);
+      .gt('dato', start)
+      .lt('dato', end);
 
   final busy = await query;
 
@@ -1036,7 +1077,7 @@ final allBuses = getVehicleConfig().all;
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
                 child: Text(
-                  "Busy",
+                  S.t('busy'),
                   style: TextStyle(
                     fontSize: 11,
                     fontWeight: FontWeight.w700,
@@ -1066,8 +1107,8 @@ final allBuses = getVehicleConfig().all;
                 Icons.hourglass_top_outlined,
                 color: Colors.orange,
               ),
-              title: const Text(
-                "Waiting list",
+              title: Text(
+                S.t('waitingList'),
                 style: TextStyle(
                   color: Colors.orange,
                   fontWeight: FontWeight.w600,
@@ -1110,11 +1151,12 @@ final allBuses = getVehicleConfig().all;
     final end = latest.toIso8601String().substring(0, 10);
 
     // Query busy buses across the full period
+    // gt/lt: allow a job to start on the same day another ends
     final busy = await Supabase.instance.client
         .from('samletdata')
         .select('kilde,draft_id')
-        .gte('dato', start)
-        .lte('dato', end);
+        .gt('dato', start)
+        .lt('dato', end);
 
     final busySet = (busy as List)
         .where((e) {
@@ -1194,7 +1236,7 @@ final allBuses = getVehicleConfig().all;
                   Padding(
                     padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
                     child: Text(
-                      "Busy",
+                      S.t('busy'),
                       style: TextStyle(
                         fontSize: 11,
                         fontWeight: FontWeight.w700,
@@ -1223,8 +1265,8 @@ final allBuses = getVehicleConfig().all;
                     Icons.hourglass_top_outlined,
                     color: Colors.orange,
                   ),
-                  title: const Text(
-                    "Waiting list",
+                  title: Text(
+                    S.t('waitingList'),
                     style: TextStyle(
                       color: Colors.orange,
                       fontWeight: FontWeight.w600,
@@ -1250,6 +1292,8 @@ final allBuses = getVehicleConfig().all;
     production: '',
   );
 
+  /// Vehicle categories loaded from DB (or defaults)
+  List<String> _vehicleCategories = defaultVehicleCategories;
 
   final TextEditingController companyCtrl = TextEditingController();
   final TextEditingController contactCtrl = TextEditingController();
@@ -1289,8 +1333,67 @@ final allBuses = getVehicleConfig().all;
   // ===================================================
 
   final RoutesService _routesService = RoutesService();
+  final GoogleRoutesService _routesGeo = GoogleRoutesService();
 
   SupabaseClient get sb => Supabase.instance.client;
+
+  /// True for companies whose offers are truck-based (Moss Turbusser today,
+  /// extensible later via `companies.vehicle_label == 'lastebil'`).
+  /// Only truck offers get station-based Norwegian bompenger. Bus offers
+  /// keep the per-km flat-rate model.
+  bool get _isTruckOffer {
+    final cname = activeCompanyNotifier.value?.name ?? '';
+    if (cname == 'Moss Turbusser') return true;
+    final label = getVehicleConfig().label.toLowerCase();
+    return label == 'lastebil';
+  }
+
+  /// One-shot load of NVDB toll stations into memory. Triggered on demand
+  /// when a truck offer fetches its first leg. Subsequent calls reuse the
+  /// in-memory cache from TollService.
+  bool _tollStationsLoaded = false;
+  Future<void> _ensureTollStationsLoaded() async {
+    if (_tollStationsLoaded) return;
+    try {
+      await TollService.loadStations();
+      _tollStationsLoaded = true;
+    } catch (e) {
+      debugPrint('[BOMPENGER] NVDB load failed: $e');
+    }
+  }
+
+  /// Calculate station-based bompenger for a single truck leg.
+  /// Geocodes from/to via Nominatim + routes via OSRM (already used elsewhere
+  /// in the app), then matches the polyline against NVDB toll stations.
+  Future<double> _calculateTruckTollForLeg(String from, String to) async {
+    if (from.trim().isEmpty || to.trim().isEmpty) return 0;
+    try {
+      await _ensureTollStationsLoaded();
+      final routes = await _routesGeo.getRoute(from: from, to: to);
+      final list = routes['routes'] as List?;
+      if (list == null || list.isEmpty) return 0;
+      final first = list.first as Map<String, dynamic>;
+      final raw = first['rawPoints'];
+      if (raw is! List) return 0;
+      final points = raw
+          .map<List<double>>((p) => [
+                (p[0] as num).toDouble(),
+                (p[1] as num).toDouble(),
+              ])
+          .toList();
+      final result = TollService.calculateTolls(
+        points,
+        vehicleClass: TollVehicleClass.truck,
+      );
+      debugPrint('[BOMPENGER] $from → $to: '
+          '${result.passedStations.length} stasjoner, '
+          'kr ${result.totalCost.toStringAsFixed(0)}');
+      return result.totalCost;
+    } catch (e) {
+      debugPrint('[BOMPENGER] calc failed for $from → $to: $e');
+      return 0;
+    }
+  }
 
 
   // ===================================================
@@ -1319,6 +1422,7 @@ final allBuses = getVehicleConfig().all;
     }
 
     _syncRoundControllers();
+    _loadVehicleCategories();
 
     // Reload when another tab saves this same draft (e.g. calendar assigns a bus)
     _draftSavesSub = OfferStorageService.draftSaved.listen((savedId) {
@@ -1384,7 +1488,7 @@ final allBuses = getVehicleConfig().all;
     final wantTrailer = widget.prefillTrailer ?? false;
 
     if (pax != null && pax > 0) {
-      BusType chosenType;
+      String chosenType;
       int chosenCount;
 
       if (reqBusCount != null && reqBusCount > 0) {
@@ -1521,28 +1625,47 @@ final allBuses = getVehicleConfig().all;
     _syncRoundControllers();
   }
 
-  /// Map pax-per-bus capacity to BusType
-  BusType _busTypeForCapacity(int perBus) {
-    if (perBus <= 12) return BusType.sleeper12;
-    if (perBus <= 14) return BusType.sleeper14;
-    if (perBus <= 16) return BusType.sleeper16;
-    if (perBus <= 18) return BusType.sleeper18;
-    return BusType.conference;
+  Future<void> _loadVehicleCategories() async {
+    final companyId = activeCompanyNotifier.value?.id;
+    if (companyId == null) return;
+    try {
+      final rows = await Supabase.instance.client
+          .from('vehicle_categories')
+          .select('name')
+          .eq('company_id', companyId)
+          .eq('active', true)
+          .order('sort_order');
+      final names = (rows as List).map((r) => r['name'] as String).toList();
+      if (names.isNotEmpty && mounted) {
+        setState(() => _vehicleCategories = names);
+      }
+    } catch (_) {
+      // Table doesn't exist yet — use defaults
+    }
+  }
+
+  /// Map pax-per-bus capacity to vehicle category name
+  String _busTypeForCapacity(int perBus) {
+    if (perBus <= 12) return '12-sleeper';
+    if (perBus <= 14) return '14-sleeper';
+    if (perBus <= 16) return '16-sleeper';
+    if (perBus <= 18) return '18-sleeper';
+    return '20-50 seats';
   }
 
   /// Find the smallest sleeper type that keeps busCount <= 4, fallback conference
-  (BusType, int) _optimalBusConfig(int pax) {
+  (String, int) _optimalBusConfig(int pax) {
     const sleeperCaps = [
-      (12, BusType.sleeper12),
-      (14, BusType.sleeper14),
-      (16, BusType.sleeper16),
-      (18, BusType.sleeper18),
+      (12, '12-sleeper'),
+      (14, '14-sleeper'),
+      (16, '16-sleeper'),
+      (18, '18-sleeper'),
     ];
     for (final (cap, type) in sleeperCaps) {
       final count = (pax / cap).ceil();
       if (count <= 4) return (type, count);
     }
-    return (BusType.conference, 1);
+    return ('20-50 seats', 1);
   }
 
   // ===================================================
@@ -1892,7 +2015,7 @@ Future<void> _loadPlaceSuggestions(String query) async {
     builder: (ctx) {
 
       return AlertDialog(
-        title: const Text("Add missing route"),
+        title: Text(S.t('addMissingRoute')),
 
         content: SizedBox(
   width: 420,
@@ -1902,8 +2025,8 @@ Future<void> _loadPlaceSuggestions(String query) async {
 
       TextField(
         controller: fromCtrl,
-        decoration: const InputDecoration(
-          labelText: "From",
+        decoration: InputDecoration(
+          labelText: S.t('from'),
         ),
       ),
 
@@ -1911,8 +2034,8 @@ Future<void> _loadPlaceSuggestions(String query) async {
 
       TextField(
         controller: toCtrl,
-        decoration: const InputDecoration(
-          labelText: "To",
+        decoration: InputDecoration(
+          labelText: S.t('to'),
         ),
       ),
 
@@ -1921,8 +2044,8 @@ Future<void> _loadPlaceSuggestions(String query) async {
       TextField(
         controller: kmCtrl,
         keyboardType: TextInputType.number,
-        decoration: const InputDecoration(
-          labelText: "KM",
+        decoration: InputDecoration(
+          labelText: S.t('km'),
         ),
       ),
 
@@ -1930,8 +2053,8 @@ Future<void> _loadPlaceSuggestions(String query) async {
 
       TextField(
         controller: extraCtrl,
-        decoration: const InputDecoration(
-          labelText: "Extra (ex: Ferry)",
+        decoration: InputDecoration(
+          labelText: S.t('extraEgFerry'),
         ),
       ),
     ],
@@ -1942,7 +2065,7 @@ Future<void> _loadPlaceSuggestions(String query) async {
 
           TextButton(
             onPressed: () => Navigator.pop(ctx),
-            child: const Text("Cancel"),
+            child: Text(S.t('cancel')),
           ),
 
           FilledButton(
@@ -1956,8 +2079,8 @@ Future<void> _loadPlaceSuggestions(String query) async {
 
               if (from.isEmpty || to.isEmpty || km == null) {
                 ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text("Fill all fields"),
+                  SnackBar(
+                    content: Text(S.t('fillAllFields')),
                   ),
                 );
                 return;
@@ -1992,8 +2115,8 @@ Navigator.pop(ctx);
                 await _recalcKm();
 
                 ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text("Route saved ✅"),
+                  SnackBar(
+                    content: Text(S.t('routeSaved')),
                   ),
                 );
 
@@ -2012,14 +2135,14 @@ Navigator.pop(ctx);
 
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(
-                    content: Text("Save failed: $e"),
+                    content: Text("${S.t('error')}: $e"),
                     backgroundColor: Colors.red,
                   ),
                 );
               }
             },
 
-            child: const Text("Save"),
+            child: Text(S.t('save')),
           ),
         ],
       );
@@ -2141,6 +2264,15 @@ static const Map<String, double> _vatRates = {
   'Other': 0.0,
 };
 
+// Moss Turbusser (NO-based truck operator) charges 25% Norwegian MVA
+// on any trip leg that lies abroad, regardless of which foreign country.
+double _vatRateFor(String country) {
+  if (activeCompanyNotifier.value?.name == 'Moss Turbusser') {
+    return 0.25;
+  }
+  return _vatRates[country] ?? 0;
+}
+
 String _mapCalendarStatus(String? status) {
   switch (status?.toLowerCase()) {
     case 'draft':
@@ -2166,12 +2298,14 @@ String _mapCalendarStatus(String? status) {
 Map<String, double> _collectAllCountryKm() {
   final Map<String, double> result = {};
 
-  for (final map in _countryKmByIndex.values) {
-    map.forEach((country, km) {
-      if (km <= 0) return;
-
-      result[country] = (result[country] ?? 0) + km;
-    });
+  // Collect from ALL rounds, not just the active one
+  for (final round in offer.rounds) {
+    for (final entry in round.entries) {
+      entry.countryKm.forEach((country, km) {
+        if (km <= 0) return;
+        result[country] = (result[country] ?? 0) + km;
+      });
+    }
   }
 
   return result;
@@ -2184,7 +2318,18 @@ Map<String, double> _calculateForeignVat({
   required double basePrice,
   required Map<String, double> countryKm,
   double? totalDrivenKm,
+  double? totalExVat,
 }) {
+  // Moss Turbusser (truck): 25% Norwegian MVA on the full sum of the trips
+  // (incl ferry/bridge/toll), not pro-rated by km share.
+  if (activeCompanyNotifier.value?.name == 'Moss Turbusser') {
+    final basis = totalExVat ?? basePrice;
+    if (basis <= 0) return {};
+    final hasForeignKm = countryKm.values.any((km) => km > 0);
+    if (!hasForeignKm) return {};
+    return {'NO': basis * 0.25};
+  }
+
   final totalKm = totalDrivenKm ??
       countryKm.values.fold<double>(0, (a, b) => a + b);
 
@@ -2193,7 +2338,7 @@ Map<String, double> _calculateForeignVat({
   final Map<String, double> result = {};
 
   countryKm.forEach((country, km) {
-    final rate = _vatRates[country] ?? 0;
+    final rate = _vatRateFor(country);
 
     if (rate <= 0 || km <= 0) return;
 
@@ -2225,7 +2370,7 @@ Widget _buildVatBox(
   final hasOverride = _totalOverride != null;
 
   Widget totalExclWidget = _buildEditableTotal(
-    label: "Total excl VAT",
+    label: S.t('totalExclVat'),
     calculatedValue: excl,
     displayedValue: displayedExcl,
     hasOverride: hasOverride,
@@ -2240,7 +2385,7 @@ Widget _buildVatBox(
         totalExclWidget,
         const SizedBox(height: 4),
         Text(
-          "Total incl VAT: ${f(displayedIncl)}",
+          "${S.t('totalInclVat')}: ${f(displayedIncl)}",
           style: const TextStyle(fontWeight: FontWeight.w900),
         ),
       ],
@@ -2250,15 +2395,15 @@ Widget _buildVatBox(
   return Column(
     crossAxisAlignment: CrossAxisAlignment.end,
     children: [
-      const Text(
-        "Foreign VAT",
-        style: TextStyle(fontWeight: FontWeight.w900),
+      Text(
+        S.t('foreignVat'),
+        style: const TextStyle(fontWeight: FontWeight.w900),
       ),
 
       const SizedBox(height: 6),
 
       ...vatMap.entries.map((e) {
-        final rate = (_vatRates[e.key] ?? 0) * 100;
+        final rate = _vatRateFor(e.key) * 100;
         return Text(
           "${e.key} (${rate.toStringAsFixed(1)}%): ${f(e.value)}",
           style: const TextStyle(fontWeight: FontWeight.w700),
@@ -2279,7 +2424,7 @@ Widget _buildVatBox(
       const SizedBox(height: 4),
 
       Text(
-        "Total incl VAT: ${f(displayedIncl)}",
+        "${S.t('totalInclVat')}: ${f(displayedIncl)}",
         style: const TextStyle(fontWeight: FontWeight.w900),
       ),
     ],
@@ -2361,7 +2506,7 @@ Widget _buildEditableTotal({
         ),
         if (hasOverride)
           Text(
-            "Calculated: ${f(calculatedValue)}",
+            "${S.t('calculated')}: ${f(calculatedValue)}",
             style: const TextStyle(
               fontSize: 11,
               color: Colors.grey,
@@ -2381,7 +2526,7 @@ Future<void> _openRoutePreview() async {
 
   if (round.entries.isEmpty) {
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text("No routes yet.")),
+      SnackBar(content: Text(S.t('noRoutesYet'))),
     );
     return;
   }
@@ -2418,8 +2563,8 @@ Future<void> _openRoutePreview() async {
 
   if (from == null || to == null) {
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text("No missing routes found."),
+      SnackBar(
+        content: Text(S.t('noMissingRoutes')),
       ),
     );
     return;
@@ -2462,7 +2607,7 @@ Future<void> _openRoutePreview() async {
 
   if (round.entries.isEmpty) {
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text("No routes yet.")),
+      SnackBar(content: Text(S.t('noRoutesYet'))),
     );
     return;
   }
@@ -2536,8 +2681,8 @@ Future<void> _saveDraft() async {
   // ----------------------------------------
   if (_loadingDraft) {
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text("Loading draft… please wait"),
+      SnackBar(
+        content: Text(S.t('loadingDraft')),
       ),
     );
     return;
@@ -2725,8 +2870,8 @@ offer.rounds[i].bus =
       SnackBar(
         content: Text(
           firstBus != null
-              ? "Lagret på ${fmtBus(firstBus)} ✅"
-              : "Lagret ✅",
+              ? "${S.t('saved')} ${fmtBus(firstBus)} ✅"
+              : "${S.t('saved')} ✅",
         ),
       ),
     );
@@ -2746,7 +2891,7 @@ offer.rounds[i].bus =
 
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text("Save failed: $e"),
+        content: Text("${S.t('error')}: $e"),
         backgroundColor: Colors.red,
       ),
     );
@@ -2775,7 +2920,7 @@ Future<void> _showVersionHistory() async {
     await _loadDraft(_draftId!);
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Version restored")),
+        SnackBar(content: Text(S.t('versionRestored'))),
       );
     }
   }
@@ -2803,14 +2948,14 @@ void _maybeSendFerryEmail(OfferDraft confirmed) {
   EmailService.sendFerryBookingEmail(offer: confirmed).then((_) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Ferry booking email sent ✅')),
+      SnackBar(content: Text(S.t('ferryBookingEmailSent'))),
     );
   }).catchError((e) {
     debugPrint('Ferry email error: $e');
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text('Ferry email failed: $e'),
+        content: Text('${S.t('error')}: $e'),
         backgroundColor: Colors.orange,
       ),
     );
@@ -2870,9 +3015,12 @@ debugPrint("Email: ${offer.email}");
 for (int i = 0; i < offer.rounds.length; i++) {
   debugPrint("EXPORT round $i trailer = ${offer.rounds[i].trailer}");
 }
+    final cid = activeCompanyNotifier.value?.id;
+    final branding = cid != null ? await BrandingService.load(cid) : null;
     final bytes = await OfferPdfService.generatePdf(
       offer,
       roundCalc,
+      branding: branding,
     );
 
     // ===============================
@@ -2906,7 +3054,7 @@ for (int i = 0; i < offer.rounds.length; i++) {
     if (!mounted) return;
 
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text("PDF saved: $path")),
+      SnackBar(content: Text("${S.t('saved')} ✅: $path")),
     );
 
   } catch (e, st) {
@@ -2919,7 +3067,7 @@ for (int i = 0; i < offer.rounds.length; i++) {
 
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text("Export failed: $e"),
+        content: Text("${S.t('error')}: $e"),
         backgroundColor: Colors.red,
       ),
     );
@@ -2939,7 +3087,9 @@ Future<void> _sendOffer() async {
       roundCalc[i] = await _calcRound(i);
     }
 
-    final bytes = await OfferPdfService.generatePdf(offer, roundCalc);
+    final cid2 = activeCompanyNotifier.value?.id;
+    final branding2 = cid2 != null ? await BrandingService.load(cid2) : null;
+    final bytes = await OfferPdfService.generatePdf(offer, roundCalc, branding: branding2);
 
     final production = offer.production.trim().isEmpty
         ? "UnknownProduction"
@@ -2982,7 +3132,7 @@ Future<void> _sendOffer() async {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Tilbud sendt til ${offer.company} i appen'),
+          content: Text('${S.t('sendOffer')} → ${offer.company}'),
           backgroundColor: Colors.teal,
         ),
       );
@@ -3007,7 +3157,7 @@ Future<void> _sendOffer() async {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text("Could not prepare offer: $e"),
+        content: Text("${S.t('error')}: $e"),
         backgroundColor: Colors.red,
       ),
     );
@@ -3015,6 +3165,126 @@ Future<void> _sendOffer() async {
 }
 
 // ------------------------------------------------------------
+// ✅ Import from pasted email
+// ------------------------------------------------------------
+Future<void> _importFromEmail() async {
+  final ctrl = TextEditingController();
+  final result = await showDialog<String>(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      title: Text(S.t('importFromEmail')),
+      content: SizedBox(
+        width: 600,
+        height: 400,
+        child: TextField(
+          controller: ctrl,
+          maxLines: null,
+          expands: true,
+          textAlignVertical: TextAlignVertical.top,
+          decoration: InputDecoration(
+            hintText: S.t('pasteEmailHint'),
+            border: const OutlineInputBorder(),
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(ctx),
+          child: Text(S.t('cancel')),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.pop(ctx, ctrl.text),
+          child: Text(S.t('importBtn')),
+        ),
+      ],
+    ),
+  );
+
+  if (result == null || result.trim().isEmpty) return;
+
+  final year = EmailTourParser.detectYear(result) ?? DateTime.now().year;
+  final blocks = EmailTourParser.splitTourBlocks(result);
+
+  // Use the first block (user can import multiple times for multiple tours)
+  // Show a picker if multiple blocks
+  String blockText = blocks.first;
+  if (blocks.length > 1) {
+    final picked = await showDialog<int>(
+      context: context,
+      builder: (ctx) => SimpleDialog(
+        title: Text(S.t('selectTour')),
+        children: [
+          for (int i = 0; i < blocks.length; i++)
+            SimpleDialogOption(
+              onPressed: () => Navigator.pop(ctx, i),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 4),
+                child: Text(
+                  blocks[i].split('\n').first,
+                  style: const TextStyle(fontWeight: FontWeight.w600),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+    if (picked == null) return;
+    blockText = blocks[picked];
+  }
+
+  final stops = EmailTourParser.parse(blockText, defaultYear: year);
+  if (stops.isEmpty) {
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(S.t('noStopsFound'))),
+      );
+    }
+    return;
+  }
+
+  // Find first empty round, or use current
+  int targetRound = roundIndex;
+  for (int i = 0; i < offer.rounds.length; i++) {
+    if (offer.rounds[i].entries.isEmpty) {
+      targetRound = i;
+      break;
+    }
+  }
+
+  final round = offer.rounds[targetRound];
+
+  // Clear existing entries and add parsed ones
+  round.entries.clear();
+  for (final stop in stops) {
+    round.entries.add(RoundEntry(
+      date: stop.date,
+      location: stop.city,
+      extra: '',
+    ));
+  }
+
+  // Sort by date
+  round.entries.sort((a, b) => a.date.compareTo(b.date));
+
+  // Switch to the target round and set date
+  setState(() {
+    roundIndex = targetRound;
+    selectedDate = stops.first.date;
+  });
+
+  // Recalculate
+  for (int i = 0; i < offer.rounds.length; i++) {
+    await _calcRound(i);
+  }
+  setState(() {});
+
+  if (mounted) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('${S.t('imported')} ${stops.length} ${S.t('stops')}')),
+    );
+  }
+}
+
 // ✅ Scan PDF with preview
 // ------------------------------------------------------------
 Future<void> _scanPdf() async {
@@ -3032,17 +3302,21 @@ Future<void> _scanPdf() async {
     debugPrint("===== RAW TEXT =====");
     debugPrint(text.substring(0, text.length > 1000 ? 1000 : text.length));
 
-    final parsedRounds = PdfTourParser.parse(text);
+    final parsed = PdfTourParser.parseWithMeta(text);
+    final parsedRounds = parsed.rounds;
+    final meta = parsed.meta;
 
     debugPrint("===== PARSED ROUNDS =====");
     debugPrint("Rounds found: ${parsedRounds.length}");
+    if (meta.company != null) debugPrint("Company: ${meta.company}");
+    if (meta.production != null) debugPrint("Production: ${meta.production}");
 
     if (parsedRounds.isEmpty) {
       if (!mounted) return;
 
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text("No tour data found in PDF"),
+        SnackBar(
+          content: Text(S.t('noTourDataInPdf')),
         ),
       );
 
@@ -3094,6 +3368,29 @@ Future<void> _scanPdf() async {
       }
 
       roundIndex = 0;
+
+      // Auto-fill company/contact/production from PDF metadata
+      if (meta.company != null && meta.company!.isNotEmpty && offer.company.isEmpty) {
+        offer.company = meta.company!;
+        companyCtrl.text = meta.company!;
+      }
+      if (meta.contact != null && meta.contact!.isNotEmpty && offer.contact.isEmpty) {
+        offer.contact = meta.contact!;
+        contactCtrl.text = meta.contact!;
+      }
+      if (meta.phone != null && meta.phone!.isNotEmpty && (offer.phone.isEmpty)) {
+        offer.phone = meta.phone!;
+        phoneCtrl.text = meta.phone!;
+      }
+      if (meta.email != null && meta.email!.isNotEmpty && (offer.email.isEmpty)) {
+        offer.email = meta.email!;
+        emailCtrl.text = meta.email!;
+      }
+      if (meta.production != null && meta.production!.isNotEmpty && offer.production.isEmpty) {
+        offer.production = meta.production!;
+        productionCtrl.text = meta.production!;
+      }
+
       _syncRoundControllers();
     });
 
@@ -3104,8 +3401,8 @@ Future<void> _scanPdf() async {
     if (!mounted) return;
 
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text("PDF imported correctly ✅"),
+      SnackBar(
+        content: Text(S.t('pdfImportedCorrectly')),
       ),
     );
 
@@ -3119,7 +3416,7 @@ Future<void> _scanPdf() async {
 
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text("PDF import failed: $e"),
+        content: Text("${S.t('error')}: $e"),
         backgroundColor: Colors.red,
       ),
     );
@@ -3216,8 +3513,13 @@ Future<void> _scanPdf() async {
     final ferryName =
         (res['ferry_name'] as String?)?.trim() ?? '';
 
-    // toll_nightliner is no longer used — toll is computed as km * rate
-    const double toll = 0.0;
+    // Toll: for buses, kept as 0 here and computed as km × rate inside
+    // TripCalculator. For trucks, calculate actual Norwegian bompenger
+    // by matching the leg's OSRM polyline against NVDB toll stations.
+    double toll = 0.0;
+    if (_isTruckOffer) {
+      toll = await _calculateTruckTollForLeg(fromN, toN);
+    }
 
     final extra =
         (res['extra'] as String?)?.trim() ?? '';
@@ -3541,21 +3843,21 @@ Future<void> _validateSelectedBus() async {
 
   if (selectedDate == null) {
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text("Pick a date first.")),
+      SnackBar(content: Text(S.t('pickDateFirst'))),
     );
     return;
   }
 
   if (loc.isEmpty) {
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text("Enter a location.")),
+      SnackBar(content: Text(S.t('enterLocation'))),
     );
     return;
   }
 
   if (_norm(startLocCtrl.text).isEmpty) {
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text("Start location must be set first.")),
+      SnackBar(content: Text(S.t('startLocationRequired'))),
     );
     return;
   }
@@ -3607,8 +3909,8 @@ Future<void> _validateSelectedBus() async {
 
   if (selectedDate == null) {
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text("Pick a date first, then paste."),
+      SnackBar(
+        content: Text(S.t('pickDateFirst')),
       ),
     );
     return;
@@ -3688,7 +3990,7 @@ Future<void> _editEntry(int index) async {
         builder: (_, setDialogState) {
 
           return AlertDialog(
-            title: const Text("Edit entry"),
+            title: Text(S.t('editEntry')),
 
             content: SizedBox(
               width: 420,
@@ -3725,9 +4027,9 @@ Future<void> _editEntry(int index) async {
                   // -------- LOCATION --------
                   TextField(
                     controller: tempLocCtrl,
-                    decoration: const InputDecoration(
-                      labelText: "Location",
-                      prefixIcon: Icon(Icons.place),
+                    decoration: InputDecoration(
+                      labelText: S.t('location'),
+                      prefixIcon: const Icon(Icons.place),
                     ),
                   ),
                 ],
@@ -3742,7 +4044,7 @@ Future<void> _editEntry(int index) async {
                       context,
                       rootNavigator: true,
                     ).pop(),
-                child: const Text("Cancel"),
+                child: Text(S.t('cancel')),
               ),
 
               FilledButton(
@@ -3760,7 +4062,7 @@ Future<void> _editEntry(int index) async {
                     ),
                   );
                 },
-                child: const Text("Save"),
+                child: Text(S.t('save')),
               ),
             ],
           );
@@ -3934,6 +4236,7 @@ Future<RoundCalcResult> _calcRound(int ri) async {
       tollByIndex[pendingTravelIndex] =
           (tollByIndex[pendingTravelIndex] ?? 0) + toll;
 
+      extraByIndex[pendingTravelIndex] = extra;
       ferryNameByIndex[pendingTravelIndex] = ferryName;
       countryKmByIndex[pendingTravelIndex] = country;
       noDDriveByIndex[pendingTravelIndex] = noDDrive;
@@ -3942,6 +4245,7 @@ Future<RoundCalcResult> _calcRound(int ri) async {
       kmByIndex[i] = 0;
       ferryByIndex[i] = 0;
       tollByIndex[i] = 0;
+      extraByIndex[i] = '';
       countryKmByIndex[i] = {};
 
       travelBefore[pendingTravelIndex] = true;
@@ -4012,7 +4316,17 @@ final safeFerryPerLeg = List<String?>.generate(
 
 final safeNoDDrive = List<bool>.generate(
   len,
-  (i) => noDDriveByIndex[i] ?? false,
+  (i) {
+    // Route-level no-drive (ferries etc.)
+    if (noDDriveByIndex[i] == true) return true;
+    // Travel-before legs only trigger D.Drive at ≥ 1200 km. Below that they
+    // must NOT count as D.Drive, even though km may exceed the normal 600 km
+    // threshold. Mirrors the per-leg badge in build() (travel ? 1200 : 600).
+    final travel = i < travelBefore.length && travelBefore[i];
+    final km = kmByIndex[i] ?? 0.0;
+    if (travel && km < 1200) return true;
+    return false;
+  },
 );
 
 final safeNoBridge = List<bool>.generate(
@@ -4022,6 +4336,14 @@ final safeNoBridge = List<bool>.generate(
 
   // Store ferry-per-leg on the round model so it can be used at save time
   offer.rounds[ri].ferryPerLeg = safeFerryPerLeg;
+
+  // Write countryKm back to entries so _buildDetailedCalc / foreign VAT can read them
+  for (int i = 0; i < round.entries.length; i++) {
+    round.entries[i] = round.entries[i].copyWith(
+      extra: extraByIndex[i] ?? round.entries[i].extra,
+      countryKm: countryKmByIndex[i] ?? round.entries[i].countryKm,
+    );
+  }
 
   // ================= SWEDISH MODEL =================
 
@@ -4338,8 +4660,8 @@ Future<String> _savePdfToFile(Uint8List bytes) async {
       ..sort((a, b) => a.key.compareTo(b.key));
 
     if (usedEntries.isEmpty) {
-      return const Text("No rounds calculated yet.",
-          style: TextStyle(fontFamily: "monospace", fontWeight: FontWeight.w700));
+      return Text(S.t('noRoundsCalculatedYet'),
+          style: const TextStyle(fontFamily: "monospace", fontWeight: FontWeight.w700));
     }
 
     const monoStyle = TextStyle(
@@ -4477,7 +4799,7 @@ Future<void> _openCreateInvoiceDialog() async {
       return StatefulBuilder(
         builder: (ctx, setLocal) {
           return AlertDialog(
-            title: const Text("Create invoice"),
+            title: Text(S.t('createInvoice')),
             content: SizedBox(
               width: 440,
               child: SingleChildScrollView(
@@ -4488,8 +4810,8 @@ Future<void> _openCreateInvoiceDialog() async {
                     // Invoice number
                     TextField(
                       controller: invoiceNumberCtrl,
-                      decoration: const InputDecoration(
-                        labelText: "Invoice number",
+                      decoration: InputDecoration(
+                        labelText: S.t('invoiceNumber'),
                         hintText: "2025-001",
                       ),
                     ),
@@ -4499,7 +4821,7 @@ Future<void> _openCreateInvoiceDialog() async {
                     // Invoice date
                     ListTile(
                       contentPadding: EdgeInsets.zero,
-                      title: const Text("Invoice date"),
+                      title: Text(S.t('invoiceDate')),
                       subtitle: Text(
                         DateFormat("dd.MM.yyyy").format(invoiceDate),
                       ),
@@ -4520,7 +4842,7 @@ Future<void> _openCreateInvoiceDialog() async {
                     // Due date
                     ListTile(
                       contentPadding: EdgeInsets.zero,
-                      title: const Text("Due date"),
+                      title: Text(S.t('dueDate')),
                       subtitle: Text(
                         DateFormat("dd.MM.yyyy").format(dueDate),
                       ),
@@ -4543,8 +4865,8 @@ Future<void> _openCreateInvoiceDialog() async {
                     // Bank account
                     TextField(
                       controller: bankAccountCtrl,
-                      decoration: const InputDecoration(
-                        labelText: "Bank account",
+                      decoration: InputDecoration(
+                        labelText: S.t('bankAccount'),
                         hintText: "9710.05.12345",
                       ),
                     ),
@@ -4554,8 +4876,8 @@ Future<void> _openCreateInvoiceDialog() async {
                     // Payment reference
                     TextField(
                       controller: paymentRefCtrl,
-                      decoration: const InputDecoration(
-                        labelText: "Reference",
+                      decoration: InputDecoration(
+                        labelText: S.t('reference'),
                       ),
                     ),
                   ],
@@ -4565,11 +4887,11 @@ Future<void> _openCreateInvoiceDialog() async {
             actions: [
               TextButton(
                 onPressed: () => Navigator.pop(ctx, false),
-                child: const Text("Cancel"),
+                child: Text(S.t('cancel')),
               ),
               FilledButton(
                 onPressed: () => Navigator.pop(ctx, true),
-                child: const Text("Create"),
+                child: Text(S.t('createInvoice')),
               ),
             ],
           );
@@ -4600,6 +4922,7 @@ Future<void> _openCreateInvoiceDialog() async {
     basePrice: grandTotal,
     countryKm: countryKm,
     totalDrivenKm: allDrivenKm,
+    totalExVat: grandTotal,
   );
   final totalInclVat =
       grandTotal + vatBreakdown.values.fold(0.0, (a, b) => a + b);
@@ -4633,7 +4956,7 @@ Future<void> _openCreateInvoiceDialog() async {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(
-          "Faktura ${invoice.invoiceNumber} opprettet og lagret",
+          "${S.t('invoiceNr')}${invoice.invoiceNumber} — ${S.t('saved')} ✅",
         ),
       ),
     );
@@ -4642,7 +4965,7 @@ Future<void> _openCreateInvoiceDialog() async {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text("Feil ved opprettelse av faktura: $e"),
+        content: Text("${S.t('error')}: $e"),
         backgroundColor: Colors.red,
       ),
     );
@@ -4764,6 +5087,7 @@ final foreignVatMap = _calculateForeignVat(
   basePrice: basePrice,
   countryKm: countryKm,
   totalDrivenKm: allDrivenKmForVat,
+  totalExVat: allRoundsTotal,
 );
 
 // allRoundsTotal is excl VAT. Foreign VAT is added on top.
@@ -4786,9 +5110,11 @@ return Padding(
         width: 300,
         child: _LeftOfferCard(
           offer: offer,
+          vehicleCategories: _vehicleCategories,
           onExport: _exportPdf,
           onSave: _saveDraft,
           onScanPdf: _scanPdf,
+          onImportEmail: _importFromEmail,
           onSendOffer: _sendOffer,
           onCreateInvoice: _openCreateInvoiceDialog,
           onShowVersions: _draftId != null ? _showVersionHistory : null,
@@ -4817,7 +5143,7 @@ return Padding(
               Row(
                 children: [
                   Text(
-                    "Rounds",
+                    S.t('rounds'),
                     style: Theme.of(context)
                         .textTheme
                         .titleLarge
@@ -4828,15 +5154,15 @@ return Padding(
                     width: 240,
                     child: DropdownButtonFormField<int>(
                       value: roundIndex,
-                      decoration: const InputDecoration(
-                        labelText: "Round",
-                        prefixIcon: Icon(Icons.repeat),
+                      decoration: InputDecoration(
+                        labelText: S.t('round'),
+                        prefixIcon: const Icon(Icons.repeat),
                       ),
                       items: List.generate(
                         12,
                         (i) => DropdownMenuItem(
                           value: i,
-                          child: Text("Round ${i + 1}"),
+                          child: Text("${S.t('round')} ${i + 1}"),
                         ),
                       ),
                       onChanged: (v) async {
@@ -4870,9 +5196,9 @@ return Padding(
 
                   await _recalcKm();
                 },
-                decoration: const InputDecoration(
-                  labelText: "Start location (for this round)",
-                  prefixIcon: Icon(Icons.flag),
+                decoration: InputDecoration(
+                  labelText: S.t('startLocation'),
+                  prefixIcon: const Icon(Icons.flag),
                 ),
               ),
 
@@ -4895,7 +5221,7 @@ Column(
             await _recalcKm();
           },
         ),
-        const Text("Pickup evening (first day not billable)"),
+        Text(S.t('pickupEvening')),
       ],
     ),
 
@@ -4973,7 +5299,7 @@ final trailer =
                       padding: const EdgeInsets.symmetric(vertical: 6),
                       child: Text(
                         bus == "WAITING_LIST"
-                            ? "Waiting list"
+                            ? S.t('waitingList')
                             : (bus != null ? fmtBus(bus) : "Select ${getVehicleConfig().label}"),
                         style: TextStyle(
                           color: bus == "WAITING_LIST"
@@ -5008,7 +5334,7 @@ final trailer =
                         await _recalcAllRounds();
                       },
                     ),
-                    const Text("Trailer"),
+                    Text(S.t('trailer')),
                   ],
                 ),
               ],
@@ -5044,7 +5370,7 @@ const SizedBox(height: 12),
                               alignment: Alignment.centerLeft,
                               child: Text(
                                 selectedDate == null
-                                    ? "Pick date"
+                                    ? S.t('pickDate')
                                     : _fmtDate(selectedDate!),
                               ),
                             ),
@@ -5068,18 +5394,18 @@ const SizedBox(height: 12),
 
                     OutlinedButton.icon(
                       icon: const Icon(Icons.add_road),
-                      label: const Text("Add missing route"),
+                      label: Text(S.t('addMissingRoute')),
                       onPressed: _openRoutePreview,
                     ),
 
                     if (_loadingSuggestions)
-                      const Padding(
-                        padding: EdgeInsets.only(top: 8),
+                      Padding(
+                        padding: const EdgeInsets.only(top: 8),
                         child: Align(
                           alignment: Alignment.centerLeft,
                           child: Text(
-                            "Searching routes…",
-                            style: TextStyle(
+                            S.t('searchingRoutes'),
+                            style: const TextStyle(
                               fontWeight: FontWeight.w800,
                               fontSize: 12,
                             ),
@@ -5129,7 +5455,7 @@ Expanded(
         Divider(height: 14, color: cs.outlineVariant),
 
         if (round.entries.isEmpty)
-          const Center(child: Text("No entries yet."))
+          Center(child: Text(S.t('noEntriesYet')))
         else
           Expanded(
             child: ReorderableListView.builder(
@@ -5194,7 +5520,7 @@ Expanded(
                 final extraParts = <String>[];
                 if (hasDDrive) extraParts.add('D.Drive');
                 if (rawExtra.isNotEmpty) extraParts.add(rawExtra);
-                final String extraText = extraParts.join(' / ');
+                final String extraText = extraParts.join('/');
 
                 return Column(
                   key: ValueKey('entry-$roundIndex-${e.date.millisecondsSinceEpoch}-${e.location}-$i'),
@@ -5248,11 +5574,11 @@ Expanded(
           spacing: 14,
           runSpacing: 6,
           children: [
-            Text("Billable days: ${calc.billableDays}",
+            Text("${S.t('billableDays')}: ${calc.billableDays}",
                 style: const TextStyle(fontWeight: FontWeight.w900)),
-            Text("Included: ${calc.includedKm.toStringAsFixed(0)} km"),
+            Text("${S.t('included')}: ${calc.includedKm.toStringAsFixed(0)} km"),
             Text("Extra: ${calc.extraKm.toStringAsFixed(0)} km"),
-            Text("Total: ${totalKm.toStringAsFixed(0)} km",
+            Text("${S.t('total')}: ${totalKm.toStringAsFixed(0)} km",
                 style: const TextStyle(fontWeight: FontWeight.w900)),
           ],
         ),
@@ -5310,9 +5636,9 @@ Container(
     crossAxisAlignment: CrossAxisAlignment.start,
     children: [
 
-      const Text(
-        "Status",
-        style: TextStyle(
+      Text(
+        S.t('status'),
+        style: const TextStyle(
           fontWeight: FontWeight.w900,
           fontSize: 14,
         ),
@@ -5329,22 +5655,22 @@ Container(
           border: OutlineInputBorder(),
         ),
 
-        items: const [
+        items: [
   DropdownMenuItem(
     value: "Draft",
-    child: Text("📝 Draft"),
+    child: Text("📝 ${S.t('draft')}"),
   ),
   DropdownMenuItem(
     value: "Inquiry",
-    child: Text("📨 Inquiry"),
+    child: Text("📨 ${S.t('inquiry')}"),
   ),
   DropdownMenuItem(
     value: "Confirmed",
-    child: Text("✅ Confirmed"),
+    child: Text("✅ ${S.t('confirmed')}"),
   ),
   DropdownMenuItem(
     value: "Invoiced",
-    child: Text("🧾 Invoiced"),
+    child: Text("🧾 ${S.t('invoiced')}"),
   ),
 ],
 
@@ -5361,15 +5687,15 @@ Container(
 
       // ================= PRICING MODEL TOGGLE =================
       if (activeCompanyNotifier.value?.name != 'Moss Turbusser') ...[
-      const Text(
-        "Pricing model",
-        style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
+      Text(
+        S.t('pricingModel'),
+        style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
       ),
       const SizedBox(height: 6),
       SegmentedButton<String>(
-        segments: const [
-          ButtonSegment(value: 'norsk', label: Text("🇳🇴 Norwegian")),
-          ButtonSegment(value: 'svensk', label: Text("🇸🇪 Swedish")),
+        segments: [
+          ButtonSegment(value: 'norsk', label: Text("🇳🇴 ${S.t('norwegian')}")),
+          ButtonSegment(value: 'svensk', label: Text("🇸🇪 ${S.t('swedish')}")),
         ],
         selected: {offer.pricingModel},
         onSelectionChanged: (selected) async {
@@ -5382,6 +5708,29 @@ Container(
         },
       ),
       ],
+
+      const SizedBox(height: 12),
+
+      // ================= OFFER LANGUAGE =================
+      Text(
+        S.t('offerLanguage'),
+        style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
+      ),
+      const SizedBox(height: 6),
+      SegmentedButton<String>(
+        segments: const [
+          ButtonSegment(value: 'no', label: Text('🇳🇴 NO')),
+          ButtonSegment(value: 'en', label: Text('🇬🇧 EN')),
+          ButtonSegment(value: 'sv', label: Text('🇸🇪 SV')),
+          ButtonSegment(value: 'de', label: Text('🇩🇪 DE')),
+        ],
+        selected: {offer.language},
+        onSelectionChanged: (selected) {
+          setState(() {
+            offer.language = selected.first;
+          });
+        },
+      ),
 
       const SizedBox(height: 12),
 
@@ -5399,7 +5748,7 @@ Container(
       tilePadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 2),
       childrenPadding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
       title: Text(
-        "Round calculation",
+        S.t('roundCalculation'),
         style: Theme.of(context)
             .textTheme
             .titleMedium
@@ -5413,7 +5762,7 @@ Container(
                 ? (_sweCalcCache[roundIndex] != null
                     ? _buildSweRoundBreakdown(
                         roundIndex, _sweCalcCache[roundIndex]!)
-                    : "Calculating...")
+                    : S.t('loading'))
                 : _buildRoundBreakdown(
                     roundIndex, calc, _effectiveSettings()),
             style: const TextStyle(
@@ -5428,7 +5777,7 @@ Container(
           child: TextButton.icon(
             onPressed: () => _showDetailedCalcDialog(roundIndex, calc),
             icon: const Icon(Icons.analytics_outlined, size: 16),
-            label: const Text('Show detailed calc'),
+            label: Text(S.t('showDetailedCalc')),
             style: TextButton.styleFrom(
               foregroundColor: Colors.orange,
               textStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
@@ -5457,7 +5806,7 @@ Container(
       tilePadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 2),
       childrenPadding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
       title: Text(
-        "Total calculation",
+        S.t('totalCalculation'),
         style: Theme.of(context)
             .textTheme
             .titleMedium
@@ -5493,9 +5842,9 @@ Container(
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
 
-              const Text(
-                "VAT summary",
-                style: TextStyle(
+              Text(
+                S.t('vatSummary'),
+                style: const TextStyle(
                   fontWeight: FontWeight.w900,
                   fontSize: 14,
                 ),
@@ -5538,11 +5887,13 @@ class _LeftOfferCard extends StatefulWidget {
   final Future<void> Function() onExport;
   final Future<void> Function() onSave;
   final Future<void> Function() onScanPdf;
+  final Future<void> Function() onImportEmail;
   final Future<void> Function() onSendOffer;
   final Future<void> Function() onCreateInvoice;
   final VoidCallback? onShowVersions;
   final String? draftId;
   final int tokenRefresh;
+  final List<String> vehicleCategories;
 
   const _LeftOfferCard({
   super.key,
@@ -5550,11 +5901,13 @@ class _LeftOfferCard extends StatefulWidget {
   required this.onExport,
   required this.onSave,
   required this.onScanPdf,
+  required this.onImportEmail,
   required this.onSendOffer,
   required this.onCreateInvoice,
   this.onShowVersions,
   required this.draftId,
   this.tokenRefresh = 0,
+  required this.vehicleCategories,
 });
 
   @override
@@ -5686,7 +6039,11 @@ void didUpdateWidget(covariant _LeftOfferCard oldWidget) {
         for (int i = 0; i < widget.offer.rounds.length; i++) {
           roundCalc[i] = await page._calcRound(i);
         }
-        final companySigner = signerName.isNotEmpty ? signerName : 'Coach Service Scandinavia';
+        final cid3 = activeCompanyNotifier.value?.id;
+        final branding3 = cid3 != null ? await BrandingService.load(cid3) : null;
+        final companySigner = signerName.isNotEmpty
+            ? signerName
+            : (branding3?.signatureName ?? 'Coach Service Scandinavia');
         debugPrint('APPROVE PDF: customerSignature=$acceptedName, companySignature=$companySigner');
         signedPdf = await OfferPdfService.generatePdf(
           widget.offer,
@@ -5695,6 +6052,7 @@ void didUpdateWidget(covariant _LeftOfferCard oldWidget) {
           customerSignatureDate: acceptedDate,
           companySignature: companySigner,
           companySignatureDate: approvedDate,
+          branding: branding3,
         );
         debugPrint('APPROVE PDF generated: ${signedPdf.length} bytes');
       } else {
@@ -5775,8 +6133,8 @@ void didUpdateWidget(covariant _LeftOfferCard oldWidget) {
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Offer approved and signed copy sent'),
+          SnackBar(
+            content: Text(S.t('offerApprovedAndSigned')),
             backgroundColor: Colors.green,
           ),
         );
@@ -5785,7 +6143,7 @@ void didUpdateWidget(covariant _LeftOfferCard oldWidget) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Failed to approve: $e'),
+            content: Text('${S.t('error')}: $e'),
             backgroundColor: Colors.red,
           ),
         );
@@ -5805,14 +6163,14 @@ void didUpdateWidget(covariant _LeftOfferCard oldWidget) {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Decline offer?'),
-        content: const Text('This will decline the customer\'s acceptance and notify them by email.'),
+        title: Text(S.t('declineOffer')),
+        content: Text(S.t('declineOfferDesc')),
         actions: [
-          TextButton(onPressed: () => ctx.pop(false), child: const Text('Cancel')),
+          TextButton(onPressed: () => ctx.pop(false), child: Text(S.t('cancel'))),
           FilledButton(
             onPressed: () => ctx.pop(true),
             style: FilledButton.styleFrom(backgroundColor: Colors.red),
-            child: const Text('Decline'),
+            child: Text(S.t('decline')),
           ),
         ],
       ),
@@ -5870,8 +6228,8 @@ void didUpdateWidget(covariant _LeftOfferCard oldWidget) {
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Offer declined'),
+          SnackBar(
+            content: Text(S.t('offerDeclined')),
             backgroundColor: Colors.orange,
           ),
         );
@@ -5880,7 +6238,7 @@ void didUpdateWidget(covariant _LeftOfferCard oldWidget) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Failed to decline: $e'),
+            content: Text('${S.t('error')}: $e'),
             backgroundColor: Colors.red,
           ),
         );
@@ -5962,12 +6320,15 @@ void didUpdateWidget(covariant _LeftOfferCard oldWidget) {
     setState(() => _loading = true);
 
     try {
-      final res = await _client
+      var query = _client
           .from('companies')
           .select()
-          .ilike('name', '%$q%')
-          .order('name')
-          .limit(10);
+          .ilike('name', '%$q%');
+      final ownerId = activeCompanyNotifier.value?.id;
+      if (ownerId != null) {
+        query = query.eq('owner_company_id', ownerId);
+      }
+      final res = await query.order('name').limit(10);
 
       if (!mounted) return;
 
@@ -5985,7 +6346,7 @@ Future<void> _createCompanyInline() async {
 
   final created = await showDialog<bool>(
     context: context,
-    builder: (_) => const NewCompanyDialog(),
+    builder: (_) => NewCompanyDialog(ownerCompanyId: activeCompanyNotifier.value?.id),
   );
 
   // Bruker avbrøt
@@ -6014,7 +6375,7 @@ Future<void> _createCompanyInline() async {
 
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text("Failed to create company: $e"),
+        content: Text("${S.t('error')}: $e"),
         backgroundColor: Colors.red,
       ),
     );
@@ -6109,14 +6470,14 @@ Future<void> _openProductionDialog() async {
     context: context,
     builder: (ctx) {
       return AlertDialog(
-        title: const Text("New production"),
+        title: Text(S.t('newProduction')),
 
         content: SizedBox(
           width: 360,
           child: TextField(
             controller: nameCtrl,
-            decoration: const InputDecoration(
-              labelText: "Production name",
+            decoration: InputDecoration(
+              labelText: S.t('productionName'),
             ),
           ),
         ),
@@ -6124,7 +6485,7 @@ Future<void> _openProductionDialog() async {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
-            child: const Text("Cancel"),
+            child: Text(S.t('cancel')),
           ),
 
           FilledButton(
@@ -6134,7 +6495,7 @@ Future<void> _openProductionDialog() async {
 
               Navigator.pop(ctx, name);
             },
-            child: const Text("Save"),
+            child: Text(S.t('save')),
           ),
         ],
       );
@@ -6170,7 +6531,7 @@ Future<void> _openProductionDialog() async {
 
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text("Save failed: $e"),
+        content: Text("${S.t('error')}: $e"),
         backgroundColor: Colors.red,
       ),
     );
@@ -6194,7 +6555,7 @@ Future<void> _openProductionDialog() async {
     context: context,
     builder: (ctx) {
       return AlertDialog(
-        title: Text(isEdit ? "Edit contact" : "New contact"),
+        title: Text(isEdit ? S.t('editEntry') : S.t('newContact')),
 
         content: SizedBox(
           width: 380,
@@ -6204,8 +6565,8 @@ Future<void> _openProductionDialog() async {
 
               TextField(
                 controller: nameCtrl,
-                decoration: const InputDecoration(
-                  labelText: "Name",
+                decoration: InputDecoration(
+                  labelText: S.t('name'),
                 ),
               ),
 
@@ -6213,8 +6574,8 @@ Future<void> _openProductionDialog() async {
 
               TextField(
                 controller: emailCtrl,
-                decoration: const InputDecoration(
-                  labelText: "Email",
+                decoration: InputDecoration(
+                  labelText: S.t('email'),
                 ),
               ),
 
@@ -6222,8 +6583,8 @@ Future<void> _openProductionDialog() async {
 
               TextField(
                 controller: phoneCtrl,
-                decoration: const InputDecoration(
-                  labelText: "Phone",
+                decoration: InputDecoration(
+                  labelText: S.t('phone'),
                 ),
               ),
             ],
@@ -6233,7 +6594,7 @@ Future<void> _openProductionDialog() async {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
-            child: const Text("Cancel"),
+            child: Text(S.t('cancel')),
           ),
 
           FilledButton(
@@ -6280,11 +6641,11 @@ Future<void> _openProductionDialog() async {
 
               } catch (e) {
                 ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text("Save failed: $e")),
+                  SnackBar(content: Text("${S.t('error')}: $e")),
                 );
               }
             },
-            child: const Text("Save"),
+            child: Text(S.t('save')),
           ),
         ],
       );
@@ -6325,15 +6686,15 @@ CurrentOfferStore.set(widget.offer);
       case 'approved':
         statusColor = Colors.blue;
         statusIcon = Icons.verified;
-        statusText = 'Approved';
+        statusText = S.t('approved');
       case 'declined':
         statusColor = Colors.red;
         statusIcon = Icons.cancel_outlined;
-        statusText = 'Declined';
+        statusText = S.t('declined');
       default:
         statusColor = Colors.grey;
         statusIcon = Icons.hourglass_empty;
-        statusText = 'Pending — waiting for customer';
+        statusText = S.t('pendingWaitingForCustomer');
     }
 
     return Container(
@@ -6387,7 +6748,7 @@ CurrentOfferStore.set(widget.offer);
                             ),
                           )
                         : const Icon(Icons.verified, size: 16),
-                    label: const Text('Approve', style: TextStyle(fontSize: 13)),
+                    label: Text(S.t('approve'), style: const TextStyle(fontSize: 13)),
                     style: FilledButton.styleFrom(
                       backgroundColor: Colors.green,
                       padding: const EdgeInsets.symmetric(vertical: 8),
@@ -6399,7 +6760,7 @@ CurrentOfferStore.set(widget.offer);
                   child: OutlinedButton.icon(
                     onPressed: _approvingOffer ? null : _declineOffer,
                     icon: const Icon(Icons.close, size: 16, color: Colors.red),
-                    label: const Text('Decline', style: TextStyle(fontSize: 13, color: Colors.red)),
+                    label: Text(S.t('decline'), style: const TextStyle(fontSize: 13, color: Colors.red)),
                     style: OutlinedButton.styleFrom(
                       side: const BorderSide(color: Colors.red),
                       padding: const EdgeInsets.symmetric(vertical: 8),
@@ -6424,7 +6785,7 @@ CurrentOfferStore.set(widget.offer);
                     Icon(Icons.refresh, size: 14, color: cs.onSurfaceVariant),
                     const SizedBox(width: 4),
                     Text(
-                      'Refresh',
+                      S.t('refresh'),
                       style: TextStyle(fontSize: 11, color: cs.onSurfaceVariant),
                     ),
                   ],
@@ -6471,7 +6832,7 @@ CurrentOfferStore.set(widget.offer);
 
               // ---------- HEADER ----------
               Text(
-                widget.draftId == null ? "New Offer" : "Edit Offer",
+                widget.draftId == null ? S.t('newOfferTitle') : S.t('editOfferTitle'),
                 style: Theme.of(context)
                     .textTheme
                     .titleLarge
@@ -6488,9 +6849,9 @@ CurrentOfferStore.set(widget.offer);
                     children: [
 
                       // ================= COMPANY =================
-                      const Text(
-                        "Company",
-                        style: TextStyle(fontWeight: FontWeight.w900),
+                      Text(
+                        S.t('company'),
+                        style: const TextStyle(fontWeight: FontWeight.w900),
                       ),
 
                       const SizedBox(height: 6),
@@ -6504,7 +6865,7 @@ CurrentOfferStore.set(widget.offer);
         controller: _companyCtrl,
         onChanged: _search,
         decoration: InputDecoration(
-          labelText: "Search company",
+          labelText: S.t('searchCompany'),
           prefixIcon: const Icon(Icons.apartment),
           suffixIcon: _loading
               ? const SizedBox(
@@ -6521,7 +6882,7 @@ CurrentOfferStore.set(widget.offer);
 
     // ================= ADD COMPANY =================
 IconButton(
-  tooltip: "Add new company",
+  tooltip: S.t('addNewCompany'),
   icon: const Icon(Icons.add_business),
   onPressed: _createCompanyInline,
 ),
@@ -6555,9 +6916,9 @@ if (_companySuggestions.isNotEmpty)
 const SizedBox(height: 16),
 
 // ================= CONTACT =================
-const Text(
-  "Contact",
-  style: TextStyle(fontWeight: FontWeight.w900),
+Text(
+  S.t('contact'),
+  style: const TextStyle(fontWeight: FontWeight.w900),
 ),
 
 const SizedBox(height: 6),
@@ -6614,7 +6975,7 @@ setState(() {
     // ➕ ADD CONTACT
     IconButton(
       icon: const Icon(Icons.add),
-      tooltip: "Add contact",
+      tooltip: S.t('addContact'),
       onPressed: _currentCompanyId == null
           ? null
           : () => _openContactDialog(),
@@ -6623,7 +6984,7 @@ setState(() {
     // ✏️ EDIT CONTACT
     IconButton(
       icon: const Icon(Icons.edit),
-      tooltip: "Edit contact",
+      tooltip: S.t('editEntry'),
       onPressed: _contactId == null
           ? null
           : () {
@@ -6641,9 +7002,9 @@ const SizedBox(height: 16),
 
                       // ================= PRODUCTION =================
                       // ================= PRODUCTION =================
-const Text(
-  "Production",
-  style: TextStyle(fontWeight: FontWeight.w900),
+Text(
+  S.t('production'),
+  style: const TextStyle(fontWeight: FontWeight.w900),
 ),
 
 const SizedBox(height: 6),
@@ -6687,7 +7048,7 @@ Row(
     // ➕ ADD PRODUCTION
     IconButton(
       icon: const Icon(Icons.add),
-      tooltip: "Add production",
+      tooltip: S.t('addProduction'),
       onPressed: _currentCompanyId == null
           ? null
           : _openProductionDialog,
@@ -6701,6 +7062,7 @@ const SizedBox(height: 12),
 // ================= BUS SETTINGS =================
 _BusSettingsCard(
   offer: widget.offer,
+  vehicleCategories: widget.vehicleCategories,
   onChanged: () {
     setState(() {});
   },
@@ -6729,7 +7091,7 @@ Column(
       child: OutlinedButton.icon(
         onPressed: widget.onSave,
         icon: const Icon(Icons.save),
-        label: const Text("Save draft"),
+        label: Text(S.t('saveDraft')),
       ),
     ),
 
@@ -6740,7 +7102,7 @@ Column(
       child: OutlinedButton.icon(
         onPressed: widget.draftId != null ? widget.onShowVersions : null,
         icon: const Icon(Icons.history),
-        label: const Text("Versions"),
+        label: Text(S.t('versions')),
       ),
     ),
 
@@ -6750,11 +7112,23 @@ Column(
 SizedBox(
   width: double.infinity,
   child: OutlinedButton.icon(
-    onPressed: widget.onScanPdf, // ✅ KORREKT
+    onPressed: widget.onScanPdf,
     icon: const Icon(Icons.picture_as_pdf),
-    label: const Text("Scan PDF"),
+    label: Text(S.t('scanPdf')),
   ),
 ),
+
+    const SizedBox(height: 8),
+
+    // -------- IMPORT FROM EMAIL --------
+    SizedBox(
+      width: double.infinity,
+      child: OutlinedButton.icon(
+        onPressed: widget.onImportEmail,
+        icon: const Icon(Icons.email_outlined),
+        label: Text(S.t('importFromEmail')),
+      ),
+    ),
 
     const SizedBox(height: 10),
 
@@ -6764,7 +7138,7 @@ SizedBox(
       child: FilledButton.icon(
         onPressed: widget.onExport,
         icon: const Icon(Icons.download),
-        label: const Text("Export PDF"),
+        label: Text(S.t('exportPdf')),
       ),
     ),
 
@@ -6776,7 +7150,7 @@ SizedBox(
       child: OutlinedButton.icon(
         onPressed: widget.onSendOffer,
         icon: const Icon(Icons.email_outlined),
-        label: const Text("Send offer"),
+        label: Text(S.t('sendOffer')),
       ),
     ),
 
@@ -6794,7 +7168,7 @@ SizedBox(
       child: OutlinedButton.icon(
         onPressed: widget.onCreateInvoice,
         icon: const Icon(Icons.receipt_long),
-        label: const Text("Create invoice"),
+        label: Text(S.t('createInvoice')),
       ),
     ),
   ],
@@ -6960,9 +7334,9 @@ class _PricingOverrideCardState extends State<_PricingOverrideCard> {
           initiallyExpanded: false,
           tilePadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
           childrenPadding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-          title: const Text(
-            "Pricing (per draft)",
-            style: TextStyle(
+          title: Text(
+            S.t('pricingPerDraft'),
+            style: const TextStyle(
               fontWeight: FontWeight.w900,
               fontSize: 13,
             ),
@@ -6970,7 +7344,7 @@ class _PricingOverrideCardState extends State<_PricingOverrideCard> {
           children: [
             SwitchListTile(
               contentPadding: EdgeInsets.zero,
-              title: const Text("Override global pricing"),
+              title: Text(S.t('overrideGlobalPricing')),
               value: _localEnabled,
               onChanged: (v) {
                 setState(() {
@@ -7009,13 +7383,13 @@ class _RoutesTableHeader extends StatelessWidget {
       );
       return Row(
         children: [
-          SizedBox(width: 105 * s, child: Text("Date",  style: headerStyle)),
+          SizedBox(width: 105 * s, child: Text(S.t('date'),  style: headerStyle)),
           SizedBox(width: 10 * s),
-          SizedBox(width: 180 * s, child: Text("Route", style: headerStyle)),
+          SizedBox(width: 180 * s, child: Text(S.t('route'), style: headerStyle)),
           SizedBox(width: 10 * s),
-          SizedBox(width: 52 * s,  child: Text("KM",    style: headerStyle)),
+          SizedBox(width: 52 * s,  child: Text(S.t('km'),    style: headerStyle)),
           SizedBox(width: 10 * s),
-          Expanded(child: Text("Extra", style: headerStyle)),
+          Expanded(child: Text(S.t('extra'), style: headerStyle)),
           const SizedBox(width: 56),
         ],
       );
@@ -7106,7 +7480,7 @@ class _RoutesTableRow extends StatelessWidget {
 
             // KM
             Tooltip(
-              message: tooltipText.isEmpty ? "No country breakdown" : tooltipText,
+              message: tooltipText.isEmpty ? S.t('noCountryBreakdown') : tooltipText,
               child: SizedBox(
                 width: 52 * s,
                 child: Text(
@@ -7191,9 +7565,9 @@ class _LocationAutoComplete extends StatelessWidget {
         TextField(
           controller: controller,
           focusNode: focusNode, // ✅ BEHOLDER FOKUS
-          decoration: const InputDecoration(
-            labelText: "Location",
-            prefixIcon: Icon(Icons.place),
+          decoration: InputDecoration(
+            labelText: S.t('location'),
+            prefixIcon: const Icon(Icons.place),
           ),
           onSubmitted: (_) => onSubmit(),
           onChanged: (v) {
@@ -7245,10 +7619,12 @@ class _LocationAutoComplete extends StatelessWidget {
 class _BusSettingsCard extends StatelessWidget {
   final OfferDraft offer;
   final VoidCallback onChanged;
+  final List<String> vehicleCategories;
 
   const _BusSettingsCard({
     required this.offer,
     required this.onChanged,
+    required this.vehicleCategories,
   });
 
   @override
@@ -7266,7 +7642,7 @@ class _BusSettingsCard extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            "${getVehicleConfig().labelCap} settings",
+            S.t('vehicleSettings'),
             style: const TextStyle(
               fontWeight: FontWeight.w900,
               fontSize: 13,
@@ -7351,22 +7727,25 @@ class _BusSettingsCard extends StatelessWidget {
           const SizedBox(height: 12),
 
           // ---------------- BUS TYPE ----------------
-          DropdownButtonFormField<BusType>(
-            value: offer.busType,
+          DropdownButtonFormField<String>(
+            value: vehicleCategories.contains(offer.busType)
+                ? offer.busType
+                : (vehicleCategories.isNotEmpty ? vehicleCategories.first : null),
+            isExpanded: true,
             style: TextStyle(
               fontWeight: FontWeight.normal,
               color: cs.onSurface,
             ),
             decoration: InputDecoration(
-              labelText: "${getVehicleConfig().labelCap} type",
+              labelText: S.t('vehicleType'),
               prefixIcon: const Icon(Icons.airline_seat_recline_extra),
             ),
-            items: BusType.values
+            items: vehicleCategories
                 .map(
-                  (b) => DropdownMenuItem(
-                    value: b,
+                  (cat) => DropdownMenuItem(
+                    value: cat,
                     child: Text(
-                      b.label,
+                      cat,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
                         fontWeight: FontWeight.normal,
@@ -7385,9 +7764,9 @@ class _BusSettingsCard extends StatelessWidget {
 
           const Divider(height: 24),
 
-          const Text(
-            "Global allocation",
-            style: TextStyle(
+          Text(
+            S.t('globalAllocation'),
+            style: const TextStyle(
               fontWeight: FontWeight.w900,
               fontSize: 13,
             ),
@@ -7459,7 +7838,7 @@ class _BusSettingsCard extends StatelessWidget {
                     const SizedBox(width: 6),
                     Expanded(
                       child: Text(
-                        globalBus != null ? fmtBus(globalBus) : "Not set",
+                        globalBus != null ? fmtBus(globalBus) : S.t('notSetOffer'),
                         style: TextStyle(
                           color: globalBus == null ? Colors.grey : null,
                           fontWeight: FontWeight.w600,
@@ -7533,7 +7912,7 @@ class _SendOfferDialogState extends State<_SendOfferDialog> {
   Future<void> _send() async {
     final to = _toCtrl.text.trim();
     if (to.isEmpty) {
-      setState(() => _error = 'Recipient email is required');
+      setState(() => _error = S.t('recipientEmailRequired'));
       return;
     }
 
@@ -7641,7 +8020,7 @@ class _SendOfferDialogState extends State<_SendOfferDialog> {
       if (!mounted) return;
       Navigator.of(context).pop();
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Offer sent to $to')),
+        SnackBar(content: Text('${S.t('sendOffer')} → $to')),
       );
     } catch (e) {
       if (!mounted) return;
@@ -7654,7 +8033,7 @@ class _SendOfferDialogState extends State<_SendOfferDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: const Text('Send offer'),
+      title: Text(S.t('sendOffer')),
       content: SizedBox(
         width: 480,
         child: Column(
@@ -7663,28 +8042,28 @@ class _SendOfferDialogState extends State<_SendOfferDialog> {
             TextField(
               controller: _toCtrl,
               keyboardType: TextInputType.emailAddress,
-              decoration: const InputDecoration(
-                labelText: 'To',
+              decoration: InputDecoration(
+                labelText: S.t('to'),
                 hintText: 'email@example.com, another@example.com',
-                prefixIcon: Icon(Icons.email_outlined),
+                prefixIcon: const Icon(Icons.email_outlined),
               ),
             ),
             const SizedBox(height: 12),
             TextField(
               controller: _subjectCtrl,
-              decoration: const InputDecoration(
-                labelText: 'Subject',
-                prefixIcon: Icon(Icons.subject),
+              decoration: InputDecoration(
+                labelText: S.t('subject'),
+                prefixIcon: const Icon(Icons.subject),
               ),
             ),
             const SizedBox(height: 12),
             TextField(
               controller: _messageCtrl,
               maxLines: 4,
-              decoration: const InputDecoration(
-                labelText: 'Message (optional)',
+              decoration: InputDecoration(
+                labelText: S.t('messageOptional'),
                 alignLabelWithHint: true,
-                prefixIcon: Icon(Icons.message_outlined),
+                prefixIcon: const Icon(Icons.message_outlined),
               ),
             ),
             if (_error != null) ...[
@@ -7709,7 +8088,7 @@ class _SendOfferDialogState extends State<_SendOfferDialog> {
       actions: [
         TextButton(
           onPressed: _sending ? null : () => Navigator.of(context).pop(),
-          child: const Text('Cancel'),
+          child: Text(S.t('cancel')),
         ),
         FilledButton.icon(
           onPressed: _sending ? null : _send,
@@ -7723,7 +8102,7 @@ class _SendOfferDialogState extends State<_SendOfferDialog> {
                   ),
                 )
               : const Icon(Icons.send),
-          label: const Text('Send'),
+          label: Text(S.t('send')),
         ),
       ],
     );
@@ -7773,7 +8152,7 @@ class _OfferVersionHistoryDialogState
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Restore version?'),
+        title: Text(S.t('restoreVersion')),
         content: Text(
           'This will restore version ${ver['version']} and save the '
           'current state as a new version. Continue?',
@@ -7781,11 +8160,11 @@ class _OfferVersionHistoryDialogState
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancel'),
+            child: Text(S.t('cancel')),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Restore'),
+            child: Text(S.t('restore')),
           ),
         ],
       ),
@@ -7803,7 +8182,7 @@ class _OfferVersionHistoryDialogState
         setState(() => _restoring = false);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Restore failed: $e'),
+            content: Text('${S.t('error')}: $e'),
             backgroundColor: Colors.red,
           ),
         );
@@ -7817,14 +8196,14 @@ class _OfferVersionHistoryDialogState
     final dateFmt = DateFormat('dd.MM.yyyy HH:mm');
 
     return AlertDialog(
-      title: const Text('Version history'),
+      title: Text(S.t('versionHistory')),
       content: SizedBox(
         width: 500,
         height: 400,
         child: _loading
             ? const Center(child: CircularProgressIndicator())
             : (_versions == null || _versions!.isEmpty)
-                ? const Center(child: Text('No previous versions'))
+                ? Center(child: Text(S.t('noPreviousVersions')))
                 : ListView.separated(
                     itemCount: _versions!.length,
                     separatorBuilder: (_, __) => const Divider(height: 1),
@@ -7875,7 +8254,7 @@ class _OfferVersionHistoryDialogState
       actions: [
         TextButton(
           onPressed: () => Navigator.pop(context),
-          child: const Text('Close'),
+          child: Text(S.t('close')),
         ),
       ],
     );
