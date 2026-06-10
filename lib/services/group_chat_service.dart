@@ -73,7 +73,7 @@ class GroupChatService {
     String messageType = 'text',
     String? attachmentUrl,
   }) async {
-    await _sb.from('group_chat_messages').insert({
+    final inserted = await _sb.from('group_chat_messages').insert({
       'group_chat_id': groupId,
       'user_id': _sb.auth.currentUser!.id,
       'sender_name': senderName,
@@ -83,7 +83,8 @@ class GroupChatService {
       if (replyToId != null) 'reply_to_id': replyToId,
       if (mentionedUserIds != null && mentionedUserIds.isNotEmpty)
         'mentioned_user_ids': mentionedUserIds,
-    });
+    }).select('id').single();
+    final newMessageId = inserted['id'] as String;
 
     // Push notification to group members
     try {
@@ -93,6 +94,7 @@ class GroupChatService {
         'sender_id': _sb.auth.currentUser!.id,
         'sender_name': senderName,
         'message': message,
+        'message_id': newMessageId,
         if (mentionedUserIds != null && mentionedUserIds.isNotEmpty)
           'mentioned_user_ids': mentionedUserIds,
       });

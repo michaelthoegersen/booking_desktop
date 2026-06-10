@@ -383,6 +383,7 @@ class _MgmtSideNavState extends State<_MgmtSideNav> {
           .from('gig_messages')
           .select('id')
           .eq('is_admin', false)
+          .isFilter('deleted_at', null)
           .or('read_by_admin.is.null,read_by_admin.eq.false');
       int total = (gigRes as List).length;
 
@@ -400,6 +401,7 @@ class _MgmtSideNavState extends State<_MgmtSideNav> {
           .from('direct_messages')
           .select('sender_id, created_at')
           .eq('receiver_id', myId)
+          .isFilter('deleted_at', null)
           .order('created_at', ascending: false)
           .limit(500);
       for (final msg in (dmMessages as List)) {
@@ -436,6 +438,7 @@ class _MgmtSideNavState extends State<_MgmtSideNav> {
             .select('group_chat_id, created_at')
             .inFilter('group_chat_id', groupIds)
             .neq('user_id', myId)
+            .isFilter('deleted_at', null)
             .order('created_at', ascending: false)
             .limit(500);
         for (final msg in (groupMsgs as List)) {

@@ -4690,7 +4690,7 @@ class _ChatTabState extends State<_ChatTab> with MentionMixin {
         }
         // Insert new message
         final mentions = List<String>.from(mentionedUserIds);
-        await _sb.from('gig_messages').insert({
+        final inserted = await _sb.from('gig_messages').insert({
           'gig_id': widget.gigId,
           'user_id': _sb.auth.currentUser!.id,
           'sender_name': senderName,
@@ -4698,7 +4698,8 @@ class _ChatTabState extends State<_ChatTab> with MentionMixin {
           'is_admin': true,
           if (_replyTo != null) 'reply_to_id': _replyTo!['id'],
           if (mentions.isNotEmpty) 'mentioned_user_ids': mentions,
-        });
+        }).select('id').single();
+        final newMessageId = inserted['id'] as String;
         clearMentions();
 
         // Notify
@@ -4716,6 +4717,7 @@ class _ChatTabState extends State<_ChatTab> with MentionMixin {
               'sender_id': _sb.auth.currentUser!.id,
               'sender_name': senderName,
               'message': text,
+              'message_id': newMessageId,
             });
           }
         } catch (_) {}

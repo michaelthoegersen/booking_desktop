@@ -51,7 +51,7 @@ class DirectChatService {
     String messageType = 'text',
     String? attachmentUrl,
   }) async {
-    await _sb.from('direct_messages').insert({
+    final inserted = await _sb.from('direct_messages').insert({
       'sender_id': _sb.auth.currentUser!.id,
       'receiver_id': peerId,
       'sender_name': senderName,
@@ -61,7 +61,8 @@ class DirectChatService {
       if (replyToId != null) 'reply_to_id': replyToId,
       if (mentionedUserIds != null && mentionedUserIds.isNotEmpty)
         'mentioned_user_ids': mentionedUserIds,
-    });
+    }).select('id').single();
+    final newMessageId = inserted['id'] as String;
 
     // Push notification to receiver
     try {
@@ -71,6 +72,7 @@ class DirectChatService {
         'sender_id': _sb.auth.currentUser!.id,
         'sender_name': senderName,
         'message': message,
+        'message_id': newMessageId,
         if (mentionedUserIds != null && mentionedUserIds.isNotEmpty)
           'mentioned_user_ids': mentionedUserIds,
       });

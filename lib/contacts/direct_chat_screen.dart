@@ -57,6 +57,12 @@ class _DirectChatScreenState extends State<DirectChatScreen>
   /// Peer's read cursor for showing read receipts
   DateTime? _peerLastReadAt;
 
+  /// Pending attachment — staged but not sent until user presses Send.
+  Uint8List? _pendingBytes;
+  String? _pendingFileName;
+  String? _pendingMessageType;
+  String? _pendingContentType;
+
   @override
   void initState() {
     super.initState();
@@ -118,7 +124,8 @@ class _DirectChatScreenState extends State<DirectChatScreen>
 
   Future<void> _send() async {
     final text = _controller.text.trim();
-    if (text.isEmpty || _sending) return;
+    final hasAttachment = _pendingBytes != null;
+    if ((text.isEmpty && !hasAttachment) || _sending) return;
 
     setState(() => _sending = true);
     _controller.clear();
@@ -127,6 +134,33 @@ class _DirectChatScreenState extends State<DirectChatScreen>
       if (_editingMessageId != null) {
         await DirectChatService.updateMessage(_editingMessageId!, text);
         setState(() => _editingMessageId = null);
+      } else if (hasAttachment) {
+        final url = await ChatAttachmentService.uploadFile(
+          bytes: _pendingBytes!,
+          fileName: _pendingFileName!,
+          contentType: _pendingContentType!,
+        );
+        final mentions = List<String>.from(mentionedUserIds);
+        final isFile = _pendingMessageType == 'file';
+        await DirectChatService.sendMessage(
+          peerId: widget.peerId,
+          message: isFile && text.isEmpty ? _pendingFileName! : text,
+          senderName: _senderName,
+          messageType: _pendingMessageType!,
+          attachmentUrl: url,
+          replyToId: _replyTo?['id'] as String?,
+          mentionedUserIds: mentions.isNotEmpty ? mentions : null,
+        );
+        clearMentions();
+        if (mounted) {
+          setState(() {
+            _replyTo = null;
+            _pendingBytes = null;
+            _pendingFileName = null;
+            _pendingMessageType = null;
+            _pendingContentType = null;
+          });
+        }
       } else {
         final mentions = List<String>.from(mentionedUserIds);
         await DirectChatService.sendMessage(
@@ -167,29 +201,12 @@ class _DirectChatScreenState extends State<DirectChatScreen>
     final file = result.files.first;
     final bytes = file.bytes;
     if (bytes == null) return;
-    setState(() => _sending = true);
-    try {
-      final url = await ChatAttachmentService.uploadFile(
-        bytes: bytes,
-        fileName: file.name,
-        contentType: 'image/${file.extension ?? 'png'}',
-      );
-      await DirectChatService.sendMessage(
-        peerId: widget.peerId,
-        message: '',
-        senderName: _senderName,
-        messageType: 'image',
-        attachmentUrl: url,
-      );
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Feil ved opplasting: $e')),
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _sending = false);
-    }
+    setState(() {
+      _pendingBytes = bytes;
+      _pendingFileName = file.name;
+      _pendingMessageType = 'image';
+      _pendingContentType = 'image/${file.extension ?? 'png'}';
+    });
   }
 
   Future<void> _pickFile() async {
@@ -198,28 +215,64 @@ class _DirectChatScreenState extends State<DirectChatScreen>
     final file = result.files.first;
     final bytes = file.bytes;
     if (bytes == null) return;
-    setState(() => _sending = true);
-    try {
-      final url = await ChatAttachmentService.uploadFile(
-        bytes: bytes,
-        fileName: file.name,
-      );
-      await DirectChatService.sendMessage(
-        peerId: widget.peerId,
-        message: file.name,
-        senderName: _senderName,
-        messageType: 'file',
-        attachmentUrl: url,
-      );
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Feil ved opplasting: $e')),
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _sending = false);
-    }
+    setState(() {
+      _pendingBytes = bytes;
+      _pendingFileName = file.name;
+      _pendingMessageType = 'file';
+      _pendingContentType = 'application/octet-stream';
+    });
+  }
+
+  void _clearPendingAttachment() {
+    setState(() {
+      _pendingBytes = null;
+      _pendingFileName = null;
+      _pendingMessageType = null;
+      _pendingContentType = null;
+    });
+  }
+
+  Widget _buildPendingAttachmentPreview() {
+    final type = _pendingMessageType;
+    return Container(
+      padding: const EdgeInsets.fromLTRB(14, 8, 8, 0),
+      child: Row(
+        children: [
+          ClipRRect(
+            borderRadius: BorderRadius.circular(8),
+            child: SizedBox(
+              width: 56,
+              height: 56,
+              child: type == 'image' && _pendingBytes != null
+                  ? Image.memory(_pendingBytes!, fit: BoxFit.cover)
+                  : Container(
+                      color: Colors.black12,
+                      child: Icon(
+                        type == 'video'
+                            ? Icons.movie_outlined
+                            : Icons.insert_drive_file_outlined,
+                        size: 28,
+                        color: Colors.black54,
+                      ),
+                    ),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              _pendingFileName ?? '',
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 13),
+            ),
+          ),
+          IconButton(
+            icon: const Icon(Icons.close, size: 20),
+            onPressed: _clearPendingAttachment,
+          ),
+        ],
+      ),
+    );
   }
 
   void _showGifPicker() {
@@ -476,6 +529,7 @@ class _DirectChatScreenState extends State<DirectChatScreen>
                           isMine: isMine,
                           createdAt: msg['created_at'] as String?,
                           editedAt: msg['edited_at'] as String?,
+                          deletedAt: msg['deleted_at'] as String?,
                           replyMsg: replyMsg,
                           reactions: reactions,
                           currentUserId: _currentUserId,
@@ -571,6 +625,13 @@ class _DirectChatScreenState extends State<DirectChatScreen>
                   ),
                 ],
               ),
+            ),
+
+          // Pending attachment preview
+          if (_pendingBytes != null)
+            Container(
+              color: Colors.white,
+              child: _buildPendingAttachmentPreview(),
             ),
 
           // Input
@@ -792,6 +853,7 @@ class _Bubble extends StatelessWidget {
   final bool isMine;
   final String? createdAt;
   final String? editedAt;
+  final String? deletedAt;
   final Map<String, dynamic>? replyMsg;
   final List<Map<String, dynamic>> reactions;
   final String currentUserId;
@@ -810,6 +872,7 @@ class _Bubble extends StatelessWidget {
     required this.isMine,
     this.createdAt,
     this.editedAt,
+    this.deletedAt,
     this.replyMsg,
     required this.reactions,
     required this.currentUserId,
@@ -822,12 +885,13 @@ class _Bubble extends StatelessWidget {
     this.showRead = false,
   });
 
-  static const _emojiOptions = ['👍', '👎', '❤️', '😂', '😮', '😢', '😡', '🙏', '🔥', '🎉', '💯', '👀'];
+  static const _emojiOptions = ['✅', '👍', '👎', '❤️', '😂', '😮', '😢', '😡', '🙏', '🔥', '🎉', '💯', '👀'];
 
   @override
   Widget build(BuildContext context) {
     final timeStr = _fmtTime(createdAt);
     final maxWidth = MediaQuery.of(context).size.width * 0.55;
+    final isDeleted = deletedAt != null;
 
     // Group reactions: emoji → {count, myReaction}
     final Map<String, _ReactionInfo> grouped = {};
@@ -849,8 +913,9 @@ class _Bubble extends StatelessWidget {
           children: [
             // Bubble
             GestureDetector(
-              onSecondaryTapUp: (details) => _showContextMenu(context),
-              onLongPress: () => _showContextMenu(context),
+              onSecondaryTapUp:
+                  isDeleted ? null : (details) => _showContextMenu(context),
+              onLongPress: isDeleted ? null : () => _showContextMenu(context),
               child: Container(
                 padding:
                     const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
@@ -876,6 +941,27 @@ class _Bubble extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(height: 3),
+                    if (isDeleted)
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.do_not_disturb_alt,
+                              size: 15,
+                              color: isMine ? Colors.white54 : Colors.black38),
+                          const SizedBox(width: 4),
+                          Flexible(
+                            child: Text(
+                              '$senderName slettet en melding',
+                              style: TextStyle(
+                                fontSize: 14,
+                                fontStyle: FontStyle.italic,
+                                color: isMine ? Colors.white60 : Colors.black45,
+                              ),
+                            ),
+                          ),
+                        ],
+                      )
+                    else ...[
                     // Reply quote
                     if (replyMsg != null) ...[
                       Container(
@@ -928,6 +1014,7 @@ class _Bubble extends StatelessWidget {
                         color: isMine ? Colors.white : Colors.black87,
                       ),
                     ),
+                    ],
                     if (timeStr != null) ...[
                       const SizedBox(height: 3),
                       Row(
@@ -940,7 +1027,7 @@ class _Bubble extends StatelessWidget {
                               color: isMine ? Colors.white38 : Colors.black38,
                             ),
                           ),
-                          if (editedAt != null) ...[
+                          if (editedAt != null && !isDeleted) ...[
                             const SizedBox(width: 4),
                             Text(
                               '(redigert)',
@@ -966,7 +1053,7 @@ class _Bubble extends StatelessWidget {
             ),
 
             // Reaction pills
-            if (grouped.isNotEmpty)
+            if (grouped.isNotEmpty && !isDeleted)
               Padding(
                 padding: const EdgeInsets.only(top: 4),
                 child: Wrap(

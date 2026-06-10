@@ -97,6 +97,7 @@ async function sendPushBatch(
     ...(extraFields?.peer_id ? { peer_id: extraFields.peer_id } : {}),
     ...(extraFields?.group_id ? { group_id: extraFields.group_id } : {}),
     ...(extraFields?.group_name ? { group_name: extraFields.group_name } : {}),
+    ...(extraFields?.message_id ? { message_id: extraFields.message_id } : {}),
   }));
 
   let { error: insertError } = await supabase
@@ -238,7 +239,8 @@ Deno.serve(async (req) => {
       // Normal: skip if muted
       const normalRecipients = [receiver_id].filter((uid: string) => !mentionSet.has(uid) && !dmMuted);
 
-      const dmExtra = { chat_type: 'dm', peer_id: sender_id, peer_name: sender_name };
+      const dmExtra: Record<string, string> = { chat_type: 'dm', peer_id: sender_id, peer_name: sender_name };
+      if (payload.message_id) dmExtra.message_id = payload.message_id;
 
       let totalResult = { notifications: 0, push: 0 };
       if (mentionedRecipients.length > 0) {
@@ -297,7 +299,8 @@ Deno.serve(async (req) => {
       // Normal recipients: exclude muted users
       const normalRecipients = recipientIds.filter((uid: string) => !mentionSet.has(uid) && !mutedSet.has(uid));
 
-      const groupExtra = { chat_type: 'group', group_id, group_name: groupName };
+      const groupExtra: Record<string, string> = { chat_type: 'group', group_id, group_name: groupName };
+      if (payload.message_id) groupExtra.message_id = payload.message_id;
       const groupTitle = groupName ? `${sender_name} · ${groupName}` : sender_name;
 
       let totalResult = { notifications: 0, push: 0 };
@@ -402,7 +405,8 @@ Deno.serve(async (req) => {
       // Normal recipients: exclude muted users
       const normalRecipients = recipientIds.filter((uid: string) => !mentionSet.has(uid) && !mutedGigSet.has(uid));
 
-      const gigExtra = { chat_type: 'gig' };
+      const gigExtra: Record<string, string> = { chat_type: 'gig' };
+      if (payload.message_id) gigExtra.message_id = payload.message_id;
 
       let totalResult = { notifications: 0, push: 0 };
       if (mentionedRecipients.length > 0) {
