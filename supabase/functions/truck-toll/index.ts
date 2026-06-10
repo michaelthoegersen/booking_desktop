@@ -46,6 +46,9 @@ function parseStation(obj: any) {
     lon,
     priceCar: num(props["Takst liten bil"]),
     priceTruck: num(props["Takst stor bil"]),
+    // Toll-ring group for the one-hour rule: stations sharing this id belong to
+    // the same bomring and are charged ONCE per pass, not per station.
+    gruppe: num(props["Timesregel, passeringsgruppe"]),
   };
 }
 
@@ -166,11 +169,22 @@ function truckTollForPoints(points: [number, number][], stations: any[]) {
       passed.push(s);
     }
   }
+  // One-hour rule (timesregel): stations in the same passeringsgruppe (toll
+  // ring) are charged once per pass — the highest tariff in the ring — not once
+  // per station. Stations with no group (single toll roads/bridges) are charged
+  // individually.
   let toll = 0;
+  const ringMax = new Map<number, number>();
   for (const s of passed) {
-    toll += s.priceTruck > 0 ? s.priceTruck : s.priceCar;
+    const price = s.priceTruck > 0 ? s.priceTruck : s.priceCar;
+    if (s.gruppe && s.gruppe > 0) {
+      ringMax.set(s.gruppe, Math.max(ringMax.get(s.gruppe) ?? 0, price));
+    } else {
+      toll += price;
+    }
   }
-  return { toll, stations: passed.length };
+  for (const v of ringMax.values()) toll += v;
+  return { toll, stations: passed.length, rings: ringMax.size };
 }
 
 Deno.serve(async (req) => {
