@@ -6,9 +6,13 @@ import 'package:intl/intl.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import '../models/offer_draft.dart';
+import '../models/company_branding.dart';
 import '../state/settings_store.dart';
+import '../state/active_company.dart';
+import '../localization/s.dart';
 import 'package:tourflow/services/trip_calculator.dart';
 import '../models/round_calc_result.dart';
+import 'branding_service.dart';
 
 class OfferPdfService {
   
@@ -64,25 +68,15 @@ This offer is valid for 7 days from today’s date and assumes that a vehicle is
 // BUS TYPE IMAGE
 // ============================================================
 
-static String _busImageForType(BusType type) {
-  switch (type) {
-    case BusType.sleeper12:
-      return 'assets/pdf/buses/12_sleeper.png';
-
-    case BusType.sleeper14:
-      return 'assets/pdf/buses/14_sleeper.png';
-
-    case BusType.sleeper16:
-      return 'assets/pdf/buses/16_sleeper.png';
-
-    case BusType.sleeper18:
-      return 'assets/pdf/buses/18_sleeper.png';
-
-    case BusType.sleeper12StarRoom:
-      return 'assets/pdf/buses/12_sleeper.png';
-
-    case BusType.conference:
-      return 'assets/pdf/buses/12_sleeper.png';
+static String _busImageForType(String type) {
+  if (type.contains('18')) {
+    return 'assets/pdf/buses/18_sleeper.png';
+  } else if (type.contains('16')) {
+    return 'assets/pdf/buses/16_sleeper.png';
+  } else if (type.contains('14')) {
+    return 'assets/pdf/buses/14_sleeper.png';
+  } else {
+    return 'assets/pdf/buses/12_sleeper.png';
   }
 }
 
@@ -97,6 +91,7 @@ static Future<Uint8List> generatePdf(
   String? customerSignatureDate,
   String? companySignature,
   String? companySignatureDate,
+  CompanyBranding? branding,
 }) async {
   return buildPdf(
     offer: offer,
@@ -105,6 +100,7 @@ static Future<Uint8List> generatePdf(
     customerSignatureDate: customerSignatureDate,
     companySignature: companySignature,
     companySignatureDate: companySignatureDate,
+    branding: branding,
   );
 }
 
@@ -186,6 +182,7 @@ static List<pw.Widget> _buildTableForIndexes(
       basePrice: vatBase,
       countryKm: allCountryKm,
       totalDrivenKm: allDrivenKm,
+      totalExVat: grandTotal,
     );
 
     // grandTotal is excl VAT. Foreign VAT is added on top.
@@ -209,7 +206,7 @@ static List<pw.Widget> _buildTableForIndexes(
               pw.SizedBox(height: 10),
 
               pw.Text(
-                "TOTAL",
+                S.t('total', lang: offer.language).toUpperCase(),
                 style: pw.TextStyle(font: bold, fontSize: 12),
               ),
 
@@ -221,6 +218,7 @@ static List<pw.Widget> _buildTableForIndexes(
                 totalIncVat,
                 regular,
                 bold,
+                language: offer.language,
               ),
 
               // 🔒 Gir lik høyde også uten VAT
@@ -248,6 +246,7 @@ static Future<Uint8List> buildPdf({
   String? customerSignatureDate,
   String? companySignature,
   String? companySignatureDate,
+  CompanyBranding? branding,
 }) async {
   final doc = pw.Document();
 
@@ -281,17 +280,32 @@ static Future<Uint8List> buildPdf({
   );
 
   // ---------------- IMAGES ----------------
-  final appLogo = pw.MemoryImage(
+  // Use branding logo if available, otherwise fall back to default
+  pw.ImageProvider? brandLogo;
+  if (branding?.logoUrl != null && branding!.logoUrl!.isNotEmpty) {
+    try {
+      final logoBytes = await BrandingService.downloadLogoBytes(branding.logoUrl!);
+      if (logoBytes != null) brandLogo = pw.MemoryImage(logoBytes);
+    } catch (_) {}
+  }
+  final appLogo = brandLogo ?? pw.MemoryImage(
     _safeBytes(await rootBundle.load('assets/pdf/logos/LOGOapp.png')),
   );
 
-  final busLayout = pw.MemoryImage(
-    _safeBytes(await rootBundle.load('assets/pdf/buses/DDBus.png')),
-  );
-
-  final busTypeImage = pw.MemoryImage(
-    _safeBytes(await rootBundle.load(_busImageForType(offer.busType))),
-  );
+  // Bus images only for CSS (no custom branding = CSS fallback)
+  final hasBusImages = brandLogo == null;
+  pw.ImageProvider? busLayout;
+  pw.ImageProvider? busTypeImage;
+  if (hasBusImages) {
+    try {
+      busLayout = pw.MemoryImage(
+        _safeBytes(await rootBundle.load('assets/pdf/buses/DDBus.png')),
+      );
+      busTypeImage = pw.MemoryImage(
+        _safeBytes(await rootBundle.load(_busImageForType(offer.busType))),
+      );
+    } catch (_) {}
+  }
 
   doc.addPage(
     pw.MultiPage(
@@ -301,16 +315,19 @@ static Future<Uint8List> buildPdf({
       build: (context) => [
 
         // ---------- HEADER (KUN ÉN GANG)
-        _buildTopBar(appLogo, regular),
+        _buildTopBar(appLogo, regular, branding: branding),
         pw.SizedBox(height: 20),
-        _buildTopContent(
-          offer,
-          busLayout,
-          busTypeImage,
-          regular,
-        ),
+        if (busLayout != null && busTypeImage != null)
+          _buildTopContent(
+            offer,
+            busLayout,
+            busTypeImage,
+            regular,
+          )
+        else
+          _buildTopContentSimple(offer, regular),
         pw.SizedBox(height: 30),
-        _buildOfferTitle(bold),
+        _buildOfferTitle(bold, language: offer.language),
         pw.SizedBox(height: 15),
 
         // ---------- ALLE RUNDER (FLYTENDE)
@@ -325,7 +342,7 @@ static Future<Uint8List> buildPdf({
 
         // ---------- TERMS + SIGNATURE (RETT ETTER TOTAL)
         pw.SizedBox(height: 30),
-        _buildTerms(regular, bold),
+        _buildTerms(regular, bold, branding: branding, language: offer.language),
         pw.SizedBox(height: 30),
         _buildSignature(
           regular,
@@ -335,6 +352,8 @@ static Future<Uint8List> buildPdf({
           customerSignatureDate: customerSignatureDate,
           companySignature: companySignature,
           companySignatureDate: companySignatureDate,
+          branding: branding,
+          language: offer.language,
         ),
       ],
     ),
@@ -349,6 +368,7 @@ static List<pw.Widget> _buildSingleRound({
   required RoundCalcResult result,
   required pw.Font regular,
   required pw.Font bold,
+  String language = 'no',
 }) {
   final widgets = <pw.Widget>[];
 
@@ -356,7 +376,7 @@ static List<pw.Widget> _buildSingleRound({
     pw.Padding(
       padding: const pw.EdgeInsets.symmetric(horizontal: 40),
       child: pw.Text(
-        "Round ${roundIndex + 1}",
+        "${S.t('round', lang: language)} ${roundIndex + 1}",
         style: pw.TextStyle(font: bold, fontSize: 12),
       ),
     ),
@@ -367,7 +387,7 @@ static List<pw.Widget> _buildSingleRound({
   // 👉 HER bruker du eksisterende tabell-logikk
   widgets.addAll(
     _buildTable(
-      OfferDraft()..rounds.add(round),
+      OfferDraft(language: language)..rounds.add(round),
       {0: result},
       regular,
       bold,
@@ -380,7 +400,7 @@ static List<pw.Widget> _buildSingleRound({
       child: pw.Align(
         alignment: pw.Alignment.centerRight,
         child: pw.Text(
-          "Subtotal: ${_formatNok(result.totalCost)}",
+          "${S.t('pdfSubtotal', lang: language)}: ${_formatNok(result.totalCost)}",
           style: pw.TextStyle(font: bold, fontSize: 9),
         ),
       ),
@@ -398,6 +418,7 @@ static List<pw.Widget> _buildTotalSection({
   required pw.Font regular,
   required pw.Font bold,
   double? totalDrivenKm,
+  String language = 'no',
 }) {
   if (grandTotal <= 0) return [];
 
@@ -405,6 +426,7 @@ static List<pw.Widget> _buildTotalSection({
     basePrice: grandTotal,
     countryKm: countryKm,
     totalDrivenKm: totalDrivenKm,
+    totalExVat: grandTotal,
   );
 
   // grandTotal is excl VAT. Foreign VAT is added on top.
@@ -421,7 +443,7 @@ static List<pw.Widget> _buildTotalSection({
           pw.Divider(),
           pw.SizedBox(height: 10),
           pw.Text(
-            "TOTAL",
+            S.t('total', lang: language).toUpperCase(),
             style: pw.TextStyle(font: bold, fontSize: 12),
           ),
           pw.SizedBox(height: 6),
@@ -431,6 +453,7 @@ static List<pw.Widget> _buildTotalSection({
             totalIncVat,
             regular,
             bold,
+            language: language,
           ),
           pw.SizedBox(height: 20),
         ],
@@ -448,70 +471,81 @@ static List<pw.Widget> _buildTotalSection({
 
 static pw.Widget _buildTopBar(
   pw.ImageProvider logo,
-  pw.Font font,
-) {
+  pw.Font font, {
+  CompanyBranding? branding,
+}) {
+  final bool isBrandedLogo = branding?.logoUrl != null && branding!.logoUrl!.isNotEmpty;
   return pw.Container(
     width: double.infinity,
-    height: 110, // Litt mer luft
+    height: 110,
     color: PdfColors.black,
 
     child: pw.Stack(
       children: [
 
-        // LOGO (FULL KONTROLL)
-        pw.Positioned(
-          left: 0,  // → høyre
-          top: -25,   // ↓ ned
-
-          child: pw.Image(
-            logo,
-            height: 180, // 👈 STØRRELSE (endre denne)
-            fit: pw.BoxFit.contain,
+        // LOGO — CSS uses oversized logo with offset, others use contained logo
+        if (!isBrandedLogo)
+          pw.Positioned(
+            left: 0,
+            top: -25,
+            child: pw.Image(
+              logo,
+              height: 180,
+              fit: pw.BoxFit.contain,
+            ),
+          )
+        else
+          pw.Positioned(
+            left: 0,
+            top: 0,
+            bottom: 0,
+            child: pw.Center(
+              child: pw.Image(
+                logo,
+                height: 50,
+                fit: pw.BoxFit.contain,
+              ),
+            ),
           ),
-        ),
 
-        // TEKST (låst høyre)
+        // TEKST (låst høyre — same position as CSS original)
         pw.Positioned(
-          right: -140,
+          right: isBrandedLogo ? 20 : -140,
           top: 40,
-
           child: pw.Container(
-            width: 420,
-
+            width: isBrandedLogo ? 200 : 420,
             child: pw.Column(
               crossAxisAlignment: pw.CrossAxisAlignment.start,
               children: [
-
                 pw.Text(
-                  "Coach Service Scandinavia / STARCOACH - Ring Lillgård 1585 62 Linköping, SE",
+                  branding?.companyName ?? '',
                   style: pw.TextStyle(
                     font: font,
                     fontSize: 8,
                     color: PdfColors.white,
                   ),
                 ),
-
-                pw.SizedBox(height: 4),
-
-                pw.Text(
-                  "Michael: +47 948 93 820  sales@coachservicescandinavia.com",
-                  style: pw.TextStyle(
-                    font: font,
-                    fontSize: 8,
-                    color: PdfColors.white,
+                if ((branding?.addressLine ?? '').isNotEmpty) ...[
+                  pw.SizedBox(height: 4),
+                  pw.Text(
+                    branding!.addressLine!,
+                    style: pw.TextStyle(font: font, fontSize: 8, color: PdfColors.white),
                   ),
-                ),
-
-                pw.SizedBox(height: 4),
-
-                pw.Text(
-                  "Benny: +46 73-428 19 48  benny.nyberg@starcoach.nu",
-                  style: pw.TextStyle(
-                    font: font,
-                    fontSize: 8,
-                    color: PdfColors.white,
+                ],
+                if ((branding?.contactLine1 ?? '').isNotEmpty) ...[
+                  pw.SizedBox(height: 4),
+                  pw.Text(
+                    branding!.contactLine1!,
+                    style: pw.TextStyle(font: font, fontSize: 8, color: PdfColors.white),
                   ),
-                ),
+                ],
+                if ((branding?.contactLine2 ?? '').isNotEmpty) ...[
+                  pw.SizedBox(height: 4),
+                  pw.Text(
+                    branding!.contactLine2!,
+                    style: pw.TextStyle(font: font, fontSize: 8, color: PdfColors.white),
+                  ),
+                ],
               ],
             ),
           ),
@@ -553,7 +587,7 @@ static pw.Widget _whiteText(String text, pw.Font font) {
       offer.rounds.any((r) => r.trailer);
 
   final vehicle =
-      "${offer.busCount} x ${offer.busType.label}"
+      "${offer.busCount} x ${offer.busType}"
       "${hasTrailer ? " + trailer" : ""}";
   return pw.Container(
     height: 95, // Nok plass → ingen clipping
@@ -580,18 +614,18 @@ static pw.Widget _whiteText(String text, pw.Font font) {
             child: pw.Column(
               crossAxisAlignment: pw.CrossAxisAlignment.start,
               children: [
-                _rightInfo("Company", offer.company, font),
-_rightInfo("Name", offer.contact, font),
-_rightInfo("Phone", offer.phone ?? "", font),
-_rightInfo("Email", offer.email ?? "", font),
-_rightInfo("Production", offer.production, font),
+                _rightInfo(S.t('company', lang: offer.language), offer.company, font),
+_rightInfo(S.t('name', lang: offer.language), offer.contact, font),
+_rightInfo(S.t('phone', lang: offer.language), offer.phone ?? "", font),
+_rightInfo(S.t('email', lang: offer.language), offer.email ?? "", font),
+_rightInfo(S.t('production', lang: offer.language), offer.production, font),
                 _rightInfo(
-  "Vehicle",
+  S.t('vehicle', lang: offer.language),
   vehicle,
   font,
 ),
-                _rightInfo("Date", _todayDate(), font),
-                _rightInfo("Valid until", _validUntil(), font),
+                _rightInfo(S.t('date', lang: offer.language), _todayDate(), font),
+                _rightInfo(S.t('pdfValidUntil', lang: offer.language), _validUntil(), font),
 
                 pw.SizedBox(height: 12),
 
@@ -608,14 +642,51 @@ _rightInfo("Production", offer.production, font),
   );
 }
 
+  /// Top content for non-bus companies — same layout as original, all info on right
+  static pw.Widget _buildTopContentSimple(OfferDraft offer, pw.Font font) {
+    final hasTrailer = offer.rounds.any((r) => r.trailer);
+    final vehicle =
+        "${offer.busCount} x ${offer.busType}"
+        "${hasTrailer ? " + trailer" : ""}";
+    return pw.Container(
+      height: 95,
+      padding: const pw.EdgeInsets.only(top: -25),
+      child: pw.Stack(
+        children: [
+          // All info on the right — same position as original
+          pw.Positioned(
+            right: 0,
+            top: 15,
+            child: pw.Container(
+              width: 160,
+              child: pw.Column(
+                crossAxisAlignment: pw.CrossAxisAlignment.start,
+                children: [
+                  _rightInfo(S.t('company', lang: offer.language), offer.company, font),
+                  _rightInfo(S.t('name', lang: offer.language), offer.contact, font),
+                  _rightInfo(S.t('phone', lang: offer.language), offer.phone ?? "", font),
+                  _rightInfo(S.t('email', lang: offer.language), offer.email ?? "", font),
+                  _rightInfo(S.t('production', lang: offer.language), offer.production, font),
+                  _rightInfo(S.t('vehicle', lang: offer.language), vehicle, font),
+                  _rightInfo(S.t('date', lang: offer.language), _todayDate(), font),
+                  _rightInfo(S.t('pdfValidUntil', lang: offer.language), _validUntil(), font),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   // ============================================================
 // OFFER TITLE
 // ============================================================
 
-static pw.Widget _buildOfferTitle(pw.Font bold) {
+static pw.Widget _buildOfferTitle(pw.Font bold, {String language = 'no'}) {
   return pw.Center(
     child: pw.Text(
-      "Offer",
+      S.t('offerPdfTitle', lang: language),
       style: pw.TextStyle(
         font: bold,
         fontSize: 24,
@@ -664,7 +735,7 @@ static pw.Widget _buildOfferTitle(pw.Font bold) {
     // ---------------- ROUND TITLE
     widgets.add(
       pw.Text(
-  "Round ${roundNumberOverride ?? (i + 1)}",
+  "${S.t('round', lang: offer.language)} ${roundNumberOverride ?? (i + 1)}",
   style: pw.TextStyle(font: bold, fontSize: 12),
 
       ),
@@ -674,104 +745,107 @@ static pw.Widget _buildOfferTitle(pw.Font bold) {
 
     // ---------------- HEADERS
     final headers = [
-      "Date",
-      "Location",
-      "Km",
-      "Time",
-      "Extra",
+      S.t('date', lang: offer.language),
+      S.t('location', lang: offer.language),
+      S.t('km', lang: offer.language),
+      S.t('pdfTime', lang: offer.language),
+      S.t('extra', lang: offer.language),
     ];
 
     final rows = <List<String>>[];
 
     // ---------------- ROWS
+    // Matches new_offer_page logic:
+    //  - Travel/Off rows: always 0 km, no extra
+    //  - First Travel in a consecutive block: show the merged km from prev city → next city
+    //  - Subsequent Travel rows: 0 km
+    //  - City after Travel: 0 km (already shown on first Travel row)
+
+    // Pre-calculate: for each Travel row, is it the FIRST in a consecutive Travel block?
+    final isFirstTravel = List<bool>.filled(round.entries.length, false);
+    for (int r = 0; r < round.entries.length; r++) {
+      final loc = round.entries[r].location.trim().toLowerCase();
+      if (loc != 'travel') continue;
+      // Check if previous entry is also Travel
+      bool prevIsTravel = false;
+      if (r > 0) {
+        final prevLoc = round.entries[r - 1].location.trim().toLowerCase();
+        prevIsTravel = prevLoc == 'travel';
+      }
+      isFirstTravel[r] = !prevIsTravel;
+    }
+
 for (int r = 0; r < round.entries.length; r++) {
   final e = round.entries[r];
+  final loc = e.location.trim().toLowerCase();
+  final isTravel = loc == 'travel';
+  final isOff = loc == 'off';
 
-  final isTravel = e.location.trim().toLowerCase() == 'travel';
-  final isOff    = e.location.trim().toLowerCase() == 'off';
-
-  // Direct look-back: is the closest preceding non-off/empty entry a Travel row?
-  // (More reliable than result.hasTravelBefore which depends on calc path taken.)
+  // Is this a city that comes after one or more Travel rows?
   bool isAfterTravel = false;
   if (!isTravel && !isOff) {
     for (int j = r - 1; j >= 0; j--) {
       final jLoc = round.entries[j].location.trim().toLowerCase();
-      if (jLoc == 'travel') {
-        isAfterTravel = true;
-        break;
-      }
-      if (jLoc.isNotEmpty && jLoc != 'off') break; // real city before us
+      if (jLoc == 'travel') { isAfterTravel = true; break; }
+      if (jLoc.isNotEmpty && jLoc != 'off') break;
     }
   }
 
-  // ---------------- KM (raw from calc) ----------------
-  double km = 0;
-  if (r < result.legKm.length) km = result.legKm[r].toDouble();
+  double displayKm = 0;
+  String extraText = '';
 
-  // ---------------- FIND FROM / TO =================
-  int? fromIndex;
-  int? toIndex;
-  for (int i = r - 1; i >= 0; i--) {
-    if (round.entries[i].location.toLowerCase() != "travel") { fromIndex = i; break; }
-  }
-  for (int i = r + 1; i < round.entries.length; i++) {
-    if (round.entries[i].location.toLowerCase() != "travel") { toIndex = i; break; }
-  }
-
-  // ================= DISPLAY VALUES =================
-  // City after Travel → "0" km, "0h 0m" time, no extra (all shown on Travel row).
-  // Travel row        → own km if MERGE path (km>0), else look ahead; extra from city.
-  // Normal row        → own km/time/extra as usual.
-
-  double displayKm = km;
-  String extraText = "";
-
-  if (isAfterTravel) {
-    // Always suppress — Travel row above shows everything.
+  if (isOff || isAfterTravel) {
+    // Off days and cities after Travel: always 0 km, no extra
     displayKm = 0;
-    extraText = '';
   } else if (isTravel) {
-    // Look ahead to next real city for noDDrive flag and extra field.
-    // NORMAL path: Travel's own km==0 → also pick up km from city.
-    // MERGE path:  Travel's own km>0  → keep it, only need city for extra/DDrive.
-    for (int j = r + 1; j < round.entries.length; j++) {
-      final jLoc = round.entries[j].location.trim().toLowerCase();
-      if (jLoc.isEmpty || jLoc == 'travel') continue;
-      if (jLoc != 'off') {
-        if (km == 0 && j < result.legKm.length) {
-          displayKm = result.legKm[j].toDouble(); // NORMAL path: pick up km
+    if (isFirstTravel[r]) {
+      // First Travel in block: show merged km (prev real city → next real city)
+      // Find next real city's km from calc result
+      for (int j = r + 1; j < round.entries.length; j++) {
+        final jLoc = round.entries[j].location.trim().toLowerCase();
+        if (jLoc == 'travel' || jLoc == 'off' || jLoc.isEmpty) continue;
+        // Found next real city — use its legKm
+        if (j < result.legKm.length) {
+          displayKm = result.legKm[j].toDouble();
         }
+        // Get extra/DDrive from that city
         final jNoDDrive = j < result.noDDrivePerLeg.length
             ? result.noDDrivePerLeg[j] : false;
-        final jHasDDrive = !jNoDDrive && displayKm >= 600;
+        final jHasDDrive = !jNoDDrive && displayKm > 600;
         final jExtra = j < result.extraPerLeg.length ? result.extraPerLeg[j] : '';
         extraText = _buildExtraText(hasDDrive: jHasDDrive, extraField: jExtra);
+        break;
       }
-      break;
-    }
-    // Fallback if no city found: use own data
-    if (extraText.isEmpty && km > 0) {
-      final ownNoDDrive = r < result.noDDrivePerLeg.length
-          ? result.noDDrivePerLeg[r] : false;
-      final hasDDrive = !ownNoDDrive && km >= 600;
-      final rawExtra = r < result.extraPerLeg.length ? result.extraPerLeg[r] : '';
-      extraText = _buildExtraText(hasDDrive: hasDDrive, extraField: rawExtra);
+      // Fallback: use own km if calc put it on the Travel row
+      if (displayKm == 0 && r < result.legKm.length) {
+        displayKm = result.legKm[r].toDouble();
+        if (displayKm > 0) {
+          final ownNoDDrive = r < result.noDDrivePerLeg.length
+              ? result.noDDrivePerLeg[r] : false;
+          final hasDDrive = !ownNoDDrive && displayKm > 600;
+          final rawExtra = r < result.extraPerLeg.length ? result.extraPerLeg[r] : '';
+          extraText = _buildExtraText(hasDDrive: hasDDrive, extraField: rawExtra);
+        }
+      }
+    } else {
+      // Subsequent Travel in block: 0 km
+      displayKm = 0;
     }
   } else {
-    // Normal row: own km and extra.
+    // Normal city row (no Travel before it)
+    if (r < result.legKm.length) displayKm = result.legKm[r].toDouble();
     final legIsNoDDrive = r < result.noDDrivePerLeg.length
         ? result.noDDrivePerLeg[r] : false;
-    final hasDDrive = !legIsNoDDrive && km >= 600;
+    final hasDDrive = !legIsNoDDrive && displayKm > 600;
     final rawExtra = r < result.extraPerLeg.length ? result.extraPerLeg[r] : '';
     extraText = _buildExtraText(hasDDrive: hasDDrive, extraField: rawExtra);
   }
 
-  // ================= ADD ROW =================
   rows.add([
     DateFormat("dd.MM.yyyy").format(e.date),
     e.location,
-    isAfterTravel ? "0" : (displayKm > 0 ? "${displayKm.round()}" : ""),
-    isAfterTravel ? "0h 0m" : _calcTimeText(km: displayKm, hasDDrive: false),
+    displayKm > 0 ? "${displayKm.round()}" : "",
+    displayKm > 0 ? _calcTimeText(km: displayKm, hasDDrive: false) : "",
     extraText,
   ]);
 }
@@ -820,7 +894,7 @@ for (int r = 0; r < round.entries.length; r++) {
         pw.Align(
           alignment: pw.Alignment.centerRight,
           child: pw.Text(
-            "Subtotal: ${_formatNok(subtotal)}",
+            "${S.t('pdfSubtotal', lang: offer.language)}: ${_formatNok(subtotal)}",
             style: pw.TextStyle(
               font: bold,
               fontSize: 9,
@@ -853,11 +927,20 @@ for (int r = 0; r < round.entries.length; r++) {
   // TERMS
   // ============================================================
 
-  static pw.Widget _buildTerms(pw.Font regular, pw.Font bold) {
+  static pw.Widget _buildTerms(
+    pw.Font regular,
+    pw.Font bold, {
+    CompanyBranding? branding,
+    String language = 'no',
+  }) {
+    final resolved = branding?.termsFor(language);
+    final terms = (resolved != null && resolved.trim().isNotEmpty)
+        ? resolved
+        : _termsText;
     return pw.Padding(
       padding: const pw.EdgeInsets.symmetric(horizontal: 40),
       child: pw.Paragraph(
-        text: _termsText,
+        text: terms,
         style: pw.TextStyle(
           font: regular,
           fontSize: 9,
@@ -879,7 +962,14 @@ for (int r = 0; r < round.entries.length; r++) {
     String? customerSignatureDate,
     String? companySignature,
     String? companySignatureDate,
+    CompanyBranding? branding,
+    String language = 'no',
   }) {
+    final forLabel = S.t('pdfFor', lang: language);
+    final customerFallback = S.t('pdfCustomer', lang: language);
+    final dateLabel = S.t('date', lang: language);
+    final nameTitleDate = S.t('pdfNameAndTitleDate', lang: language);
+
     return pw.Padding(
       padding: const pw.EdgeInsets.symmetric(horizontal: 40),
       child: pw.Row(
@@ -890,7 +980,9 @@ for (int r = 0; r < round.entries.length; r++) {
               crossAxisAlignment: pw.CrossAxisAlignment.start,
               children: [
                 pw.Text(
-                  'For Coach Service Scandinavia',
+                  branding?.signatureName != null && branding!.signatureName!.isNotEmpty
+                      ? branding.signatureName!
+                      : 'For Coach Service Scandinavia',
                   style: pw.TextStyle(font: bold, fontSize: 10),
                 ),
                 pw.SizedBox(height: 6),
@@ -911,8 +1003,8 @@ for (int r = 0; r < round.entries.length; r++) {
                 pw.SizedBox(height: 4),
                 pw.Text(
                   companySignature != null
-                      ? '$companySignature  ·  Date: ${companySignatureDate ?? ''}'
-                      : 'Name and title  ·  Date: _______________',
+                      ? '$companySignature  ·  $dateLabel: ${companySignatureDate ?? ''}'
+                      : nameTitleDate,
                   style: pw.TextStyle(font: font, fontSize: 9, color: PdfColors.grey600),
                 ),
               ],
@@ -925,7 +1017,7 @@ for (int r = 0; r < round.entries.length; r++) {
               crossAxisAlignment: pw.CrossAxisAlignment.start,
               children: [
                 pw.Text(
-                  'For ${customerCompany.isNotEmpty ? customerCompany : 'Customer'}',
+                  '$forLabel ${customerCompany.isNotEmpty ? customerCompany : customerFallback}',
                   style: pw.TextStyle(font: bold, fontSize: 10),
                 ),
                 pw.SizedBox(height: 6),
@@ -946,8 +1038,8 @@ for (int r = 0; r < round.entries.length; r++) {
                 pw.SizedBox(height: 4),
                 pw.Text(
                   customerSignature != null
-                      ? '$customerSignature  ·  Date: ${customerSignatureDate ?? ''}'
-                      : 'Name and title  ·  Date: _______________',
+                      ? '$customerSignature  ·  $dateLabel: ${customerSignatureDate ?? ''}'
+                      : nameTitleDate,
                   style: pw.TextStyle(font: font, fontSize: 9, color: PdfColors.grey600),
                 ),
               ],
@@ -1017,14 +1109,8 @@ static String _todayDate() {
 
     if (hasDDrive) extras.add("D.Drive");
 
-    final parts = extraField
-        .split(RegExp(r'[,/]'))
-        .map((e) => e.trim())
-        .where((e) => e.isNotEmpty);
-
-    for (final p in parts) {
-      if (p.toLowerCase().contains("ferry")) extras.add("Ferry");
-      if (p.toLowerCase().contains("bridge")) extras.add("Bridge");
+    if (extraField.trim().isNotEmpty) {
+      extras.add(extraField.trim());
     }
 
     return extras.join("/");
@@ -1053,7 +1139,18 @@ static Map<String, double> _calculateForeignVat({
   required double basePrice,
   required Map<String, double> countryKm,
   double? totalDrivenKm,
+  double? totalExVat,
 }) {
+  // Moss Turbusser (truck): 25% Norwegian MVA on the full sum of the trips
+  // (incl ferry/bridge/toll), not pro-rated by km share.
+  if (activeCompanyNotifier.value?.name == 'Moss Turbusser') {
+    final basis = totalExVat ?? basePrice;
+    if (basis <= 0) return {};
+    final hasForeignKm = countryKm.values.any((km) => km > 0);
+    if (!hasForeignKm) return {};
+    return {'NO': basis * 0.25};
+  }
+
   if (basePrice <= 0 || countryKm.isEmpty) return {};
 
   final totalKm = totalDrivenKm ??
@@ -1088,8 +1185,9 @@ static pw.Widget _buildVatBox(
   double excl,
   double incl,
   pw.Font regular,
-  pw.Font bold,
-) {
+  pw.Font bold, {
+  String language = 'no',
+}) {
   const double labelWidth = 120;
   const double valueWidth = 90;
 
@@ -1139,20 +1237,24 @@ static pw.Widget _buildVatBox(
   // ---- EXCL
   rows.add(
     row(
-      "Total excl VAT",
+      S.t('totalExclVat', lang: language),
       _formatNok(excl),
       boldText: true,
     ),
   );
 
   // ---- VAT
+  final isMossTruck =
+      activeCompanyNotifier.value?.name == 'Moss Turbusser';
+  final vatLabel = S.t('vat', lang: language);
   vatMap.forEach((country, value) {
-    final rate =
-        ((_vatRates[country] ?? 0) * 100).round();
+    final rate = isMossTruck
+        ? 25
+        : ((_vatRates[country] ?? 0) * 100).round();
 
     rows.add(
       row(
-        "VAT $country $rate%",
+        "$vatLabel $country $rate%",
         _formatNok(value),
         italic: true,
       ),
@@ -1175,7 +1277,7 @@ static pw.Widget _buildVatBox(
   // ---- INCL
   rows.add(
     row(
-      "Total incl VAT",
+      S.t('totalInclVat', lang: language),
       _formatNok(incl),
       boldText: true,
     ),

@@ -202,6 +202,9 @@ Map<int, String> _extraByIndex = {};
 Map<int, Map<String, double>> _countryKmByIndex = {};
 Map<int, bool> _noDDriveByIndex = {};
 Map<int, bool> _noBridgeByIndex = {};
+// Number of consecutive Travel days credited to each leg (the leg that carries
+// the merged km). Drives the scaled D.Drive threshold: 600 × (1 + travelDays).
+Map<int, int> _travelDaysByIndex = {};
 // Indices whose km was merged into the preceding TRAVEL block
 Set<int> _travelMergedIndices = {};
 
@@ -2153,6 +2156,14 @@ Navigator.pop(ctx);
 // HELPERS
 // ------------------------------------------------------------
 // ------------------------------------------------------------
+// D.Drive km allowance for a leg credited with [travelDays] Travel days.
+// Normal day = base threshold; each Travel day adds another base of allowance.
+// base 600 → 0 days: 600, 1 day: 1200, 2 days: 1800, …
+// ------------------------------------------------------------
+double _dDriveAllowanceForTravelDays(int travelDays, double base) {
+  return base * (1 + travelDays);
+}
+// ------------------------------------------------------------
 // Check if leg has Travel/Off before
 // ------------------------------------------------------------
 bool _hasTravelBefore(List<RoundEntry> entries, int index) {
@@ -3608,6 +3619,7 @@ Future<void> _recalcKm() async {
       _countryKmByIndex = {};
       _noDDriveByIndex = {};
       _noBridgeByIndex = {};
+      _travelDaysByIndex = {};
       _travelBefore = [];
       _travelMergedIndices = {};
       _kmError = null;
@@ -3634,6 +3646,7 @@ Future<void> _recalcKm() async {
   final Map<int, Map<String, double>> countryKmByIndex = {};
   final Map<int, bool> noDDriveByIndex = {};
   final Map<int, bool> noBridgeByIndex = {};
+  final Map<int, int> travelDaysByIndex = {};
   final Set<int> travelMergedIndices = {};
 
   final List<bool> travelBefore =
@@ -3643,6 +3656,8 @@ Future<void> _recalcKm() async {
 
   int? pendingTravelIndex;
   bool inTravelBlock = false;
+  // Count of consecutive Travel days in the current open block.
+  int travelBlockDays = 0;
 
   // ===================================================
   // PRE-FETCH — fire all route lookups in parallel so
@@ -3672,6 +3687,7 @@ Future<void> _recalcKm() async {
 
       pendingTravelIndex = null;
       inTravelBlock = false;
+      travelBlockDays = 0;
       travelBefore[i] = false;
       continue;
     }
@@ -3688,6 +3704,7 @@ Future<void> _recalcKm() async {
       if (pendingTravelIndex == null) {
         pendingTravelIndex = i; // første Travel i blokken
       }
+      travelBlockDays++; // each Travel row adds a day of driving allowance
 
       inTravelBlock = true;
       continue;
@@ -3704,6 +3721,7 @@ Future<void> _recalcKm() async {
 
       pendingTravelIndex = null;
       inTravelBlock = false;
+      travelBlockDays = 0;
       continue;
     }
 
@@ -3755,10 +3773,13 @@ Future<void> _recalcKm() async {
 
       travelBefore[pendingTravelIndex] = true;
       travelBefore[i] = true;
+      // Credit the consecutive Travel days to the row that now carries the km.
+      travelDaysByIndex[pendingTravelIndex] = travelBlockDays;
       travelMergedIndices.add(i); // this index's km was moved into the TRAVEL row
 
       pendingTravelIndex = null;
       inTravelBlock = false;
+      travelBlockDays = 0;
       continue;
     }
 
@@ -3802,6 +3823,7 @@ Future<void> _recalcKm() async {
     _countryKmByIndex = countryKmByIndex;
     _noDDriveByIndex = noDDriveByIndex;
     _noBridgeByIndex = noBridgeByIndex;
+    _travelDaysByIndex = travelDaysByIndex;
     _travelBefore = travelBefore;
     _travelMergedIndices = travelMergedIndices;
 
@@ -4139,12 +4161,14 @@ Future<RoundCalcResult> _calcRound(int ri) async {
   final Map<int, Map<String, double>> countryKmByIndex = {};
   final Map<int, bool> noDDriveByIndex = {};
   final Map<int, bool> noBridgeByIndex = {};
+  final Map<int, int> travelDaysByIndex = {};
 
   final List<bool> travelBefore =
       List<bool>.filled(entries.length, false);
 
   int? pendingTravelIndex;
   bool seenTravel = false;
+  int travelBlockDays = 0;
 
   // Pre-fetch any legs not already in cache (no-op if _recalcAllRounds
   // already pre-fetched everything).
@@ -4173,6 +4197,7 @@ Future<RoundCalcResult> _calcRound(int ri) async {
       countryKmByIndex[i] = {};
       pendingTravelIndex = null;
       seenTravel = false;
+      travelBlockDays = 0;
       travelBefore[i] = false;
       continue;
     }
@@ -4188,6 +4213,7 @@ Future<RoundCalcResult> _calcRound(int ri) async {
       if (pendingTravelIndex == null) {
         pendingTravelIndex = i;
       }
+      travelBlockDays++;
 
       seenTravel = true;
       continue;
@@ -4201,6 +4227,7 @@ Future<RoundCalcResult> _calcRound(int ri) async {
       countryKmByIndex[i] = {};
       pendingTravelIndex = null;
       seenTravel = false;
+      travelBlockDays = 0;
       continue;
     }
 
@@ -4250,9 +4277,11 @@ Future<RoundCalcResult> _calcRound(int ri) async {
 
       travelBefore[pendingTravelIndex] = true;
       travelBefore[i] = true;
+      travelDaysByIndex[pendingTravelIndex] = travelBlockDays;
 
       pendingTravelIndex = null;
       seenTravel = false;
+      travelBlockDays = 0;
       continue;
     }
 
@@ -4314,17 +4343,22 @@ final safeFerryPerLeg = List<String?>.generate(
   },
 );
 
+final double ddBase = _effectiveSettings().dDriveKmThreshold;
 final safeNoDDrive = List<bool>.generate(
   len,
   (i) {
     // Route-level no-drive (ferries etc.)
     if (noDDriveByIndex[i] == true) return true;
-    // Travel-before legs only trigger D.Drive at ≥ 1200 km. Below that they
-    // must NOT count as D.Drive, even though km may exceed the normal 600 km
-    // threshold. Mirrors the per-leg badge in build() (travel ? 1200 : 600).
-    final travel = i < travelBefore.length && travelBefore[i];
-    final km = kmByIndex[i] ?? 0.0;
-    if (travel && km < 1200) return true;
+    // Travel days raise the D.Drive allowance: 600 km per travel day on top of
+    // the normal day. So 1 travel day → 1200 km, 2 → 1800 km, etc. A leg whose
+    // km is within that allowance must NOT count as D.Drive. The flat 600/625
+    // threshold in the calculators handles non-travel legs (travelDays == 0).
+    final travelDays = travelDaysByIndex[i] ?? 0;
+    if (travelDays > 0) {
+      final km = kmByIndex[i] ?? 0.0;
+      final allowance = _dDriveAllowanceForTravelDays(travelDays, ddBase);
+      if (km <= allowance) return true;
+    }
     return false;
   },
 );
@@ -5493,9 +5527,14 @@ Expanded(
                 // ---------- EXTRA text (D.Drive / Ferry / Bridge)
                 final bool travelBefore = _hasTravelBefore(round.entries, i);
                 final bool isTravel = toLower == 'travel';
+                // Travel days raise the allowance (600 per travel day): 1 day →
+                // 1200 km, 2 days → 1800 km, etc. Matches the calc + PDF, which
+                // exclude these legs via noDDrivePerLeg.
+                final int travelDays = _travelDaysByIndex[i] ?? 0;
                 final bool hasDDrive = km != null &&
                     (_noDDriveByIndex[i] != true) &&
-                    (travelBefore ? km >= 1200 : km >= 600);
+                    km > _dDriveAllowanceForTravelDays(
+                        travelDays, _effectiveSettings().dDriveKmThreshold);
 
                 // Extra: show D.Drive prefix + extra column value as-is.
                 // On Travel row, look ahead to next city entry. Suppress on city row after Travel.
