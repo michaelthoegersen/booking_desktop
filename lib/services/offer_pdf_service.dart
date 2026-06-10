@@ -841,8 +841,16 @@ for (int r = 0; r < round.entries.length; r++) {
     extraText = _buildExtraText(hasDDrive: hasDDrive, extraField: rawExtra);
   }
 
+  // Show the date only on the first row of each day — blank it on consecutive
+  // rows that share the same date.
+  final prevDate = r > 0 ? round.entries[r - 1].date : null;
+  final bool sameDateAsPrev = prevDate != null &&
+      prevDate.year == e.date.year &&
+      prevDate.month == e.date.month &&
+      prevDate.day == e.date.day;
+
   rows.add([
-    DateFormat("dd.MM.yyyy").format(e.date),
+    sameDateAsPrev ? "" : DateFormat("dd.MM.yyyy").format(e.date),
     e.location,
     displayKm > 0 ? "${displayKm.round()}" : "",
     displayKm > 0 ? _calcTimeText(km: displayKm, hasDDrive: false) : "",

@@ -5563,6 +5563,14 @@ Expanded(
                 if (rawExtra.isNotEmpty) extraParts.add(rawExtra);
                 final String extraText = extraParts.join('/');
 
+                // Show the date only on the first row of each date — blank it
+                // on consecutive rows that share the same day.
+                final prev = i > 0 ? round.entries[i - 1].date : null;
+                final bool sameDateAsPrev = prev != null &&
+                    prev.year == e.date.year &&
+                    prev.month == e.date.month &&
+                    prev.day == e.date.day;
+
                 return Column(
                   key: ValueKey('entry-$roundIndex-${e.date.millisecondsSinceEpoch}-${e.location}-$i'),
                   mainAxisSize: MainAxisSize.min,
@@ -5585,7 +5593,7 @@ Expanded(
                         ),
                         Expanded(
                           child: _RoutesTableRow(
-                            date: _fmtDate(e.date),
+                            date: sameDateAsPrev ? '' : _fmtDate(e.date),
                             route: routeText,
                             km: km,
                             extra: extraText,
