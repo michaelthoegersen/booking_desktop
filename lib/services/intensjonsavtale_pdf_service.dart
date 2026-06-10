@@ -139,6 +139,10 @@ class IntensjonsavtalePdfService {
         dateEntries,
     bool markupOnAll = false,
     String lang = 'no',
+    // Free-text extra cost line items from the offer (Ekstrakostnader). Only
+    // used by the legacy (single-date) price summary — for the calc-lines path
+    // (multi-date) extras already arrive as unknown-label lines in [calcLines].
+    List<({String label, double amount})>? extras,
   }) async {
     final isEn = lang == 'en';
 
@@ -320,6 +324,13 @@ class IntensjonsavtalePdfService {
       markupFactor = showsTotal / showsRawTotal;
       inearWithMarkup = inearPrice;
       transportWithMarkup = transportPrice;
+      // Add offer extra cost lines at face value on top of the legacy total.
+      // Purely additive — does not touch show distribution, markup or transport.
+      if (extras != null) {
+        for (final e in extras) {
+          total += e.amount;
+        }
+      }
     } else {
       total = calcTotal;
     }
@@ -459,6 +470,7 @@ class IntensjonsavtalePdfService {
                 transportPrice: transportWithMarkup,
                 total: total,
                 lang: lang,
+                extras: extras,
                 showLabel: config.showLabel.isNotEmpty
                     ? config.showLabel
                     : (tenantName.isNotEmpty ? tenantName : 'Show'),
@@ -1313,6 +1325,7 @@ class IntensjonsavtalePdfService {
     required double total,
     required String showLabel,
     String lang = 'no',
+    List<({String label, double amount})>? extras,
   }) {
     final isEn = lang == 'en';
     final effectiveShowLabel = shows.length == 1
@@ -1323,6 +1336,10 @@ class IntensjonsavtalePdfService {
       if (inearFromUs && inearPrice > 0)
         _PriceLine(isEn ? 'In-ear monitor' : 'In-ear monitoring', inearPrice),
       if (transportPrice > 0) _PriceLine('Transport', transportPrice),
+      // Ekstrakostnader — face value, no markup.
+      if (extras != null)
+        for (final e in extras)
+          if (e.amount != 0) _PriceLine(e.label, e.amount),
     ];
 
     return pw.Container(
