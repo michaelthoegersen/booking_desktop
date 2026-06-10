@@ -3469,6 +3469,12 @@ Future<void> _scanPdf() async {
   // cross-round overwrites when _recalcAllRounds ran.
   // ===================================================
   if (_distanceCache.containsKey(key)) {
+    // Truck offers need actual NVDB bompenger even on a distance cache hit:
+    // the distance cache is filled by the prefetch, but the toll cache is
+    // separate and would otherwise stay empty → toll 0 → km×rate fallback.
+    if (_isTruckOffer && !_tollCache.containsKey(key)) {
+      _tollCache[key] = await _calculateTruckTollForLeg(fromN, toN);
+    }
     return _distanceCache[key];
   }
 
@@ -4534,6 +4540,7 @@ final safeNoBridge = List<bool>.generate(
     noDDrivePerLeg: safeNoDDrive,
     noBridgePerLeg: safeNoBridge,
     roundEndDate: lastRealDate,
+    useStationToll: _isTruckOffer,
   );
   // ⭐ MULTI BUS SUMMARY
 final busCount =

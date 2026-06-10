@@ -54,6 +54,11 @@ class TripCalculator {
     /// Last real tour day (last entry with a location). Prevents trailing empty
     /// staging rows from adding a phantom homebound D.Drive day.
     DateTime? roundEndDate,
+
+    /// Truck offers use actual NVDB station tolls (sum of [tollPerLeg]) with NO
+    /// km × rate fallback — if the station lookup yields 0, the toll is 0, never
+    /// an estimate. Bus offers keep the flat per-km model.
+    bool useStationToll = false,
   }) {
     // ✅ RIKTIG KILDE: dates er sannheten
     final int entryCount = dates.length;
@@ -195,11 +200,15 @@ class TripCalculator {
 
     final double tollSumPerLeg =
         tollPerLeg.fold(0.0, (a, b) => a + b);
-    final double tollCost = tollSumPerLeg > 0
+    // Truck: actual station tolls only, no fallback. Bus: per-km when no
+    // per-leg tolls were supplied.
+    final double tollCost = useStationToll
         ? tollSumPerLeg
-        : (tollableKm ?? totalKm) * settings.tollKmRate;
+        : (tollSumPerLeg > 0
+            ? tollSumPerLeg
+            : (tollableKm ?? totalKm) * settings.tollKmRate);
     _log('Toll cost: $tollCost'
-        '${tollSumPerLeg > 0 ? ' (sum of per-leg station tolls)' : ' (km × rate)'}');
+        '${useStationToll ? ' (station tolls, no fallback)' : (tollSumPerLeg > 0 ? ' (sum of per-leg station tolls)' : ' (km × rate)')}');
 
     // ----------------------------------------
     // TOTAL
