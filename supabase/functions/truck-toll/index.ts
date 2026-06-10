@@ -84,30 +84,31 @@ async function loadStations() {
   return stations;
 }
 
-// ── geocode (Nominatim) + route (OSRM) ──────────────────────────────────────
+// ── geocode (Google) + route (OSRM) ─────────────────────────────────────────
+// Google Geocoding is used instead of Nominatim because Nominatim's 1 req/sec
+// limit made parallel leg lookups (the client prefetches all legs at once) fail
+// and return 0 → km × rate fallback.
+const GOOGLE_KEY = Deno.env.get("GOOGLE_MAPS_API_KEY") ?? "";
+
 async function geocode(place: string): Promise<[number, number] | null> {
   const key = place.trim().toLowerCase();
   if (geoCache.has(key)) return geoCache.get(key)!;
-  const url = `https://nominatim.openstreetmap.org/search` +
-    `?q=${encodeURIComponent(place)}&format=json&limit=1&countrycodes=no`;
-  const res = await fetch(url, {
-    headers: {
-      "Accept": "application/json",
-      "User-Agent": "TourFlow/1.0 (post@tourflow.no)",
-    },
-  });
+  const url = `https://maps.googleapis.com/maps/api/geocode/json` +
+    `?address=${encodeURIComponent(`${place}, Norway`)}&region=no&key=${GOOGLE_KEY}`;
+  const res = await fetch(url);
   if (!res.ok) return null;
   const data = await res.json();
-  if (!Array.isArray(data) || data.length === 0) return null;
-  const coord: [number, number] = [
-    parseFloat(data[0].lat),
-    parseFloat(data[0].lon),
-  ];
+  if (data?.status !== "OK" || !Array.isArray(data.results) || data.results.length === 0) {
+    return null;
+  }
+  const loc = data.results[0]?.geometry?.location;
+  if (loc == null) return null;
+  const coord: [number, number] = [loc.lat, loc.lng];
   geoCache.set(key, coord);
   return coord;
 }
 
-// Returns the OSRM route geometry as [lat, lon] points.
+// Returns the OSRM route geometry as [lat, lon] points (one retry on failure).
 async function routePoints(
   from: [number, number],
   to: [number, number],
@@ -115,15 +116,22 @@ async function routePoints(
   const coordStr = `${from[1]},${from[0]};${to[1]},${to[0]}`;
   const url = `https://router.project-osrm.org/route/v1/driving/${coordStr}` +
     `?overview=full&geometries=geojson`;
-  const res = await fetch(url, {
-    headers: { "User-Agent": "TourFlow/1.0 (post@tourflow.no)" },
-  });
-  if (!res.ok) return [];
-  const data = await res.json();
-  if (data?.code !== "Ok") return [];
-  const coords = data?.routes?.[0]?.geometry?.coordinates;
-  if (!Array.isArray(coords)) return [];
-  return coords.map((c: number[]) => [c[1], c[0]] as [number, number]);
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const res = await fetch(url, {
+        headers: { "User-Agent": "TourFlow/1.0 (post@tourflow.no)" },
+      });
+      if (!res.ok) continue;
+      const data = await res.json();
+      if (data?.code !== "Ok") continue;
+      const coords = data?.routes?.[0]?.geometry?.coordinates;
+      if (!Array.isArray(coords)) continue;
+      return coords.map((c: number[]) => [c[1], c[0]] as [number, number]);
+    } catch (_) {
+      // retry
+    }
+  }
+  return [];
 }
 
 // ── matching (haversine, same logic as the Flutter TollService) ─────────────
