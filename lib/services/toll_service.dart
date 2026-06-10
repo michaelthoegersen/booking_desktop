@@ -1,8 +1,12 @@
-import 'dart:convert';
 import 'dart:math';
 
 import 'package:flutter/foundation.dart';
-import 'package:http/http.dart' as http;
+import 'package:supabase_flutter/supabase_flutter.dart';
+
+/// Which NVDB price class to use when summing toll station costs.
+/// - [car]   Takst liten bil (vehicles ≤ 3500 kg)
+/// - [truck] Takst stor bil  (vehicles > 3500 kg — incl. lastebil/buss)
+enum TollVehicleClass { car, truck }
 
 /// A single toll station with coordinates and prices.
 class TollStation {
@@ -12,6 +16,8 @@ class TollStation {
   final double lon;
   final double priceCar;
   final double priceCarRush;
+  final double priceTruck;
+  final double priceTruckRush;
 
   const TollStation({
     required this.id,
@@ -20,7 +26,22 @@ class TollStation {
     required this.lon,
     required this.priceCar,
     required this.priceCarRush,
+    required this.priceTruck,
+    required this.priceTruckRush,
   });
+
+  double priceFor(TollVehicleClass vc, {bool rush = false}) {
+    switch (vc) {
+      case TollVehicleClass.car:
+        return rush ? priceCarRush : priceCar;
+      case TollVehicleClass.truck:
+        // Fall back to small-car price if NVDB has no large-vehicle rate
+        // for this station (a few private toll roads only publish one).
+        final t = rush ? priceTruckRush : priceTruck;
+        if (t > 0) return t;
+        return rush ? priceCarRush : priceCar;
+    }
+  }
 }
 
 /// Result of toll calculation for a route.
@@ -31,102 +52,61 @@ class TollResult {
   const TollResult({required this.totalCost, required this.passedStations});
 }
 
-/// Service that loads Norwegian toll stations from NVDB and matches them
-/// against a route polyline to calculate toll costs.
+/// Service that loads Norwegian toll stations (via the `toll-stations` Supabase
+/// Edge Function, which proxies NVDB server-side to avoid browser CORS) and
+/// matches them against a route polyline to calculate toll costs.
 class TollService {
-  static const _base = 'https://nvdbapiles.atlas.vegvesen.no';
-  static const _pageSize = 1000;
-
   /// Cached stations — loaded once per app session.
   static List<TollStation>? _cached;
 
-  /// Load all toll stations from NVDB V4.
+  /// Load all toll stations via the `toll-stations` edge function.
+  ///
+  /// NVDB cannot be called directly from the browser (no CORS), so the fetch +
+  /// parse happens server-side; here we just deserialize the slim station list.
   static Future<List<TollStation>> loadStations() async {
     if (_cached != null) return _cached!;
 
-    final stations = <TollStation>[];
-    String? startParam;
-    var page = 0;
+    try {
+      final resp = await Supabase.instance.client.functions
+          .invoke('toll-stations')
+          .timeout(const Duration(seconds: 30));
 
-    while (page < 10) {
-      page++;
-      var url = '$_base/vegobjekter/45'
-          '?inkluder=egenskaper,lokasjon'
-          '&srid=4326'
-          '&antall=$_pageSize';
-      if (startParam != null) url += '&start=$startParam';
+      final data = resp.data;
+      final list = (data is Map ? data['stations'] : null) as List? ?? [];
 
-      debugPrint('TollService: fetching page $page ...');
-      final resp = await http.get(Uri.parse(url), headers: {
-        'Accept': 'application/json',
-        'X-Client': 'TourFlow/1.0',
-        'X-Kontaktperson': 'post@tourflow.no',
-      }).timeout(const Duration(seconds: 15));
-
-      if (resp.statusCode != 200) {
-        debugPrint('TollService: HTTP ${resp.statusCode}, stopping');
-        break;
+      final stations = <TollStation>[];
+      for (final s in list) {
+        final m = (s as Map).cast<String, dynamic>();
+        stations.add(TollStation(
+          id: (m['id'] as num?)?.toInt() ?? 0,
+          name: m['name'] as String? ?? 'Ukjent',
+          lat: (m['lat'] as num?)?.toDouble() ?? 0,
+          lon: (m['lon'] as num?)?.toDouble() ?? 0,
+          priceCar: (m['priceCar'] as num?)?.toDouble() ?? 0,
+          priceCarRush: (m['priceCarRush'] as num?)?.toDouble() ?? 0,
+          priceTruck: (m['priceTruck'] as num?)?.toDouble() ?? 0,
+          priceTruckRush: (m['priceTruckRush'] as num?)?.toDouble() ?? 0,
+        ));
       }
 
-      final body = jsonDecode(resp.body) as Map<String, dynamic>;
-      final objects = body['objekter'] as List<dynamic>? ?? [];
-      debugPrint('TollService: got ${objects.length} stations on page $page');
-
-      if (objects.isEmpty) break;
-
-      for (final obj in objects) {
-        final station = _parseStation(obj as Map<String, dynamic>);
-        if (station != null) stations.add(station);
-      }
-
-      // Pagination — stop if no next page
-      final next = body['metadata']?['neste'];
-      if (next == null) break;
-      startParam = next['start'] as String?;
-      if (startParam == null) break;
+      debugPrint('TollService: loaded ${stations.length} stations via edge function');
+      _cached = stations;
+      return stations;
+    } catch (e) {
+      debugPrint('TollService: loadStations failed: $e');
+      _cached = [];
+      return [];
     }
-
-    debugPrint('TollService: loaded ${stations.length} stations total');
-    _cached = stations;
-    return stations;
-  }
-
-  static TollStation? _parseStation(Map<String, dynamic> obj) {
-    final props = <String, dynamic>{};
-    for (final e in (obj['egenskaper'] as List<dynamic>? ?? [])) {
-      final m = e as Map<String, dynamic>;
-      props[m['navn'] as String] = m['verdi'];
-    }
-
-    final wkt = obj['lokasjon']?['geometri']?['wkt'] as String?;
-    if (wkt == null) return null;
-
-    // Parse "POINT Z (lat lon elev)" or "POINT (lat lon)"
-    final match = RegExp(r'POINT\s*Z?\s*\(\s*([\d.+-]+)\s+([\d.+-]+)')
-        .firstMatch(wkt);
-    if (match == null) return null;
-
-    final lat = double.tryParse(match.group(1)!);
-    final lon = double.tryParse(match.group(2)!);
-    if (lat == null || lon == null) return null;
-
-    return TollStation(
-      id: obj['id'] as int? ?? 0,
-      name: props['Navn bomstasjon'] as String? ?? 'Ukjent',
-      lat: lat,
-      lon: lon,
-      priceCar: (props['Takst liten bil'] as num?)?.toDouble() ?? 0,
-      priceCarRush:
-          (props['Rushtidstakst liten bil'] as num?)?.toDouble() ?? 0,
-    );
   }
 
   /// Calculate toll for a route given as a list of [lat, lon] coordinate pairs.
   /// [thresholdMeters] is the max distance from the route for a station to count.
+  /// [vehicleClass] selects which NVDB tariff to sum (car vs. truck/large).
   static TollResult calculateTolls(
     List<List<double>> routePoints, {
     double thresholdMeters = 50,
     bool useRushPrice = false,
+    TollVehicleClass vehicleClass = TollVehicleClass.car,
   }) {
     final stations = _cached ?? [];
     if (stations.isEmpty || routePoints.length < 2) {
@@ -164,7 +144,9 @@ class TollService {
     }
 
     final total = passed.fold<double>(
-        0, (sum, s) => sum + (useRushPrice ? s.priceCarRush : s.priceCar));
+        0,
+        (sum, s) =>
+            sum + s.priceFor(vehicleClass, rush: useRushPrice));
 
     return TollResult(totalCost: total, passedStations: passed);
   }
