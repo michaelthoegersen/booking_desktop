@@ -273,7 +273,7 @@ final Map<String, Map<String, double>> _countryKmCache = {};
 
     if (trailerTotal > 0) {
       b.writeln("");
-      b.writeln("Trailer: ${_nok(trailerTotal)}");
+      b.writeln("${_isTruckOffer ? 'Mellomlagring' : 'Trailer'}: ${_nok(trailerTotal)}");
     }
 
     // ================= FERRY =================
@@ -455,7 +455,9 @@ if (r.flightCost > 0) {
       b.writeln("  D.Drive:   ${r.dDriveDays} × ${_nok(s.dDriveDayPrice)} = ${_nok(r.dDriveCost)}");
     }
     if (r.trailerDayCost > 0) {
-      b.writeln("  Trailer day: ${_nok(r.trailerDayCost)}");
+      b.writeln(_isTruckOffer
+          ? "  Mellomlagring: ${_nok(r.trailerDayCost)}"
+          : "  Trailer day: ${_nok(r.trailerDayCost)}");
     }
     if (r.trailerKmCost > 0) {
       b.writeln("  Trailer km:  ${_nok(r.trailerKmCost)}");
@@ -782,7 +784,7 @@ if (r.flightCost > 0) {
       }
 
       final trailerTotal = r.trailerDayCost + r.trailerKmCost;
-      if (trailerTotal > 0) b.writeln("  Trailer:  ${_nok(trailerTotal)}");
+      if (trailerTotal > 0) b.writeln("  ${_isTruckOffer ? 'Mellomlagring' : 'Trailer'}:  ${_nok(trailerTotal)}");
       if (r.ferryCost   > 0) b.writeln("  Ferry:    ${_nok(r.ferryCost)}");
       if (r.bridgeCost  > 0) b.writeln("  Bridge:   ${_nok(r.bridgeCost)}");
       if (r.flightCost  > 0) b.writeln("  Flights:  ${_nok(r.flightCost)}");
@@ -834,7 +836,7 @@ if (r.flightCost > 0) {
     if (totalDayCost     > 0) footer.writeln("  Days:     ${_nok(totalDayCost)}");
     if (totalExtraKmCost > 0) footer.writeln("  Extra km: ${_nok(totalExtraKmCost)}");
     if (totalDDriveCost  > 0) footer.writeln("  D.Drive:  ${_nok(totalDDriveCost)}");
-    if (totalTrailerCost > 0) footer.writeln("  Trailer:  ${_nok(totalTrailerCost)}");
+    if (totalTrailerCost > 0) footer.writeln("  ${_isTruckOffer ? 'Mellomlagring' : 'Trailer'}:  ${_nok(totalTrailerCost)}");
     if (totalFerryCost   > 0) footer.writeln("  Ferry:    ${_nok(totalFerryCost)}");
     if (totalBridgeCost  > 0) footer.writeln("  Bridge:   ${_nok(totalBridgeCost)}");
     if (totalFlightCost  > 0) footer.writeln("  Flights:  ${_nok(totalFlightCost)}");
@@ -4129,6 +4131,29 @@ Future<RoundCalcResult> _calcRound(int ri) async {
     }
   }
 
+  // Mellomlagring (truck only): when enabled on this round, charge the days
+  // STRICTLY BETWEEN the previous round's last day and this round's first day,
+  // at the per-day rate (reuses trailerDayPrice). E.g. prev ends 5th, this
+  // starts 12th → 6th–11th = 6 days. Replaces the (pointless-for-truck) trailer.
+  double mellomCost = 0;
+  if (_isTruckOffer && round.trailer && ri > 0) {
+    DateTime? edgeDate(List<RoundEntry> es, {required bool last}) {
+      DateTime? d;
+      for (final e in es) {
+        if (_norm(e.location).isEmpty) continue;
+        final c = DateTime(e.date.year, e.date.month, e.date.day);
+        if (d == null || (last ? c.isAfter(d) : c.isBefore(d))) d = c;
+      }
+      return d;
+    }
+    final prevLast = edgeDate(offer.rounds[ri - 1].entries, last: true);
+    final thisFirst = edgeDate(entries, last: false);
+    if (prevLast != null && thisFirst != null) {
+      final gap = thisFirst.difference(prevLast).inDays - 1; // strictly between
+      if (gap > 0) mellomCost = gap * SettingsStore.current.trailerDayPrice;
+    }
+  }
+
   if (dates.isEmpty) {
     // Clear swe cache entry for empty rounds
     _sweCalcCache.remove(ri);
@@ -4422,7 +4447,7 @@ final safeNoBridge = List<bool>.generate(
       settings: swe,
       legKm: safeLegKm,
       dates: legDates,
-      trailer: round.trailer,
+      trailer: _isTruckOffer ? false : round.trailer,
       utlTraktPerLeg: utlTrkt,
       pickupEveningFirstDay: round.pickupEveningFirstDay,
     );
@@ -4476,7 +4501,7 @@ final safeNoBridge = List<bool>.generate(
     // Ferry + Bridge: use FerryResolver (same as Norwegian) — consistent trailer pricing
     final ferryAndBridge = FerryResolver.resolveFerriesAndBridges(
       ferries: SettingsStore.current.ferries,
-      trailer: round.trailer,
+      trailer: _isTruckOffer ? false : round.trailer,
       ferryPerLeg: safeFerryPerLeg,
       noBridgePerLeg: safeNoBridge,
     );
@@ -4508,13 +4533,14 @@ final safeNoBridge = List<bool>.generate(
       dayCost: 0,
       extraKmCost: 0,
       dDriveCost: ddCostScaled,
-      trailerDayCost: 0,
+      trailerDayCost: mellomCost, // truck mellomlagring (relabeled in UI)
       trailerKmCost: 0,
       ferryCost: roundFerryCost,
       bridgeCost: roundBridgeCost,
       tollCost: roundTollCost,
       flightCost: 0,
-      totalCost: scaledTotal + roundFerryCost + roundBridgeCost + roundTollCost,
+      totalCost: scaledTotal + roundFerryCost + roundBridgeCost +
+          roundTollCost + mellomCost,
     );
     _roundCalcCache[ri] = minimal;
     return minimal;
@@ -4526,7 +4552,7 @@ final safeNoBridge = List<bool>.generate(
     settings: _effectiveSettings(),
     dates: dates,
     pickupEveningFirstDay: round.pickupEveningFirstDay,
-    trailer: round.trailer,
+    trailer: _isTruckOffer ? false : round.trailer,
     totalKm: totalKm,
     tollableKm: tollableKm, // excludes Swedish and German km (toll-free)
     sweKm: totalSweKm,
@@ -4571,7 +4597,8 @@ final scaled = RoundCalcResult(
   extraKmCost: result.extraKmCost * busCount,
   dDriveCost: result.dDriveCost * busCount,
 
-  trailerDayCost: result.trailerDayCost * busCount,
+  // Truck mellomlagring rides in the trailerDayCost slot (relabeled in the UI).
+  trailerDayCost: result.trailerDayCost * busCount + mellomCost,
   trailerKmCost: result.trailerKmCost * busCount,
 
   ferryCost: result.ferryCost * busCount,
@@ -4579,7 +4606,7 @@ final scaled = RoundCalcResult(
   tollCost: result.tollCost * busCount,
   flightCost: result.flightCost * busCount,
 
-  totalCost: result.totalCost * busCount,
+  totalCost: result.totalCost * busCount + mellomCost,
 );
 _roundCalcCache[ri] = scaled;
 return scaled;
@@ -5370,7 +5397,7 @@ final trailer =
                         await _recalcAllRounds();
                       },
                     ),
-                    Text(S.t('trailer')),
+                    Text(_isTruckOffer ? 'Mellomlagring' : S.t('trailer')),
                   ],
                 ),
               ],

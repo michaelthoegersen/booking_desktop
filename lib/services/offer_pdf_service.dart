@@ -644,10 +644,13 @@ _rightInfo(S.t('production', lang: offer.language), offer.production, font),
 
   /// Top content for non-bus companies — same layout as original, all info on right
   static pw.Widget _buildTopContentSimple(OfferDraft offer, pw.Font font) {
+    // For trucks the per-round flag means "mellomlagring", not a trailer, so it
+    // must not be appended to the vehicle description.
+    final isTruck = offer.busType.toLowerCase().contains('lastebil');
     final hasTrailer = offer.rounds.any((r) => r.trailer);
     final vehicle =
         "${offer.busCount} x ${offer.busType}"
-        "${hasTrailer ? " + trailer" : ""}";
+        "${hasTrailer && !isTruck ? " + trailer" : ""}";
     return pw.Container(
       height: 95,
       padding: const pw.EdgeInsets.only(top: -25),
