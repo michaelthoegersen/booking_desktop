@@ -30,8 +30,6 @@ import '../services/email_service.dart';
 
 // ✅ NY: bruker routes db for autocomplete + route lookup
 import '../services/routes_service.dart';
-import '../services/toll_service.dart';
-import '../services/google_routes_service.dart';
 import '../services/km_se_updater.dart';
 import '../services/customers_service.dart';
 import '../state/current_offer_store.dart';
@@ -304,16 +302,21 @@ if (r.flightCost > 0) {
       final totalDriven = r.includedKm + r.extraKm;
       b.writeln("");
       b.writeln("TOLL:");
-      b.writeln("  Total:    ${totalDriven.toStringAsFixed(0)} km");
-      if (r.sweKm > 0)
-        b.writeln("  Sweden:   -${r.sweKm.toStringAsFixed(0)} km (toll-free)");
-      if (r.deKm > 0)
-        b.writeln("  Germany:  -${r.deKm.toStringAsFixed(0)} km (toll-free)");
-      b.writeln(
-        "  Tollable: ${r.tollableKm.toStringAsFixed(0)} km"
-        " × ${s.tollKmRate.toStringAsFixed(2)}"
-        " = ${_nok(r.tollCost)}",
-      );
+      if (_isTruckOffer) {
+        // Truck offers use actual NVDB toll-station prices, not km × rate.
+        b.writeln("  Bompenger (faktiske bomstasjoner) = ${_nok(r.tollCost)}");
+      } else {
+        b.writeln("  Total:    ${totalDriven.toStringAsFixed(0)} km");
+        if (r.sweKm > 0)
+          b.writeln("  Sweden:   -${r.sweKm.toStringAsFixed(0)} km (toll-free)");
+        if (r.deKm > 0)
+          b.writeln("  Germany:  -${r.deKm.toStringAsFixed(0)} km (toll-free)");
+        b.writeln(
+          "  Tollable: ${r.tollableKm.toStringAsFixed(0)} km"
+          " × ${s.tollKmRate.toStringAsFixed(2)}"
+          " = ${_nok(r.tollCost)}",
+        );
+      }
     }
 
     // ================= TOTAL =================
@@ -464,7 +467,11 @@ if (r.flightCost > 0) {
       b.writeln("  Bridge:    ${_nok(r.bridgeCost)}");
     }
     if (r.tollCost > 0) {
-      b.writeln("  Toll:      ${r.tollableKm.toStringAsFixed(0)} km × ${s.tollKmRate.toStringAsFixed(2)} = ${_nok(r.tollCost)}");
+      if (_isTruckOffer) {
+        b.writeln("  Toll:      bompenger (faktiske bomstasjoner) = ${_nok(r.tollCost)}");
+      } else {
+        b.writeln("  Toll:      ${r.tollableKm.toStringAsFixed(0)} km × ${s.tollKmRate.toStringAsFixed(2)} = ${_nok(r.tollCost)}");
+      }
     }
     if (r.flightCost > 0) {
       b.writeln("  Flights:   ${r.flightTickets} × ${_nok(s.flightTicketPrice)} = ${_nok(r.flightCost)}");
@@ -1336,7 +1343,6 @@ final allBuses = getVehicleConfig().all;
   // ===================================================
 
   final RoutesService _routesService = RoutesService();
-  final GoogleRoutesService _routesGeo = GoogleRoutesService();
 
   SupabaseClient get sb => Supabase.instance.client;
 
@@ -1351,49 +1357,25 @@ final allBuses = getVehicleConfig().all;
     return label == 'lastebil';
   }
 
-  /// One-shot load of NVDB toll stations into memory. Triggered on demand
-  /// when a truck offer fetches its first leg. Subsequent calls reuse the
-  /// in-memory cache from TollService.
-  bool _tollStationsLoaded = false;
-  Future<void> _ensureTollStationsLoaded() async {
-    if (_tollStationsLoaded) return;
-    try {
-      await TollService.loadStations();
-      _tollStationsLoaded = true;
-    } catch (e) {
-      debugPrint('[BOMPENGER] NVDB load failed: $e');
-    }
-  }
-
-  /// Calculate station-based bompenger for a single truck leg.
-  /// Geocodes from/to via Nominatim + routes via OSRM (already used elsewhere
-  /// in the app), then matches the polyline against NVDB toll stations.
+  /// Calculate station-based bompenger for a single truck leg via the
+  /// `truck-toll` edge function (server-side geocode → OSRM route → NVDB match).
+  /// Done server-side because the browser cannot reach NVDB/OSRM reliably
+  /// (CORS + per-client rate limits), which made the old client version return
+  /// 0 and fall back to km × 2.80.
   Future<double> _calculateTruckTollForLeg(String from, String to) async {
     if (from.trim().isEmpty || to.trim().isEmpty) return 0;
     try {
-      await _ensureTollStationsLoaded();
-      final routes = await _routesGeo.getRoute(from: from, to: to);
-      final list = routes['routes'] as List?;
-      if (list == null || list.isEmpty) return 0;
-      final first = list.first as Map<String, dynamic>;
-      final raw = first['rawPoints'];
-      if (raw is! List) return 0;
-      final points = raw
-          .map<List<double>>((p) => [
-                (p[0] as num).toDouble(),
-                (p[1] as num).toDouble(),
-              ])
-          .toList();
-      final result = TollService.calculateTolls(
-        points,
-        vehicleClass: TollVehicleClass.truck,
-      );
-      debugPrint('[BOMPENGER] $from → $to: '
-          '${result.passedStations.length} stasjoner, '
-          'kr ${result.totalCost.toStringAsFixed(0)}');
-      return result.totalCost;
+      final resp = await Supabase.instance.client.functions
+          .invoke('truck-toll', body: {'from': from, 'to': to})
+          .timeout(const Duration(seconds: 35));
+      final data = resp.data;
+      final toll =
+          (data is Map ? (data['toll'] as num?)?.toDouble() : null) ?? 0;
+      debugPrint('[BOMPENGER] $from → $to: kr ${toll.toStringAsFixed(0)} '
+          '(${data is Map ? data['stations'] : '?'} stasjoner)');
+      return toll;
     } catch (e) {
-      debugPrint('[BOMPENGER] calc failed for $from → $to: $e');
+      debugPrint('[BOMPENGER] truck-toll failed for $from → $to: $e');
       return 0;
     }
   }
@@ -4130,6 +4112,17 @@ Future<RoundCalcResult> _calcRound(int ri) async {
       .map((e) => DateTime(e.date.year, e.date.month, e.date.day))
       .toList();
 
+  // Last day that has a real location. Trailing empty staging rows (e.g. the
+  // "add next date" row) must NOT extend the tour — otherwise the D.Drive
+  // cluster logic adds a phantom homebound travel day (counted 3 instead of 2).
+  DateTime? lastRealDate;
+  for (final e in entries) {
+    if (_norm(e.location).isNotEmpty) {
+      final d = DateTime(e.date.year, e.date.month, e.date.day);
+      if (lastRealDate == null || d.isAfter(lastRealDate)) lastRealDate = d;
+    }
+  }
+
   if (dates.isEmpty) {
     // Clear swe cache entry for empty rounds
     _sweCalcCache.remove(ri);
@@ -4441,6 +4434,7 @@ final safeNoBridge = List<bool>.generate(
       noDDrivePerLeg: safeNoDDrive,
       pickupEveningFirstDay: round.pickupEveningFirstDay,
       threshold: swe.ddKmGrans,
+      roundEndDate: lastRealDate,
     ).dDriveDays;
     final sweDdDays = sweResult.legDdCost.where((v) => v > 0).length;
     final extraDdDays = (sweNewDdDays - sweDdDays).clamp(0, 999);
@@ -4539,6 +4533,7 @@ final safeNoBridge = List<bool>.generate(
     hasTravelBefore: safeTravel,
     noDDrivePerLeg: safeNoDDrive,
     noBridgePerLeg: safeNoBridge,
+    roundEndDate: lastRealDate,
   );
   // ⭐ MULTI BUS SUMMARY
 final busCount =

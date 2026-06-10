@@ -50,6 +50,10 @@ class TripCalculator {
 
     /// German km (toll-free) — stored in result for breakdown display
     double deKm = 0,
+
+    /// Last real tour day (last entry with a location). Prevents trailing empty
+    /// staging rows from adding a phantom homebound D.Drive day.
+    DateTime? roundEndDate,
   }) {
     // ✅ RIKTIG KILDE: dates er sannheten
     final int entryCount = dates.length;
@@ -131,6 +135,7 @@ class TripCalculator {
       pickupEveningFirstDay: pickupEveningFirstDay,
       threshold: threshold,
       noDDrivePerLeg: noDDrivePerLeg,
+      roundEndDate: roundEndDate,
     );
 
     final int totalDDriveDays = dd.dDriveDays;
@@ -181,11 +186,20 @@ class TripCalculator {
     _log('BRIDGE COST: $bridgeCost');
 
     // ----------------------------------------
-    // TOLL (midlertidig fast modell)
+    // TOLL
+    //
+    // If the caller supplied non-zero per-leg toll values (trucks use
+    // station-based NVDB pricing via TollService), use the sum of those.
+    // Otherwise fall back to the flat per-km model (buses).
     // ----------------------------------------
 
-    final double tollCost = (tollableKm ?? totalKm) * settings.tollKmRate;
-    _log('Toll cost: $tollCost');
+    final double tollSumPerLeg =
+        tollPerLeg.fold(0.0, (a, b) => a + b);
+    final double tollCost = tollSumPerLeg > 0
+        ? tollSumPerLeg
+        : (tollableKm ?? totalKm) * settings.tollKmRate;
+    _log('Toll cost: $tollCost'
+        '${tollSumPerLeg > 0 ? ' (sum of per-leg station tolls)' : ' (km × rate)'}');
 
     // ----------------------------------------
     // TOTAL
@@ -255,6 +269,10 @@ class TripCalculator {
     required bool pickupEveningFirstDay,
     required double threshold,
     List<bool>? noDDrivePerLeg,
+    // Last real tour day. Trailing empty/staging rows (no location) must not
+    // extend the tour and add a phantom homebound travel day. Defaults to the
+    // last date when not supplied.
+    DateTime? roundEndDate,
   }) {
     final int n = dates.length;
     if (n == 0) return (dDriveDays: 0, flightTickets: 0);
@@ -285,8 +303,8 @@ class TripCalculator {
     // Round boundaries for travel-day checks
     final effectiveStart = DateTime(
         dates[startIdx].year, dates[startIdx].month, dates[startIdx].day);
-    final effectiveEnd =
-        DateTime(dates.last.year, dates.last.month, dates.last.day);
+    final endSrc = roundEndDate ?? dates.last;
+    final effectiveEnd = DateTime(endSrc.year, endSrc.month, endSrc.day);
 
     // Build clusters: merge dates that are ≤ 3 calendar days apart
     final clusters = <List<DateTime>>[];
