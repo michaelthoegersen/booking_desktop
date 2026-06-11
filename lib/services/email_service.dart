@@ -8,6 +8,7 @@ import 'package:intl/intl.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../models/offer_draft.dart';
+import '../state/active_company.dart';
 import '../widgets/send_invoice_dialog.dart' show OfferSummary;
 import 'microsoft_oauth_service.dart';
 
@@ -46,9 +47,6 @@ class EmailService {
   static final _dateFmt = DateFormat('dd.MM.yyyy');
   static final _nokFmt = NumberFormat('#,##0', 'nb_NO');
 
-  /// CS Scandinavia logo as base64 PNG (white on transparent).
-  static const _cssLogoBase64 =
-      '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';
 
   // --------------------------------------------------
   // SMTP ACCOUNTS (cached per company)
@@ -89,38 +87,61 @@ class EmailService {
   /// Clear cache (call after adding/removing accounts).
   static void clearSmtpCache() => _smtpCache = {};
 
-  /// Returns an HTML email signature block for the active SMTP account.
-  /// If the sender is sales@coachservicescandinavia.com, returns the CSS signature.
-  /// Otherwise returns a simple "Best regards, CompanyName" block.
-  /// Returns an HTML email signature for the active SMTP account.
-  /// CSS signature when sending from sales@coachservicescandinavia.com.
+  /// CS Scandinavia logo as base64 PNG (white on transparent).
+  static const _cssLogoBase64 =
+      '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';
+
+  /// Returns an HTML email signature with logo and logged-in user's name.
+  /// Uses company branding logo URL if available, falls back to inline CSS logo.
   static Future<String> getEmailSignature({String? companyId}) async {
     final account = await getDefaultSmtpAccount(companyId: companyId);
-    if (account != null && account.email.toLowerCase() == 'sales@coachservicescandinavia.com') {
-      return '''
+    if (account == null) return '';
+    final companyName = account.displayName;
+    final email = account.email;
+
+    // Get logged-in user's name from profiles
+    String userName = '';
+    try {
+      final sb = Supabase.instance.client;
+      final uid = sb.auth.currentUser?.id;
+      if (uid != null) {
+        final res = await sb.from('profiles').select('name').eq('id', uid).maybeSingle();
+        userName = (res?['name'] as String?) ?? '';
+      }
+    } catch (_) {}
+
+    if (companyName.isEmpty && userName.isEmpty) return '';
+
+    // Try to get logo URL from company branding
+    String? logoUrl;
+    try {
+      if (companyId != null) {
+        final sb = Supabase.instance.client;
+        final res = await sb
+            .from('company_branding')
+            .select('logo_url')
+            .eq('company_id', companyId)
+            .maybeSingle();
+        logoUrl = res?['logo_url'] as String?;
+      }
+    } catch (_) {}
+
+    // Build logo column — only if a hosted logo URL exists in branding
+    final hasLogo = logoUrl != null && logoUrl.isNotEmpty;
+
+    return '''
 <table cellpadding="0" cellspacing="0" border="0" style="margin-top: 24px; border-top: 1px solid #555; padding-top: 16px;">
   <tr>
-    <td style="padding-right: 16px; vertical-align: middle;">
-      <img src="data:image/png;base64,$_cssLogoBase64" alt="CS Scandinavia" width="80" height="80" style="display: block;" />
-    </td>
-    <td style="vertical-align: middle; padding-left: 16px; border-left: 2px solid #4CAF50;">
+    ${hasLogo ? '<td style="padding-right: 16px; vertical-align: middle;"><img src="$logoUrl" alt="$companyName" width="80" height="80" style="display: block; object-fit: contain;" /></td>' : ''}
+    <td style="vertical-align: middle;${hasLogo ? ' padding-left: 16px; border-left: 2px solid #4CAF50;' : ''}">
       <p style="font-size: 14px; color: #ccc; margin: 0; line-height: 1.7; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
-        <strong style="color: #ffffff; font-size: 15px;">Michael Thøgersen</strong><br>
-        Coach Service Scandinavia<br>
-        <a href="mailto:sales@coachservicescandinavia.com" style="color: #90caf9; text-decoration: none;">sales@coachservicescandinavia.com</a><br>
-        <span style="color: #aaa;">+47 948 93 820</span>
+        ${userName.isNotEmpty ? '<strong style="color: #ffffff; font-size: 15px;">$userName</strong><br>' : ''}
+        $companyName<br>
+        <a href="mailto:$email" style="color: #90caf9; text-decoration: none;">$email</a>
       </p>
     </td>
   </tr>
 </table>''';
-    }
-    // Default: simple signature
-    final name = account?.displayName ?? '';
-    if (name.isEmpty) return '';
-    return '''
-<div style="margin-top: 20px;">
-  <p style="font-size: 13px; color: #666; margin: 0;">Best regards,<br><strong>$name</strong></p>
-</div>''';
   }
 
   // --------------------------------------------------
@@ -155,23 +176,59 @@ class EmailService {
     if (useSmtp) {
       final account = await getDefaultSmtpAccount(companyId: companyId);
       if (account != null) {
-        if (kIsWeb) {
-          await _sendViaSmtpEdgeFunction(account: account, to: to, subject: subject, body: body, isHtml: isHtml);
-        } else {
-          await _sendViaSmtp(account: account, to: to, subject: subject, body: body, isHtml: isHtml);
+        try {
+          if (kIsWeb) {
+            await _sendViaSmtpEdgeFunction(account: account, to: to, subject: subject, body: body, isHtml: isHtml);
+          } else {
+            await _sendViaSmtp(account: account, to: to, subject: subject, body: body, isHtml: isHtml);
+          }
+          return;
+        } catch (e) {
+          // Desktop: only fall back on SMTP-auth-disabled errors. Web: always
+          // fall through to the Microsoft Graph edge function below.
+          if (!kIsWeb && !_shouldFallbackToOAuth(e)) rethrow;
+          debugPrint('SMTP send failed — trying Microsoft OAuth: $e');
         }
-        return;
       }
     }
-    // Try delegated OAuth (user-connected Microsoft account)
-    if (!kIsWeb) {
+    // Delegated OAuth (user-connected Microsoft account). On web this goes
+    // through the ms-graph-send edge function (uses the stored token); on
+    // desktop it sends client-side.
+    if (kIsWeb) {
+      final sent = await _trySendViaGraphEdge(
+        to: to, subject: subject, body: body, isHtml: isHtml, companyId: companyId,
+      );
+      if (sent) return;
+    } else {
       final sent = await _trySendViaDelegated(
         to: to, subject: subject, body: body, isHtml: isHtml, companyId: companyId,
       );
       if (sent) return;
     }
     // No SMTP or OAuth configured — throw instead of using michael@nttas.com
-    throw Exception('E-post er ikke konfigurert. Legg til en SMTP-konto i Innstillinger.');
+    throw Exception(_emailNotConfiguredMessage(companyId: companyId));
+  }
+
+  /// Returns true if the SMTP error indicates the provider disabled
+  /// basic SMTP AUTH (Microsoft 365 default) so we should try OAuth instead.
+  static bool _shouldFallbackToOAuth(Object err) {
+    final msg = err.toString().toLowerCase();
+    return msg.contains('smtpclientauthentication is disabled') ||
+        msg.contains('5.7.139') ||
+        msg.contains('authentication unsuccessful');
+  }
+
+  static String _emailNotConfiguredMessage({String? companyId}) {
+    // If we got here after trying SMTP, it usually means SMTP auth was
+    // rejected (Microsoft disables it by default) and OAuth isn't connected.
+    final hasSmtp = (_smtpCache[companyId ?? '_all'] ?? []).isNotEmpty;
+    if (hasSmtp) {
+      return 'SMTP AUTH er deaktivert på Microsoft-tenanten din. '
+          'Gå til Innstillinger → E-post & Integrasjoner og trykk "Koble til Microsoft" '
+          'for å sende via Microsoft Graph i stedet.';
+    }
+    return 'E-post er ikke konfigurert. Legg til en SMTP-konto eller koble til '
+        'Microsoft i Innstillinger.';
   }
 
   static Future<void> sendEmailWithAttachment({
@@ -209,22 +266,35 @@ class EmailService {
     if (useSmtp) {
       final account = await getDefaultSmtpAccount(companyId: companyId);
       if (account != null) {
-        if (kIsWeb) {
-          await _sendViaSmtpEdgeFunction(
-            account: account, to: to, subject: subject, body: body,
-            attachments: attachments, isHtml: isHtml,
-          );
-        } else {
-          await _sendViaSmtp(
-            account: account, to: to, subject: subject, body: body,
-            attachments: attachments, isHtml: isHtml,
-          );
+        try {
+          if (kIsWeb) {
+            await _sendViaSmtpEdgeFunction(
+              account: account, to: to, subject: subject, body: body,
+              attachments: attachments, isHtml: isHtml,
+            );
+          } else {
+            await _sendViaSmtp(
+              account: account, to: to, subject: subject, body: body,
+              attachments: attachments, isHtml: isHtml,
+            );
+          }
+          return;
+        } catch (e) {
+          // Desktop: only fall back on SMTP-auth-disabled errors. Web: always
+          // fall through to the Microsoft Graph edge function below.
+          if (!kIsWeb && !_shouldFallbackToOAuth(e)) rethrow;
+          debugPrint('SMTP send failed — trying Microsoft OAuth: $e');
         }
-        return;
       }
     }
-    // Try delegated OAuth
-    if (!kIsWeb) {
+    // Delegated OAuth. Web → ms-graph-send edge function; desktop → client-side.
+    if (kIsWeb) {
+      final sent = await _trySendViaGraphEdge(
+        to: to, subject: subject, body: body,
+        attachments: attachments, isHtml: isHtml, companyId: companyId,
+      );
+      if (sent) return;
+    } else {
       final attachmentList = attachments
           .map((a) => {
                 'name': a.filename,
@@ -238,7 +308,50 @@ class EmailService {
       if (sent) return;
     }
     // No SMTP or OAuth configured — throw instead of using michael@nttas.com
-    throw Exception('E-post er ikke konfigurert. Legg til en SMTP-konto i Innstillinger.');
+    throw Exception(_emailNotConfiguredMessage(companyId: companyId));
+  }
+
+  /// Web delegated send: calls the ms-graph-send edge function, which uses the
+  /// company's stored Microsoft token (saved when "Koble til Microsoft" was used
+  /// in the desktop app). Returns true if sent. The desktop app sends the same
+  /// way client-side via [_trySendViaDelegated].
+  static Future<bool> _trySendViaGraphEdge({
+    required String to,
+    required String subject,
+    required String body,
+    List<({String filename, Uint8List bytes})>? attachments,
+    bool isHtml = false,
+    String? companyId,
+  }) async {
+    try {
+      final cid = companyId ?? activeCompanyNotifier.value?.id;
+      if (cid == null) return false;
+      final payload = <String, dynamic>{
+        'company_id': cid,
+        'to': to,
+        'subject': subject,
+        'body': body,
+        'is_html': isHtml,
+      };
+      if (attachments != null && attachments.isNotEmpty) {
+        payload['attachments'] = attachments
+            .map((a) =>
+                {'name': a.filename, 'contentBytes': base64Encode(a.bytes)})
+            .toList();
+      }
+      final res = await Supabase.instance.client.functions
+          .invoke('ms-graph-send', body: payload);
+      final data = res.data;
+      final sent = data is Map && data['sent'] == true;
+      if (!sent) {
+        debugPrint(
+            'ms-graph-send not sent: ${data is Map ? data['error'] : data}');
+      }
+      return sent;
+    } catch (e) {
+      debugPrint('ms-graph-send failed: $e');
+      return false;
+    }
   }
 
   // --------------------------------------------------
@@ -360,10 +473,15 @@ class EmailService {
 
       // Attachment parts
       for (final a in attachments!) {
+        final ext = a.filename.split('.').last.toLowerCase();
+        final mimeType = ext == 'pdf' ? 'application/pdf'
+            : ext == 'png' ? 'image/png'
+            : ext == 'jpg' || ext == 'jpeg' ? 'image/jpeg'
+            : 'application/octet-stream';
         buf.write('--$boundary$_crlf');
-        buf.write('Content-Type: application/pdf; name="${a.filename}"$_crlf');
+        buf.write('Content-Type: $mimeType; name="${a.filename}"$_crlf');
         buf.write('Content-Transfer-Encoding: base64$_crlf');
-        buf.write('Content-Disposition: attachment; filename="${a.filename}"$_crlf');
+        buf.write('Content-Disposition: attachment; filename="${a.filename}"; size=${a.bytes.length}$_crlf');
         buf.write(_crlf);
         buf.write(_base64Wrap(a.bytes));
         buf.write(_crlf);
@@ -707,7 +825,7 @@ class EmailService {
       postalCode: hasSeparate ? company['invoice_postal_code'] : company['postal_code'],
       city: hasSeparate ? company['invoice_city'] : company['city'],
       country: hasSeparate ? company['invoice_country'] : company['country'],
-      email: hasSeparate ? company['invoice_email'] : null,
+      email: company['invoice_email'],
       fallbackName: name,
     );
 
@@ -753,7 +871,7 @@ class EmailService {
         postalCode: compHasSeparate ? company['invoice_postal_code'] : company['postal_code'],
         city: compHasSeparate ? company['invoice_city'] : company['city'],
         country: compHasSeparate ? company['invoice_country'] : company['country'],
-        email: compHasSeparate ? company['invoice_email'] : null,
+        email: company['invoice_email'],
         fallbackName: companyName,
       );
     }
@@ -883,7 +1001,7 @@ class EmailService {
     }
     buf.writeln('Trailer: ${anyTrailer ? 'Yes' : 'No'}');
     // Vehicle type (kjoretoy)
-    var kjoretoy = offer.busType.label;
+    var kjoretoy = offer.busType;
     if (anyTrailer) kjoretoy += ' + trailer';
     if (offer.busCount > 1) kjoretoy = '${offer.busCount}x $kjoretoy';
     buf.writeln('Layout: $kjoretoy');
@@ -900,9 +1018,9 @@ class EmailService {
 
     buf.writeln();
     buf.writeln('Best Regards');
-    buf.writeln('Michael Thøgersen');
+    buf.writeln(account.displayName);
 
-    await sendEmail(to: to, subject: subject, body: buf.toString());
+    await sendEmail(to: to, subject: subject, body: buf.toString(), companyId: companyId);
   }
 }
 
