@@ -392,6 +392,7 @@ class _GigOfferPageState extends State<GigOfferPage> {
               entry.performanceTimeCtrl.text = gig['performance_time'] ?? '';
               entry.getOutTimeCtrl.text = gig['get_out_time'] ?? '';
               entry.meetingNotesCtrl.text = gig['meeting_notes'] ?? '';
+              entry.loadScheduleItems(gig['schedule_items']);
 
               // Load per-date show selection from gig_shows. Match on
               // show_type_id when present; fall back to show_name so
@@ -472,6 +473,7 @@ class _GigOfferPageState extends State<GigOfferPage> {
             _dateEntries[0].performanceTimeCtrl.text = gig['performance_time'] ?? '';
             _dateEntries[0].getOutTimeCtrl.text = gig['get_out_time'] ?? '';
             _dateEntries[0].meetingNotesCtrl.text = gig['meeting_notes'] ?? '';
+            _dateEntries[0].loadScheduleItems(gig['schedule_items']);
           }
 
           // Load gig shows if we don't have offer shows yet
@@ -525,6 +527,7 @@ class _GigOfferPageState extends State<GigOfferPage> {
           _dateEntries[0].performanceTimeCtrl.text = gig['performance_time'] ?? '';
           _dateEntries[0].getOutTimeCtrl.text = gig['get_out_time'] ?? '';
           _dateEntries[0].meetingNotesCtrl.text = gig['meeting_notes'] ?? '';
+          _dateEntries[0].loadScheduleItems(gig['schedule_items']);
         }
 
         // Load gig shows
@@ -1017,6 +1020,7 @@ class _GigOfferPageState extends State<GigOfferPage> {
           'performance_time': n(entry.performanceTimeCtrl.text),
           'get_out_time': n(entry.getOutTimeCtrl.text),
           'meeting_notes': n(entry.meetingNotesCtrl.text),
+          'schedule_items': entry.scheduleItemsJson(),
           'stage_shape': n(_stageShapeCtrl.text),
           'stage_size': n(_stageSizeCtrl.text),
           'stage_notes': n(_stageNotesCtrl.text),
@@ -3281,24 +3285,101 @@ class _GigOfferPageState extends State<GigOfferPage> {
             key: ValueKey('schedule_${selected.gigId ?? _scheduleSelectedIdx}'),
             child: Column(
               children: [
-                _tf(selected.meetingTimeCtrl, 'Oppmøte', maxLines: null),
-                const SizedBox(height: 12),
-                _tf(selected.getInTimeCtrl, 'Get-in', maxLines: null),
-                const SizedBox(height: 12),
-                _tf(selected.rehearsalTimeCtrl, 'Prøver', maxLines: null),
-                const SizedBox(height: 12),
-                _tf(selected.performanceTimeCtrl, 'Opptreden',
-                    maxLines: null),
-                const SizedBox(height: 12),
-                _tf(selected.getOutTimeCtrl, 'Get-out', maxLines: null),
-                const SizedBox(height: 12),
-                _tf(selected.meetingNotesCtrl, 'Oppmøtenotat',
-                    maxLines: null),
+                for (int i = 0; i < selected.schedRows.length; i++) ...[
+                  if (i > 0) const SizedBox(height: 12),
+                  _buildSchedRow(selected, i),
+                ],
+                const SizedBox(height: 8),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: TextButton.icon(
+                    icon: const Icon(Icons.add, size: 16),
+                    label: const Text('Legg til punkt'),
+                    onPressed: () => setState(() {
+                      selected.schedRows.add(_SchedRow.custom());
+                    }),
+                  ),
+                ),
               ],
             ),
           ),
         ],
       ),
+    );
+  }
+
+  /// One reorderable Tidsplan row — up/down arrows + the field(s). Built-in
+  /// rows show a single labelled field; custom rows show a title + value and
+  /// a remove button.
+  Widget _buildSchedRow(_DateEntry entry, int i) {
+    final row = entry.schedRows[i];
+    final isFirst = i == 0;
+    final isLast = i == entry.schedRows.length - 1;
+    void move(int delta) {
+      final ni = i + delta;
+      if (ni < 0 || ni >= entry.schedRows.length) return;
+      setState(() {
+        final tmp = entry.schedRows[i];
+        entry.schedRows[i] = entry.schedRows[ni];
+        entry.schedRows[ni] = tmp;
+      });
+    }
+
+    final Widget field = row.isCustom
+        ? Column(
+            children: [
+              TextField(
+                controller: row.titleCtrl,
+                style: const TextStyle(
+                    fontSize: 13, fontWeight: FontWeight.w600),
+                decoration: const InputDecoration(
+                  labelText: 'Tittel',
+                  hintText: 'F.eks. Soundcheck',
+                  isDense: true,
+                  contentPadding:
+                      EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+                ),
+              ),
+              const SizedBox(height: 6),
+              _tf(row.valueCtrl!, 'Verdi', maxLines: null),
+            ],
+          )
+        : _tf(entry.builtinSchedCtrl(row.key)!,
+            _DateEntry.builtinSchedLabel(row.key),
+            maxLines: null);
+
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            IconButton(
+              icon: const Icon(Icons.keyboard_arrow_up, size: 20),
+              visualDensity: VisualDensity.compact,
+              tooltip: 'Flytt opp',
+              onPressed: isFirst ? null : () => move(-1),
+            ),
+            IconButton(
+              icon: const Icon(Icons.keyboard_arrow_down, size: 20),
+              visualDensity: VisualDensity.compact,
+              tooltip: 'Flytt ned',
+              onPressed: isLast ? null : () => move(1),
+            ),
+          ],
+        ),
+        const SizedBox(width: 4),
+        Expanded(child: field),
+        if (row.isCustom)
+          IconButton(
+            icon: const Icon(Icons.close, size: 18),
+            visualDensity: VisualDensity.compact,
+            tooltip: 'Fjern',
+            onPressed: () => setState(() {
+              entry.schedRows.removeAt(i).dispose();
+            }),
+          ),
+      ],
     );
   }
 
@@ -4698,6 +4779,108 @@ class _DateEntry {
   final performanceTimeCtrl = TextEditingController();
   final getOutTimeCtrl = TextEditingController();
   final meetingNotesCtrl = TextEditingController();
+
+  // Ordered Tidsplan rows — built-in fields + custom rows, freely reorderable.
+  // Built-in row values live in the controllers above; custom rows carry their
+  // own title/value controllers. Persisted to gigs.schedule_items as order +
+  // custom data; built-in values keep going to their own columns.
+  static const builtinSchedKeys = [
+    'meeting',
+    'getin',
+    'rehearsal',
+    'performance',
+    'getout',
+    'notes',
+  ];
+  static List<_SchedRow> _defaultSchedRows() =>
+      builtinSchedKeys.map((k) => _SchedRow.builtin(k)).toList();
+  List<_SchedRow> schedRows = _DateEntry._defaultSchedRows();
+
+  static String builtinSchedLabel(String key) {
+    switch (key) {
+      case 'meeting':
+        return 'Oppmøte';
+      case 'getin':
+        return 'Get-in';
+      case 'rehearsal':
+        return 'Prøver';
+      case 'performance':
+        return 'Opptreden';
+      case 'getout':
+        return 'Get-out';
+      case 'notes':
+        return 'Oppmøtenotat';
+    }
+    return '';
+  }
+
+  TextEditingController? builtinSchedCtrl(String key) {
+    switch (key) {
+      case 'meeting':
+        return meetingTimeCtrl;
+      case 'getin':
+        return getInTimeCtrl;
+      case 'rehearsal':
+        return rehearsalTimeCtrl;
+      case 'performance':
+        return performanceTimeCtrl;
+      case 'getout':
+        return getOutTimeCtrl;
+      case 'notes':
+        return meetingNotesCtrl;
+    }
+    return null;
+  }
+
+  /// Build [schedRows] from a stored gigs.schedule_items value. Falls back to
+  /// the default fixed order when the column is null/empty (legacy gigs).
+  void loadScheduleItems(dynamic json) {
+    for (final r in schedRows) {
+      r.dispose();
+    }
+    if (json is! List || json.isEmpty) {
+      schedRows = _defaultSchedRows();
+      return;
+    }
+    final rows = <_SchedRow>[];
+    final seen = <String>{};
+    for (final item in json) {
+      if (item is! Map) continue;
+      final k = item['k'] as String?;
+      if (k == null) continue;
+      if (k == 'custom') {
+        rows.add(_SchedRow.custom(
+          title: item['t'] as String? ?? '',
+          value: item['v'] as String? ?? '',
+        ));
+      } else if (builtinSchedKeys.contains(k)) {
+        rows.add(_SchedRow.builtin(k));
+        seen.add(k);
+      }
+    }
+    // Make sure every built-in is present even if missing from stored order.
+    for (final k in builtinSchedKeys) {
+      if (!seen.contains(k)) rows.add(_SchedRow.builtin(k));
+    }
+    schedRows = rows;
+  }
+
+  /// Serialize the row order (+ custom rows) for gigs.schedule_items.
+  List<Map<String, dynamic>> scheduleItemsJson() {
+    final out = <Map<String, dynamic>>[];
+    for (final r in schedRows) {
+      if (r.isCustom) {
+        final t = r.titleCtrl!.text.trim();
+        final v = r.valueCtrl!.text.trim();
+        if (t.isEmpty && v.isEmpty) continue; // drop empty custom rows
+        out.add({'k': 'custom', 't': t, 'v': v});
+      } else {
+        out.add({'k': r.key});
+      }
+    }
+    return out;
+  }
+
   /// Indices into the parent's _shows list that are selected for this date.
   /// null means "use all selected shows" (default for new entries).
   Set<int>? selectedShowIndices;
@@ -4711,6 +4894,34 @@ class _DateEntry {
     performanceTimeCtrl.dispose();
     getOutTimeCtrl.dispose();
     meetingNotesCtrl.dispose();
+    for (final r in schedRows) {
+      r.dispose();
+    }
+  }
+}
+
+/// One row in the Tidsplan list. Built-in rows reference the parent
+/// [_DateEntry]'s fixed controllers via [key]; custom rows carry their own
+/// title + value controllers.
+class _SchedRow {
+  final String key; // builtin key or 'custom'
+  final TextEditingController? titleCtrl;
+  final TextEditingController? valueCtrl;
+
+  _SchedRow.builtin(this.key)
+      : titleCtrl = null,
+        valueCtrl = null;
+
+  _SchedRow.custom({String title = '', String value = ''})
+      : key = 'custom',
+        titleCtrl = TextEditingController(text: title),
+        valueCtrl = TextEditingController(text: value);
+
+  bool get isCustom => key == 'custom';
+
+  void dispose() {
+    titleCtrl?.dispose();
+    valueCtrl?.dispose();
   }
 }
 
