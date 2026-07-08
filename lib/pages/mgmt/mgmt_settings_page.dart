@@ -10,6 +10,7 @@ import '../../services/email_service.dart';
 import '../../services/profile_field_service.dart';
 import '../../state/active_company.dart';
 import '../../state/role_labels.dart';
+import '../inventory/show_equipment_dialog.dart';
 
 /// Notifier so the sidebar can react to feature-flag changes without restart.
 final companyFlagsNotifier = ValueNotifier<Map<String, bool>>({});
@@ -1339,6 +1340,16 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
                                     ),
                                   ],
                                 ),
+                              ),
+                              TextButton.icon(
+                                onPressed: () => showFixedShowEquipmentDialog(
+                                  context,
+                                  showTypeId: st['id'] as String,
+                                  showName: st['name'] as String? ?? '',
+                                ),
+                                icon: const Icon(Icons.inventory_2_outlined,
+                                    size: 16),
+                                label: const Text('Utstyr'),
                               ),
                               TextButton(
                                 onPressed: () =>

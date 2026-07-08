@@ -15,6 +15,7 @@ import '../../services/email_service.dart';
 import '../../widgets/contact_profile_dialog.dart';
 import '../../widgets/mention_helpers.dart';
 import '../../widgets/rich_text_field.dart';
+import '../inventory/show_equipment_dialog.dart';
 
 class MgmtGigDetailPage extends StatefulWidget {
   final String gigId;
@@ -2773,7 +2774,7 @@ class _ShowsPrisTabState extends State<_ShowsPrisTab> {
                                       fontWeight: FontWeight.w900,
                                       fontSize: 12),
                                   textAlign: TextAlign.right)),
-                          const SizedBox(width: 40),
+                          const SizedBox(width: 80),
                         ],
                       ),
                     ),
@@ -2978,6 +2979,18 @@ class _ShowRowState extends State<_ShowRow> {
                       ),
                     ),
                   ),
+          ),
+          SizedBox(
+            width: 40,
+            child: IconButton(
+              icon: const Icon(Icons.inventory_2_outlined, size: 18),
+              onPressed: () => showGigShowEquipmentDialog(
+                context,
+                gigShowId: show['id'] as String,
+                showName: show['show_name'] as String? ?? 'Show',
+              ),
+              tooltip: 'Utstyr',
+            ),
           ),
           SizedBox(
             width: 40,
