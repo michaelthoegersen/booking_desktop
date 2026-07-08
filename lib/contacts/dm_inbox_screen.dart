@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../localization/s.dart';
 import '../services/direct_chat_service.dart';
 import '../state/active_company.dart';
 import '../ui/css_theme.dart';
@@ -60,12 +61,12 @@ class _DmInboxScreenState extends State<DmInboxScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            'Meldinger',
+            S.t('messages'),
             style: Theme.of(context).textTheme.headlineMedium,
           ),
           const SizedBox(height: 4),
           Text(
-            'Direktemeldinger',
+            S.t('directMessages'),
             style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                   color: CssTheme.textMuted,
                 ),
@@ -83,9 +84,9 @@ class _DmInboxScreenState extends State<DmInboxScreen> {
                 final allMessages = snapshot.data ?? [];
 
                 if (allMessages.isEmpty) {
-                  return const Center(
+                  return Center(
                     child: Text(
-                      'Ingen samtaler ennå',
+                      S.t('noConversationsYet'),
                       style: TextStyle(color: CssTheme.textMuted),
                     ),
                   );
@@ -230,7 +231,7 @@ class _ConversationTileState extends State<_ConversationTile> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    peerName.isEmpty ? 'Loading…' : peerName,
+                    peerName.isEmpty ? S.t('loading') : peerName,
                     style: const TextStyle(
                       fontWeight: FontWeight.w900,
                       fontSize: 15,
@@ -238,7 +239,7 @@ class _ConversationTileState extends State<_ConversationTile> {
                   ),
                   const SizedBox(height: 3),
                   Text(
-                    isMine ? 'Du: $message' : message,
+                    isMine ? '${S.t('you')}: $message' : message,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
@@ -275,7 +276,7 @@ class _ConversationTileState extends State<_ConversationTile> {
       if (diff.inDays == 0) {
         return DateFormat('HH:mm').format(dt);
       } else if (diff.inDays == 1) {
-        return 'I går';
+        return S.t('yesterday');
       } else if (diff.inDays < 7) {
         return DateFormat('EEEE').format(dt);
       } else {

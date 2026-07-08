@@ -2,7 +2,7 @@ name: tourflow
 description: TourFlow booking and tour management system
 publish_to: 'none'
 
-version: 1.1.1+7
+version: 1.1.6+12
 
 environment:
   sdk: ">=3.0.0 <4.0.0"
@@ -35,7 +35,7 @@ dependencies:
   webview_flutter: ^4.7.0
   file_picker: ^10.0.0
 
-  syncfusion_flutter_pdf: ^24.1.41
+  syncfusion_flutter_pdf: ^28.2.12
 
   open_filex: ^4.3.2
   path_provider: ^2.1.2
@@ -47,6 +47,7 @@ dependencies:
   agora_rtc_engine: ^6.5.3
   mailer: ^7.1.0
   flutter_markdown: ^0.7.7+1
+  syncfusion_flutter_pdfviewer: ^28.2.12
 
 
 # =============================================================
@@ -113,6 +114,7 @@ flutter:
     - assets/pdf/logos/TourFlowLogoComplete.png
     - assets/pdf/logos/TourFlowLogoComplete.svg
     - assets/pdf/logos/CompleteDrumsWhite.png
+    - assets/pdf/logos/CompleteDrumsBlack.png
 
     # Bus images
     - assets/pdf/buses/12_sleeper.png

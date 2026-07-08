@@ -1,6 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../localization/s.dart';
+import '../services/km_se_updater.dart';
+import '../widgets/route_popup_dialog.dart';
+
 class RoutesAdminPage extends StatefulWidget {
   const RoutesAdminPage({super.key});
 
@@ -94,11 +98,91 @@ class _RoutesAdminPageState extends State<RoutesAdminPage> {
   }
 
   List<Map<String, dynamic>> _applySearchInternal(String q) {
+    // Support "Oslo - Gothenburg" style search: split on -/→/til and match from+to
+    final parts = q.split(RegExp(r'\s*[-–—→]\s*|\s+til\s+', caseSensitive: false))
+        .map((s) => s.trim())
+        .where((s) => s.isNotEmpty)
+        .toList();
+
+    if (parts.length >= 2) {
+      final qFrom = parts[0];
+      final qTo = parts[1];
+      return routes.where((r) {
+        final from = (r['from_place'] ?? '').toString().toLowerCase();
+        final to = (r['to_place'] ?? '').toString().toLowerCase();
+        return from.contains(qFrom) && to.contains(qTo);
+      }).toList();
+    }
+
     return routes.where((r) {
       final from = (r['from_place'] ?? '').toString().toLowerCase();
       final to = (r['to_place'] ?? '').toString().toLowerCase();
       return from.contains(q) || to.contains(q);
     }).toList();
+  }
+
+  // =================================================
+  // DELETE ROUTE
+  // =================================================
+
+  Future<void> _deleteRoute(Map<String, dynamic> row) async {
+    final from = row['from_place'] ?? '';
+    final to = row['to_place'] ?? '';
+
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(S.t('delete')),
+        content: Text('$from → $to'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text(S.t('cancel')),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text(S.t('delete')),
+          ),
+        ],
+      ),
+    );
+
+    if (ok != true) return;
+
+    try {
+      await sb
+          .from('routes_all')
+          .delete()
+          .eq('from_place', from)
+          .eq('to_place', to);
+
+      await _loadRoutes();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('${S.t('error')}: $e')),
+        );
+      }
+    }
+  }
+
+  // =================================================
+  // ADD NEW ROUTE (Route preview dialog with map)
+  // =================================================
+
+  Future<void> _addNewRoute() async {
+    final saved = await showDialog<bool>(
+      context: context,
+      builder: (_) => const RoutePopupDialog(
+        start: '',
+        stops: [''],
+      ),
+    );
+
+    if (saved == true) {
+      await _loadRoutes();
+    }
   }
 
   // =================================================
@@ -150,8 +234,9 @@ class _RoutesAdminPageState extends State<RoutesAdminPage> {
       builder: (ctx) {
         return StatefulBuilder(
           builder: (ctx, setLocalState) {
+            final isNew = row['from_place'] == '' && row['to_place'] == '';
             return AlertDialog(
-              title: const Text("Edit route"),
+              title: Text(isNew ? S.t('addRoute') : S.t('editRoute')),
               content: SizedBox(
                 width: 520,
                 child: SingleChildScrollView(
@@ -161,22 +246,22 @@ class _RoutesAdminPageState extends State<RoutesAdminPage> {
                     children: [
                       TextField(
                         controller: fromCtrl,
-                        decoration: const InputDecoration(labelText: "From"),
+                        decoration: InputDecoration(labelText: S.t('from')),
                       ),
                       TextField(
                         controller: toCtrl,
-                        decoration: const InputDecoration(labelText: "To"),
+                        decoration: InputDecoration(labelText: S.t('to')),
                       ),
                       const SizedBox(height: 4),
                       TextField(
                         controller: totalKmCtrl,
                         keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                        decoration: const InputDecoration(labelText: "Total km"),
+                        decoration: InputDecoration(labelText: S.t('totalKm')),
                       ),
                       TextField(
                         controller: ferryCtrl,
-                        decoration: const InputDecoration(
-                          labelText: "Ferry name (optional)",
+                        decoration: InputDecoration(
+                          labelText: S.t('ferryNameOptional'),
                           hintText: "e.g. Puttgarden–Rødby",
                         ),
                       ),
@@ -185,7 +270,7 @@ class _RoutesAdminPageState extends State<RoutesAdminPage> {
                         value: hasFerry,
                         onChanged: (v) =>
                             setLocalState(() => hasFerry = v ?? false),
-                        title: const Text("Ferry"),
+                        title: Text(S.t('ferry')),
                         controlAffinity: ListTileControlAffinity.leading,
                         contentPadding: EdgeInsets.zero,
                       ),
@@ -193,7 +278,7 @@ class _RoutesAdminPageState extends State<RoutesAdminPage> {
                         value: hasBridge,
                         onChanged: (v) =>
                             setLocalState(() => hasBridge = v ?? false),
-                        title: const Text("Bridge"),
+                        title: Text(S.t('bridge')),
                         controlAffinity: ListTileControlAffinity.leading,
                         contentPadding: EdgeInsets.zero,
                       ),
@@ -202,9 +287,9 @@ class _RoutesAdminPageState extends State<RoutesAdminPage> {
                           value: noDDrive,
                           onChanged: (v) =>
                               setLocalState(() => noDDrive = v ?? false),
-                          title: const Text("No D.Drive"),
-                          subtitle: const Text(
-                            "Route km >= 600 but should not trigger D.Drive",
+                          title: Text(S.t('noDDrive')),
+                          subtitle: Text(
+                            S.t('noDDriveDesc'),
                             style: TextStyle(fontSize: 12),
                           ),
                           controlAffinity: ListTileControlAffinity.leading,
@@ -212,8 +297,8 @@ class _RoutesAdminPageState extends State<RoutesAdminPage> {
                         ),
                       ],
                       const SizedBox(height: 16),
-                      const Text(
-                        "Km per land",
+                      Text(
+                        S.t('kmPerCountry'),
                         style: TextStyle(
                           fontSize: 13,
                           fontWeight: FontWeight.w700,
@@ -242,11 +327,11 @@ class _RoutesAdminPageState extends State<RoutesAdminPage> {
               actions: [
                 TextButton(
                   onPressed: () => Navigator.pop(ctx, false),
-                  child: const Text("Cancel"),
+                  child: Text(S.t('cancel')),
                 ),
                 FilledButton(
                   onPressed: () => Navigator.pop(ctx, true),
-                  child: const Text("Save"),
+                  child: Text(S.t('save')),
                 ),
               ],
             );
@@ -301,7 +386,7 @@ class _RoutesAdminPageState extends State<RoutesAdminPage> {
 
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Route updated")),
+        SnackBar(content: Text(S.t('routeUpdated'))),
       );
     }
   }
@@ -325,91 +410,12 @@ class _RoutesAdminPageState extends State<RoutesAdminPage> {
   // ADD / EDIT FERRIES (POPUP)
   // =================================================
 
-  Future<void> _openAddFerryPopup() async {
-    final nameCtrl = TextEditingController();
-    final baseCtrl = TextEditingController();
-    final trailerCtrl = TextEditingController();
-    final currencyCtrl = TextEditingController(text: "EUR");
-    bool active = true;
-
-    final ok = await showDialog<bool>(
+  Future<void> _openManageFerriesDialog() async {
+    await showDialog<void>(
       context: context,
-      barrierDismissible: false,
-      builder: (ctx) {
-        return AlertDialog(
-          title: const Text("Add ferry"),
-          content: SizedBox(
-            width: 420,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TextField(
-                  controller: nameCtrl,
-                  decoration: const InputDecoration(
-                    labelText: "Ferry name",
-                  ),
-                ),
-                TextField(
-                  controller: baseCtrl,
-                  keyboardType: TextInputType.number,
-                  decoration: const InputDecoration(
-                    labelText: "Base price",
-                  ),
-                ),
-                TextField(
-                  controller: trailerCtrl,
-                  keyboardType: TextInputType.number,
-                  decoration: const InputDecoration(
-                    labelText: "Trailer price",
-                  ),
-                ),
-                TextField(
-                  controller: currencyCtrl,
-                  decoration: const InputDecoration(
-                    labelText: "Currency",
-                  ),
-                ),
-                const SizedBox(height: 8),
-                CheckboxListTile(
-                  value: active,
-                  onChanged: (v) => active = v ?? true,
-                  title: const Text("Active"),
-                  controlAffinity: ListTileControlAffinity.leading,
-                ),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text("Cancel"),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              child: const Text("Save"),
-            ),
-          ],
-        );
-      },
+      barrierDismissible: true,
+      builder: (ctx) => _FerryManagerDialog(sb: sb),
     );
-
-    if (ok != true) return;
-
-    await sb.from('ferries').insert({
-      'name': nameCtrl.text.trim(),
-      'base_price':
-          double.tryParse(baseCtrl.text.replaceAll(',', '.')),
-      'trailer_price':
-          double.tryParse(trailerCtrl.text.replaceAll(',', '.')),
-      'currency': currencyCtrl.text.trim(),
-      'active': active,
-    });
-
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Ferry saved")),
-      );
-    }
   }
 
   // =================================================
@@ -438,12 +444,17 @@ class _RoutesAdminPageState extends State<RoutesAdminPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text("Route Manager"),
+        title: Text(S.t('routeManager')),
         actions: [
           IconButton(
+            icon: const Icon(Icons.add_road),
+            tooltip: S.t('addRoute'),
+            onPressed: _addNewRoute,
+          ),
+          IconButton(
             icon: const Icon(Icons.directions_boat),
-            tooltip: "Manage ferries",
-            onPressed: _openAddFerryPopup,
+            tooltip: S.t('manageFerries'),
+            onPressed: _openManageFerriesDialog,
           ),
           IconButton(
             onPressed: _loadRoutes,
@@ -457,9 +468,9 @@ class _RoutesAdminPageState extends State<RoutesAdminPage> {
             padding: const EdgeInsets.all(12),
             child: TextField(
               controller: _searchCtrl,
-              decoration: const InputDecoration(
-                hintText: "Search from / to…",
-                prefixIcon: Icon(Icons.search),
+              decoration: InputDecoration(
+                hintText: S.t('searchFromTo'),
+                prefixIcon: const Icon(Icons.search),
               ),
               onChanged: _applySearch,
             ),
@@ -483,7 +494,7 @@ class _RoutesAdminPageState extends State<RoutesAdminPage> {
     }
 
     if (_filteredRoutes.isEmpty) {
-      return const Center(child: Text("No routes"));
+      return Center(child: Text(S.t('noRoutes')));
     }
 
     return ListView.separated(
@@ -504,7 +515,7 @@ class _RoutesAdminPageState extends State<RoutesAdminPage> {
               children: [
                 Row(
                   children: [
-                    Text("Total: ${r['distance_total_km'] ?? '-'} km"),
+                    Text("${S.t('total')}: ${r['distance_total_km'] ?? '-'} km"),
                     if ((r['no_ddrive'] as bool?) == true) ...[
                       const SizedBox(width: 8),
                       Container(
@@ -515,8 +526,8 @@ class _RoutesAdminPageState extends State<RoutesAdminPage> {
                           borderRadius: BorderRadius.circular(6),
                           border: Border.all(color: Colors.amber.shade400),
                         ),
-                        child: const Text(
-                          "No D.Drive",
+                        child: Text(
+                          S.t('noDDrive'),
                           style: TextStyle(
                               fontSize: 11, fontWeight: FontWeight.w700),
                         ),
@@ -526,7 +537,7 @@ class _RoutesAdminPageState extends State<RoutesAdminPage> {
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  "Ferry: ${r['ferry_name'] ?? '—'}",
+                  "${S.t('ferry')}: ${r['ferry_name'] ?? '—'}",
                   style: TextStyle(
                     fontWeight: FontWeight.w600,
                     color: r['ferry_name'] == null
@@ -536,7 +547,7 @@ class _RoutesAdminPageState extends State<RoutesAdminPage> {
                 ),
                 if (((r['extra'] as String?)?.trim() ?? '').isNotEmpty)
                   Text(
-                    "Extra: ${r['extra']}",
+                    "${S.t('extra')}: ${r['extra']}",
                     style: const TextStyle(fontSize: 12),
                   ),
                 const SizedBox(height: 6),
@@ -556,13 +567,271 @@ class _RoutesAdminPageState extends State<RoutesAdminPage> {
                 ),
               ],
             ),
-            trailing: IconButton(
-              icon: const Icon(Icons.edit),
-              onPressed: () => _editRoute(r),
+            trailing: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                IconButton(
+                  icon: const Icon(Icons.edit),
+                  onPressed: () => _editRoute(r),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.delete_outline, color: Colors.red),
+                  onPressed: () => _deleteRoute(r),
+                ),
+              ],
             ),
           ),
         );
       },
+    );
+  }
+}
+
+// =============================================================
+// FERRY MANAGER DIALOG — list, add, edit, delete
+// =============================================================
+
+class _FerryManagerDialog extends StatefulWidget {
+  final SupabaseClient sb;
+  const _FerryManagerDialog({required this.sb});
+
+  @override
+  State<_FerryManagerDialog> createState() => _FerryManagerDialogState();
+}
+
+class _FerryManagerDialogState extends State<_FerryManagerDialog> {
+  List<Map<String, dynamic>> _ferries = [];
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadFerries();
+  }
+
+  Future<void> _loadFerries() async {
+    setState(() => _loading = true);
+    final res = await widget.sb
+        .from('ferries')
+        .select()
+        .order('name');
+    _ferries = List<Map<String, dynamic>>.from(res);
+    if (mounted) setState(() => _loading = false);
+  }
+
+  Future<void> _addOrEditFerry([Map<String, dynamic>? existing]) async {
+    final nameCtrl = TextEditingController(text: existing?['name'] ?? '');
+    final baseCtrl = TextEditingController(
+      text: existing?['base_price']?.toString() ?? '',
+    );
+    final trailerCtrl = TextEditingController(
+      text: existing?['trailer_price']?.toString() ?? '',
+    );
+    final currencyCtrl = TextEditingController(
+      text: existing?['currency'] ?? 'EUR',
+    );
+    bool active = (existing?['active'] as bool?) ?? true;
+
+    final ok = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (ctx, setLocal) {
+            return AlertDialog(
+              title: Text(existing != null
+                  ? S.t('editFerry')
+                  : S.t('addFerry')),
+              content: SizedBox(
+                width: 420,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    TextField(
+                      controller: nameCtrl,
+                      decoration: InputDecoration(
+                        labelText: S.t('ferryName'),
+                      ),
+                    ),
+                    TextField(
+                      controller: baseCtrl,
+                      keyboardType: TextInputType.number,
+                      decoration: InputDecoration(
+                        labelText: S.t('basePrice'),
+                      ),
+                    ),
+                    TextField(
+                      controller: trailerCtrl,
+                      keyboardType: TextInputType.number,
+                      decoration: InputDecoration(
+                        labelText: S.t('trailerPrice'),
+                      ),
+                    ),
+                    TextField(
+                      controller: currencyCtrl,
+                      decoration: InputDecoration(
+                        labelText: S.t('currency'),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    CheckboxListTile(
+                      value: active,
+                      onChanged: (v) => setLocal(() => active = v ?? true),
+                      title: Text(S.t('active')),
+                      controlAffinity: ListTileControlAffinity.leading,
+                      contentPadding: EdgeInsets.zero,
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx, false),
+                  child: Text(S.t('cancel')),
+                ),
+                FilledButton(
+                  onPressed: () => Navigator.pop(ctx, true),
+                  child: Text(S.t('save')),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+
+    if (ok != true) return;
+
+    final data = {
+      'name': nameCtrl.text.trim(),
+      'base_price': double.tryParse(baseCtrl.text.replaceAll(',', '.')),
+      'trailer_price': double.tryParse(trailerCtrl.text.replaceAll(',', '.')),
+      'currency': currencyCtrl.text.trim(),
+      'active': active,
+    };
+
+    if (existing != null) {
+      await widget.sb
+          .from('ferries')
+          .update(data)
+          .eq('id', existing['id']);
+    } else {
+      await widget.sb.from('ferries').insert(data);
+    }
+
+    await _loadFerries();
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(S.t('ferrySaved'))),
+      );
+    }
+  }
+
+  Future<void> _deleteFerry(Map<String, dynamic> ferry) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(S.t('delete')),
+        content: Text(ferry['name'] ?? ''),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text(S.t('cancel')),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text(S.t('delete')),
+          ),
+        ],
+      ),
+    );
+
+    if (ok != true) return;
+
+    await widget.sb.from('ferries').delete().eq('id', ferry['id']);
+    await _loadFerries();
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(S.t('ferryDeleted'))),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Row(
+        children: [
+          Expanded(child: Text(S.t('manageFerries'))),
+          IconButton(
+            icon: const Icon(Icons.add),
+            tooltip: S.t('addFerry'),
+            onPressed: () => _addOrEditFerry(),
+          ),
+        ],
+      ),
+      content: SizedBox(
+        width: 560,
+        height: 400,
+        child: _loading
+            ? const Center(child: CircularProgressIndicator())
+            : _ferries.isEmpty
+                ? Center(child: Text(S.t('noFerries')))
+                : ListView.separated(
+                    itemCount: _ferries.length,
+                    separatorBuilder: (_, __) => const Divider(height: 1),
+                    itemBuilder: (_, i) {
+                      final f = _ferries[i];
+                      final base = f['base_price'];
+                      final trailer = f['trailer_price'];
+                      final currency = f['currency'] ?? '';
+                      final isActive = (f['active'] as bool?) ?? true;
+
+                      return ListTile(
+                        leading: Icon(
+                          Icons.directions_boat,
+                          color: isActive ? Colors.blue : Colors.grey,
+                        ),
+                        title: Text(
+                          f['name'] ?? '',
+                          style: TextStyle(
+                            fontWeight: FontWeight.w600,
+                            color: isActive ? null : Colors.grey,
+                          ),
+                        ),
+                        subtitle: Text(
+                          "${S.t('basePrice')}: ${base ?? '—'} $currency  ·  "
+                          "${S.t('trailerPrice')}: ${trailer ?? '—'} $currency"
+                          "${isActive ? '' : '  (inactive)'}",
+                          style: const TextStyle(fontSize: 12),
+                        ),
+                        trailing: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            IconButton(
+                              icon: const Icon(Icons.edit, size: 20),
+                              onPressed: () => _addOrEditFerry(f),
+                            ),
+                            IconButton(
+                              icon: const Icon(Icons.delete_outline,
+                                  size: 20, color: Colors.red),
+                              onPressed: () => _deleteFerry(f),
+                            ),
+                          ],
+                        ),
+                      );
+                    },
+                  ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: Text(S.t('close')),
+        ),
+      ],
     );
   }
 }

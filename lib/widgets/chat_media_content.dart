@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:syncfusion_flutter_pdfviewer/pdfviewer.dart';
 import 'package:tourflow/widgets/mention_helpers.dart';
 import 'package:tourflow/services/poll_service.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -32,7 +33,7 @@ class ChatMediaContent extends StatelessWidget {
       case 'poll':
         return _buildPoll();
       default:
-        return Text.rich(
+        return SelectableText.rich(
           TextSpan(children: buildMentionSpans(message, textStyle)),
           style: textStyle,
         );
@@ -44,26 +45,37 @@ class ChatMediaContent extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         if (attachmentUrl != null)
-          ClipRRect(
-            borderRadius: BorderRadius.circular(8),
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 300, maxHeight: 300),
-              child: Image.network(
-                attachmentUrl!,
-                fit: BoxFit.cover,
-                loadingBuilder: (context, child, progress) {
-                  if (progress == null) return child;
-                  return const SizedBox(
-                    width: 200,
-                    height: 150,
-                    child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
-                  );
-                },
-                errorBuilder: (_, __, ___) => Container(
-                  width: 200,
-                  height: 100,
-                  color: Colors.grey[300],
-                  child: const Icon(Icons.broken_image, size: 40),
+          Builder(
+            builder: (context) => MouseRegion(
+              cursor: SystemMouseCursors.click,
+              child: GestureDetector(
+                onTap: () => _openImageViewer(context, attachmentUrl!),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(
+                        maxWidth: 300, maxHeight: 300),
+                    child: Image.network(
+                      attachmentUrl!,
+                      fit: BoxFit.cover,
+                      loadingBuilder: (context, child, progress) {
+                        if (progress == null) return child;
+                        return const SizedBox(
+                          width: 200,
+                          height: 150,
+                          child: Center(
+                              child: CircularProgressIndicator(
+                                  strokeWidth: 2)),
+                        );
+                      },
+                      errorBuilder: (_, __, ___) => Container(
+                        width: 200,
+                        height: 100,
+                        color: Colors.grey[300],
+                        child: const Icon(Icons.broken_image, size: 40),
+                      ),
+                    ),
+                  ),
                 ),
               ),
             ),
@@ -80,10 +92,142 @@ class ChatMediaContent extends StatelessWidget {
     );
   }
 
+  void _openImageViewer(BuildContext context, String url) {
+    showDialog(
+      context: context,
+      barrierColor: Colors.black.withValues(alpha: 0.85),
+      builder: (ctx) => Dialog(
+        backgroundColor: Colors.transparent,
+        insetPadding: const EdgeInsets.all(24),
+        child: Stack(
+          children: [
+            Positioned.fill(
+              child: GestureDetector(
+                onTap: () => Navigator.pop(ctx),
+                behavior: HitTestBehavior.opaque,
+              ),
+            ),
+            Center(
+              child: InteractiveViewer(
+                minScale: 0.5,
+                maxScale: 5,
+                child: Image.network(
+                  url,
+                  fit: BoxFit.contain,
+                  loadingBuilder: (context, child, progress) {
+                    if (progress == null) return child;
+                    return const Center(
+                        child: CircularProgressIndicator(color: Colors.white));
+                  },
+                  errorBuilder: (_, __, ___) => const Icon(
+                    Icons.broken_image,
+                    size: 80,
+                    color: Colors.white54,
+                  ),
+                ),
+              ),
+            ),
+            Positioned(
+              top: 8,
+              right: 8,
+              child: Material(
+                color: Colors.black.withValues(alpha: 0.5),
+                shape: const CircleBorder(),
+                child: IconButton(
+                  icon: const Icon(Icons.close, color: Colors.white),
+                  onPressed: () => Navigator.pop(ctx),
+                  tooltip: 'Lukk',
+                ),
+              ),
+            ),
+            Positioned(
+              top: 8,
+              right: 56,
+              child: Material(
+                color: Colors.black.withValues(alpha: 0.5),
+                shape: const CircleBorder(),
+                child: IconButton(
+                  icon: const Icon(Icons.open_in_new, color: Colors.white),
+                  onPressed: () => launchUrl(Uri.parse(url)),
+                  tooltip: 'Åpne eksternt',
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildFile() {
     final fileName = attachmentUrl != null
         ? Uri.parse(attachmentUrl!).pathSegments.last.replaceFirst(RegExp(r'^\d+_'), '')
         : 'Fil';
+    final isPdf = fileName.toLowerCase().endsWith('.pdf') ||
+        (attachmentUrl?.toLowerCase().contains('.pdf') ?? false);
+
+    if (isPdf && attachmentUrl != null) {
+      return Builder(builder: (context) => GestureDetector(
+        onTap: () {
+          showDialog(
+            context: context,
+            builder: (_) => Dialog(
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              child: SizedBox(
+                width: 700,
+                height: 800,
+                child: Column(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                      decoration: const BoxDecoration(
+                        color: Colors.black,
+                        borderRadius: BorderRadius.only(topLeft: Radius.circular(12), topRight: Radius.circular(12)),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.picture_as_pdf, color: Colors.white, size: 18),
+                          const SizedBox(width: 8),
+                          Expanded(child: Text(message.isNotEmpty ? message : fileName, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 13), overflow: TextOverflow.ellipsis)),
+                          IconButton(icon: const Icon(Icons.open_in_new, color: Colors.white70, size: 18), onPressed: () => launchUrl(Uri.parse(attachmentUrl!)), tooltip: 'Åpne eksternt'),
+                          IconButton(icon: const Icon(Icons.close, color: Colors.white70, size: 18), onPressed: () => Navigator.pop(context)),
+                        ],
+                      ),
+                    ),
+                    Expanded(child: SfPdfViewer.network(attachmentUrl!)),
+                  ],
+                ),
+              ),
+            ),
+          );
+        },
+        child: Container(
+          width: 220,
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: isMine ? Colors.white.withValues(alpha: 0.1) : Colors.grey.shade100,
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: isMine ? Colors.white24 : Colors.black12),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.picture_as_pdf, size: 28, color: Colors.red.shade400),
+              const SizedBox(width: 10),
+              Flexible(
+                child: Text(
+                  message.isNotEmpty ? message : fileName,
+                  style: textStyle.copyWith(fontSize: 12),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ));
+    }
+
     return InkWell(
       onTap: () {
         if (attachmentUrl != null) {

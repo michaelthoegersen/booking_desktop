@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
+import '../localization/s.dart';
 import '../models/invoice.dart';
 import '../services/invoice_service.dart';
 import '../services/invoice_pdf_service.dart';
@@ -38,7 +39,7 @@ class _InvoicesPageState extends State<InvoicesPage> {
       setState(() => _loading = false);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text("Load error: $e"),
+          content: Text("${S.t('loadError')}: $e"),
           backgroundColor: Colors.red,
         ),
       );
@@ -59,7 +60,7 @@ class _InvoicesPageState extends State<InvoicesPage> {
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("PDF error: $e"), backgroundColor: Colors.red),
+        SnackBar(content: Text("${S.t('pdfError')}: $e"), backgroundColor: Colors.red),
       );
     }
   }
@@ -71,7 +72,7 @@ class _InvoicesPageState extends State<InvoicesPage> {
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("Error: $e"), backgroundColor: Colors.red),
+        SnackBar(content: Text("${S.t('error')}: $e"), backgroundColor: Colors.red),
       );
     }
   }
@@ -80,19 +81,19 @@ class _InvoicesPageState extends State<InvoicesPage> {
     final confirm = await showDialog<bool>(
       context: context,
       builder: (dialogCtx) => AlertDialog(
-        title: const Text("Delete invoice?"),
+        title: Text(S.t('deleteInvoice')),
         content: Text(
           "Delete invoice ${invoice.invoiceNumber} for ${invoice.company}?",
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(dialogCtx, false),
-            child: const Text("Cancel"),
+            child: Text(S.t('cancel')),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(dialogCtx, true),
             style: FilledButton.styleFrom(backgroundColor: Colors.red),
-            child: const Text("Delete"),
+            child: Text(S.t('delete')),
           ),
         ],
       ),
@@ -106,7 +107,7 @@ class _InvoicesPageState extends State<InvoicesPage> {
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("Error: $e"), backgroundColor: Colors.red),
+        SnackBar(content: Text("${S.t('error')}: $e"), backgroundColor: Colors.red),
       );
     }
   }
@@ -120,7 +121,7 @@ class _InvoicesPageState extends State<InvoicesPage> {
           children: [
             ListTile(
               leading: const Icon(Icons.download),
-              title: const Text("Download PDF"),
+              title: Text(S.t('downloadPdf')),
               onTap: () {
                 Navigator.pop(sheetCtx);
                 _downloadPdf(invoice);
@@ -129,7 +130,7 @@ class _InvoicesPageState extends State<InvoicesPage> {
             if (invoice.status == 'unpaid')
               ListTile(
                 leading: const Icon(Icons.check_circle_outline),
-                title: const Text("Mark as paid"),
+                title: Text(S.t('markAsPaid')),
                 onTap: () {
                   Navigator.pop(sheetCtx);
                   _markPaid(invoice);
@@ -138,7 +139,7 @@ class _InvoicesPageState extends State<InvoicesPage> {
             if (invoice.status != 'cancelled')
               ListTile(
                 leading: const Icon(Icons.cancel_outlined),
-                title: const Text("Mark as cancelled"),
+                title: Text(S.t('markAsCancelled')),
                 onTap: () async {
                   Navigator.pop(sheetCtx);
                   await InvoiceService.updateStatus(invoice.id!, 'cancelled');
@@ -147,9 +148,9 @@ class _InvoicesPageState extends State<InvoicesPage> {
               ),
             ListTile(
               leading: const Icon(Icons.delete_outline, color: Colors.red),
-              title: const Text(
-                "Delete",
-                style: TextStyle(color: Colors.red),
+              title: Text(
+                S.t('delete'),
+                style: const TextStyle(color: Colors.red),
               ),
               onTap: () {
                 Navigator.pop(sheetCtx);
@@ -182,7 +183,7 @@ class _InvoicesPageState extends State<InvoicesPage> {
             Row(
               children: [
                 Text(
-                  "Invoices",
+                  S.t('invoices'),
                   style: Theme.of(context)
                       .textTheme
                       .titleLarge
@@ -192,13 +193,13 @@ class _InvoicesPageState extends State<InvoicesPage> {
                 DropdownButton<String>(
                   value: _statusFilter,
                   underline: const SizedBox(),
-                  items: const [
-                    DropdownMenuItem(value: 'all', child: Text("All")),
-                    DropdownMenuItem(value: 'unpaid', child: Text("Unpaid")),
-                    DropdownMenuItem(value: 'paid', child: Text("Paid")),
+                  items: [
+                    DropdownMenuItem(value: 'all', child: Text(S.t('all'))),
+                    DropdownMenuItem(value: 'unpaid', child: Text(S.t('unpaid'))),
+                    DropdownMenuItem(value: 'paid', child: Text(S.t('paid'))),
                     DropdownMenuItem(
                       value: 'cancelled',
-                      child: Text("Cancelled"),
+                      child: Text(S.t('cancelled')),
                     ),
                   ],
                   onChanged: (v) {
@@ -227,12 +228,12 @@ class _InvoicesPageState extends State<InvoicesPage> {
               ),
               child: Row(
                 children: [
-                  _headerCell("Invoice #", flex: 2),
-                  _headerCell("Company", flex: 3),
-                  _headerCell("Production", flex: 3),
-                  _headerCell("Date", flex: 2),
-                  _headerCell("Total incl. VAT", flex: 2),
-                  _headerCell("Status", flex: 2),
+                  _headerCell(S.t('invoiceNr'), flex: 2),
+                  _headerCell(S.t('companies'), flex: 3),
+                  _headerCell(S.t('production'), flex: 3),
+                  _headerCell(S.t('date'), flex: 2),
+                  _headerCell(S.t('totalInclVat'), flex: 2),
+                  _headerCell(S.t('status'), flex: 2),
                 ],
               ),
             ),
@@ -244,10 +245,10 @@ class _InvoicesPageState extends State<InvoicesPage> {
               child: _loading
                   ? const Center(child: CircularProgressIndicator())
                   : _filtered.isEmpty
-                      ? const Center(
+                      ? Center(
                           child: Text(
-                            "No invoices found.",
-                            style: TextStyle(color: Colors.grey),
+                            S.t('noInvoicesFound'),
+                            style: const TextStyle(color: Colors.grey),
                           ),
                         )
                       : ListView.builder(

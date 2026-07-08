@@ -1,17 +1,19 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../state/active_company.dart';
 
 class CustomersService {
   final SupabaseClient _client = Supabase.instance.client;
 
   // -----------------------------------
-  // LOAD COMPANIES
+  // LOAD COMPANIES (filtered by owner)
   // -----------------------------------
   Future<List<Map<String, dynamic>>> getCompanies() async {
-    final res = await _client
-        .from('companies')
-        .select()
-        .order('name');
-
+    var query = _client.from('companies').select();
+    final ownerId = activeCompanyNotifier.value?.id;
+    if (ownerId != null) {
+      query = query.eq('owner_company_id', ownerId);
+    }
+    final res = await query.order('name');
     return (res as List).cast<Map<String, dynamic>>();
   }
 

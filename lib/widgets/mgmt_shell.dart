@@ -602,6 +602,11 @@ class _MgmtSideNavState extends State<_MgmtSideNav> {
                       badge: _unreadMessages,
                     ),
                     _MgmtNavItem(
+                      icon: Icons.inventory_2_rounded,
+                      label: 'Lager',
+                      route: '/m/lager',
+                    ),
+                    _MgmtNavItem(
                       icon: Icons.cloud_outlined,
                       label: 'Dropbox',
                       route: '/m/dropbox',

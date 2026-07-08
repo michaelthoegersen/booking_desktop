@@ -1,0 +1,130 @@
+const offerStrings = <String, Map<String, String>>{
+  // --- Page titles ---
+  'newOfferTitle': {'en': 'New Offer', 'no': 'Nytt tilbud', 'sv': 'Nytt erbjudande', 'de': 'Neues Angebot', 'da': 'Nyt tilbud'},
+  'editOfferTitle': {'en': 'Edit Offer', 'no': 'Rediger tilbud', 'sv': 'Redigera erbjudande', 'de': 'Angebot bearbeiten', 'da': 'Rediger tilbud'},
+
+  // --- Statuses ---
+  'statusDraft': {'en': 'Draft', 'no': 'Utkast', 'sv': 'Utkast', 'de': 'Entwurf', 'da': 'Udkast'},
+  'statusInquiry': {'en': 'Inquiry', 'no': 'Forespørsel', 'sv': 'Förfrågan', 'de': 'Anfrage', 'da': 'Forespørgsel'},
+  'statusConfirmed': {'en': 'Confirmed', 'no': 'Bekreftet', 'sv': 'Bekräftad', 'de': 'Bestätigt', 'da': 'Bekræftet'},
+  'statusInvoiced': {'en': 'Invoiced', 'no': 'Fakturert', 'sv': 'Fakturerad', 'de': 'In Rechnung gestellt', 'da': 'Faktureret'},
+  'pendingWaitingForCustomer': {'en': 'Pending — waiting for customer', 'no': 'Ventende — venter på kunde', 'sv': 'Väntande — väntar på kund', 'de': 'Ausstehend — wartet auf Kunden', 'da': 'Afventende — venter på kunde'},
+  'approved': {'en': 'Approved', 'no': 'Godkjent', 'sv': 'Godkänd', 'de': 'Genehmigt', 'da': 'Godkendt'},
+  'declined': {'en': 'Declined', 'no': 'Avslått', 'sv': 'Avslagen', 'de': 'Abgelehnt', 'da': 'Afvist'},
+
+  // --- Sections ---
+  'rounds': {'en': 'Rounds', 'no': 'Runder', 'sv': 'Sträckor', 'de': 'Etappen', 'da': 'Runder'},
+  'pricingModel': {'en': 'Pricing model', 'no': 'Prismodell', 'sv': 'Prismodell', 'de': 'Preismodell', 'da': 'Prismodel'},
+  'offerLanguage': {'en': 'Offer language', 'no': 'Tilbudsspråk', 'sv': 'Erbjudandespråk', 'de': 'Angebotssprache', 'da': 'Tilbudssprog'},
+  'offerPdfTitle': {'en': 'Offer', 'no': 'Tilbud', 'sv': 'Erbjudande', 'de': 'Angebot', 'da': 'Tilbud'},
+  'pdfValidUntil': {'en': 'Valid until', 'no': 'Gyldig til', 'sv': 'Giltigt till', 'de': 'Gültig bis', 'da': 'Gyldig til'},
+  'pdfSubtotal': {'en': 'Subtotal', 'no': 'Delsum', 'sv': 'Delsumma', 'de': 'Zwischensumme', 'da': 'Subtotal'},
+  'pdfTime': {'en': 'Time', 'no': 'Tid', 'sv': 'Tid', 'de': 'Zeit', 'da': 'Tid'},
+  'pdfNameAndTitleDate': {'en': 'Name and title  ·  Date: _______________', 'no': 'Navn og tittel  ·  Dato: _______________', 'sv': 'Namn och titel  ·  Datum: _______________', 'de': 'Name und Titel  ·  Datum: _______________', 'da': 'Navn og titel  ·  Dato: _______________'},
+  'pdfFor': {'en': 'For', 'no': 'For', 'sv': 'För', 'de': 'Für', 'da': 'For'},
+  'pdfCustomer': {'en': 'Customer', 'no': 'Kunde', 'sv': 'Kund', 'de': 'Kunde', 'da': 'Kunde'},
+  'vat': {'en': 'VAT', 'no': 'MVA', 'sv': 'Moms', 'de': 'MwSt.', 'da': 'Moms'},
+  'roundCalculation': {'en': 'Round calculation', 'no': 'Rundeberegning', 'sv': 'Sträckberäkning', 'de': 'Etappenberechnung', 'da': 'Rundeberegning'},
+  'totalCalculation': {'en': 'Total calculation', 'no': 'Totalberegning', 'sv': 'Totalberäkning', 'de': 'Gesamtberechnung', 'da': 'Totalberegning'},
+  'vatSummary': {'en': 'VAT summary', 'no': 'MVA-oversikt', 'sv': 'Momssammanfattning', 'de': 'MwSt.-Übersicht', 'da': 'Momsoversigt'},
+  'vehicleSettings': {'en': 'Vehicle settings', 'no': 'Kjøretøyinnstillinger', 'sv': 'Fordonsinställningar', 'de': 'Fahrzeugeinstellungen', 'da': 'Køretøjsindstillinger'},
+  'globalAllocation': {'en': 'Global allocation', 'no': 'Global tildeling', 'sv': 'Global tilldelning', 'de': 'Globale Zuordnung', 'da': 'Global tildeling'},
+  'pricingPerDraft': {'en': 'Pricing (per draft)', 'no': 'Prising (per utkast)', 'sv': 'Prissättning (per utkast)', 'de': 'Preisgestaltung (pro Entwurf)', 'da': 'Prissætning (per udkast)'},
+  'overrideGlobalPricing': {'en': 'Override global pricing', 'no': 'Overstyr global prising', 'sv': 'Åsidosätt global prissättning', 'de': 'Globale Preise überschreiben', 'da': 'Tilsidesæt global prissætning'},
+
+  // --- Form labels ---
+  'km': {'en': 'KM', 'no': 'KM', 'sv': 'KM', 'de': 'KM', 'da': 'KM'},
+  'extraEgFerry': {'en': 'Extra (ex: Ferry)', 'no': 'Ekstra (f.eks: Ferge)', 'sv': 'Extra (t.ex: Färja)', 'de': 'Extra (z.B.: Fähre)', 'da': 'Ekstra (f.eks: Færge)'},
+  'location': {'en': 'Location', 'no': 'Sted', 'sv': 'Plats', 'de': 'Ort', 'da': 'Sted'},
+  'invoiceNumber': {'en': 'Invoice number', 'no': 'Fakturanummer', 'sv': 'Fakturanummer', 'de': 'Rechnungsnummer', 'da': 'Fakturanummer'},
+  'invoiceDate': {'en': 'Invoice date', 'no': 'Fakturadato', 'sv': 'Fakturadatum', 'de': 'Rechnungsdatum', 'da': 'Fakturadato'},
+  'dueDate': {'en': 'Due date', 'no': 'Forfallsdato', 'sv': 'Förfallodatum', 'de': 'Fälligkeitsdatum', 'da': 'Forfaldsdato'},
+  'bankAccount': {'en': 'Bank account', 'no': 'Bankkonto', 'sv': 'Bankkonto', 'de': 'Bankkonto', 'da': 'Bankkonto'},
+  'reference': {'en': 'Reference', 'no': 'Referanse', 'sv': 'Referens', 'de': 'Referenz', 'da': 'Reference'},
+  'productionName': {'en': 'Production name', 'no': 'Produksjonsnavn', 'sv': 'Produktionsnamn', 'de': 'Produktionsname', 'da': 'Produktionsnavn'},
+  'searchCompany': {'en': 'Search company', 'no': 'Søk selskap', 'sv': 'Sök företag', 'de': 'Unternehmen suchen', 'da': 'Søg virksomhed'},
+  'round': {'en': 'Round', 'no': 'Runde', 'sv': 'Sträcka', 'de': 'Etappe', 'da': 'Runde'},
+  'startLocation': {'en': 'Start location (for this round)', 'no': 'Startsted (for denne runden)', 'sv': 'Startplats (för denna sträcka)', 'de': 'Startort (für diese Etappe)', 'da': 'Startsted (for denne runde)'},
+  'vehicleType': {'en': 'Vehicle type', 'no': 'Kjøretøytype', 'sv': 'Fordonstyp', 'de': 'Fahrzeugtyp', 'da': 'Køretøjstype'},
+  'route': {'en': 'Route', 'no': 'Rute', 'sv': 'Rutt', 'de': 'Route', 'da': 'Rute'},
+
+  // --- Buttons ---
+  'saveDraft': {'en': 'Save draft', 'no': 'Lagre utkast', 'sv': 'Spara utkast', 'de': 'Entwurf speichern', 'da': 'Gem udkast'},
+  'versions': {'en': 'Versions', 'no': 'Versjoner', 'sv': 'Versioner', 'de': 'Versionen', 'da': 'Versioner'},
+  'scanPdf': {'en': 'Scan PDF', 'no': 'Skann PDF', 'sv': 'Skanna PDF', 'de': 'PDF scannen', 'da': 'Scan PDF'},
+  'exportPdf': {'en': 'Export PDF', 'no': 'Eksporter PDF', 'sv': 'Exportera PDF', 'de': 'PDF exportieren', 'da': 'Eksporter PDF'},
+  'sendOffer': {'en': 'Send offer', 'no': 'Send tilbud', 'sv': 'Skicka erbjudande', 'de': 'Angebot senden', 'da': 'Send tilbud'},
+  'createInvoice': {'en': 'Create invoice', 'no': 'Opprett faktura', 'sv': 'Skapa faktura', 'de': 'Rechnung erstellen', 'da': 'Opret faktura'},
+  'approve': {'en': 'Approve', 'no': 'Godkjenn', 'sv': 'Godkänn', 'de': 'Genehmigen', 'da': 'Godkend'},
+  'decline': {'en': 'Decline', 'no': 'Avslå', 'sv': 'Avslå', 'de': 'Ablehnen', 'da': 'Afvis'},
+  'addMissingRoute': {'en': 'Add missing route', 'no': 'Legg til manglende rute', 'sv': 'Lägg till saknad rutt', 'de': 'Fehlende Route hinzufügen', 'da': 'Tilføj manglende rute'},
+  'fillAllFields': {'en': 'Fill all fields', 'no': 'Fyll ut alle felt', 'sv': 'Fyll i alla fält', 'de': 'Alle Felder ausfüllen', 'da': 'Udfyld alle felter'},
+  'addNewCompany': {'en': 'Add new company', 'no': 'Legg til nytt selskap', 'sv': 'Lägg till nytt företag', 'de': 'Neues Unternehmen hinzufügen', 'da': 'Tilføj ny virksomhed'},
+  'addContact': {'en': 'Add contact', 'no': 'Legg til kontakt', 'sv': 'Lägg till kontakt', 'de': 'Kontakt hinzufügen', 'da': 'Tilføj kontakt'},
+  'addProduction': {'en': 'Add production', 'no': 'Legg til produksjon', 'sv': 'Lägg till produktion', 'de': 'Produktion hinzufügen', 'da': 'Tilføj produktion'},
+  'showDetailedCalc': {'en': 'Show detailed calc', 'no': 'Vis detaljert beregning', 'sv': 'Visa detaljerad beräkning', 'de': 'Detaillierte Berechnung anzeigen', 'da': 'Vis detaljeret beregning'},
+
+  // --- Dialogs ---
+  'declineOffer': {'en': 'Decline offer?', 'no': 'Avslå tilbud?', 'sv': 'Avslå erbjudande?', 'de': 'Angebot ablehnen?', 'da': 'Afvis tilbud?'},
+  'declineOfferDesc': {'en': "This will decline the customer's acceptance and notify them by email.", 'no': 'Dette vil avslå kundens aksept og varsle dem per e-post.', 'sv': 'Detta avslår kundens acceptans och meddelar dem via e-post.', 'de': 'Dies lehnt die Annahme des Kunden ab und benachrichtigt ihn per E-Mail.', 'da': 'Dette afviser kundens accept og underretter dem via e-mail.'},
+  'versionHistory': {'en': 'Version history', 'no': 'Versjonshistorikk', 'sv': 'Versionshistorik', 'de': 'Versionshistorie', 'da': 'Versionshistorik'},
+  'restoreVersion': {'en': 'Restore version?', 'no': 'Gjenopprett versjon?', 'sv': 'Återställ version?', 'de': 'Version wiederherstellen?', 'da': 'Gendan version?'},
+  'newProduction': {'en': 'New production', 'no': 'Ny produksjon', 'sv': 'Ny produktion', 'de': 'Neue Produktion', 'da': 'Ny produktion'},
+  'newContact': {'en': 'New contact', 'no': 'Ny kontakt', 'sv': 'Ny kontakt', 'de': 'Neuer Kontakt', 'da': 'Ny kontakt'},
+  'editEntry': {'en': 'Edit entry', 'no': 'Rediger oppføring', 'sv': 'Redigera post', 'de': 'Eintrag bearbeiten', 'da': 'Rediger post'},
+
+  // --- Checkbox labels ---
+  'pickupEvening': {'en': 'Pickup evening (first day not billable)', 'no': 'Henting kveld (første dag ikke fakturerbar)', 'sv': 'Upphämtning kväll (första dagen ej fakturerbar)', 'de': 'Abholung abends (erster Tag nicht berechenbar)', 'da': 'Afhentning aften (første dag ikke fakturerbar)'},
+
+  // --- PDF language ---
+  'norwegian': {'en': 'Norwegian', 'no': 'Norsk', 'sv': 'Norska', 'de': 'Norwegisch', 'da': 'Norsk'},
+  'swedish': {'en': 'Swedish', 'no': 'Svensk', 'sv': 'Svenska', 'de': 'Schwedisch', 'da': 'Svensk'},
+
+  // --- Calculation ---
+  'billableDays': {'en': 'Billable days', 'no': 'Fakturerbare dager', 'sv': 'Fakturerbara dagar', 'de': 'Abrechenbare Tage', 'da': 'Fakturerbare dage'},
+  'included': {'en': 'Included', 'no': 'Inkludert', 'sv': 'Inkluderat', 'de': 'Inklusive', 'da': 'Inkluderet'},
+  'noRoundsCalculatedYet': {'en': 'No rounds calculated yet.', 'no': 'Ingen runder beregnet ennå.', 'sv': 'Inga sträckor beräknade ännu.', 'de': 'Noch keine Etappen berechnet.', 'da': 'Ingen runder beregnet endnu.'},
+  'detailedCalcRound': {'en': 'Detailed Calc — Round', 'no': 'Detaljert beregning — Runde', 'sv': 'Detaljerad beräkning — Sträcka', 'de': 'Detaillierte Berechnung — Etappe', 'da': 'Detaljeret beregning — Runde'},
+  'foreignVat': {'en': 'Foreign VAT', 'no': 'Utenlandsk MVA', 'sv': 'Utländsk moms', 'de': 'Ausländische MwSt.', 'da': 'Udenlandsk moms'},
+  'totalExclVat': {'en': 'Total excl VAT', 'no': 'Total eks. MVA', 'sv': 'Totalt exkl. moms', 'de': 'Gesamt exkl. MwSt.', 'da': 'Total ekskl. moms'},
+  'roundTotal': {'en': 'Round total', 'no': 'Rundetotal', 'sv': 'Sträcktotal', 'de': 'Etappensumme', 'da': 'Rundetotal'},
+  'subtotals': {'en': 'SUBTOTALS', 'no': 'DELSUMMER', 'sv': 'DELSUMMOR', 'de': 'ZWISCHENSUMMEN', 'da': 'DELSUMMER'},
+  'grandTotal': {'en': 'GRAND TOTAL', 'no': 'TOTALSUM', 'sv': 'TOTALSUMMA', 'de': 'GESAMTSUMME', 'da': 'TOTALSUM'},
+  'noCountryBreakdown': {'en': 'No country breakdown', 'no': 'Ingen landinndeling', 'sv': 'Ingen landsindelning', 'de': 'Keine Länderaufteilung', 'da': 'Ingen landeopdeling'},
+  'calculated': {'en': 'Calculated', 'no': 'Beregnet', 'sv': 'Beräknat', 'de': 'Berechnet', 'da': 'Beregnet'},
+
+  // --- Snackbars ---
+  'routeSaved': {'en': 'Route saved ✅', 'no': 'Rute lagret ✅', 'sv': 'Rutt sparad ✅', 'de': 'Route gespeichert ✅', 'da': 'Rute gemt ✅'},
+  'searchingRoutes': {'en': 'Searching routes…', 'no': 'Søker ruter…', 'sv': 'Söker rutter…', 'de': 'Routen werden gesucht…', 'da': 'Søger ruter…'},
+  'noRoutesYet': {'en': 'No routes yet.', 'no': 'Ingen ruter ennå.', 'sv': 'Inga rutter ännu.', 'de': 'Noch keine Routen.', 'da': 'Ingen ruter endnu.'},
+  'noMissingRoutes': {'en': 'No missing routes found.', 'no': 'Ingen manglende ruter funnet.', 'sv': 'Inga saknade rutter hittades.', 'de': 'Keine fehlenden Routen gefunden.', 'da': 'Ingen manglende ruter fundet.'},
+  'loadingDraft': {'en': 'Loading draft… please wait', 'no': 'Laster utkast… vennligst vent', 'sv': 'Laddar utkast… vänta', 'de': 'Entwurf wird geladen… bitte warten', 'da': 'Indlæser udkast… vent venligst'},
+  'versionRestored': {'en': 'Version restored', 'no': 'Versjon gjenopprettet', 'sv': 'Version återställd', 'de': 'Version wiederhergestellt', 'da': 'Version gendannet'},
+  'noPreviousVersions': {'en': 'No previous versions', 'no': 'Ingen tidligere versjoner', 'sv': 'Inga tidigare versioner', 'de': 'Keine früheren Versionen', 'da': 'Ingen tidligere versioner'},
+  'offerDeclined': {'en': 'Offer declined', 'no': 'Tilbud avslått', 'sv': 'Erbjudande avslaget', 'de': 'Angebot abgelehnt', 'da': 'Tilbud afvist'},
+  'offerApprovedAndSigned': {'en': 'Offer approved and signed copy sent', 'no': 'Tilbud godkjent og signert kopi sendt', 'sv': 'Erbjudande godkänt och signerad kopia skickad', 'de': 'Angebot genehmigt und signierte Kopie gesendet', 'da': 'Tilbud godkendt og signeret kopi sendt'},
+  'noEntriesYet': {'en': 'No entries yet.', 'no': 'Ingen oppføringer ennå.', 'sv': 'Inga poster ännu.', 'de': 'Noch keine Einträge.', 'da': 'Ingen poster endnu.'},
+  'pdfImportedCorrectly': {'en': 'PDF imported correctly ✅', 'no': 'PDF importert korrekt ✅', 'sv': 'PDF importerad korrekt ✅', 'de': 'PDF korrekt importiert ✅', 'da': 'PDF importeret korrekt ✅'},
+  'noTourDataInPdf': {'en': 'No tour data found in PDF', 'no': 'Ingen turdata funnet i PDF', 'sv': 'Ingen turdata hittades i PDF', 'de': 'Keine Tourdaten in der PDF gefunden', 'da': 'Ingen turdata fundet i PDF'},
+  'pickDateFirst': {'en': 'Pick a date first.', 'no': 'Velg en dato først.', 'sv': 'Välj ett datum först.', 'de': 'Wählen Sie zuerst ein Datum.', 'da': 'Vælg en dato først.'},
+  'enterLocation': {'en': 'Enter a location.', 'no': 'Skriv inn et sted.', 'sv': 'Ange en plats.', 'de': 'Geben Sie einen Ort ein.', 'da': 'Indtast et sted.'},
+  'startLocationRequired': {'en': 'Start location must be set first.', 'no': 'Startsted må angis først.', 'sv': 'Startplats måste anges först.', 'de': 'Startort muss zuerst festgelegt werden.', 'da': 'Startsted skal angives først.'},
+  'doubleClickToOverride': {'en': 'Double-click to override', 'no': 'Dobbeltklikk for å overstyre', 'sv': 'Dubbelklicka för att åsidosätta', 'de': 'Doppelklicken zum Überschreiben', 'da': 'Dobbeltklik for at tilsidesætte'},
+  'recipientEmailRequired': {'en': 'Recipient email is required', 'no': 'Mottakers e-post er påkrevd', 'sv': 'Mottagarens e-post krävs', 'de': 'Empfänger-E-Mail ist erforderlich', 'da': 'Modtagers e-mail er påkrævet'},
+  'notSetOffer': {'en': 'Not set', 'no': 'Ikke satt', 'sv': 'Ej angiven', 'de': 'Nicht gesetzt', 'da': 'Ikke angivet'},
+  'busy': {'en': 'Busy', 'no': 'Opptatt', 'sv': 'Upptagen', 'de': 'Belegt', 'da': 'Optaget'},
+
+  // --- Email import ---
+  'importFromEmail': {'en': 'Import from email', 'no': 'Importer fra e-post', 'sv': 'Importera från e-post', 'de': 'Aus E-Mail importieren', 'da': 'Importer fra e-mail'},
+  'pasteEmailHint': {'en': 'Paste email with tour routing here...', 'no': 'Lim inn e-post med turruteinfo her...', 'sv': 'Klistra in e-post med turnérutt här...', 'de': 'E-Mail mit Tourrouting hier einfügen...', 'da': 'Indsæt e-mail med turruteinfo her...'},
+  'importBtn': {'en': 'Import', 'no': 'Importer', 'sv': 'Importera', 'de': 'Importieren', 'da': 'Importer'},
+  'selectTour': {'en': 'Select tour', 'no': 'Velg tur', 'sv': 'Välj turné', 'de': 'Tour auswählen', 'da': 'Vælg tur'},
+  'noStopsFound': {'en': 'No stops found in text', 'no': 'Ingen stopp funnet i teksten', 'sv': 'Inga stopp hittades i texten', 'de': 'Keine Stopps im Text gefunden', 'da': 'Ingen stop fundet i teksten'},
+  'imported': {'en': 'Imported', 'no': 'Importert', 'sv': 'Importerat', 'de': 'Importiert', 'da': 'Importeret'},
+  'stops': {'en': 'stops', 'no': 'stopp', 'sv': 'stopp', 'de': 'Stopps', 'da': 'stop'},
+
+  // --- Email content ---
+  'hi': {'en': 'Hi,', 'no': 'Hei,', 'sv': 'Hej,', 'de': 'Hallo,', 'da': 'Hej,'},
+  'offerEmailBody': {'en': 'Please find the offer attached as a PDF.', 'no': 'Vennligst finn tilbudet vedlagt som PDF.', 'sv': 'Vänligen se det bifogade erbjudandet som PDF.', 'de': 'Bitte finden Sie das Angebot als PDF im Anhang.', 'da': 'Venligst find tilbuddet vedhæftet som PDF.'},
+  'acceptOffer': {'en': 'Accept Offer', 'no': 'Aksepter tilbud', 'sv': 'Acceptera erbjudande', 'de': 'Angebot annehmen', 'da': 'Accepter tilbud'},
+};

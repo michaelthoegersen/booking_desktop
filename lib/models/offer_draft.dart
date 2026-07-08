@@ -1,33 +1,32 @@
 // ============================================================
-// BUS TYPE
+// BUS TYPE — now a plain String, configurable per company.
+// Legacy enum names are mapped to display labels for backwards compat.
 // ============================================================
 
-enum BusType {
-  sleeper12,
-  sleeper14,
-  sleeper16,
-  sleeper18,
-  sleeper12StarRoom,
-  conference,
-}
+/// Maps legacy enum names (stored in existing offers) to display labels.
+const _legacyBusTypeLabels = <String, String>{
+  'sleeper12': '12-sleeper',
+  'sleeper14': '14-sleeper',
+  'sleeper16': '16-sleeper',
+  'sleeper18': '18-sleeper',
+  'sleeper12StarRoom': '12-sleeper + Star room',
+  'conference': '20-50 seats',
+};
 
-extension BusTypeLabel on BusType {
-  String get label {
-    switch (this) {
-      case BusType.sleeper12:
-        return "12-sleeper";
-      case BusType.sleeper14:
-        return "14-sleeper";
-      case BusType.sleeper16:
-        return "16-sleeper";
-      case BusType.sleeper18:
-        return "18-sleeper";
-      case BusType.sleeper12StarRoom:
-        return "12-sleeper + Star room";
-      case BusType.conference:
-        return "20-50 seats";
-    }
-  }
+/// Default vehicle categories used as fallback when DB is empty.
+const defaultVehicleCategories = <String>[
+  '12-sleeper',
+  '14-sleeper',
+  '16-sleeper',
+  '18-sleeper',
+  '12-sleeper + Star room',
+  '20-50 seats',
+];
+
+/// Resolve a stored busType value to a display label.
+/// Handles both legacy enum names and new plain-text names.
+String busTypeLabel(String value) {
+  return _legacyBusTypeLabels[value] ?? value;
 }
 // ============================================================
 // PRICING OVERRIDE (DRAFT ONLY)
@@ -108,7 +107,7 @@ class OfferDraft {
   String status;
 
   int busCount;
-  BusType busType;
+  String busType;
 
   /// ✅ Saved bus
   String? bus;
@@ -120,6 +119,10 @@ OfferPricingOverride? pricingOverride;
 
   /// Pricing model: 'norsk' (Norwegian day-based) or 'svensk' (Swedish per-leg)
   String pricingModel;
+
+  /// Output language for the offer PDF. Defaults to Norwegian.
+  /// Supported: 'no', 'en', 'sv', 'de'.
+  String language;
 
   final List<OfferRound> rounds;
 
@@ -136,12 +139,13 @@ OfferPricingOverride? pricingOverride;
     this.production = '',
     this.status = 'Draft',
     this.busCount = 1,
-    this.busType = BusType.sleeper12,
+    this.busType = '12-sleeper',
     this.bus,
     this.pricingOverride,
     this.totalOverride,
     Map<int, double?>? roundOverrides,
     this.pricingModel = 'norsk',
+    this.language = 'no',
   })  : roundOverrides = roundOverrides ?? {},
         rounds = List.generate(12, (_) => OfferRound()),
         globalBusSlots = List.generate(4, (_) => null);
@@ -199,7 +203,7 @@ OfferPricingOverride? pricingOverride;
     'status': _safeStatus(status),
 
     'busCount': busCount,
-    'busType': busType.name,
+    'busType': busType,
     'bus': bus,
 
     // ⭐⭐⭐ NYTT (pricing override)
@@ -207,6 +211,9 @@ OfferPricingOverride? pricingOverride;
 
     // Pricing model ('norsk' / 'svensk')
     'pricingModel': pricingModel,
+
+    // Output language for the PDF ('no' / 'en' / 'sv' / 'de')
+    'language': language,
 
     // Per-round price overrides
     'roundOverrides': roundOverrides.map((k, v) => MapEntry(k.toString(), v)),
@@ -233,9 +240,7 @@ OfferPricingOverride? pricingOverride;
 
     busCount: (json['busCount'] ?? 1) as int,
 
-    busType: _busTypeFromName(
-      (json['busType'] ?? 'sleeper12') as String,
-    ),
+    busType: busTypeLabel((json['busType'] ?? '12-sleeper') as String),
 
     bus: json['bus'] as String?,
 
@@ -248,6 +253,9 @@ OfferPricingOverride? pricingOverride;
 
     // Pricing model (backwards compatible — default 'norsk')
     pricingModel: (json['pricingModel'] as String?) ?? 'norsk',
+
+    // Output language (backwards compatible — default 'no')
+    language: (json['language'] as String?) ?? 'no',
 
     // Per-round price overrides
     roundOverrides: _parseRoundOverrides(json['roundOverrides']),
@@ -287,12 +295,6 @@ OfferPricingOverride? pricingOverride;
     return result;
   }
 
-  static BusType _busTypeFromName(String name) {
-    for (final t in BusType.values) {
-      if (t.name == name) return t;
-    }
-    return BusType.sleeper12;
-  }
   // ------------------------------------------------------------
 // COPY WITH SELECTED ROUNDS (FOR PDF PAGING)
 // ------------------------------------------------------------
@@ -312,6 +314,7 @@ OfferDraft copyWithRounds(List<int> indexes) {
     busType: this.busType,
     bus: this.bus,
     pricingModel: this.pricingModel,
+    language: this.language,
   );
 
   // Clear default rounds

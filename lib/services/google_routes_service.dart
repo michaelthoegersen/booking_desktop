@@ -80,10 +80,11 @@ class GoogleRoutesService {
     // OSRM expects lon,lat pairs separated by semicolons
     final coordStr = coords.map((c) => '${c[1]},${c[0]}').join(';');
 
-    // Use geojson — gives plain [lon,lat] coordinates, no decoding issues
+    // Use geojson — gives plain [lon,lat] coordinates, no decoding issues.
+    // steps=true so we can detect ferry segments (mode == "ferry").
     final osrmUrl = Uri.parse(
       'https://router.project-osrm.org/route/v1/driving/$coordStr'
-      '?overview=full&alternatives=true&geometries=geojson',
+      '?overview=full&alternatives=true&geometries=geojson&steps=true',
     );
 
     debugPrint('🚗 OSRM: $osrmUrl');
@@ -124,9 +125,36 @@ class GoogleRoutesService {
 
       final distanceMeters = route['distance'] as num;
 
+      // ----------------------------------------------------------
+      // FERRY DETECTION via OSRM steps (mode == "ferry")
+      // ----------------------------------------------------------
+      bool hasFerrySteps = false;
+      final List<String> ferryNames = [];
+
+      final legs = route['legs'];
+      if (legs is List) {
+        for (final leg in legs) {
+          final steps = leg['steps'];
+          if (steps is! List) continue;
+          for (final step in steps) {
+            if (step is! Map) continue;
+            if (step['mode'] == 'ferry') {
+              hasFerrySteps = true;
+              final n = step['name'] as String?;
+              if (n != null && n.isNotEmpty && !ferryNames.contains(n)) {
+                ferryNames.add(n);
+              }
+            }
+          }
+        }
+      }
+      debugPrint('⛴️ OSRM ferry: hasFerry=$hasFerrySteps, names=$ferryNames');
+
       parsedRoutes.add({
         'distanceMeters': distanceMeters,
         'rawPoints': latLonPoints, // List of [lat, lon]
+        'hasFerrySteps': hasFerrySteps,
+        'ferryNames': ferryNames,
       });
     }
 
@@ -143,11 +171,19 @@ class GoogleRoutesService {
   Future<Map<String, dynamic>> getRouteWithVia({
     required List<String> places,
   }) async {
-    // Web: OSRM (no API key, CORS OK). Desktop: Google Routes API.
-    if (kIsWeb) {
-      return _getRouteWeb(places: places);
-    }
+    // Always use Nominatim + OSRM — no API key, no billing, ferry detection
+    // via OSRM steps. Google Routes API path preserved as [_getRouteGoogle]
+    // below; swap the call here to re-enable it.
+    return _getRouteWeb(places: places);
+  }
 
+  // ============================================================
+  // GOOGLE ROUTES API (preserved fallback — billing required)
+  // ============================================================
+  // ignore: unused_element
+  Future<Map<String, dynamic>> _getRouteGoogle({
+    required List<String> places,
+  }) async {
     if (_apiKey.isEmpty) {
       throw Exception('Missing GOOGLE_MAPS_API_KEY in .env');
     }

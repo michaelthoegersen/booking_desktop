@@ -10,6 +10,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../../services/brreg_service.dart';
 import '../../state/active_company.dart';
+import '../../state/role_labels.dart';
 import '../../state/settings_store.dart';
 import '../../ui/css_theme.dart';
 import '../../widgets/new_company_dialog.dart';
@@ -29,9 +30,11 @@ class _MgmtGigsPageState extends State<MgmtGigsPage> {
   bool _loading = true;
   String? get _companyId => activeCompanyNotifier.value?.id;
   List<Map<String, dynamic>> _gigs = [];
+  List<Map<String, dynamic>> _meetings = [];
+  Map<String, DateTime> _gigViews = {};
   String _search = '';
-  String _statusFilter = 'all';
-  String _typeFilter = 'all'; // 'all', 'gig', 'rehearsal'
+  String _statusFilter = 'upcoming';
+  String _typeFilter = 'all'; // 'all', 'gig', 'rehearsal', 'meeting'
 
   // Multi-select for bus booking
   bool _selectionMode = false;
@@ -63,28 +66,140 @@ class _MgmtGigsPageState extends State<MgmtGigsPage> {
         return;
       }
 
-      final gigs = await _sb
+      final gigsFuture = _sb
           .from('gigs')
           .select('*, gig_shows(show_name)')
           .eq('company_id', _companyId!)
           .eq('archived', false)
           .order('date_from', ascending: true);
 
+      final meetingsFuture = _sb
+          .from('meetings')
+          .select('*')
+          .eq('company_id', _companyId!)
+          .neq('status', 'draft')
+          .order('date', ascending: true);
+
+      final uid = _sb.auth.currentUser?.id;
+      final viewsFuture = uid != null
+          ? _sb.from('gig_views').select('gig_id, viewed_at').eq('user_id', uid)
+          : Future.value(<dynamic>[]);
+
+      final gigs = await gigsFuture;
+      final meetings = await meetingsFuture;
+      final views = await viewsFuture;
+
       _gigs = List<Map<String, dynamic>>.from(gigs);
+      _meetings = List<Map<String, dynamic>>.from(meetings);
+
+      // Mark gigs that are part of a multi-date offer (used to relabel
+      // rehearsals as "Prøve" instead of "Øvelse" in the list).
+      try {
+        final gigIds = _gigs.map((g) => g['id'] as String).toList();
+        if (gigIds.isNotEmpty) {
+          final junction = await _sb
+              .from('gig_offer_gigs')
+              .select('gig_id, offer_id')
+              .inFilter('gig_id', gigIds);
+          final offerCounts = <String, int>{};
+          for (final r in (junction as List)) {
+            final off = r['offer_id'] as String?;
+            if (off != null) {
+              offerCounts[off] = (offerCounts[off] ?? 0) + 1;
+            }
+          }
+          final offerForGig = <String, String>{};
+          for (final r in junction) {
+            offerForGig[r['gig_id'] as String] = r['offer_id'] as String;
+          }
+          for (final g in _gigs) {
+            final off = offerForGig[g['id'] as String];
+            g['_is_offer_part'] = off != null && (offerCounts[off] ?? 0) > 1;
+          }
+        }
+      } catch (e) {
+        debugPrint('Mark offer parts error: $e');
+      }
+
+      _gigViews = {};
+      for (final v in (views as List)) {
+        final gid = v['gig_id'] as String;
+        final ts = DateTime.tryParse(v['viewed_at']?.toString() ?? '');
+        if (ts != null) _gigViews[gid] = ts;
+      }
     } catch (e) {
       debugPrint('Gigs load error: $e');
     }
     if (mounted) setState(() => _loading = false);
   }
 
-  List<Map<String, dynamic>> get _filtered {
-    var list = _gigs;
+  /// Mark gig as viewed by current user
+  Future<void> _markViewed(String gigId) async {
+    final uid = _sb.auth.currentUser?.id;
+    if (uid == null) return;
+    _gigViews[gigId] = DateTime.now().toUtc();
+    try {
+      await _sb.from('gig_views').upsert({
+        'gig_id': gigId,
+        'user_id': uid,
+        'viewed_at': DateTime.now().toUtc().toIso8601String(),
+      }, onConflict: 'gig_id,user_id');
+    } catch (_) {}
+  }
 
-    if (_typeFilter != 'all') {
-      list = list
-          .where((g) => (g['type'] as String? ?? 'gig') == _typeFilter)
-          .toList();
+  bool _isUnseen(Map<String, dynamic> gig) {
+    // Don't track meetings from meetings table
+    if (gig['_is_meeting_table'] == true) return false;
+    final updatedAt = DateTime.tryParse(gig['updated_at']?.toString() ?? '');
+    if (updatedAt == null) return false;
+    final lastViewed = _gigViews[gig['id'] as String];
+    // Only unseen if user HAS viewed before AND it was updated since
+    if (lastViewed == null) return false;
+    return updatedAt.isAfter(lastViewed);
+  }
+
+  List<Map<String, dynamic>> get _filtered {
+    var list = <Map<String, dynamic>>[];
+
+    // Add gigs
+    if (_typeFilter == 'all' || _typeFilter != 'meeting') {
+      var gigs = _gigs.toList();
+      if (_typeFilter != 'all') {
+        gigs = gigs
+            .where((g) => (g['type'] as String? ?? 'gig') == _typeFilter)
+            .toList();
+      }
+      list.addAll(gigs);
     }
+
+    // Add meetings from meetings table (mapped to gig-like format)
+    if (_typeFilter == 'all' || _typeFilter == 'meeting') {
+      for (final m in _meetings) {
+        list.add({
+          'id': m['id'],
+          'date_from': m['date'] as String?,
+          'date_to': null,
+          'venue_name': m['title'] ?? '',
+          'city': m['city'] ?? '',
+          'customer_firma': '',
+          'customer_name': '',
+          'status': m['status'] ?? 'finalized',
+          'type': 'meeting',
+          'gig_shows': <dynamic>[],
+          'updated_at': m['updated_at'],
+          '_is_meeting_table': true,
+          'start_time': m['start_time'],
+          'end_time': m['end_time'],
+        });
+      }
+    }
+
+    // Sort by date
+    list.sort((a, b) {
+      final da = a['date_from'] as String? ?? '';
+      final db = b['date_from'] as String? ?? '';
+      return da.compareTo(db);
+    });
 
     if (_statusFilter != 'all') {
       if (_statusFilter == 'upcoming') {
@@ -806,11 +921,24 @@ class _MgmtGigsPageState extends State<MgmtGigsPage> {
                                 final gig = _filtered[i];
                                 final gigId = gig['id'] as String;
                                 final isGig = (gig['type'] as String? ?? 'gig') == 'gig';
+                                final isMeetingTable = gig['_is_meeting_table'] == true;
                                 return _GigRow(
                                   gig: gig,
+                                  hasUnseenUpdate: _isUnseen(gig),
+                                  isStian: _sb.auth.currentUser?.email == 'stian@completedrums.no',
                                   onTap: _selectionMode && isGig
                                       ? () => _toggleGigSelection(gigId)
-                                      : () => context.go('/m/gigs/$gigId'),
+                                      : () {
+                                          if (!isMeetingTable) {
+                                            _markViewed(gigId);
+                                            setState(() {});
+                                          }
+                                          if (isMeetingTable) {
+                                            context.go('/m/meetings/$gigId');
+                                          } else {
+                                            context.go('/m/gigs/$gigId');
+                                          }
+                                        },
                                   onCancel: () => _confirmCancel(gig),
                                   onDelete: () => _confirmDelete(gig),
                                   selectionMode: _selectionMode,
@@ -862,6 +990,9 @@ class _NewGigDialogState extends State<_NewGigDialog> {
   // ── Date / status ─────────────────────────────────────────────────────────
   DateTime? _dateFrom;
   DateTime? _dateTo;
+  // Extra dates to repeat the same activity on. Only used for standalone
+  // rehearsals/other (a separate gig is created for each entry).
+  final Set<DateTime> _repeatDates = {};
   String _status = 'inquiry';
 
   // ── Booleans ──────────────────────────────────────────────────────────────
@@ -1048,6 +1179,52 @@ class _NewGigDialogState extends State<_NewGigDialog> {
 
   // ── Save gig ───────────────────────────────────────────────────────────────
 
+  static DateTime _dateOnly(DateTime d) => DateTime(d.year, d.month, d.day);
+
+  Map<String, dynamic> _gigPayloadFor(DateTime date) {
+    final df = DateFormat('yyyy-MM-dd');
+    String? n(String s) => s.trim().isEmpty ? null : s.trim();
+    return {
+      'company_id': widget.managementCompanyId,
+      'type': _type,
+      'date_from': df.format(date),
+      if (_dateTo != null) 'date_to': df.format(_dateTo!),
+      'status': _status,
+      'venue_name': n(_venueCtrl.text),
+      'city': n(_cityCtrl.text),
+      'country': n(_countryCtrl.text),
+      'customer_firma': n(_firmaCtrl.text),
+      'customer_name': n(_custNameCtrl.text),
+      'customer_phone': n(_phoneCtrl.text),
+      'customer_email': n(_emailCtrl.text),
+      'customer_org_nr': n(_orgNrCtrl.text),
+      'customer_address': n(_addressCtrl.text),
+      'invoice_on_ehf': _invoiceOnEhf,
+      'responsible': n(_responsibleCtrl.text),
+      'show_desc': n(_showDescCtrl.text),
+      'meeting_time': n(_meetingTimeCtrl.text),
+      'get_in_time': n(_getInTimeCtrl.text),
+      'rehearsal_time': n(_rehearsalTimeCtrl.text),
+      'performance_time': n(_performanceTimeCtrl.text),
+      'get_out_time': n(_getOutTimeCtrl.text),
+      'meeting_notes': n(_meetingNotesCtrl.text),
+      'stage_shape': n(_stageShapeCtrl.text),
+      'stage_size': n(_stageSizeCtrl.text),
+      'stage_notes': n(_stageNotesCtrl.text),
+      'inear_from_us': _inearFromUs,
+      'playback_from_us': _playbackFromUs,
+      'inear_price':
+          double.tryParse(_inearPriceCtrl.text) ?? SettingsStore.current.inearPrice,
+      'transport_km': int.tryParse(_transportKmCtrl.text),
+      'transport_price': double.tryParse(_transportPriceCtrl.text),
+      'extra_desc': n(_extraDescCtrl.text),
+      'extra_price': double.tryParse(_extraPriceCtrl.text),
+      'notes_for_contract': n(_notesCtrl.text),
+      'info_from_organizer': n(_infoFromOrgCtrl.text),
+      'created_by': _sb.auth.currentUser?.id,
+    };
+  }
+
   Future<void> _save() async {
     if (_dateFrom == null) return;
     setState(() => _saving = true);
@@ -1055,76 +1232,57 @@ class _NewGigDialogState extends State<_NewGigDialog> {
       final df = DateFormat('yyyy-MM-dd');
       String? n(String s) => s.trim().isEmpty ? null : s.trim();
 
-      final res = await _sb.from('gigs').insert({
-        'company_id': widget.managementCompanyId,
-        'type': _type,
-        'date_from': df.format(_dateFrom!),
-        if (_dateTo != null) 'date_to': df.format(_dateTo!),
-        'status': _status,
-        'venue_name': n(_venueCtrl.text),
-        'city': n(_cityCtrl.text),
-        'country': n(_countryCtrl.text),
-        'customer_firma': n(_firmaCtrl.text),
-        'customer_name': n(_custNameCtrl.text),
-        'customer_phone': n(_phoneCtrl.text),
-        'customer_email': n(_emailCtrl.text),
-        'customer_org_nr': n(_orgNrCtrl.text),
-        'customer_address': n(_addressCtrl.text),
-        'invoice_on_ehf': _invoiceOnEhf,
-        'responsible': n(_responsibleCtrl.text),
-        'show_desc': n(_showDescCtrl.text),
-        'meeting_time': n(_meetingTimeCtrl.text),
-        'get_in_time': n(_getInTimeCtrl.text),
-        'rehearsal_time': n(_rehearsalTimeCtrl.text),
-        'performance_time': n(_performanceTimeCtrl.text),
-        'get_out_time': n(_getOutTimeCtrl.text),
-        'meeting_notes': n(_meetingNotesCtrl.text),
-        'stage_shape': n(_stageShapeCtrl.text),
-        'stage_size': n(_stageSizeCtrl.text),
-        'stage_notes': n(_stageNotesCtrl.text),
-        'inear_from_us': _inearFromUs,
-        'playback_from_us': _playbackFromUs,
-        'inear_price': double.tryParse(_inearPriceCtrl.text) ?? SettingsStore.current.inearPrice,
-        'transport_km': int.tryParse(_transportKmCtrl.text),
-        'transport_price': double.tryParse(_transportPriceCtrl.text),
-        'extra_desc': n(_extraDescCtrl.text),
-        'extra_price': double.tryParse(_extraPriceCtrl.text),
-        'notes_for_contract': n(_notesCtrl.text),
-        'info_from_organizer': n(_infoFromOrgCtrl.text),
-        'created_by': _sb.auth.currentUser?.id,
-      }).select('id').single();
+      // Build full date list — primary date plus any "Gjenta"-selections.
+      final dates = <DateTime>{_dateOnly(_dateFrom!), ..._repeatDates}.toList()
+        ..sort();
 
-      final gigId = res['id'] as String;
+      final createdIds = <String>[];
+      for (final d in dates) {
+        final res = await _sb
+            .from('gigs')
+            .insert(_gigPayloadFor(d))
+            .select('id')
+            .single();
+        final gigId = res['id'] as String;
+        createdIds.add(gigId);
 
-      // Insert show if selected
-      if (_selectedShow != null) {
-        await _sb.from('gig_shows').insert({
-          'gig_id': gigId,
-          'show_type_id': _selectedShow!['id'],
-          'show_name': _selectedShow!['name'],
-          'drummers': int.tryParse(_drumCtrl.text) ?? 0,
-          'dancers': int.tryParse(_danceCtrl.text) ?? 0,
-          'others': int.tryParse(_othersCtrl.text) ?? 0,
-          'price': double.tryParse(_showPriceCtrl.text) ?? 0,
-          'sort_order': 0,
-        });
+        if (_selectedShow != null) {
+          await _sb.from('gig_shows').insert({
+            'gig_id': gigId,
+            'show_type_id': _selectedShow!['id'],
+            'show_name': _selectedShow!['name'],
+            'drummers': int.tryParse(_drumCtrl.text) ?? 0,
+            'dancers': int.tryParse(_danceCtrl.text) ?? 0,
+            'others': int.tryParse(_othersCtrl.text) ?? 0,
+            'price': double.tryParse(_showPriceCtrl.text) ?? 0,
+            'sort_order': 0,
+          });
+        }
       }
 
-      // Notify crew about the new gig
+      // Send a single notification covering all created dates
       try {
         final venue = n(_venueCtrl.text) ?? '';
-        final date = df.format(_dateFrom!);
-        final label = const {'gig': 'Ny gig', 'rehearsal': 'Ny øvelse', 'meeting': 'Nytt møte', 'other': 'Ny aktivitet'}[_type] ?? 'Ny aktivitet';
+        final dateLabel = dates.length == 1
+            ? df.format(dates.first)
+            : '${dates.length} datoer';
+        final label = const {
+              'gig': 'Ny gig',
+              'rehearsal': 'Ny øvelse',
+              'meeting': 'Nytt møte',
+              'other': 'Ny aktivitet',
+            }[_type] ??
+            'Ny aktivitet';
         await _sb.functions.invoke('notify-company', body: {
           'company_id': widget.managementCompanyId,
           'title': '$label: $venue',
-          'body': '$date — $venue',
+          'body': '$dateLabel — $venue',
           'exclude_user_id': _sb.auth.currentUser?.id,
-          'gig_id': gigId,
+          if (createdIds.isNotEmpty) 'gig_id': createdIds.first,
         });
       } catch (_) {}
 
-      if (mounted) Navigator.of(context).pop(gigId);
+      if (mounted) Navigator.of(context).pop(createdIds.first);
     } catch (e) {
       debugPrint('Create gig error: $e');
       if (mounted) setState(() => _saving = false);
@@ -1244,6 +1402,67 @@ class _NewGigDialogState extends State<_NewGigDialog> {
                           ],
                         ],
                       ),
+                      // Repeat-on-multiple-dates (standalone rehearsal / other only)
+                      if (_type == 'rehearsal' || _type == 'other') ...[
+                        const SizedBox(height: 8),
+                        Row(
+                          children: [
+                            OutlinedButton.icon(
+                              icon: const Icon(Icons.repeat, size: 16),
+                              label: Text(_repeatDates.isEmpty
+                                  ? 'Gjenta på flere datoer…'
+                                  : 'Gjenta på ${_repeatDates.length} datoer'),
+                              onPressed: () async {
+                                final picked = await showDialog<Set<DateTime>>(
+                                  context: context,
+                                  builder: (_) => _MultiDatePickerDialog(
+                                    initial: _repeatDates,
+                                    excludeDates: _dateFrom == null
+                                        ? const {}
+                                        : {_dateOnly(_dateFrom!)},
+                                  ),
+                                );
+                                if (picked != null) {
+                                  setState(() {
+                                    _repeatDates
+                                      ..clear()
+                                      ..addAll(picked);
+                                  });
+                                }
+                              },
+                            ),
+                            if (_repeatDates.isNotEmpty) ...[
+                              const SizedBox(width: 8),
+                              IconButton(
+                                tooltip: 'Fjern alle ekstra datoer',
+                                icon: const Icon(Icons.close, size: 18),
+                                onPressed: () =>
+                                    setState(() => _repeatDates.clear()),
+                              ),
+                            ],
+                          ],
+                        ),
+                        if (_repeatDates.isNotEmpty)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 6),
+                            child: Wrap(
+                              spacing: 4,
+                              runSpacing: 4,
+                              children: (_repeatDates.toList()..sort())
+                                  .map((d) => Chip(
+                                        label: Text(df.format(d),
+                                            style: const TextStyle(
+                                                fontSize: 11)),
+                                        visualDensity: VisualDensity.compact,
+                                        materialTapTargetSize:
+                                            MaterialTapTargetSize.shrinkWrap,
+                                        onDeleted: () => setState(
+                                            () => _repeatDates.remove(d)),
+                                      ))
+                                  .toList(),
+                            ),
+                          ),
+                      ],
 
                       // ── LOCATION ────────────────────────────────────────
                       _sec('Spillested'),
@@ -1334,14 +1553,17 @@ class _NewGigDialogState extends State<_NewGigDialog> {
                       ),
                       if (_selectedShow != null) ...[
                         const SizedBox(height: 8),
-                        _row([
-                          _tf(_drumCtrl, 'Trommeslagere',
-                              keyboardType: TextInputType.number),
-                          _tf(_danceCtrl, 'Dansere',
-                              keyboardType: TextInputType.number),
-                          _tf(_othersCtrl, 'Andre',
-                              keyboardType: TextInputType.number),
-                        ]),
+                        ValueListenableBuilder<RoleLabels>(
+                          valueListenable: roleLabelsNotifier,
+                          builder: (_, labels, __) => _row([
+                            _tf(_drumCtrl, labels.role1,
+                                keyboardType: TextInputType.number),
+                            _tf(_danceCtrl, labels.role2,
+                                keyboardType: TextInputType.number),
+                            _tf(_othersCtrl, labels.role3,
+                                keyboardType: TextInputType.number),
+                          ]),
+                        ),
                         const SizedBox(height: 8),
                         _tfFull(_showPriceCtrl, 'Pris (kr)',
                             keyboardType: TextInputType.number),
@@ -1968,6 +2190,8 @@ class _GigRow extends StatelessWidget {
   final bool selectionMode;
   final bool selected;
   final VoidCallback? onSelect;
+  final bool hasUnseenUpdate;
+  final bool isStian;
 
   const _GigRow({
     required this.gig,
@@ -1977,11 +2201,39 @@ class _GigRow extends StatelessWidget {
     this.selectionMode = false,
     this.selected = false,
     this.onSelect,
+    this.hasUnseenUpdate = false,
+    this.isStian = false,
   });
 
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
+
+    // Last action label + Stian's fading blue
+    final lastAction = gig['last_action'] as Map<String, dynamic>?;
+    String? actionLabel;
+    Color bgColor = hasUnseenUpdate
+        ? const Color(0xFFD6EAFF)
+        : cs.surfaceContainerLowest;
+
+    if (lastAction != null) {
+      final actionType = lastAction['type'] as String? ?? '';
+      final actionAt = DateTime.tryParse(lastAction['at']?.toString() ?? '');
+      if (actionAt != null && actionType.isNotEmpty) {
+        final df = DateFormat('dd.MM.yyyy HH:mm');
+        actionLabel = '${actionType.toLowerCase()} ${df.format(actionAt.toLocal())}';
+
+        // Stian sees fading blue based on age (0 days = full, 20 days = gone)
+        if (isStian) {
+          final daysSince = DateTime.now().difference(actionAt).inDays;
+          final fade = (1.0 - (daysSince / 20.0)).clamp(0.0, 1.0);
+          if (fade > 0) {
+            bgColor = Color.lerp(cs.surfaceContainerLowest, const Color(0xFFD6EAFF), fade)!;
+          }
+        }
+      }
+    }
+
     final dateFrom = gig['date_from'] as String?;
     final dateTo = gig['date_to'] as String?;
     final venue = gig['venue_name'] as String? ?? '';
@@ -2018,9 +2270,13 @@ class _GigRow extends StatelessWidget {
         margin: const EdgeInsets.only(bottom: 8),
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
-          color: cs.surfaceContainerLowest,
+          color: bgColor,
           borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: cs.outlineVariant),
+          border: Border.all(
+            color: hasUnseenUpdate
+                ? const Color(0xFF90CAF9)
+                : cs.outlineVariant,
+          ),
         ),
         child: Row(
           children: [
@@ -2045,17 +2301,57 @@ class _GigRow extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   if (type != 'gig') ...[
-                    Text(
-                      const {'rehearsal': 'Øvelse', 'meeting': 'Møte', 'other': 'Annet'}[type] ?? type,
-                      style: const TextStyle(
-                          fontWeight: FontWeight.w900, fontSize: 15),
+                    Row(
+                      children: [
+                        Text(
+                          type == 'rehearsal' && gig['_is_offer_part'] == true
+                              ? 'Prøve'
+                              : const {
+                                    'rehearsal': 'Øvelse',
+                                    'meeting': 'Møte',
+                                    'other': 'Annet',
+                                  }[type] ??
+                                  type,
+                          style: const TextStyle(
+                              fontWeight: FontWeight.w900, fontSize: 15),
+                        ),
+                        if (type == 'meeting' && venue.isNotEmpty) ...[
+                          const SizedBox(width: 6),
+                          Text('— $venue',
+                              style: const TextStyle(
+                                  fontWeight: FontWeight.w700, fontSize: 15)),
+                        ],
+                      ],
                     ),
-                    if (locationLine.isNotEmpty)
-                      Text(
-                        locationLine,
-                        style: TextStyle(
-                            color: cs.onSurfaceVariant, fontSize: 13),
-                      ),
+                    if (type == 'meeting') ...[
+                      if (city.isNotEmpty)
+                        Text(city,
+                            style: TextStyle(
+                                color: cs.onSurfaceVariant, fontSize: 13)),
+                      if (gig['start_time'] != null)
+                        Text(
+                          '${gig['start_time']}${gig['end_time'] != null ? ' – ${gig['end_time']}' : ''}',
+                          style: TextStyle(
+                              color: cs.onSurfaceVariant, fontSize: 12),
+                        ),
+                    ] else ...[
+                      if (locationLine.isNotEmpty)
+                        Text(
+                          locationLine,
+                          style: TextStyle(
+                              color: cs.onSurfaceVariant, fontSize: 13),
+                        ),
+                      // Show customer firma for rehearsals tied to a gig offer
+                      // ("Prøve") so the list reads like a gig row.
+                      if (type == 'rehearsal' &&
+                          gig['_is_offer_part'] == true &&
+                          customerLine.isNotEmpty)
+                        Text(
+                          customerLine,
+                          style: TextStyle(
+                              color: cs.onSurfaceVariant, fontSize: 13),
+                        ),
+                    ],
                   ] else ...[
                     if (locationLine.isNotEmpty)
                       Text(
@@ -2079,6 +2375,10 @@ class _GigRow extends StatelessWidget {
                 ],
               ),
             ),
+            if (actionLabel != null) ...[
+              Text(actionLabel, style: TextStyle(fontSize: 10, fontStyle: FontStyle.italic, color: cs.onSurfaceVariant)),
+              const SizedBox(width: 8),
+            ],
             if (status == 'cancelled') ...[
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -2101,11 +2401,15 @@ class _GigRow extends StatelessWidget {
                   'meeting': Colors.teal,
                   'other': Colors.blueGrey,
                 }[type] ?? Colors.grey;
-                final badgeLabel = const {
-                  'rehearsal': 'Øvelse',
-                  'meeting': 'Møte',
-                  'other': 'Annet',
-                }[type] ?? type;
+                final badgeLabel =
+                    type == 'rehearsal' && gig['_is_offer_part'] == true
+                        ? 'Prøve'
+                        : const {
+                              'rehearsal': 'Øvelse',
+                              'meeting': 'Møte',
+                              'other': 'Annet',
+                            }[type] ??
+                            type;
                 return Container(
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                   decoration: BoxDecoration(
@@ -2198,6 +2502,222 @@ class _GigStatusBadge extends StatelessWidget {
         _labels[status] ?? status,
         style: TextStyle(
             fontSize: 12, fontWeight: FontWeight.w700, color: color),
+      ),
+    );
+  }
+}
+
+// ============================================================================
+// MULTI-DATE PICKER (used by Gjenta-knappen for rehearsal / other)
+// ============================================================================
+
+class _MultiDatePickerDialog extends StatefulWidget {
+  /// Initially-selected dates (date-only — time component ignored).
+  final Set<DateTime> initial;
+
+  /// Dates that should not be selectable (e.g. the primary "Dato fra" already
+  /// chosen on the parent dialog).
+  final Set<DateTime> excludeDates;
+
+  const _MultiDatePickerDialog({
+    required this.initial,
+    this.excludeDates = const {},
+  });
+
+  @override
+  State<_MultiDatePickerDialog> createState() =>
+      _MultiDatePickerDialogState();
+}
+
+class _MultiDatePickerDialogState extends State<_MultiDatePickerDialog> {
+  late final Set<DateTime> _selected;
+  late DateTime _viewMonth;
+
+  static DateTime _d(DateTime x) => DateTime(x.year, x.month, x.day);
+
+  @override
+  void initState() {
+    super.initState();
+    _selected = widget.initial.map(_d).toSet();
+    final now = DateTime.now();
+    _viewMonth = DateTime(now.year, now.month, 1);
+  }
+
+  void _shiftMonth(int delta) {
+    setState(() {
+      _viewMonth =
+          DateTime(_viewMonth.year, _viewMonth.month + delta, 1);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final monthFmt = DateFormat('MMMM yyyy', 'nb_NO');
+    final firstWeekday = DateTime(_viewMonth.year, _viewMonth.month, 1).weekday;
+    // Monday-first: shift so weekday 1 (Mon) lands at column 0
+    final leadingBlanks = (firstWeekday - 1) % 7;
+    final daysInMonth =
+        DateTime(_viewMonth.year, _viewMonth.month + 1, 0).day;
+    final today = _d(DateTime.now());
+
+    return Dialog(
+      shape:
+          RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: SizedBox(
+        width: 460,
+        child: Padding(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Velg datoer å gjenta på',
+                style:
+                    TextStyle(fontSize: 18, fontWeight: FontWeight.w900),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                'Trykk en dag for å markere/avmarkere. ${_selected.length} valgt.',
+                style:
+                    TextStyle(fontSize: 12, color: cs.onSurfaceVariant),
+              ),
+              const SizedBox(height: 16),
+              Row(
+                children: [
+                  IconButton(
+                    icon: const Icon(Icons.chevron_left),
+                    onPressed: () => _shiftMonth(-1),
+                  ),
+                  Expanded(
+                    child: Center(
+                      child: Text(
+                        monthFmt.format(_viewMonth),
+                        style: const TextStyle(
+                            fontSize: 16, fontWeight: FontWeight.w700),
+                      ),
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.chevron_right),
+                    onPressed: () => _shiftMonth(1),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              // Weekday header
+              Row(
+                children: ['Ma', 'Ti', 'On', 'To', 'Fr', 'Lø', 'Sø']
+                    .map((w) => Expanded(
+                          child: Center(
+                            child: Text(
+                              w,
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w700,
+                                color: cs.onSurfaceVariant,
+                              ),
+                            ),
+                          ),
+                        ))
+                    .toList(),
+              ),
+              const SizedBox(height: 4),
+              // Calendar grid
+              GridView.builder(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                itemCount: leadingBlanks + daysInMonth,
+                gridDelegate:
+                    const SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: 7,
+                  childAspectRatio: 1.1,
+                ),
+                itemBuilder: (context, i) {
+                  if (i < leadingBlanks) return const SizedBox.shrink();
+                  final day = i - leadingBlanks + 1;
+                  final date = DateTime(_viewMonth.year, _viewMonth.month, day);
+                  final isSelected = _selected.contains(date);
+                  final isExcluded = widget.excludeDates.contains(date);
+                  final isToday = date == today;
+                  final isPast = date.isBefore(today);
+
+                  Color? bg;
+                  Color fg = cs.onSurface;
+                  FontWeight weight = FontWeight.w500;
+                  if (isExcluded) {
+                    bg = cs.primary.withValues(alpha: 0.15);
+                    fg = cs.primary;
+                    weight = FontWeight.w800;
+                  } else if (isSelected) {
+                    bg = Colors.black;
+                    fg = Colors.white;
+                    weight = FontWeight.w800;
+                  } else if (isToday) {
+                    bg = cs.surfaceContainerHigh;
+                    weight = FontWeight.w800;
+                  } else if (isPast) {
+                    fg = cs.onSurfaceVariant.withValues(alpha: 0.5);
+                  }
+
+                  return Padding(
+                    padding: const EdgeInsets.all(2),
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(8),
+                      onTap: isExcluded
+                          ? null
+                          : () => setState(() {
+                                if (_selected.contains(date)) {
+                                  _selected.remove(date);
+                                } else {
+                                  _selected.add(date);
+                                }
+                              }),
+                      child: Container(
+                        decoration: BoxDecoration(
+                          color: bg,
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Center(
+                          child: Text(
+                            '$day',
+                            style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: weight,
+                              color: fg,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  );
+                },
+              ),
+              const SizedBox(height: 16),
+              Row(
+                children: [
+                  if (_selected.isNotEmpty)
+                    TextButton.icon(
+                      onPressed: () => setState(() => _selected.clear()),
+                      icon: const Icon(Icons.clear_all, size: 16),
+                      label: const Text('Tøm'),
+                    ),
+                  const Spacer(),
+                  TextButton(
+                    onPressed: () => Navigator.of(context).pop(),
+                    child: const Text('Avbryt'),
+                  ),
+                  const SizedBox(width: 8),
+                  FilledButton(
+                    onPressed: () => Navigator.of(context).pop(_selected),
+                    child: Text('Bruk (${_selected.length})'),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

@@ -24,8 +24,10 @@ class _MgmtGigOffersPageState extends State<MgmtGigOffersPage> {
   String _statusFilter = 'all';
   bool _showArchived = false;
 
-  // Agreement status per gig_id
-  Map<String, Map<String, dynamic>> _agreements = {};
+  // Agreement status per offer_id (best of: approved > accepted > newest).
+  // Tokens can live on any sibling gig in a multi-date offer, so we resolve
+  // them per offer rather than per gig.
+  Map<String, Map<String, dynamic>> _agreementByOffer = {};
   // Multi-date junction: offer_id → list of junction rows with gig data
   Map<String, List<Map<String, dynamic>>> _offerGigs = {};
 
@@ -92,16 +94,46 @@ class _MgmtGigOffersPageState extends State<MgmtGigOffersPage> {
       if (gigIds.isNotEmpty) {
         final agreements = await _sb
             .from('agreement_tokens')
-            .select('gig_id, status, accepted_name, accepted_at')
+            .select('id, gig_id, status, accepted_name, accepted_at, customer_email, created_at')
             .inFilter('gig_id', gigIds.toList())
             .order('created_at', ascending: false);
-        _agreements = {};
+        // Build per-gig lookup with all tokens (newest first).
+        final tokensByGig = <String, List<Map<String, dynamic>>>{};
         for (final a in (agreements as List)) {
           final gid = a['gig_id'] as String;
-          // Keep the latest agreement per gig
-          if (!_agreements.containsKey(gid)) {
-            _agreements[gid] = Map<String, dynamic>.from(a);
+          tokensByGig
+              .putIfAbsent(gid, () => [])
+              .add(Map<String, dynamic>.from(a));
+        }
+        // Resolve per offer: collect every gig_id linked to this offer
+        // (legacy + junction siblings), gather all tokens, prefer
+        // approved > accepted > newest.
+        _agreementByOffer = {};
+        for (final o in _offers) {
+          final oid = o['id'] as String;
+          final offerGigIds = <String>{};
+          final legacyGid = o['gig_id'] as String?;
+          if (legacyGid != null) offerGigIds.add(legacyGid);
+          for (final j in (_offerGigs[oid] ?? [])) {
+            final gid = j['gig_id'] as String?;
+            if (gid != null) offerGigIds.add(gid);
           }
+          final candidates = <Map<String, dynamic>>[];
+          for (final gid in offerGigIds) {
+            candidates.addAll(tokensByGig[gid] ?? const []);
+          }
+          if (candidates.isEmpty) continue;
+          Map<String, dynamic>? pick;
+          for (final r in candidates) {
+            if (r['status'] == 'approved') { pick = r; break; }
+          }
+          if (pick == null) {
+            for (final r in candidates) {
+              if (r['status'] == 'accepted') { pick = r; break; }
+            }
+          }
+          pick ??= candidates.first;
+          _agreementByOffer[oid] = pick;
         }
       }
     } catch (e) {
@@ -397,9 +429,14 @@ class _MgmtGigOffersPageState extends State<MgmtGigOffersPage> {
                                       ],
                                     ),
                                   ),
-                                  // Agreement badge (hidden when cancelled)
+                                  // Agreement badges + approve button
+                                  // (hidden when cancelled). The "Godkjenn"
+                                  // button navigates to the offer page with
+                                  // ?approve=1 so the existing approve flow
+                                  // there fires automatically — no need to
+                                  // open the offer manually.
                                   if (status != 'cancelled' &&
-                                      _agreements[o['gig_id']]?['status'] == 'accepted') ...[
+                                      _agreementByOffer[o['id']]?['status'] == 'accepted') ...[
                                     Container(
                                       padding: const EdgeInsets.symmetric(
                                           horizontal: 10, vertical: 4),
@@ -418,9 +455,22 @@ class _MgmtGigOffersPageState extends State<MgmtGigOffersPage> {
                                       ),
                                     ),
                                     const SizedBox(width: 8),
+                                    FilledButton.icon(
+                                      onPressed: () => context.go(
+                                          '/m/offers/${o['id']}?approve=1'),
+                                      style: FilledButton.styleFrom(
+                                        backgroundColor: Colors.green,
+                                        padding: const EdgeInsets.symmetric(
+                                            horizontal: 12, vertical: 8),
+                                      ),
+                                      icon: const Icon(Icons.check_circle, size: 16),
+                                      label: const Text('Godkjenn',
+                                          style: TextStyle(fontSize: 12)),
+                                    ),
+                                    const SizedBox(width: 8),
                                   ],
                                   if (status != 'cancelled' &&
-                                      _agreements[o['gig_id']]?['status'] == 'approved') ...[
+                                      _agreementByOffer[o['id']]?['status'] == 'approved') ...[
                                     Container(
                                       padding: const EdgeInsets.symmetric(
                                           horizontal: 10, vertical: 4),

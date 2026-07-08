@@ -23,9 +23,9 @@ import 'pages/google_test_page.dart';
 import 'pages/invoices_page.dart';
 import 'pages/issues_page.dart';
 import 'pages/economy_page.dart';
-import 'pages/chat_page.dart';
 import 'pages/archive_page.dart';
 import 'pages/bus_requests_page.dart';
+import 'pages/admin_page.dart';
 
 import 'pages/mgmt/mgmt_dashboard_page.dart';
 import 'pages/mgmt/mgmt_tours_page.dart';
@@ -46,6 +46,9 @@ import 'pages/mgmt/meeting_wizard_page.dart';
 import 'pages/mgmt/meeting_detail_page.dart';
 import 'pages/mgmt/meeting_live_page.dart';
 
+import 'pages/inventory/logistics_inventory_page.dart';
+import 'pages/inventory/mgmt_inventory_page.dart';
+
 import 'pages/crew/crew_gigs_page.dart';
 import 'pages/crew/crew_gig_detail_page.dart';
 import 'pages/crew/crew_notes_page.dart';
@@ -56,8 +59,11 @@ import 'contacts/contacts_screen.dart';
 import 'contacts/dm_inbox_screen.dart';
 
 import 'state/active_company.dart';
+import 'state/role_labels.dart';
+import 'services/platform_admin_service.dart';
 import 'state/settings_store.dart';
 import 'ui/css_theme.dart';
+import 'localization/app_locale.dart';
 
 
 // ------------------------------------------------------------
@@ -109,6 +115,7 @@ Future<void> main() async {
 
     await SettingsStore.load();
     await SettingsStore.loadFerries();
+    await appLocale.load();
 
     debugPrint("Supabase initialized OK");
 
@@ -147,6 +154,8 @@ Future<void> _loadUserRole() async {
         .maybeSingle();
     _cachedUserRole = res?['role'] as String?;
     await activeCompanyNotifier.load();
+    await platformAdminNotifier.refresh();
+    await roleLabelsNotifier.refresh();
   } catch (e) {
     debugPrint('_loadUserRole error: $e');
     _cachedUserRole = null;
@@ -164,6 +173,7 @@ class SupabaseAuthRefresher extends ChangeNotifier {
       if (event.event == AuthChangeEvent.signedOut) {
         _cachedUserRole = null;
         activeCompanyNotifier.clear();
+        platformAdminNotifier.clear();
       }
       notifyListeners();
     });
@@ -341,6 +351,12 @@ class BookingApp extends StatelessWidget {
               builder: (context, state) => const RoutesAdminPage(),
             ),
 
+            // ---------------- LAGER (inventory) ----------------
+            GoRoute(
+              path: "/lager",
+              builder: (context, state) => const LogisticsInventoryPage(),
+            ),
+
             // ---------------- INVOICES ----------------
             GoRoute(
               path: "/invoices",
@@ -356,7 +372,7 @@ class BookingApp extends StatelessWidget {
             // ---------------- CHAT ----------------
             GoRoute(
               path: "/chat",
-              builder: (context, state) => const ChatPage(),
+              builder: (context, state) => const MgmtMessagesPage(),
             ),
 
             // ---------------- ECONOMY ----------------
@@ -393,6 +409,12 @@ class BookingApp extends StatelessWidget {
             GoRoute(
               path: "/google-test",
               builder: (context, state) => const GoogleTestPage(),
+            ),
+
+            // ---------------- PLATFORM ADMIN ----------------
+            GoRoute(
+              path: "/admin",
+              builder: (context, state) => const AdminPage(),
             ),
           ],
         ),
@@ -438,6 +460,10 @@ class BookingApp extends StatelessWidget {
               builder: (_, __) => const MgmtMessagesPage(),
             ),
             GoRoute(
+              path: '/m/lager',
+              builder: (_, __) => const MgmtInventoryPage(),
+            ),
+            GoRoute(
               path: '/m/settings',
               builder: (_, __) => const MgmtSettingsPage(),
             ),
@@ -463,6 +489,7 @@ class BookingApp extends StatelessWidget {
               path: '/m/offers/:id',
               builder: (_, s) => GigOfferPage(
                 offerId: s.pathParameters['id']!,
+                autoApprove: s.uri.queryParameters['approve'] == '1',
               ),
             ),
             GoRoute(
@@ -545,18 +572,28 @@ class BookingApp extends StatelessWidget {
       ],
     );
 
-    return MaterialApp.router(
-      debugShowCheckedModeBanner: false,
-      title: "TourFlow",
-      theme: CssTheme.theme(),
-      routerConfig: router,
-      locale: const Locale('en', 'GB'),
-      supportedLocales: const [Locale('en', 'GB')],
-      localizationsDelegates: const [
-        GlobalMaterialLocalizations.delegate,
-        GlobalWidgetsLocalizations.delegate,
-        GlobalCupertinoLocalizations.delegate,
-      ],
+    return ValueListenableBuilder<Locale>(
+      valueListenable: appLocale,
+      builder: (_, locale, __) => MaterialApp.router(
+        debugShowCheckedModeBanner: false,
+        title: "TourFlow",
+        theme: CssTheme.theme(),
+        routerConfig: router,
+        locale: locale,
+        supportedLocales: const [
+          Locale('en'),
+          Locale('nb'), // Norwegian Bokmål (Material)
+          Locale('no'), // Norwegian (our custom strings)
+          Locale('sv'),
+          Locale('de'),
+          Locale('da'),
+        ],
+        localizationsDelegates: const [
+          GlobalMaterialLocalizations.delegate,
+          GlobalWidgetsLocalizations.delegate,
+          GlobalCupertinoLocalizations.delegate,
+        ],
+      ),
     );
   }
 }

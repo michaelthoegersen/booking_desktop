@@ -265,7 +265,7 @@ class OfferStorageService {
     'status': offer.status,
 
     'bus_count': offer.busCount,
-    'bus_type': offer.busType.name,
+    'bus_type': offer.busType,
 
     'payload': jsonMap,
     'offer_json': jsonString,
@@ -314,7 +314,7 @@ class OfferStorageService {
     'production': offer.production,
 
     'busCount': offer.busCount,
-    'busType': offer.busType.name,
+    'busType': offer.busType,
     'bus': offer.bus,
     'globalBusSlots': offer.globalBusSlots,
     'pricingModel': offer.pricingModel,
@@ -369,9 +369,7 @@ class OfferStorageService {
 
   busCount: (data['busCount'] ?? 1) as int,
 
-  busType: _busTypeFromName(
-    (data['busType'] ?? 'sleeper12') as String,
-  ),
+  busType: (data['busType'] ?? '12-sleeper') as String,
 
   bus: data['bus'] as String?,
    pricingOverride: data['pricingOverride'] != null
@@ -465,12 +463,6 @@ if (r['ferryPerLeg'] != null) {
   return draft;
 }
 
-  static BusType _busTypeFromName(String name) {
-    for (final t in BusType.values) {
-      if (t.name == name) return t;
-    }
-    return BusType.sleeper12;
-  }
   // ============================================================
 // SAVE TO SAMLETDATA (Calendar)
 // ============================================================
@@ -512,7 +504,7 @@ static Future<void> saveToSamletData({
   }
 }
 static String _buildKjoretoy(OfferDraft offer) {
-  var type = offer.busType.label;
+  var type = offer.busType;
 
   if (offer.rounds.any((r) => r.trailer)) {
     type += " + trailer";

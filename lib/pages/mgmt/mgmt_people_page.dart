@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../state/active_company.dart';
+import '../../widgets/contact_profile_dialog.dart';
 
 class MgmtPeoplePage extends StatefulWidget {
   const MgmtPeoplePage({super.key});
@@ -104,15 +105,26 @@ class _MgmtPeoplePageState extends State<MgmtPeoplePage> {
                               as Map<String, dynamic>?;
                           final tourName = tour?['name'] as String? ?? '';
 
+                          final userId = person['user_id'] as String?;
                           return Container(
                             margin: const EdgeInsets.only(bottom: 8),
-                            padding: const EdgeInsets.all(14),
                             decoration: BoxDecoration(
                               color: cs.surfaceContainerLowest,
                               borderRadius: BorderRadius.circular(14),
                               border: Border.all(color: cs.outlineVariant),
                             ),
-                            child: Row(
+                            child: InkWell(
+                              borderRadius: BorderRadius.circular(14),
+                              onTap: userId == null
+                                  ? null
+                                  : () => ContactProfileDialog.show(
+                                        context,
+                                        contactId: userId,
+                                        contactName: name,
+                                      ),
+                              child: Padding(
+                                padding: const EdgeInsets.all(14),
+                                child: Row(
                               children: [
                                 CircleAvatar(
                                   backgroundColor: Colors.black,
@@ -158,6 +170,8 @@ class _MgmtPeoplePageState extends State<MgmtPeoplePage> {
                                   ),
                                 ),
                               ],
+                                ),
+                              ),
                             ),
                           );
                         },

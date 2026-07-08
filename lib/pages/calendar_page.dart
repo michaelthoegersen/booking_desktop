@@ -8,6 +8,7 @@ import 'dart:async';
 import 'dart:math';
 import 'package:flutter/gestures.dart';
 
+import '../localization/s.dart';
 import '../services/offer_storage_service.dart';
 import '../services/notification_service.dart';
 import '../services/email_service.dart';
@@ -511,7 +512,7 @@ Widget build(BuildContext context) {
     children: [
 
       Text(
-        "Calendar",
+        S.t('calendar'),
         style: Theme.of(context).textTheme.headlineSmall?.copyWith(
               fontWeight: FontWeight.w900,
             ),
@@ -533,7 +534,7 @@ Widget build(BuildContext context) {
 FilledButton.icon(
   onPressed: _openManualBlockDialog,
   icon: const Icon(Icons.add),
-  label: const Text("Block"),
+  label: Text(S.t('block')),
 ),
 
 const SizedBox(width: 8),
@@ -542,7 +543,7 @@ const SizedBox(width: 8),
 OutlinedButton.icon(
   onPressed: _openExportDialog,
   icon: const Icon(Icons.picture_as_pdf, size: 18),
-  label: const Text("Export"),
+  label: Text(S.t('export')),
 ),
 
 const SizedBox(width: 12),
@@ -562,14 +563,14 @@ IconButton(
 const SizedBox(width: 8),
 
       SegmentedButton<bool>(
-        segments: const [
+        segments: [
           ButtonSegment(
             value: false,
-            label: Text("Week"),
+            label: Text(S.t('week')),
           ),
           ButtonSegment(
             value: true,
-            label: Text("Month"),
+            label: Text(S.t('monthView')),
           ),
         ],
 
@@ -1134,6 +1135,8 @@ List<Widget> buildSegments(
   // 5️⃣ BUILD UI
   // =====================================================
 
+  // Track placed chunks so they aren't matched twice
+  final Set<int> placedChunkIdx = {};
   int i = 0;
 
   while (i < days.length) {
@@ -1142,14 +1145,18 @@ List<Widget> buildSegments(
         DateTime.utc(days[i].year, days[i].month, days[i].day);
 
     List<Map<String, dynamic>>? chunk;
+    int foundIdx = -1;
 
-    for (final c in chunks) {
+    for (int ci = 0; ci < chunks.length; ci++) {
+      if (placedChunkIdx.contains(ci)) continue;
+      final c = chunks[ci];
 
       final start = parseUtcDay(c.first['dato']);
       final end   = parseUtcDay(c.last['dato']);
 
       if (!day.isBefore(start) && !day.isAfter(end)) {
         chunk = c;
+        foundIdx = ci;
         break;
       }
     }
@@ -1159,6 +1166,8 @@ List<Widget> buildSegments(
       i++;
       continue;
     }
+
+    placedChunkIdx.add(foundIdx);
 
     final chunkStart = parseUtcDay(chunk.first['dato']);
     final chunkEnd   = parseUtcDay(chunk.last['dato']);
@@ -1181,6 +1190,41 @@ List<Widget> buildSegments(
       i++;
       continue;
     }
+
+    // Detect shared boundary days with chunks from DIFFERENT bookings.
+    // Both jobs share the day — each gets half the column width.
+    final thisDraft = chunk.first['draft_id']?.toString() ?? '';
+    double shrink = 0;
+
+    // sharedEnd: another booking starts on this chunk's last visible day
+    for (int ci = 0; ci < chunks.length; ci++) {
+      if (ci == foundIdx) continue;
+      final c = chunks[ci];
+      if ((c.first['draft_id']?.toString() ?? '') == thisDraft) continue;
+      final otherStart = parseUtcDay(c.first['dato']);
+      if (otherStart.year == visibleEnd.year &&
+          otherStart.month == visibleEnd.month &&
+          otherStart.day == visibleEnd.day) {
+        shrink += 0.5;
+        break;
+      }
+    }
+
+    // sharedStart: another booking ends on this chunk's first visible day
+    for (int ci = 0; ci < chunks.length; ci++) {
+      if (ci == foundIdx) continue;
+      final c = chunks[ci];
+      if ((c.first['draft_id']?.toString() ?? '') == thisDraft) continue;
+      final otherEnd = parseUtcDay(c.last['dato']);
+      if (otherEnd.year == visibleStart.year &&
+          otherEnd.month == visibleStart.month &&
+          otherEnd.day == visibleStart.day) {
+        shrink += 0.5;
+        break;
+      }
+    }
+
+    final double totalWidth = dayWidth * visibleCount - dayWidth * shrink;
 
     final first = chunk.first;
     final isManual = first['manual_block'] == true;
@@ -1223,6 +1267,7 @@ List<Widget> buildSegments(
         to: chunkEnd,
         status: first['status'],
         width: dayWidth,
+        widthOverride: shrink > 0 ? totalWidth : null,
         draftId: first['draft_id'].toString(),
         noDriver: noDriver,
         noDDrive: noDDrive,
@@ -1270,11 +1315,16 @@ List<Widget> buildSegments(
 
     // Overlap: date_from <= periodEnd AND date_to >= periodStart
     // Also include entries with null dates (manually added without dates).
-    final res = await supabase
+    var wlQuery = supabase
         .from('waiting_list')
         .select()
         .or('date_from.is.null,date_from.lte.$peStr')
-        .or('date_to.is.null,date_to.gte.$psStr')
+        .or('date_to.is.null,date_to.gte.$psStr');
+    final wlCid = activeCompanyNotifier.value?.id;
+    if (wlCid != null) {
+      wlQuery = wlQuery.eq('owner_company_id', wlCid);
+    }
+    final res = await wlQuery
         .order('date_from', ascending: true, nullsFirst: true);
 
     if (mounted) {
@@ -1403,7 +1453,7 @@ List<Widget> buildSegments(
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Could not prepare tour schedule: $e'),
+          content: Text('${S.t('couldNotPrepareTourSchedule')}: $e'),
           backgroundColor: Colors.red,
         ),
       );
@@ -1417,16 +1467,16 @@ List<Widget> buildSegments(
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text("Remove from waiting list?"),
+        title: Text(S.t('removeFromWaitingList')),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: const Text("Cancel"),
+            child: Text(S.t('cancel')),
           ),
           FilledButton(
             style: FilledButton.styleFrom(backgroundColor: Colors.red),
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text("Remove"),
+            child: Text(S.t('delete')),
           ),
         ],
       ),
@@ -1480,7 +1530,7 @@ List<Widget> buildSegments(
                   const SizedBox(width: 8),
 
                   Text(
-                    "Waiting List",
+                    S.t('waitingList'),
                     style: Theme.of(context)
                         .textTheme
                         .titleMedium
@@ -1511,7 +1561,7 @@ List<Widget> buildSegments(
 
                   IconButton(
                     icon: const Icon(Icons.refresh, size: 18),
-                    tooltip: "Refresh waiting list",
+                    tooltip: S.t('refreshWaitingList'),
                     onPressed: _loadWaitingList,
                   ),
                 ],
@@ -1525,7 +1575,7 @@ List<Widget> buildSegments(
               child: _waitingList.isEmpty
                   ? Center(
                       child: Text(
-                        "No jobs in waiting list",
+                        S.t('noJobsInWaitingList'),
                         style: TextStyle(color: cs.onSurfaceVariant),
                       ),
                     )
@@ -1570,7 +1620,7 @@ List<Widget> buildSegments(
                                 onPressed: () =>
                                     _sendWaitingListInfo(item),
                                 icon: const Icon(Icons.send, size: 16),
-                                label: const Text("Send info"),
+                                label: Text(S.t('sendInfo')),
                               ),
                               const SizedBox(width: 8),
                               OutlinedButton.icon(
@@ -1578,14 +1628,14 @@ List<Widget> buildSegments(
                                     _openAssignToBusDialog(item),
                                 icon: const Icon(Icons.directions_bus,
                                     size: 16),
-                                label: const Text("Assign to bus"),
+                                label: Text(S.t('assignToBus')),
                               ),
                               const SizedBox(width: 8),
                               IconButton(
                                 icon: const Icon(Icons.delete_outline,
                                     size: 18),
                                 color: cs.error,
-                                tooltip: "Remove from waiting list",
+                                tooltip: S.t('removeFromWaitingList'),
                                 onPressed: () => _deleteWaitingListItem(item),
                               ),
                             ],
@@ -1654,6 +1704,7 @@ class BookingSegment extends StatelessWidget {
   final DateTime to;
   final String? status;
   final double width;
+  final double? widthOverride;
   final String draftId;
   final bool noDriver;
   final bool noDDrive;
@@ -1673,6 +1724,7 @@ class BookingSegment extends StatelessWidget {
     required this.to,
     this.status,
     required this.width,
+    this.widthOverride,
     required this.draftId,
     this.noDriver = false,
     this.noDDrive = false,
@@ -1683,6 +1735,8 @@ class BookingSegment extends StatelessWidget {
     this.manualBuses = const [],
     this.pris,
   });
+
+  double get effectiveWidth => widthOverride ?? (width * span);
 
   // ============================================================
   // BODY (CLICK + DOUBLE CLICK)
@@ -1733,15 +1787,15 @@ class BookingSegment extends StatelessWidget {
           details.globalPosition.dx,
           details.globalPosition.dy,
         ),
-        items: const [
+        items: [
 
           PopupMenuItem(
             value: 'Draft',
             child: Row(
               children: [
-                _StatusDot(color: Colors.purple),
-                SizedBox(width: 8),
-                Text('Draft'),
+                const _StatusDot(color: Colors.purple),
+                const SizedBox(width: 8),
+                Text(S.t('draft')),
               ],
             ),
           ),
@@ -1750,9 +1804,9 @@ class BookingSegment extends StatelessWidget {
             value: 'Inquiry',
             child: Row(
               children: [
-                _StatusDot(color: Colors.orange),
-                SizedBox(width: 8),
-                Text('Inquiry'),
+                const _StatusDot(color: Colors.orange),
+                const SizedBox(width: 8),
+                Text(S.t('inquiry')),
               ],
             ),
           ),
@@ -1761,9 +1815,9 @@ class BookingSegment extends StatelessWidget {
             value: 'Confirmed',
             child: Row(
               children: [
-                _StatusDot(color: Colors.green),
-                SizedBox(width: 8),
-                Text('Confirmed'),
+                const _StatusDot(color: Colors.green),
+                const SizedBox(width: 8),
+                Text(S.t('confirmed')),
               ],
             ),
           ),
@@ -1772,9 +1826,9 @@ class BookingSegment extends StatelessWidget {
             value: 'Invoiced',
             child: Row(
               children: [
-                _StatusDot(color: Colors.blue),
-                SizedBox(width: 8),
-                Text('Invoiced'),
+                const _StatusDot(color: Colors.blue),
+                const SizedBox(width: 8),
+                Text(S.t('invoiced')),
               ],
             ),
           ),
@@ -1860,8 +1914,8 @@ class BookingSegment extends StatelessWidget {
                 Expanded(
                   child: Text(
                     [
-                      if (noDriver) 'No driver',
-                      if (noDDrive) 'No D.Drive: ${missingDDriveDates.join(', ')}',
+                      if (noDriver) S.t('noDriver'),
+                      if (noDDrive) '${S.t('dDrive')}: ${missingDDriveDates.join(', ')}',
                     ].join(' · '),
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
@@ -1887,7 +1941,7 @@ class BookingSegment extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return SizedBox(
-      width: width * span,
+      width: effectiveWidth,
       child: Draggable<DragBookingData>(
         data: DragBookingData(
           production: title,
@@ -1900,7 +1954,7 @@ class BookingSegment extends StatelessWidget {
         feedback: Material(
           color: Colors.transparent,
           child: Container(
-            width: width * span,
+            width: effectiveWidth,
             padding: const EdgeInsets.all(6),
             decoration: BoxDecoration(
               color: statusColor(status).withOpacity(0.9),
@@ -1970,22 +2024,22 @@ class _QuickVenueDialogState extends State<_QuickVenueDialog> {
       setState(() => _saving = false);
       if (!mounted) return;
       ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('Error: $e')));
+          .showSnackBar(SnackBar(content: Text('${S.t('error')}: $e')));
     }
   }
 
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: const Text('Edit venue'),
+      title: Text(S.t('editVenue')),
       content: SizedBox(
         width: 340,
         child: TextField(
           controller: _ctrl,
           autofocus: true,
-          decoration: const InputDecoration(
-            labelText: 'Venue',
-            border: OutlineInputBorder(),
+          decoration: InputDecoration(
+            labelText: S.t('venue'),
+            border: const OutlineInputBorder(),
           ),
           onSubmitted: (_) => _save(),
         ),
@@ -1993,7 +2047,7 @@ class _QuickVenueDialogState extends State<_QuickVenueDialog> {
       actions: [
         TextButton(
           onPressed: _saving ? null : () => Navigator.pop(context, false),
-          child: const Text('Cancel'),
+          child: Text(S.t('cancel')),
         ),
         FilledButton(
           onPressed: _saving ? null : _save,
@@ -2003,7 +2057,7 @@ class _QuickVenueDialogState extends State<_QuickVenueDialog> {
                   height: 18,
                   child: CircularProgressIndicator(strokeWidth: 2),
                 )
-              : const Text('Save'),
+              : Text(S.t('save')),
         ),
       ],
     );
@@ -2351,7 +2405,7 @@ Future<void> load() async {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Could not prepare summary: $e'),
+          content: Text('${S.t('couldNotPrepareSummary')}: $e'),
           backgroundColor: Colors.red,
         ),
       );
@@ -2439,7 +2493,7 @@ Future<void> load() async {
         await EmailService.sendFerryBookingEmail(offer: draft);
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Ferry booking email sent ✅')),
+            SnackBar(content: Text(S.t('ferryBookingEmailSent'))),
           );
         }
       } catch (e) {
@@ -2447,7 +2501,7 @@ Future<void> load() async {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text('Ferry email failed: $e'),
+              content: Text('${S.t('error')}: $e'),
               backgroundColor: Colors.orange,
             ),
           );
@@ -2463,14 +2517,27 @@ Future<void> load() async {
         newSjafor.isNotEmpty && newSjafor != (oldSjafor ?? '');
 
     if (driverChanged) {
-      final isFirstAssignment = oldSjafor == null || oldSjafor.isEmpty;
+      // Strip +trailer from production name for cleaner notifications
+      final cleanProd = widget.production.replaceAll(RegExp(r'\s*\+\s*trailer', caseSensitive: false), '').trim();
+
+      final noTitles = ['🚍 Tut tut! Ny tur!', '🚌 Beep beep — ny jobb!', '🛞 Rattet kaller!', '🚍 Veien venter!', '🚌💨 Ny tur i sikte!', '🗺️ Pakk kofferten — ny tur!', '🚍 La hjulene rulle!', '🛣️ Neste stopp: ny jobb!'];
+      final enTitles = ['🚍 Beep beep! New tour!', '🚌 Honk honk — new job!', '🛞 The wheel is calling!', '🚍 The road awaits!', '🚌💨 New tour ahead!', '🗺️ Pack your bags — new tour!', '🚍 Let the wheels roll!', '🛣️ Next stop: new job!'];
+      final svTitles = ['🚍 Tut tut! Ny tur!', '🚌 Beep beep — nytt jobb!', '🛞 Ratten kallar!', '🚍 Vägen väntar!', '🚌💨 Ny tur i sikte!', '🗺️ Packa väskan — ny tur!', '🚍 Låt hjulen rulla!', '🛣️ Nästa stopp: nytt jobb!'];
+      final i = DateTime.now().microsecond % noTitles.length;
+
+      final bodyText = cleanProd.isNotEmpty ? cleanProd : null;
+
       await NotificationService.sendToDriver(
         driverName: newSjafor,
-        title: 'Booking: ${widget.production}',
-        body: isFirstAssignment
-            ? 'You have been assigned as driver for this tour.'
-            : 'Your driver assignment has been updated.',
+        title: noTitles[i],
+        body: bodyText ?? 'Sjekk TourFlow for detaljer',
         draftId: draftId,
+        titlesByLang: {'no': noTitles[i], 'en': enTitles[i], 'sv': svTitles[i]},
+        bodiesByLang: {
+          'no': bodyText ?? 'Sjekk TourFlow for detaljer',
+          'en': bodyText ?? 'Check TourFlow for details',
+          'sv': bodyText ?? 'Kolla TourFlow för detaljer',
+        },
       );
     }
 
@@ -2538,7 +2605,7 @@ Future<void> load() async {
     return AlertDialog(
 
       title: Text(
-        "Edit ${widget.production}\n"
+        "${S.t('edit')} ${widget.production}\n"
         "${fmt(widget.from)} - ${fmt(widget.to)}",
       ),
 
@@ -2551,15 +2618,15 @@ Future<void> load() async {
                 child: CircularProgressIndicator(),
               )
             : rows.isEmpty
-                ? const Center(child: Text("No calendar data found."))
+                ? Center(child: Text(S.t('noCalendarData')))
                 : SingleChildScrollView(
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
 
                   children: [
 
-                    if (widget.isManual) _field("Sum (kr)", prisCtrl),
-                    _field("Driver", sjaforCtrl),
+                    if (widget.isManual) _field(S.t('sumKr'), prisCtrl),
+                    _field(S.t('driver'), sjaforCtrl),
                     ValueListenableBuilder<TextEditingValue>(
                       valueListenable: sjaforCtrl,
                       builder: (_, value, __) {
@@ -2574,7 +2641,7 @@ Future<void> load() async {
                                   size: 16, color: Colors.orange.shade700),
                               const SizedBox(width: 4),
                               Text(
-                                "No driver allocated",
+                                S.t('noDriverAllocated'),
                                 style: TextStyle(
                                   color: Colors.orange.shade700,
                                   fontSize: 12,
@@ -2585,7 +2652,7 @@ Future<void> load() async {
                         );
                       },
                     ),
-                    _field("Status", statusCtrl),
+                    _field(S.t('status'), statusCtrl),
 
                     const SizedBox(height: 16),
                     const Divider(),
@@ -2595,7 +2662,7 @@ Future<void> load() async {
                     Align(
                       alignment: Alignment.centerLeft,
                       child: Text(
-                        "Contact person",
+                        S.t('contactPerson'),
                         style: TextStyle(
                           fontWeight: FontWeight.w600,
                           fontSize: 13,
@@ -2604,9 +2671,9 @@ Future<void> load() async {
                       ),
                     ),
                     const SizedBox(height: 8),
-                    _field("Name", contactNameCtrl),
-                    _field("Email", contactEmailCtrl),
-                    _field("Phone", contactPhoneCtrl),
+                    _field(S.t('name'), contactNameCtrl),
+                    _field(S.t('email'), contactEmailCtrl),
+                    _field(S.t('phone'), contactPhoneCtrl),
 
                     const SizedBox(height: 8),
                     const Divider(),
@@ -2693,10 +2760,10 @@ Future<void> load() async {
 
 
                     _dDriveField(),
-                    _multiDayField("Itinerary", itinCtrls),
-                    _dayField("Venue", venueCtrls),
-                    _multiDayField("Address", addrCtrls),
-                    _multiDayField("Comment", commentCtrls),
+                    _multiDayField(S.t('itinerary'), itinCtrls),
+                    _dayField(S.t('venue'), venueCtrls),
+                    _multiDayField(S.t('address'), addrCtrls),
+                    _multiDayField(S.t('comment'), commentCtrls),
 
                     // ── Attachments for active day ──
                     if (rows.isNotEmpty) ...[
@@ -2711,7 +2778,7 @@ Future<void> load() async {
                           children: [
                             const Divider(),
                             const SizedBox(height: 4),
-                            Text("Vedlegg",
+                            Text(S.t('attachments'),
                                 style: TextStyle(
                                     fontWeight: FontWeight.w600,
                                     fontSize: 13,
@@ -2772,22 +2839,22 @@ Future<void> load() async {
   if (widget.isManual)
     TextButton.icon(
       icon: const Icon(Icons.delete, color: Colors.red),
-      label: const Text("Delete", style: TextStyle(color: Colors.red)),
+      label: Text(S.t('delete'), style: const TextStyle(color: Colors.red)),
       onPressed: saving ? null : () async {
         final ok = await showDialog<bool>(
           context: context,
           builder: (_) => AlertDialog(
-            title: const Text("Delete block?"),
-            content: const Text("This will permanently remove this manual block."),
+            title: Text(S.t('deleteBlock')),
+            content: Text(S.t('deleteBlockDesc')),
             actions: [
               TextButton(
                 onPressed: () => Navigator.pop(context, false),
-                child: const Text("Cancel"),
+                child: Text(S.t('cancel')),
               ),
               FilledButton(
                 style: FilledButton.styleFrom(backgroundColor: Colors.red),
                 onPressed: () => Navigator.pop(context, true),
-                child: const Text("Delete"),
+                child: Text(S.t('delete')),
               ),
             ],
           ),
@@ -2807,7 +2874,7 @@ Future<void> load() async {
 
   OutlinedButton.icon(
     icon: const Icon(Icons.attach_file, size: 18),
-    label: const Text("Vedlegg"),
+    label: Text(S.t('attachments')),
     onPressed: rows.isEmpty
         ? null
         : () async {
@@ -2840,7 +2907,7 @@ Future<void> load() async {
                 debugPrint('❌ Vedlegg-feil: $e');
                 if (mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('Feil ved opplasting av ${file.name}: $e')),
+                    SnackBar(content: Text('${S.t('error')}: ${file.name} – $e')),
                   );
                 }
               }
@@ -2855,7 +2922,7 @@ Future<void> load() async {
 
   OutlinedButton.icon(
     icon: const Icon(Icons.copy),
-    label: const Text("Copy to"),
+    label: Text(S.t('copyTo')),
     onPressed: () async {
 
       final buses = getVehicleConfig().all;
@@ -2863,7 +2930,7 @@ Future<void> load() async {
       final target = await showDialog<String>(
         context: context,
         builder: (_) => SimpleDialog(
-          title: const Text("Copy to bus"),
+          title: Text(S.t('copyToBus')),
           children: buses
               .where((b) => b != widget.bus) // ikke samme buss
               .map((b) => SimpleDialogOption(
@@ -2882,13 +2949,13 @@ Future<void> load() async {
 
   TextButton(
     onPressed: saving ? null : () => Navigator.pop(context),
-    child: const Text("Cancel"),
+    child: Text(S.t('cancel')),
   ),
 
   FilledButton.icon(
     onPressed: saving || loading ? null : _sendRoundSummary,
     icon: const Icon(Icons.send, size: 16),
-    label: const Text("Send PDF"),
+    label: Text(S.t('sendPdf')),
     style: FilledButton.styleFrom(
       backgroundColor: Colors.teal,
     ),
@@ -2902,7 +2969,7 @@ Future<void> load() async {
             height: 20,
             child: CircularProgressIndicator(strokeWidth: 2),
           )
-        : const Text("Save"),
+        : Text(S.t('save')),
   ),
 ]
     );
@@ -2943,12 +3010,12 @@ Future<void> load() async {
     if (kmVal <= SettingsStore.current.dDriveKmThreshold || excepted) return const SizedBox.shrink();
     final id = row['id'].toString();
     final ctrl = dDriveCtrls[id];
-    if (ctrl == null) return _dayField("D.Drive", dDriveCtrls);
+    if (ctrl == null) return _dayField(S.t('dDrive'), dDriveCtrls);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
       children: [
-        _dayField("D.Drive", dDriveCtrls),
+        _dayField(S.t('dDrive'), dDriveCtrls),
         ValueListenableBuilder<TextEditingValue>(
           valueListenable: ctrl,
           builder: (_, value, __) {
@@ -2961,7 +3028,7 @@ Future<void> load() async {
                       size: 16, color: Colors.orange.shade700),
                   const SizedBox(width: 4),
                   Text(
-                    "No driver allocated",
+                    S.t('noDriverAllocated'),
                     style: TextStyle(
                       color: Colors.orange.shade700,
                       fontSize: 12,
@@ -3291,7 +3358,7 @@ class _StatusDatePickerDialogState
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: const Text("Select dates"),
+      title: Text(S.t('selectDates')),
 
       content: SizedBox(
         width: 420,
@@ -3325,12 +3392,12 @@ class _StatusDatePickerDialogState
 
         TextButton(
           onPressed: () => Navigator.pop(context),
-          child: const Text("Cancel"),
+          child: Text(S.t('cancel')),
         ),
 
         FilledButton(
           onPressed: _apply,
-          child: const Text("Apply"),
+          child: Text(S.t('apply')),
         ),
       ],
     );
@@ -3465,15 +3532,13 @@ class _ManualBlockDialogState
     final ok = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
-        title: const Text("Delete block?"),
-        content: const Text(
-          "This will permanently remove this manual block.\n\nAre you sure?",
-        ),
+        title: Text(S.t('deleteBlock')),
+        content: Text(S.t('deleteBlockDesc')),
         actions: [
 
           TextButton(
             onPressed: () => Navigator.pop(context, false),
-            child: const Text("Cancel"),
+            child: Text(S.t('cancel')),
           ),
 
           FilledButton(
@@ -3481,7 +3546,7 @@ class _ManualBlockDialogState
               backgroundColor: Colors.red,
             ),
             onPressed: () => Navigator.pop(context, true),
-            child: const Text("Delete"),
+            child: Text(S.t('delete')),
           ),
         ],
       ),
@@ -3584,7 +3649,7 @@ class _ManualBlockDialogState
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: Text(isEdit ? "Edit block" : "Add block"),
+      title: Text(isEdit ? S.t('editBlock') : S.t('addBlock')),
 
       content: SizedBox(
         width: 420,
@@ -3598,9 +3663,9 @@ class _ManualBlockDialogState
             DropdownButtonFormField<String>(
               value: bus,
 
-              decoration: const InputDecoration(
-                labelText: "Bus",
-                border: OutlineInputBorder(),
+              decoration: InputDecoration(
+                labelText: S.t('bus'),
+                border: const OutlineInputBorder(),
               ),
 
               items: widget.buses
@@ -3623,11 +3688,11 @@ class _ManualBlockDialogState
               readOnly: true,
               onTap: _pickFrom,
 
-              decoration: const InputDecoration(
-                labelText: "From",
-                border: OutlineInputBorder(),
+              decoration: InputDecoration(
+                labelText: S.t('dateFrom'),
+                border: const OutlineInputBorder(),
                 hintText: 'dd.MM.yyyy',
-                suffixIcon: Icon(Icons.calendar_today, size: 18),
+                suffixIcon: const Icon(Icons.calendar_today, size: 18),
               ),
             ),
 
@@ -3639,11 +3704,11 @@ class _ManualBlockDialogState
               readOnly: true,
               onTap: _pickTo,
 
-              decoration: const InputDecoration(
-                labelText: "To",
-                border: OutlineInputBorder(),
+              decoration: InputDecoration(
+                labelText: S.t('dateTo'),
+                border: const OutlineInputBorder(),
                 hintText: 'dd.MM.yyyy',
-                suffixIcon: Icon(Icons.calendar_today, size: 18),
+                suffixIcon: const Icon(Icons.calendar_today, size: 18),
               ),
             ),
 
@@ -3654,9 +3719,9 @@ class _ManualBlockDialogState
               controller: noteCtrl,
               maxLines: 2,
 
-              decoration: const InputDecoration(
-                labelText: "Produksjon",
-                border: OutlineInputBorder(),
+              decoration: InputDecoration(
+                labelText: S.t('production'),
+                border: const OutlineInputBorder(),
               ),
             ),
 
@@ -3667,10 +3732,10 @@ class _ManualBlockDialogState
               controller: prisCtrl,
               keyboardType: const TextInputType.numberWithOptions(decimal: true),
 
-              decoration: const InputDecoration(
-                labelText: "Sum (kr)",
-                border: OutlineInputBorder(),
-                hintText: "Optional — shows in Economy",
+              decoration: InputDecoration(
+                labelText: S.t('sumKr'),
+                border: const OutlineInputBorder(),
+                hintText: S.t('optionalShowsInEconomy'),
               ),
             ),
           ],
@@ -3684,9 +3749,9 @@ class _ManualBlockDialogState
           TextButton.icon(
             onPressed: saving ? null : _delete,
             icon: const Icon(Icons.delete, color: Colors.red),
-            label: const Text(
-              "Delete",
-              style: TextStyle(color: Colors.red),
+            label: Text(
+              S.t('delete'),
+              style: const TextStyle(color: Colors.red),
             ),
           ),
 
@@ -3695,7 +3760,7 @@ class _ManualBlockDialogState
         // CANCEL
         TextButton(
           onPressed: () => Navigator.pop(context),
-          child: const Text("Cancel"),
+          child: Text(S.t('cancel')),
         ),
 
         // SAVE
@@ -3708,7 +3773,7 @@ class _ManualBlockDialogState
                   height: 18,
                   child: CircularProgressIndicator(strokeWidth: 2),
                 )
-              : const Text("Save"),
+              : Text(S.t('save')),
         ),
       ],
     );
@@ -3785,6 +3850,7 @@ class _WaitingListAddDialogState extends State<_WaitingListAddDialog> {
         'notes': _notesCtrl.text.trim().isEmpty
             ? null
             : _notesCtrl.text.trim(),
+        'owner_company_id': activeCompanyNotifier.value?.id,
       });
       if (mounted) Navigator.pop(context, true);
     } finally {
@@ -3795,7 +3861,7 @@ class _WaitingListAddDialogState extends State<_WaitingListAddDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: const Text("Add to waiting list"),
+      title: Text(S.t('addToWaitingList')),
       content: SizedBox(
         width: 420,
         child: SingleChildScrollView(
@@ -3806,9 +3872,9 @@ class _WaitingListAddDialogState extends State<_WaitingListAddDialog> {
               // Production
               TextField(
                 controller: _productionCtrl,
-                decoration: const InputDecoration(
-                  labelText: "Production *",
-                  border: OutlineInputBorder(),
+                decoration: InputDecoration(
+                  labelText: '${S.t('production')} *',
+                  border: const OutlineInputBorder(),
                 ),
               ),
 
@@ -3817,9 +3883,9 @@ class _WaitingListAddDialogState extends State<_WaitingListAddDialog> {
               // Company
               TextField(
                 controller: _companyCtrl,
-                decoration: const InputDecoration(
-                  labelText: "Company",
-                  border: OutlineInputBorder(),
+                decoration: InputDecoration(
+                  labelText: S.t('company'),
+                  border: const OutlineInputBorder(),
                 ),
               ),
 
@@ -3828,9 +3894,9 @@ class _WaitingListAddDialogState extends State<_WaitingListAddDialog> {
               // Contact
               TextField(
                 controller: _contactCtrl,
-                decoration: const InputDecoration(
-                  labelText: "Contact",
-                  border: OutlineInputBorder(),
+                decoration: InputDecoration(
+                  labelText: S.t('contact'),
+                  border: const OutlineInputBorder(),
                 ),
               ),
 
@@ -3841,10 +3907,10 @@ class _WaitingListAddDialogState extends State<_WaitingListAddDialog> {
                 readOnly: true,
                 onTap: _pickFrom,
                 decoration: InputDecoration(
-                  labelText: "Date from",
+                  labelText: S.t('dateFrom'),
                   border: const OutlineInputBorder(),
                   hintText: _from == null
-                      ? 'Pick date'
+                      ? S.t('pickDate')
                       : DateFormat('dd.MM.yyyy').format(_from!),
                   suffixIcon: const Icon(Icons.calendar_today, size: 16),
                 ),
@@ -3857,10 +3923,10 @@ class _WaitingListAddDialogState extends State<_WaitingListAddDialog> {
                 readOnly: true,
                 onTap: _pickTo,
                 decoration: InputDecoration(
-                  labelText: "Date to",
+                  labelText: S.t('dateTo'),
                   border: const OutlineInputBorder(),
                   hintText: _to == null
-                      ? 'Pick date'
+                      ? S.t('pickDate')
                       : DateFormat('dd.MM.yyyy').format(_to!),
                   suffixIcon: const Icon(Icons.calendar_today, size: 16),
                 ),
@@ -3872,9 +3938,9 @@ class _WaitingListAddDialogState extends State<_WaitingListAddDialog> {
               TextField(
                 controller: _notesCtrl,
                 maxLines: 2,
-                decoration: const InputDecoration(
-                  labelText: "Notes",
-                  border: OutlineInputBorder(),
+                decoration: InputDecoration(
+                  labelText: S.t('notes'),
+                  border: const OutlineInputBorder(),
                 ),
               ),
             ],
@@ -3884,7 +3950,7 @@ class _WaitingListAddDialogState extends State<_WaitingListAddDialog> {
       actions: [
         TextButton(
           onPressed: () => Navigator.pop(context),
-          child: const Text("Cancel"),
+          child: Text(S.t('cancel')),
         ),
         FilledButton(
           onPressed: _saving ? null : _save,
@@ -3894,7 +3960,7 @@ class _WaitingListAddDialogState extends State<_WaitingListAddDialog> {
                   height: 18,
                   child: CircularProgressIndicator(strokeWidth: 2),
                 )
-              : const Text("Add"),
+              : Text(S.t('add')),
         ),
       ],
     );
@@ -4042,7 +4108,7 @@ class _WaitingListAssignDialogState
   Widget build(BuildContext context) {
     return AlertDialog(
       title: Text(
-        'Assign "${widget.item['production'] ?? ''}" to bus',
+        '${S.t('assignToBus')}: ${widget.item['production'] ?? ''}',
       ),
       content: SizedBox(
         width: 400,
@@ -4053,9 +4119,9 @@ class _WaitingListAssignDialogState
             // Bus
             DropdownButtonFormField<String>(
               value: _bus,
-              decoration: const InputDecoration(
-                labelText: "Bus *",
-                border: OutlineInputBorder(),
+              decoration: InputDecoration(
+                labelText: '${S.t('bus')} *',
+                border: const OutlineInputBorder(),
               ),
               items: widget.buses
                   .map((b) => DropdownMenuItem(
@@ -4071,13 +4137,13 @@ class _WaitingListAssignDialogState
             // Status
             DropdownButtonFormField<String>(
               value: _status,
-              decoration: const InputDecoration(
-                labelText: "Status",
-                border: OutlineInputBorder(),
+              decoration: InputDecoration(
+                labelText: S.t('status'),
+                border: const OutlineInputBorder(),
               ),
-              items: const [
-                DropdownMenuItem(value: 'Inquiry', child: Text("Inquiry")),
-                DropdownMenuItem(value: 'Confirmed', child: Text("Confirmed")),
+              items: [
+                DropdownMenuItem(value: 'Inquiry', child: Text(S.t('inquiry'))),
+                DropdownMenuItem(value: 'Confirmed', child: Text(S.t('confirmed'))),
               ],
               onChanged: (v) => setState(() => _status = v ?? 'Inquiry'),
             ),
@@ -4089,10 +4155,10 @@ class _WaitingListAssignDialogState
               readOnly: true,
               onTap: _pickFrom,
               decoration: InputDecoration(
-                labelText: "From *",
+                labelText: '${S.t('from')} *',
                 border: const OutlineInputBorder(),
                 hintText: _from == null
-                    ? 'Pick date'
+                    ? S.t('pickDate')
                     : DateFormat('dd.MM.yyyy').format(_from!),
                 suffixIcon: const Icon(Icons.calendar_today, size: 16),
               ),
@@ -4105,10 +4171,10 @@ class _WaitingListAssignDialogState
               readOnly: true,
               onTap: _pickTo,
               decoration: InputDecoration(
-                labelText: "To *",
+                labelText: '${S.t('to')} *',
                 border: const OutlineInputBorder(),
                 hintText: _to == null
-                    ? 'Pick date'
+                    ? S.t('pickDate')
                     : DateFormat('dd.MM.yyyy').format(_to!),
                 suffixIcon: const Icon(Icons.calendar_today, size: 16),
               ),
@@ -4119,7 +4185,7 @@ class _WaitingListAssignDialogState
       actions: [
         TextButton(
           onPressed: () => Navigator.pop(context),
-          child: const Text("Cancel"),
+          child: Text(S.t('cancel')),
         ),
         FilledButton(
           onPressed: (_saving || _bus == null || _from == null || _to == null)
@@ -4131,7 +4197,7 @@ class _WaitingListAssignDialogState
                   height: 18,
                   child: CircularProgressIndicator(strokeWidth: 2),
                 )
-              : const Text("Assign"),
+              : Text(S.t('assign')),
         ),
       ],
     );
@@ -4284,14 +4350,15 @@ class _SendRoundSummaryDialogState extends State<_SendRoundSummaryDialog> {
         body: messageCtrl.text.trim(),
         attachmentBytes: widget.bytes,
         attachmentFilename: widget.filename,
+        companyId: activeCompanyNotifier.value?.id,
       );
 
       if (!mounted) return;
       Navigator.pop(context);
 
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Tour schedule sent!'),
+        SnackBar(
+          content: Text(S.t('tourScheduleSent')),
           backgroundColor: Colors.green,
         ),
       );
@@ -4300,7 +4367,7 @@ class _SendRoundSummaryDialogState extends State<_SendRoundSummaryDialog> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Send failed: $e'),
+          content: Text('${S.t('error')}: $e'),
           backgroundColor: Colors.red,
         ),
       );
@@ -4310,7 +4377,7 @@ class _SendRoundSummaryDialogState extends State<_SendRoundSummaryDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: const Text('Send tour schedule'),
+      title: Text(S.t('sendTourSchedule')),
       content: SizedBox(
         width: 480,
         child: Column(
@@ -4320,7 +4387,7 @@ class _SendRoundSummaryDialogState extends State<_SendRoundSummaryDialog> {
             // To field with chips inside + autocomplete
             InputDecorator(
               decoration: InputDecoration(
-                labelText: 'To',
+                labelText: S.t('to'),
                 border: const OutlineInputBorder(),
                 contentPadding: const EdgeInsets.fromLTRB(8, 8, 8, 8),
                 // Shrink label when there are chips or text
@@ -4356,11 +4423,11 @@ class _SendRoundSummaryDialogState extends State<_SendRoundSummaryDialog> {
                       child: TextField(
                         controller: emailInputCtrl,
                         focusNode: emailFocus,
-                        decoration: const InputDecoration(
-                          hintText: 'Name or email...',
+                        decoration: InputDecoration(
+                          hintText: S.t('nameOrEmail'),
                           border: InputBorder.none,
                           isDense: true,
-                          contentPadding: EdgeInsets.symmetric(vertical: 8),
+                          contentPadding: const EdgeInsets.symmetric(vertical: 8),
                         ),
                         style: const TextStyle(fontSize: 13),
                         onChanged: _onSearchChanged,
@@ -4416,18 +4483,18 @@ class _SendRoundSummaryDialogState extends State<_SendRoundSummaryDialog> {
             const SizedBox(height: 12),
             TextField(
               controller: subjectCtrl,
-              decoration: const InputDecoration(
-                labelText: 'Subject',
-                border: OutlineInputBorder(),
+              decoration: InputDecoration(
+                labelText: S.t('subject'),
+                border: const OutlineInputBorder(),
               ),
             ),
             const SizedBox(height: 12),
             TextField(
               controller: messageCtrl,
               maxLines: 4,
-              decoration: const InputDecoration(
-                labelText: 'Message (optional)',
-                border: OutlineInputBorder(),
+              decoration: InputDecoration(
+                labelText: S.t('messageOptional'),
+                border: const OutlineInputBorder(),
               ),
             ),
           ],
@@ -4436,7 +4503,7 @@ class _SendRoundSummaryDialogState extends State<_SendRoundSummaryDialog> {
       actions: [
         TextButton(
           onPressed: sending ? null : () => Navigator.pop(context),
-          child: const Text('Cancel'),
+          child: Text(S.t('cancel')),
         ),
         FilledButton.icon(
           onPressed: sending || recipients.isEmpty ? null : _send,
@@ -4447,7 +4514,7 @@ class _SendRoundSummaryDialogState extends State<_SendRoundSummaryDialog> {
                   height: 18,
                   child: CircularProgressIndicator(strokeWidth: 2),
                 )
-              : const Text('Send'),
+              : Text(S.t('send')),
         ),
       ],
     );
@@ -4678,7 +4745,7 @@ class _CalendarExportDialogState extends State<_CalendarExportDialog> {
         Navigator.pop(context);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Calendar sent to $to'),
+            content: Text('${S.t('tourScheduleSent')} ($to)'),
             backgroundColor: Colors.green,
           ),
         );
@@ -4687,7 +4754,7 @@ class _CalendarExportDialogState extends State<_CalendarExportDialog> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Failed to send: $e'),
+            content: Text('${S.t('error')}: $e'),
             backgroundColor: Colors.red,
           ),
         );
@@ -4719,7 +4786,7 @@ class _CalendarExportDialogState extends State<_CalendarExportDialog> {
 
   Widget _buildSelectStep(ColorScheme cs) {
     return AlertDialog(
-      title: const Text('Export Calendar'),
+      title: Text(S.t('exportCalendar')),
       content: SizedBox(
         width: 500,
         child: SingleChildScrollView(
@@ -4728,13 +4795,13 @@ class _CalendarExportDialogState extends State<_CalendarExportDialog> {
             mainAxisSize: MainAxisSize.min,
             children: [
               // Month range
-              const Text('Month range', style: TextStyle(fontWeight: FontWeight.w700)),
+              Text(S.t('monthRange'), style: const TextStyle(fontWeight: FontWeight.w700)),
               const SizedBox(height: 8),
               Row(
                 children: [
                   Expanded(
                     child: _MonthPicker(
-                      label: 'From',
+                      label: S.t('from'),
                       value: _fromMonth,
                       onChanged: (d) {
                         setState(() {
@@ -4748,7 +4815,7 @@ class _CalendarExportDialogState extends State<_CalendarExportDialog> {
                   const SizedBox(width: 12),
                   Expanded(
                     child: _MonthPicker(
-                      label: 'To',
+                      label: S.t('to'),
                       value: _toMonth,
                       onChanged: (d) {
                         setState(() {
@@ -4767,15 +4834,15 @@ class _CalendarExportDialogState extends State<_CalendarExportDialog> {
               // Bus selection
               Row(
                 children: [
-                  const Text('Buses', style: TextStyle(fontWeight: FontWeight.w700)),
+                  Text(S.t('buses'), style: const TextStyle(fontWeight: FontWeight.w700)),
                   const Spacer(),
                   TextButton(
                     onPressed: () => setState(() => _selectedBuses = Set.from(widget.allBuses)),
-                    child: const Text('All', style: TextStyle(fontSize: 12)),
+                    child: Text(S.t('all'), style: const TextStyle(fontSize: 12)),
                   ),
                   TextButton(
                     onPressed: () => setState(() => _selectedBuses.clear()),
-                    child: const Text('None', style: TextStyle(fontSize: 12)),
+                    child: Text(S.t('none'), style: const TextStyle(fontSize: 12)),
                   ),
                 ],
               ),
@@ -4810,14 +4877,14 @@ class _CalendarExportDialogState extends State<_CalendarExportDialog> {
       actions: [
         TextButton(
           onPressed: () => Navigator.pop(context),
-          child: const Text('Cancel'),
+          child: Text(S.t('cancel')),
         ),
         FilledButton.icon(
           onPressed: _selectedBuses.isEmpty
               ? null
               : () => setState(() => _step = 1),
           icon: const Icon(Icons.arrow_forward, size: 16),
-          label: const Text('Next'),
+          label: Text(S.t('next')),
         ),
       ],
     );
@@ -4831,7 +4898,7 @@ class _CalendarExportDialogState extends State<_CalendarExportDialog> {
             icon: const Icon(Icons.arrow_back, size: 20),
             onPressed: () => setState(() => _step = 0),
           ),
-          const Text('Send Calendar'),
+          Text(S.t('sendCalendar')),
         ],
       ),
       content: SizedBox(
@@ -4860,10 +4927,10 @@ class _CalendarExportDialogState extends State<_CalendarExportDialog> {
 
               // To field with chips + autocomplete
               InputDecorator(
-                decoration: const InputDecoration(
-                  labelText: 'To',
-                  border: OutlineInputBorder(),
-                  contentPadding: EdgeInsets.fromLTRB(8, 8, 8, 8),
+                decoration: InputDecoration(
+                  labelText: S.t('to'),
+                  border: const OutlineInputBorder(),
+                  contentPadding: const EdgeInsets.fromLTRB(8, 8, 8, 8),
                   floatingLabelBehavior: FloatingLabelBehavior.always,
                 ),
                 child: Wrap(
@@ -4894,11 +4961,11 @@ class _CalendarExportDialogState extends State<_CalendarExportDialog> {
                         child: TextField(
                           controller: _emailInputCtrl,
                           focusNode: _emailFocus,
-                          decoration: const InputDecoration(
-                            hintText: 'Name or email...',
+                          decoration: InputDecoration(
+                            hintText: S.t('nameOrEmail'),
                             border: InputBorder.none,
                             isDense: true,
-                            contentPadding: EdgeInsets.symmetric(vertical: 8),
+                            contentPadding: const EdgeInsets.symmetric(vertical: 8),
                           ),
                           style: const TextStyle(fontSize: 13),
                           onChanged: _onSearchChanged,
@@ -4952,18 +5019,18 @@ class _CalendarExportDialogState extends State<_CalendarExportDialog> {
               const SizedBox(height: 12),
               TextField(
                 controller: _subjectCtrl,
-                decoration: const InputDecoration(
-                  labelText: 'Subject',
-                  border: OutlineInputBorder(),
+                decoration: InputDecoration(
+                  labelText: S.t('subject'),
+                  border: const OutlineInputBorder(),
                 ),
               ),
               const SizedBox(height: 12),
               TextField(
                 controller: _messageCtrl,
                 maxLines: 3,
-                decoration: const InputDecoration(
-                  labelText: 'Message (optional)',
-                  border: OutlineInputBorder(),
+                decoration: InputDecoration(
+                  labelText: S.t('messageOptional'),
+                  border: const OutlineInputBorder(),
                 ),
               ),
             ],
@@ -4973,7 +5040,7 @@ class _CalendarExportDialogState extends State<_CalendarExportDialog> {
       actions: [
         TextButton(
           onPressed: _sending ? null : () => Navigator.pop(context),
-          child: const Text('Cancel'),
+          child: Text(S.t('cancel')),
         ),
         FilledButton.icon(
           onPressed: _sending || _recipients.isEmpty
@@ -4986,7 +5053,7 @@ class _CalendarExportDialogState extends State<_CalendarExportDialog> {
                   child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
                 )
               : const Icon(Icons.send, size: 16),
-          label: Text(_sending ? 'Sending...' : 'Send'),
+          label: Text(_sending ? S.t('sending') : S.t('send')),
         ),
       ],
     );

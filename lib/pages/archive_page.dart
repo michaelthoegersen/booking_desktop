@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../localization/s.dart';
 import '../services/offer_storage_service.dart';
 import '../state/active_company.dart';
 
@@ -58,14 +59,14 @@ class _ArchivePageState extends State<ArchivePage> {
       await OfferStorageService.unarchiveDraft(id);
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Restored "$production"')),
+        SnackBar(content: Text('${S.t('restored')} "$production"')),
       );
       _load();
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Restore failed: $e'),
+          content: Text('${S.t('restoreFailed')}: $e'),
           backgroundColor: Colors.red,
         ),
       );
@@ -76,19 +77,19 @@ class _ArchivePageState extends State<ArchivePage> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
-        title: const Text('Delete permanently?'),
+        title: Text('${S.t('deletePermanently')}?'),
         content: Text(
-          'This will permanently delete:\n\n"$production"\n\nThis action cannot be undone.',
+          'This will permanently delete:\n\n"$production"\n\n${S.t('cannotBeUndone')}',
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context, rootNavigator: true).pop(false),
-            child: const Text('Cancel'),
+            child: Text(S.t('cancel')),
           ),
           FilledButton(
             style: FilledButton.styleFrom(backgroundColor: Colors.red),
             onPressed: () => Navigator.of(context, rootNavigator: true).pop(true),
-            child: const Text('Delete forever'),
+            child: Text(S.t('deleteForever')),
           ),
         ],
       ),
@@ -100,14 +101,14 @@ class _ArchivePageState extends State<ArchivePage> {
       await OfferStorageService.permanentlyDeleteDraft(id);
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Permanently deleted "$production"')),
+        SnackBar(content: Text('${S.t('permanentlyDeleted')} "$production"')),
       );
       _load();
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Delete failed: $e'),
+          content: Text('${S.t('deleteFailed')}: $e'),
           backgroundColor: Colors.red,
         ),
       );
@@ -170,7 +171,7 @@ class _ArchivePageState extends State<ArchivePage> {
             Row(
               children: [
                 Text(
-                  'Archive',
+                  S.t('archive'),
                   style: Theme.of(context)
                       .textTheme
                       .titleMedium
@@ -185,7 +186,7 @@ class _ArchivePageState extends State<ArchivePage> {
                   child: TextField(
                     controller: _searchCtrl,
                     decoration: InputDecoration(
-                      hintText: 'Search archive…',
+                      hintText: S.t('searchArchive'),
                       prefixIcon: const Icon(Icons.search, size: 18),
                       contentPadding: const EdgeInsets.symmetric(
                         vertical: 0,
@@ -226,8 +227,8 @@ class _ArchivePageState extends State<ArchivePage> {
                 ),
               )
             else if (filtered.isEmpty)
-              const Expanded(
-                child: Center(child: Text('No archived offers.')),
+              Expanded(
+                child: Center(child: Text(S.t('noArchivedOffers'))),
               )
             else
               Expanded(
@@ -295,7 +296,7 @@ class _ArchivePageState extends State<ArchivePage> {
                       ),
 
                       subtitle: Text(
-                        'Updated by: $updatedBy  •  $updatedDate',
+                        '${S.t('updatedBy')}: $updatedBy  •  $updatedDate',
                         style: const TextStyle(
                           fontSize: 11,
                           color: Colors.black54,
@@ -307,7 +308,7 @@ class _ArchivePageState extends State<ArchivePage> {
                         children: [
                           IconButton(
                             icon: const Icon(Icons.unarchive_outlined),
-                            tooltip: 'Restore',
+                            tooltip: S.t('restore'),
                             onPressed: id.isEmpty
                                 ? null
                                 : () => _unarchive(id, production),
@@ -317,7 +318,7 @@ class _ArchivePageState extends State<ArchivePage> {
                               Icons.delete_forever_outlined,
                               color: cs.error,
                             ),
-                            tooltip: 'Delete permanently',
+                            tooltip: S.t('deletePermanently'),
                             onPressed: id.isEmpty
                                 ? null
                                 : () => _permanentlyDelete(id, production),

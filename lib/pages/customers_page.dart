@@ -3,6 +3,8 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../localization/s.dart';
+import '../state/active_company.dart';
 import '../widgets/new_company_dialog.dart';
 import '../widgets/production_dialog.dart';
 import '../widgets/send_invoice_dialog.dart';
@@ -25,11 +27,10 @@ class _CustomersPageState extends State<CustomersPage> {
 
   Timer? _debounce;
 Future<Map<String, dynamic>> _loadAllForPdf() async {
-
-  final companies = await _client
-      .from('companies')
-      .select()
-      .order('name');
+  final ownerId = activeCompanyNotifier.value?.id;
+  var companyQuery = _client.from('companies').select();
+  if (ownerId != null) companyQuery = companyQuery.eq('owner_company_id', ownerId);
+  final companies = await companyQuery.order('name');
 
   final contacts = await _client
       .from('contacts')
@@ -48,11 +49,10 @@ Future<Map<String, dynamic>> _loadAllForPdf() async {
   Future<void> _exportPdf() async {
   final pdf = pw.Document();
 
-  // Hent ALT direkte fra Supabase (ikke bare valgt company)
-  final companies = await _client
-      .from('companies')
-      .select()
-      .order('name');
+  final ownerId = activeCompanyNotifier.value?.id;
+  var pdfCompanyQuery = _client.from('companies').select();
+  if (ownerId != null) pdfCompanyQuery = pdfCompanyQuery.eq('owner_company_id', ownerId);
+  final companies = await pdfCompanyQuery.order('name');
 
   final contacts = await _client.from('contacts').select();
   final productions = await _client.from('productions').select();
@@ -165,14 +165,17 @@ Future<Map<String, dynamic>> _loadAllForPdf() async {
     setState(() => _loadingCompanies = true);
 
     try {
-      var query = _client.from('companies').select();
-
+      final ownerCompanyId = activeCompanyNotifier.value?.id;
       final q = search?.trim() ?? '';
 
+      // Filter customers by active logistics company
+      var query = _client.from('companies').select();
+      if (ownerCompanyId != null) {
+        query = query.eq('owner_company_id', ownerCompanyId);
+      }
       if (q.isNotEmpty) {
         query = query.ilike('name', '%$q%');
       }
-
       final res = await query.order('name');
 
       if (!mounted) return;
@@ -262,7 +265,7 @@ Future<Map<String, dynamic>> _loadAllForPdf() async {
   Future<void> _createCompany() async {
     final created = await showDialog<bool>(
       context: context,
-      builder: (_) => const NewCompanyDialog(),
+      builder: (_) => NewCompanyDialog(ownerCompanyId: activeCompanyNotifier.value?.id),
     );
 
     if (created != true) return;
@@ -300,21 +303,21 @@ Future<Map<String, dynamic>> _loadAllForPdf() async {
       context: context,
       builder: (ctx) {
         return AlertDialog(
-          title: const Text("Delete company"),
+          title: Text(S.t('deleteCompany')),
           content: Text(
             'Delete "$name"?\n\nAll contacts and productions will be removed.',
           ),
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(ctx, false),
-              child: const Text("Cancel"),
+              child: Text(S.t('cancel')),
             ),
             FilledButton(
               style: FilledButton.styleFrom(
                 backgroundColor: Colors.red,
               ),
               onPressed: () => Navigator.pop(ctx, true),
-              child: const Text("Delete"),
+              child: Text(S.t('delete')),
             ),
           ],
         );
@@ -443,13 +446,13 @@ Future<Map<String, dynamic>> _loadAllForPdf() async {
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(ctx),
-              child: const Text("Cancel"),
+              child: Text(S.t('cancel')),
             ),
             FilledButton(
               onPressed: () {
                 Navigator.pop(ctx, controller.text.trim());
               },
-              child: const Text("Save"),
+              child: Text(S.t('save')),
             ),
           ],
         );
@@ -466,7 +469,7 @@ Future<Map<String, dynamic>> _loadAllForPdf() async {
       context: context,
       builder: (ctx) {
         return AlertDialog(
-          title: const Text("Contact"),
+          title: Text(S.t('contact')),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -478,11 +481,11 @@ Future<Map<String, dynamic>> _loadAllForPdf() async {
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(ctx, false),
-              child: const Text("Cancel"),
+              child: Text(S.t('cancel')),
             ),
             FilledButton(
               onPressed: () => Navigator.pop(ctx, true),
-              child: const Text("Save"),
+              child: Text(S.t('save')),
             ),
           ],
         );
@@ -538,9 +541,9 @@ Future<Map<String, dynamic>> _loadAllForPdf() async {
       padding: const EdgeInsets.all(12),
       child: Row(
   children: [
-    const Text(
-      "Companies",
-      style: TextStyle(fontSize: 18, fontWeight: FontWeight.w900),
+    Text(
+      S.t('companies'),
+      style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w900),
     ),
     const Spacer(),
 
@@ -575,8 +578,8 @@ Future<Map<String, dynamic>> _loadAllForPdf() async {
       child: TextField(
         controller: _searchCtrl,
         onChanged: _onSearchChanged,
-        decoration: const InputDecoration(
-          hintText: "Search...",
+        decoration: InputDecoration(
+          hintText: '${S.t('search')}...',
           prefixIcon: Icon(Icons.search),
           isDense: true,
         ),
@@ -615,7 +618,7 @@ Future<Map<String, dynamic>> _loadAllForPdf() async {
   // ==================================================
   Widget _buildDetails() {
     if (_selectedCompany == null) {
-      return const Center(child: Text("Select company"));
+      return Center(child: Text(S.t('companies')));
     }
 
     if (_loadingDetails) {
@@ -690,7 +693,7 @@ Future<Map<String, dynamic>> _loadAllForPdf() async {
               IconButton(
                 onPressed: () => _sendInvoiceDetails(company: c),
                 icon: const Icon(Icons.send),
-                tooltip: "Send invoice details",
+                tooltip: S.t('sendInvoiceDetails'),
               ),
               IconButton(
                 onPressed: _editCompany,
@@ -708,7 +711,7 @@ Future<Map<String, dynamic>> _loadAllForPdf() async {
           if ((c['org_nr'] ?? '').isNotEmpty) ...[
             const SizedBox(height: 4),
             Text(
-              "Org.nr: ${c['org_nr']}",
+              "${S.t('orgNr')}: ${c['org_nr']}",
               style: TextStyle(color: cs.onSurfaceVariant),
             ),
           ],
@@ -721,6 +724,64 @@ Future<Map<String, dynamic>> _loadAllForPdf() async {
               style: TextStyle(color: cs.onSurfaceVariant),
             ),
           ],
+
+          // Invoice email (always shown, editable inline)
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Icon(Icons.email_outlined, size: 16, color: cs.onSurfaceVariant),
+              const SizedBox(width: 6),
+              Text(
+                '${S.t('invoiceEmail')}: ',
+                style: TextStyle(fontSize: 13, color: cs.onSurfaceVariant),
+              ),
+              if ((c['invoice_email'] ?? '').isNotEmpty)
+                Text(
+                  c['invoice_email'],
+                  style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                )
+              else
+                Text(
+                  S.t('notSet'),
+                  style: TextStyle(fontSize: 13, fontStyle: FontStyle.italic, color: cs.onSurfaceVariant),
+                ),
+              const SizedBox(width: 6),
+              IconButton(
+                icon: Icon(Icons.edit, size: 14, color: cs.onSurfaceVariant),
+                visualDensity: VisualDensity.compact,
+                tooltip: S.t('editInvoiceEmail'),
+                onPressed: () async {
+                  final ctrl = TextEditingController(text: c['invoice_email'] ?? '');
+                  final result = await showDialog<String>(
+                    context: context,
+                    builder: (ctx) => AlertDialog(
+                      title: Text(S.t('invoiceEmail')),
+                      content: TextField(
+                        controller: ctrl,
+                        autofocus: true,
+                        keyboardType: TextInputType.emailAddress,
+                        decoration: const InputDecoration(
+                          labelText: 'E-postadresse for faktura',
+                          hintText: 'faktura@firma.no',
+                        ),
+                        onSubmitted: (v) => Navigator.pop(ctx, v.trim()),
+                      ),
+                      actions: [
+                        TextButton(onPressed: () => Navigator.pop(ctx), child: Text(S.t('cancel'))),
+                        TextButton(onPressed: () => Navigator.pop(ctx, ctrl.text.trim()), child: Text(S.t('save'))),
+                      ],
+                    ),
+                  );
+                  ctrl.dispose();
+                  if (result != null) {
+                    await _client.from('companies').update({'invoice_email': result}).eq('id', c['id']);
+                    final updated = await _client.from('companies').select().eq('id', c['id']).single();
+                    setState(() => _selectedCompany = updated);
+                  }
+                },
+              ),
+            ],
+          ),
 
           // Separate invoice recipient block
           if (hasSeparateInvoice) ...[
@@ -737,7 +798,7 @@ Future<Map<String, dynamic>> _loadAllForPdf() async {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    "Invoice recipient",
+                    S.t('invoiceRecipient'),
                     style: TextStyle(
                       fontWeight: FontWeight.bold,
                       color: cs.secondary,
@@ -751,7 +812,7 @@ Future<Map<String, dynamic>> _loadAllForPdf() async {
                       style: const TextStyle(fontWeight: FontWeight.w600),
                     ),
                   if ((c['invoice_org_nr'] ?? '').isNotEmpty)
-                    Text("Org.nr: ${c['invoice_org_nr']}"),
+                    Text("${S.t('orgNr')}: ${c['invoice_org_nr']}"),
                   if (_invoiceAddressLine().isNotEmpty)
                     Text(_invoiceAddressLine()),
                   if ((c['invoice_email'] ?? '').isNotEmpty)
@@ -767,10 +828,10 @@ Future<Map<String, dynamic>> _loadAllForPdf() async {
 
   Widget _buildContacts() {
     return _sectionCard(
-      title: "Contacts",
+      title: S.t('contact'),
       onAdd: _createContact,
       children: _contacts.isEmpty
-          ? [const Text("No contacts")]
+          ? [Text(S.t('noContacts'))]
           : _contacts.map((c) {
               return ListTile(
                 leading: const CircleAvatar(
@@ -792,10 +853,10 @@ Future<Map<String, dynamic>> _loadAllForPdf() async {
     final cs = Theme.of(context).colorScheme;
 
     return _sectionCard(
-      title: "Productions",
+      title: S.t('productions'),
       onAdd: _createProduction,
       children: _productions.isEmpty
-          ? [const Text("No productions")]
+          ? [Text(S.t('noProductions'))]
           : _productions.map((p) {
               final hasSeparateInvoice =
                   p['separate_invoice_recipient'] == true;
@@ -837,7 +898,7 @@ Future<Map<String, dynamic>> _loadAllForPdf() async {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        "Invoice recipient",
+                        S.t('invoiceRecipient'),
                         style: TextStyle(
                           fontSize: 11,
                           fontWeight: FontWeight.bold,
@@ -867,7 +928,7 @@ Future<Map<String, dynamic>> _loadAllForPdf() async {
                       children: [
                         IconButton(
                           icon: const Icon(Icons.send),
-                          tooltip: "Send invoice details",
+                          tooltip: S.t('sendInvoiceDetails'),
                           onPressed: () => _sendInvoiceDetails(
                             company: _selectedCompany!,
                             production: p,

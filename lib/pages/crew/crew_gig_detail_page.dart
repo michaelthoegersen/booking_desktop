@@ -3,6 +3,7 @@ import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../../widgets/contact_profile_dialog.dart';
 import '../../widgets/rich_text_field.dart';
 
 class CrewGigDetailPage extends StatefulWidget {
@@ -184,6 +185,11 @@ class _CrewGigDetailPageState extends State<CrewGigDetailPage> {
       final set = map[showId]!;
       if (set.contains(userId)) {
         set.remove(userId);
+        // Also clear any legacy "no-show" entry — see comment in
+        // mgmt_gig_detail_page._toggleLineupMember.
+        if (showId.isNotEmpty) {
+          map['']?.remove(userId);
+        }
       } else {
         set.add(userId);
       }
@@ -208,9 +214,15 @@ class _CrewGigDetailPageState extends State<CrewGigDetailPage> {
   Future<void> _saveLineup(String section) async {
     final map =
         section == 'skarp' ? _selectedSkarpByShow : _selectedBassByShow;
+    // If the gig has real shows, skip the legacy "no-show" ('') bucket — it
+    // isn't visible in the per-show UI, so an entry there is always a stale
+    // artifact from before the per-show system and would otherwise be
+    // recreated on every save.
+    final hasRealShows = _shows.isNotEmpty;
     final rows = <Map<String, dynamic>>[];
     for (final entry in map.entries) {
       final showId = entry.key;
+      if (hasRealShows && showId.isEmpty) continue;
       for (final uid in entry.value) {
         rows.add({
           'gig_id': widget.gigId,
@@ -220,8 +232,16 @@ class _CrewGigDetailPageState extends State<CrewGigDetailPage> {
         });
       }
     }
+    // Dedup by (user_id, show_id) — see comment in mgmt_gig_detail_page.
+    final seen = <String>{};
+    final dedupedRows = <Map<String, dynamic>>[];
+    for (final r in rows) {
+      final key =
+          '${r['user_id']}|${(r['show_id'] as String?) ?? ''}';
+      if (seen.add(key)) dedupedRows.add(r);
+    }
     // Safety: never wipe existing lineup with empty data
-    if (rows.isEmpty) {
+    if (dedupedRows.isEmpty) {
       final existing = await _sb
           .from('gig_lineup')
           .select('id')
@@ -238,8 +258,8 @@ class _CrewGigDetailPageState extends State<CrewGigDetailPage> {
         .delete()
         .eq('gig_id', widget.gigId)
         .eq('section', section);
-    if (rows.isNotEmpty) {
-      await _sb.from('gig_lineup').insert(rows);
+    if (dedupedRows.isNotEmpty) {
+      await _sb.from('gig_lineup').insert(dedupedRows);
     }
   }
 
@@ -256,6 +276,35 @@ class _CrewGigDetailPageState extends State<CrewGigDetailPage> {
           ),
         );
       }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Feil: $e'), backgroundColor: Colors.red),
+        );
+      }
+    }
+  }
+
+  Future<void> _saveAndToggleLock(String section) async {
+    try {
+      final field = section == 'skarp'
+          ? 'lineup_locked_skarp'
+          : 'lineup_locked_bass';
+      final currentlyLocked = _gig?[field] == true;
+      // When locking: persist current selection first, then flip the flag.
+      if (!currentlyLocked) {
+        await _saveLineup(section);
+      }
+      await _sb
+          .from('gigs')
+          .update({field: !currentlyLocked}).eq('id', widget.gigId);
+      // Refresh just the gig row so lock flag is up to date.
+      final gig = await _sb
+          .from('gigs')
+          .select('*')
+          .eq('id', widget.gigId)
+          .single();
+      if (mounted) setState(() => _gig = gig);
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -543,6 +592,59 @@ class _CrewGigDetailPageState extends State<CrewGigDetailPage> {
                         ),
                       ],
                     ),
+                    const SizedBox(height: 10),
+                    Builder(builder: (_) {
+                      final lockedSkarp =
+                          _gig?['lineup_locked_skarp'] == true;
+                      final lockedBass =
+                          _gig?['lineup_locked_bass'] == true;
+                      final canSkarp = _myRole == 'admin' ||
+                          _myRole == 'gruppeleder_skarp';
+                      final canBass = _myRole == 'admin' ||
+                          _myRole == 'gruppeleder_bass';
+                      return Row(
+                        children: [
+                          if (canSkarp)
+                            FilledButton.icon(
+                              onPressed: () => _saveAndToggleLock('skarp'),
+                              icon: Icon(
+                                lockedSkarp ? Icons.lock_open : Icons.lock,
+                                size: 16,
+                              ),
+                              label: Text(lockedSkarp
+                                  ? 'Lås opp Skarp'
+                                  : 'Lås Skarp'),
+                              style: FilledButton.styleFrom(
+                                backgroundColor: lockedSkarp
+                                    ? Colors.orange
+                                    : Colors.purple,
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 12, vertical: 8),
+                              ),
+                            ),
+                          if (canSkarp && canBass)
+                            const SizedBox(width: 10),
+                          if (canBass)
+                            FilledButton.icon(
+                              onPressed: () => _saveAndToggleLock('bass'),
+                              icon: Icon(
+                                lockedBass ? Icons.lock_open : Icons.lock,
+                                size: 16,
+                              ),
+                              label: Text(lockedBass
+                                  ? 'Lås opp Bass'
+                                  : 'Lås Bass'),
+                              style: FilledButton.styleFrom(
+                                backgroundColor: lockedBass
+                                    ? Colors.orange
+                                    : Colors.teal,
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 12, vertical: 8),
+                              ),
+                            ),
+                        ],
+                      );
+                    }),
                     const SizedBox(height: 12),
                     for (final show in _shows) ...[
                       _buildShowAssignment(context, show),
@@ -732,10 +834,26 @@ class _CrewGigDetailPageState extends State<CrewGigDetailPage> {
                   ),
                   const SizedBox(width: 6),
                   Expanded(
-                    child: Text(
-                      (m['name'] as String?) ?? 'Ukjent',
-                      style: const TextStyle(
-                          fontWeight: FontWeight.w700, fontSize: 13),
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(6),
+                      onTap: () => ContactProfileDialog.show(
+                        context,
+                        contactId: uid,
+                        contactName: (m['name'] as String?) ?? 'Ukjent',
+                        avatarUrl: m['avatar_url'] as String?,
+                      ),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 4, vertical: 4),
+                        child: Text(
+                          (m['name'] as String?) ?? 'Ukjent',
+                          style: const TextStyle(
+                              fontWeight: FontWeight.w700,
+                              fontSize: 13,
+                              decoration: TextDecoration.underline,
+                              decorationColor: Colors.transparent),
+                        ),
+                      ),
                     ),
                   ),
                 ],

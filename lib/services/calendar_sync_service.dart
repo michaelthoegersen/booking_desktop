@@ -159,7 +159,7 @@ class CalendarSyncService {
         }
 
         final vehicle =
-            "${offer.busType.label}${round.trailer ? ' + trailer' : ''}";
+            "${offer.busType}${round.trailer ? ' + trailer' : ''}";
 
         // ENTERPRISE MULTI BUS SUPPORT — include WAITING_LIST as a valid kilde
         final buses = round.busSlots

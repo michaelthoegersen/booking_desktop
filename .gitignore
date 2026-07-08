@@ -64,3 +64,9 @@ app.*.map.json
 /android/app/release.env
 dmg_temp/
 dmg_tmp/
+
+# Secrets & build artifacts (should never be committed)
+node_modules/
+*.pem
+*.apk
+.claude/

@@ -10,6 +10,76 @@ window.agoraWeb = {
   _onJoined: null,
   _onError: null,
 
+  selectedMicId: null,
+  selectedCameraId: null,
+  selectedSpeakerId: null,
+
+  async listDevices() {
+    try {
+      const [mics, cams, speakers] = await Promise.all([
+        AgoraRTC.getMicrophones(),
+        AgoraRTC.getCameras(),
+        AgoraRTC.getPlaybackDevices(),
+      ]);
+      return JSON.stringify({
+        microphones: mics.map(d => ({ id: d.deviceId, name: d.label || "Mikrofon" })),
+        cameras: cams.map(d => ({ id: d.deviceId, name: d.label || "Kamera" })),
+        speakers: speakers.map(d => ({ id: d.deviceId, name: d.label || "Høyttaler" })),
+        selected: {
+          microphone: this.selectedMicId,
+          camera: this.selectedCameraId,
+          speaker: this.selectedSpeakerId,
+        },
+      });
+    } catch (e) {
+      console.error("Agora listDevices error:", e);
+      return JSON.stringify({ microphones: [], cameras: [], speakers: [], selected: {} });
+    }
+  },
+
+  async setMicrophone(deviceId) {
+    try {
+      this.selectedMicId = deviceId;
+      if (this.localAudioTrack) {
+        await this.localAudioTrack.setDevice(deviceId);
+      }
+      return true;
+    } catch (e) {
+      console.error("Agora setMicrophone error:", e);
+      return false;
+    }
+  },
+
+  async setCamera(deviceId) {
+    try {
+      this.selectedCameraId = deviceId;
+      if (this.localVideoTrack) {
+        await this.localVideoTrack.setDevice(deviceId);
+      }
+      return true;
+    } catch (e) {
+      console.error("Agora setCamera error:", e);
+      return false;
+    }
+  },
+
+  async setSpeaker(deviceId) {
+    try {
+      this.selectedSpeakerId = deviceId;
+      if (this.client && this.client.remoteUsers) {
+        for (const user of this.client.remoteUsers) {
+          if (user.audioTrack && user.audioTrack.setPlaybackDevice) {
+            try { await user.audioTrack.setPlaybackDevice(deviceId); } catch (_) {}
+          }
+        }
+      }
+      return true;
+    } catch (e) {
+      console.error("Agora setSpeaker error:", e);
+      return false;
+    }
+  },
+
   async init(appId, channelName, token, uid) {
     try {
       this.client = AgoraRTC.createClient({ mode: "rtc", codec: "vp8" });
@@ -38,6 +108,9 @@ window.agoraWeb = {
           playRemote(15);
         }
         if (mediaType === "audio") {
+          if (this.selectedSpeakerId && user.audioTrack.setPlaybackDevice) {
+            try { await user.audioTrack.setPlaybackDevice(this.selectedSpeakerId); } catch (_) {}
+          }
           user.audioTrack.play();
         }
         if (this._onUserJoined) this._onUserJoined(user.uid.toString());
@@ -56,9 +129,11 @@ window.agoraWeb = {
         if (this._onUserLeft) this._onUserLeft(user.uid.toString());
       });
 
-      // Get media tracks
+      // Get media tracks (use saved device IDs if set)
+      const audioCfg = this.selectedMicId ? { microphoneId: this.selectedMicId } : {};
+      const videoCfg = this.selectedCameraId ? { cameraId: this.selectedCameraId } : {};
       [this.localAudioTrack, this.localVideoTrack] =
-        await AgoraRTC.createMicrophoneAndCameraTracks();
+        await AgoraRTC.createMicrophoneAndCameraTracks(audioCfg, videoCfg);
 
       // Join
       const joinedUid = await this.client.join(appId, channelName, token, uid || null);

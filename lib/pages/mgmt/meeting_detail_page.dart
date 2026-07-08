@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -9,6 +10,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../services/meeting_service.dart';
 import '../../services/meeting_pdf_service.dart';
 import '../../services/email_service.dart';
+import '../../state/active_company.dart';
 class MeetingDetailPage extends StatefulWidget {
   final String meetingId;
   const MeetingDetailPage({super.key, required this.meetingId});
@@ -27,6 +29,12 @@ class _MeetingDetailPageState extends State<MeetingDetailPage> {
 
   Uint8List? _invitationPdf;
   Uint8List? _minutesPdf;
+  List<Map<String, dynamic>> _signatures = [];
+  bool _requestingSignatures = false;
+
+  bool get _allSigned =>
+      _signatures.isNotEmpty &&
+      _signatures.every((s) => s['status'] == 'signed');
 
   @override
   void initState() {
@@ -65,6 +73,28 @@ class _MeetingDetailPageState extends State<MeetingDetailPage> {
           for (final p in (profiles as List))
             p['id'] as String: (p['name'] as String?) ?? 'Ukjent',
         };
+      }
+      // Load signatures
+      final sigs = await _sb
+          .from('meeting_signatures')
+          .select('*')
+          .eq('meeting_id', widget.meetingId);
+      _signatures = List<Map<String, dynamic>>.from(sigs);
+
+      // Auto-generate referat PDF (always, so preview works)
+      if (_agendaItems.isNotEmpty) {
+        try {
+          final pdfBytes = await MeetingPdfService.generateMinutes(
+            meeting: _meeting!,
+            participants: _participants,
+            agendaItems: _agendaItems,
+            userNames: _userNames,
+            signatures: _signatures,
+          );
+          _minutesPdf = pdfBytes;
+        } catch (e) {
+          debugPrint('Generate minutes PDF error: $e');
+        }
       }
     } catch (e) {
       debugPrint('Meeting detail load error: $e');
@@ -229,6 +259,144 @@ class _MeetingDetailPageState extends State<MeetingDetailPage> {
         );
       }
     }
+  }
+
+  Future<void> _requestSignatures() async {
+    // Show dialog to select who should sign
+    final selectedIds = await showDialog<List<String>>(
+      context: context,
+      builder: (ctx) {
+        final selected = <String>{..._signatures.map((s) => s['user_id'] as String)};
+        return StatefulBuilder(builder: (ctx, setDialogState) {
+          return AlertDialog(
+            title: const Text('Velg hvem som skal signere'),
+            content: SizedBox(
+              width: 400,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: _participants.map((p) {
+                  final uid = p['user_id'] as String;
+                  final name = _userNames[uid] ?? 'Ukjent';
+                  final existing = _signatures.where((s) => s['user_id'] == uid).firstOrNull;
+                  final alreadySigned = existing?['status'] == 'signed';
+                  return CheckboxListTile(
+                    value: selected.contains(uid),
+                    title: Text(name),
+                    subtitle: alreadySigned ? const Text('Signert', style: TextStyle(color: Colors.green, fontSize: 12)) : null,
+                    onChanged: alreadySigned ? null : (v) {
+                      setDialogState(() {
+                        if (v == true) selected.add(uid); else selected.remove(uid);
+                      });
+                    },
+                  );
+                }).toList(),
+              ),
+            ),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Avbryt')),
+              FilledButton(onPressed: () => Navigator.pop(ctx, selected.toList()), child: const Text('Send forespørsel')),
+            ],
+          );
+        });
+      },
+    );
+
+    if (selectedIds == null || selectedIds.isEmpty) return;
+
+    setState(() => _requestingSignatures = true);
+    try {
+      // Create signature records for new users
+      for (final uid in selectedIds) {
+        final existing = _signatures.where((s) => s['user_id'] == uid).firstOrNull;
+        if (existing != null) continue;
+
+        await _sb.from('meeting_signatures').insert({
+          'meeting_id': widget.meetingId,
+          'user_id': uid,
+        });
+      }
+
+      // Reload signatures to get tokens
+      final sigs = await _sb
+          .from('meeting_signatures')
+          .select('*')
+          .eq('meeting_id', widget.meetingId);
+      _signatures = List<Map<String, dynamic>>.from(sigs);
+
+      // Generate and upload PDF for signing page
+      final pdfBytes = await MeetingPdfService.generateMinutes(
+        meeting: _meeting!,
+        participants: _participants,
+        agendaItems: _agendaItems,
+        userNames: _userNames,
+        signatures: _signatures,
+      );
+      final pdfPath = 'meeting-minutes/${widget.meetingId}.pdf';
+      await _sb.storage.from('chat-attachments').uploadBinary(
+        pdfPath, pdfBytes,
+        fileOptions: const FileOptions(upsert: true, contentType: 'application/pdf'),
+      );
+      final pdfUrl = _sb.storage.from('chat-attachments').getPublicUrl(pdfPath);
+
+      // Store PDF URL on meeting
+      await _sb.from('meetings').update({'minutes_pdf_url': pdfUrl}).eq('id', widget.meetingId);
+
+      // Send emails to pending signers
+      final meetingTitle = _meeting?['title'] ?? 'Møte';
+      for (final sig in _signatures) {
+        if (sig['status'] != 'pending') continue;
+        final uid = sig['user_id'] as String;
+        if (!selectedIds.contains(uid)) continue;
+
+        final name = _userNames[uid] ?? 'Ukjent';
+        final token = sig['token'] as String;
+        final signUrl = 'https://tourflow-60890.web.app/sign-meeting.html?token=$token';
+
+        // Get user email
+        final profile = await _sb.from('profiles').select('email').eq('id', uid).maybeSingle();
+        final email = profile?['email'] as String?;
+        if (email == null || email.isEmpty) continue;
+
+        final subject = 'Signer referat: $meetingTitle';
+        final body = '''
+<div style="font-family: -apple-system, sans-serif; max-width: 500px; margin: 0 auto;">
+  <h2>Signer referat</h2>
+  <p>Hei $name,</p>
+  <p>Du er bedt om å signere referatet for <strong>$meetingTitle</strong>.</p>
+  <p>Klikk knappen nedenfor for å lese og signere:</p>
+  <a href="$signUrl" style="display: inline-block; padding: 14px 28px; background: #1a1a1a; color: white; text-decoration: none; border-radius: 10px; font-weight: 700; margin: 16px 0;">Signer referat</a>
+  <p style="color: #888; font-size: 13px;">Denne lenken er personlig og gjelder kun for deg.</p>
+</div>
+''';
+
+        try {
+          await EmailService.sendEmail(
+            to: email,
+            subject: subject,
+            body: body,
+            isHtml: true,
+            companyId: activeCompanyNotifier.value?.id,
+          );
+        } catch (e) {
+          debugPrint('Send sign email error for $name: $e');
+        }
+      }
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Signeringsforespørsler sendt')),
+        );
+      }
+    } catch (e) {
+      debugPrint('Request signatures error: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Feil: $e')),
+        );
+      }
+    }
+    if (mounted) setState(() => _requestingSignatures = false);
+    _load();
   }
 
   Future<void> _sendMinutes() async {
@@ -428,7 +596,6 @@ class _MeetingDetailPageState extends State<MeetingDetailPage> {
                   ),
                   const SizedBox(width: 12),
                 ],
-                // Edit button — always available except when completed
                 if (status != 'completed')
                   OutlinedButton.icon(
                     onPressed: () => context.go('/m/meetings/${widget.meetingId}/edit'),
@@ -436,6 +603,13 @@ class _MeetingDetailPageState extends State<MeetingDetailPage> {
                     label: const Text('Rediger'),
                   ),
                 if (status != 'completed') const SizedBox(width: 12),
+                if (status == 'completed')
+                  OutlinedButton.icon(
+                    onPressed: () => context.go('/m/meetings/${widget.meetingId}/live'),
+                    icon: const Icon(Icons.edit_note, size: 18),
+                    label: const Text('Rediger referat'),
+                  ),
+                if (status == 'completed') const SizedBox(width: 12),
                 if (status == 'finalized')
                   FilledButton.icon(
                     onPressed: _startMeeting,
@@ -453,8 +627,16 @@ class _MeetingDetailPageState extends State<MeetingDetailPage> {
                         backgroundColor: Colors.green.shade700),
                   ),
                 if (status == 'completed') ...[
+                  OutlinedButton.icon(
+                    onPressed: _requestingSignatures ? null : _requestSignatures,
+                    icon: _requestingSignatures
+                        ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                        : const Icon(Icons.draw, size: 18),
+                    label: Text(_signatures.isEmpty ? 'Be om signering' : 'Signering (${_signatures.where((s) => s['status'] == 'signed').length}/${_signatures.length})'),
+                  ),
+                  const SizedBox(width: 8),
                   FilledButton.icon(
-                    onPressed: _sendMinutes,
+                    onPressed: _allSigned ? _sendMinutes : null,
                     icon: const Icon(Icons.send, size: 18),
                     label: const Text('Send referat'),
                   ),
@@ -522,6 +704,39 @@ class _MeetingDetailPageState extends State<MeetingDetailPage> {
 
             const SizedBox(height: 24),
 
+            // Signatures section
+            if (_signatures.isNotEmpty) ...[
+              _section('Signaturer'),
+              ..._signatures.map((sig) {
+                final uid = sig['user_id'] as String;
+                final name = _userNames[uid] ?? 'Ukjent';
+                final signed = sig['status'] == 'signed';
+                final signedAt = sig['signed_at'] != null
+                    ? DateFormat('dd.MM.yyyy HH:mm').format(DateTime.parse(sig['signed_at']).toLocal())
+                    : '';
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 6),
+                  child: Row(
+                    children: [
+                      Icon(
+                        signed ? Icons.check_circle : Icons.pending,
+                        size: 18,
+                        color: signed ? Colors.green : Colors.orange,
+                      ),
+                      const SizedBox(width: 8),
+                      Text(name, style: const TextStyle(fontWeight: FontWeight.w600)),
+                      if (signed) ...[
+                        const SizedBox(width: 8),
+                        Text(signedAt, style: const TextStyle(fontSize: 12, color: Colors.black45)),
+                      ] else
+                        const Text('  Venter', style: TextStyle(fontSize: 12, color: Colors.orange)),
+                    ],
+                  ),
+                );
+              }),
+              const SizedBox(height: 24),
+            ],
+
             // Agenda section
             _section('Agenda'),
             ..._agendaItems.asMap().entries.map((entry) {
@@ -585,29 +800,76 @@ class _MeetingDetailPageState extends State<MeetingDetailPage> {
                       const SizedBox(height: 6),
                       Text(description),
                     ],
-                    if (notes.isNotEmpty) ...[
-                      const SizedBox(height: 8),
-                      Container(
+                    // Referat section — editable when completed
+                    const SizedBox(height: 8),
+                    GestureDetector(
+                      onTap: status == 'completed' ? () async {
+                        final ctrl = TextEditingController(text: notes);
+                        final result = await showDialog<String>(
+                          context: context,
+                          builder: (ctx) => AlertDialog(
+                            title: Text('Referat: ${item['title'] ?? ''}'),
+                            content: SizedBox(
+                              width: 500,
+                              height: 300,
+                              child: TextField(
+                                controller: ctrl,
+                                maxLines: null,
+                                expands: true,
+                                textAlignVertical: TextAlignVertical.top,
+                                decoration: InputDecoration(
+                                  hintText: 'Skriv referat...',
+                                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                                ),
+                              ),
+                            ),
+                            actions: [
+                              TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Avbryt')),
+                              FilledButton(onPressed: () => Navigator.pop(ctx, ctrl.text), child: const Text('Lagre')),
+                            ],
+                          ),
+                        );
+                        ctrl.dispose();
+                        if (result != null) {
+                          await MeetingService.updateAgendaNotes(item['id'] as String, result);
+                          _load();
+                        }
+                      } : null,
+                      child: Container(
                         width: double.infinity,
                         padding: const EdgeInsets.all(10),
                         decoration: BoxDecoration(
-                          color: Colors.green.shade50,
+                          color: notes.isNotEmpty ? Colors.green.shade50 : Colors.grey.shade100,
                           borderRadius: BorderRadius.circular(8),
                         ),
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            const Text('Referat:',
-                                style: TextStyle(
-                                    fontSize: 11,
-                                    fontWeight: FontWeight.w700,
-                                    color: Colors.green)),
+                            Row(
+                              children: [
+                                Text('Referat:',
+                                    style: TextStyle(
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.w700,
+                                        color: notes.isNotEmpty ? Colors.green : Colors.grey)),
+                                if (status == 'completed') ...[
+                                  const Spacer(),
+                                  Icon(Icons.edit, size: 12, color: Colors.grey.shade400),
+                                ],
+                              ],
+                            ),
                             const SizedBox(height: 4),
-                            Text(notes),
+                            Text(
+                              notes.isNotEmpty ? notes : 'Ingen referat ennå — klikk for å skrive',
+                              style: TextStyle(
+                                color: notes.isEmpty ? Colors.grey : null,
+                                fontStyle: notes.isEmpty ? FontStyle.italic : null,
+                              ),
+                            ),
                           ],
                         ),
                       ),
-                    ],
+                    ),
                     if (files.isNotEmpty) ...[
                       const SizedBox(height: 8),
                       Wrap(
@@ -663,10 +925,19 @@ class _MeetingDetailPageState extends State<MeetingDetailPage> {
     return OutlinedButton.icon(
       onPressed: bytes != null
           ? () async {
-              // For now just generate and show snackbar
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(content: Text('$label PDF generert (${bytes.length} bytes)')),
-              );
+              // Save to temp file and open
+              try {
+                final dir = await Directory.systemTemp.createTemp('meeting_pdf');
+                final file = File('${dir.path}/$label.pdf');
+                await file.writeAsBytes(bytes);
+                await launchUrl(Uri.file(file.path));
+              } catch (e) {
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('Kunne ikke åpne PDF: $e')),
+                  );
+                }
+              }
             }
           : null,
       icon: Icon(Icons.picture_as_pdf, size: 16, color: color),

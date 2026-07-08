@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../localization/s.dart';
 import '../services/notification_service.dart';
 import '../ui/css_theme.dart';
 
@@ -134,21 +135,21 @@ class _IssuesPageState extends State<IssuesPage> {
   String _statusLabel(String? status) {
     switch (status) {
       case 'in_progress':
-        return 'In Progress';
+        return S.t('inProgress');
       case 'resolved':
-        return 'Resolved';
+        return S.t('resolved');
       default:
-        return 'Open';
+        return S.t('open');
     }
   }
 
   String _categoryLabel(String? cat) {
-    const map = {
-      'motor': 'Engine',
-      'brakes': 'Brakes',
+    final map = {
+      'motor': S.t('engine'),
+      'brakes': S.t('brakes'),
       'tires': 'Tires',
-      'electric': 'Electrical',
-      'interior': 'Interior',
+      'electric': S.t('electrical'),
+      'interior': S.t('interior'),
       'other': 'Other',
     };
     return map[cat] ?? (cat ?? '');
@@ -261,7 +262,7 @@ class _IssuesPageState extends State<IssuesPage> {
           Row(
             children: [
               Text(
-                _showArchive ? 'Archive' : 'Issue Reports',
+                _showArchive ? S.t('archived') : S.t('issueReports'),
                 style: Theme.of(context)
                     .textTheme
                     .titleMedium
@@ -271,8 +272,8 @@ class _IssuesPageState extends State<IssuesPage> {
               // Archive toggle
               Tooltip(
                 message: _showArchive
-                    ? 'Back to active reports'
-                    : 'View archive',
+                    ? S.t('backToActiveReports')
+                    : S.t('viewArchive'),
                 child: IconButton(
                   icon: Icon(
                     _showArchive
@@ -307,10 +308,10 @@ class _IssuesPageState extends State<IssuesPage> {
               runSpacing: 6,
               children: [
                 for (final (key, label) in [
-                  ('all', 'All'),
-                  ('open', 'Open'),
-                  ('in_progress', 'In Progress'),
-                  ('resolved', 'Resolved'),
+                  ('all', S.t('all')),
+                  ('open', S.t('open')),
+                  ('in_progress', S.t('inProgress')),
+                  ('resolved', S.t('resolved')),
                 ])
                   ChoiceChip(
                     label: Text(label),
@@ -331,7 +332,7 @@ class _IssuesPageState extends State<IssuesPage> {
                     ),
                   ),
                 FilterChip(
-                  label: const Text('Critical'),
+                  label: Text(S.t('critical')),
                   selected: _filterCritical,
                   selectedColor: Colors.red.shade100,
                   backgroundColor: cs.surfaceContainerLowest,
@@ -352,7 +353,7 @@ class _IssuesPageState extends State<IssuesPage> {
           ] else ...[
             const SizedBox(height: 6),
             Text(
-              'Archived reports — read only',
+              S.t('archivedReportsReadOnly'),
               style: TextStyle(
                   fontSize: 12, color: cs.onSurfaceVariant),
             ),
@@ -372,7 +373,7 @@ class _IssuesPageState extends State<IssuesPage> {
     if (items.isEmpty) {
       return Center(
         child: Text(
-          _showArchive ? 'No archived reports' : 'No reports',
+          _showArchive ? S.t('noArchivedReports') : S.t('noReports'),
           style: const TextStyle(color: CssTheme.textMuted),
         ),
       );
@@ -421,7 +422,7 @@ class _IssuesPageState extends State<IssuesPage> {
                           border: Border.all(
                               color: Colors.red.shade200),
                         ),
-                        child: Text('Critical',
+                        child: Text(S.t('critical'),
                             style: TextStyle(
                                 fontSize: 10,
                                 fontWeight: FontWeight.w700,
@@ -526,17 +527,16 @@ class _IssueDetailState extends State<_IssueDetail> {
     final confirm = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Archive report'),
-        content: const Text(
-            'This report will be moved to the archive. You can find it there later and delete it if needed.'),
+        title: Text(S.t('archiveReport')),
+        content: Text(S.t('archiveReportDesc')),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancel'),
+            child: Text(S.t('cancel')),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Archive'),
+            child: Text(S.t('archived')),
           ),
         ],
       ),
@@ -554,7 +554,7 @@ class _IssueDetailState extends State<_IssueDetail> {
       debugPrint('Archive issue error: $e');
       if (mounted) {
         ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('Error: $e')));
+            .showSnackBar(SnackBar(content: Text('${S.t('error')}: $e')));
       }
     } finally {
       if (mounted) setState(() => _archiving = false);
@@ -565,18 +565,17 @@ class _IssueDetailState extends State<_IssueDetail> {
     final confirm = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Delete permanently'),
-        content: const Text(
-            'This will permanently delete the report. This cannot be undone.'),
+        title: Text(S.t('deletePermanently')),
+        content: Text(S.t('deletePermanentlyDesc')),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancel'),
+            child: Text(S.t('cancel')),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(ctx, true),
             style: FilledButton.styleFrom(backgroundColor: Colors.red),
-            child: const Text('Delete'),
+            child: Text(S.t('delete')),
           ),
         ],
       ),
@@ -594,7 +593,7 @@ class _IssueDetailState extends State<_IssueDetail> {
       debugPrint('Delete issue error: $e');
       if (mounted) {
         ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('Error: $e')));
+            .showSnackBar(SnackBar(content: Text('${S.t('error')}: $e')));
       }
     } finally {
       if (mounted) setState(() => _deleting = false);
@@ -612,7 +611,7 @@ class _IssueDetailState extends State<_IssueDetail> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('Error: $e')));
+            .showSnackBar(SnackBar(content: Text('${S.t('error')}: $e')));
       }
     } finally {
       if (mounted) setState(() => _archiving = false);
@@ -636,8 +635,8 @@ class _IssueDetailState extends State<_IssueDetail> {
         final userId = widget.issue['user_id'] as String?;
         if (userId != null) {
           final label = _status == 'resolved'
-              ? 'Issue resolved'
-              : 'Issue updated';
+              ? S.t('issueResolved')
+              : S.t('issueUpdated');
           final body = _noteCtrl.text.trim().isNotEmpty
               ? _noteCtrl.text.trim()
               : 'Status changed to: ${widget.statusLabel(_status)}';
@@ -656,14 +655,14 @@ class _IssueDetailState extends State<_IssueDetail> {
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Saved')),
+          SnackBar(content: Text(S.t('saved'))),
         );
       }
     } catch (e) {
       debugPrint('Save issue error: $e');
       if (mounted) {
         ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('Error: $e')));
+            .showSnackBar(SnackBar(content: Text('${S.t('error')}: $e')));
       }
     } finally {
       if (mounted) setState(() => _saving = false);
@@ -718,7 +717,7 @@ class _IssueDetailState extends State<_IssueDetail> {
                     borderRadius: BorderRadius.circular(8),
                     border: Border.all(color: Colors.red.shade200),
                   ),
-                  child: Text('Critical',
+                  child: Text(S.t('critical'),
                       style: TextStyle(
                           fontWeight: FontWeight.w700,
                           color: Colors.red.shade700)),
@@ -731,7 +730,7 @@ class _IssueDetailState extends State<_IssueDetail> {
           const SizedBox(height: 20),
 
           // ── Description ──
-          _Label('Description'),
+          _Label(S.t('description')),
           const SizedBox(height: 8),
           Text(
             (issue['description'] ?? '').toString(),
@@ -741,7 +740,7 @@ class _IssueDetailState extends State<_IssueDetail> {
           // ── Image ──
           if (imageUrl != null && imageUrl.isNotEmpty) ...[
             const SizedBox(height: 20),
-            _Label('Photo'),
+            _Label(S.t('photo')),
             const SizedBox(height: 8),
             GestureDetector(
               onTap: () {
@@ -771,7 +770,7 @@ class _IssueDetailState extends State<_IssueDetail> {
                   height: 96,
                   fit: BoxFit.cover,
                   errorBuilder: (_, __, ___) =>
-                      const Text('Could not load image',
+                      Text(S.t('couldNotLoadImage'),
                           style: TextStyle(color: CssTheme.textMuted)),
                 ),
               ),
@@ -781,15 +780,15 @@ class _IssueDetailState extends State<_IssueDetail> {
           const SizedBox(height: 20),
 
           // ── Status ──
-          _Label('Status'),
+          _Label(S.t('status')),
           const SizedBox(height: 8),
           SegmentedButton<String>(
-            segments: const [
-              ButtonSegment(value: 'open', label: Text('Open')),
+            segments: [
+              ButtonSegment(value: 'open', label: Text(S.t('open'))),
               ButtonSegment(
-                  value: 'in_progress', label: Text('In Progress')),
+                  value: 'in_progress', label: Text(S.t('inProgress'))),
               ButtonSegment(
-                  value: 'resolved', label: Text('Resolved')),
+                  value: 'resolved', label: Text(S.t('resolved'))),
             ],
             selected: {_status},
             onSelectionChanged: widget.isArchive
@@ -816,15 +815,14 @@ class _IssueDetailState extends State<_IssueDetail> {
           const SizedBox(height: 20),
 
           // ── Note ──
-          _Label('Note to driver (shown in app)'),
+          _Label(S.t('noteToDriver')),
           const SizedBox(height: 8),
           TextField(
             controller: _noteCtrl,
             maxLines: 4,
             readOnly: widget.isArchive,
-            decoration: const InputDecoration(
-              hintText:
-                  'Describe what was done or what is happening...',
+            decoration: InputDecoration(
+              hintText: S.t('describeWhatWasDone'),
             ),
           ),
 
@@ -849,8 +847,8 @@ class _IssueDetailState extends State<_IssueDetail> {
                             )
                           : const Icon(Icons.save),
                       label: Text(_saving
-                          ? 'Saving...'
-                          : 'Save and notify driver'),
+                          ? '${S.t('save')}...'
+                          : S.t('saveAndNotifyDriver')),
                     ),
                   ),
                 ),
@@ -872,7 +870,7 @@ class _IssueDetailState extends State<_IssueDetail> {
                                 strokeWidth: 2),
                           )
                         : const Icon(Icons.archive_outlined),
-                    label: const Text('Archive'),
+                    label: Text(S.t('archiveReport')),
                   ),
                 ),
               ],
@@ -894,7 +892,7 @@ class _IssueDetailState extends State<_IssueDetail> {
                                   strokeWidth: 2),
                             )
                           : const Icon(Icons.unarchive_outlined),
-                      label: const Text('Restore to active'),
+                      label: Text(S.t('restoreToActive')),
                     ),
                   ),
                 ),
@@ -917,7 +915,7 @@ class _IssueDetailState extends State<_IssueDetail> {
                                 color: Colors.red),
                           )
                         : const Icon(Icons.delete_outline),
-                    label: const Text('Delete permanently'),
+                    label: Text(S.t('deletePermanently')),
                   ),
                 ),
               ],

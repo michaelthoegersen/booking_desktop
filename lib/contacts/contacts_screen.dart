@@ -1,13 +1,16 @@
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../localization/s.dart';
 import '../state/active_company.dart';
 import '../ui/css_theme.dart';
 import '../widgets/agora_meeting_view.dart';
 import '../widgets/agora_meeting_stub.dart'
     if (dart.library.js_interop) '../widgets/agora_meeting_view_web.dart';
+import '../widgets/contact_profile_dialog.dart';
 import 'direct_chat_screen.dart';
 
 class ContactsScreen extends StatefulWidget {
@@ -71,7 +74,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
         .select('name')
         .eq('id', myId)
         .maybeSingle();
-    final myName = (profile?['name'] as String?) ?? 'Deltaker';
+    final myName = (profile?['name'] as String?) ?? S.t('participant');
 
     // VoIP push for iOS (native call screen) + FCM for Android
     try {
@@ -83,8 +86,8 @@ class _ContactsScreenState extends State<ContactsScreen> {
       });
       await _sb.functions.invoke('send-push', body: {
         'user_id': calleeId,
-        'title': 'Innkommende videosamtale',
-        'body': '$myName ringer deg',
+        'title': S.t('incomingVideoCall'),
+        'body': '$myName ${S.t('callingYou')}',
         'type': 'video_call',
         'channel_name': channelName,
         if (callId != null) 'call_id': callId,
@@ -131,12 +134,12 @@ class _ContactsScreenState extends State<ContactsScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            'Kontakter',
+            S.t('contacts'),
             style: Theme.of(context).textTheme.headlineMedium,
           ),
           const SizedBox(height: 4),
           Text(
-            'Kollegaer i systemet',
+            S.t('colleaguesInSystem'),
             style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                   color: CssTheme.textMuted,
                 ),
@@ -146,9 +149,9 @@ class _ContactsScreenState extends State<ContactsScreen> {
             child: _loading
                 ? const Center(child: CircularProgressIndicator())
                 : _contacts.isEmpty
-                    ? const Center(
+                    ? Center(
                         child: Text(
-                          'Ingen kontakter funnet',
+                          S.t('noContactsFound'),
                           style: TextStyle(color: CssTheme.textMuted),
                         ),
                       )
@@ -193,13 +196,22 @@ class _ContactCard extends StatelessWidget {
 
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
-      padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         color: CssTheme.surface,
         borderRadius: BorderRadius.circular(14),
         border: Border.all(color: CssTheme.outline),
       ),
-      child: Row(
+      child: InkWell(
+        borderRadius: BorderRadius.circular(14),
+        onTap: () => ContactProfileDialog.show(
+          context,
+          contactId: peerId,
+          contactName: name,
+          avatarUrl: avatarUrl,
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Row(
         children: [
           // Avatar
           CircleAvatar(
@@ -236,44 +248,60 @@ class _ContactCard extends StatelessWidget {
                 ),
                 if (phone.isNotEmpty) ...[
                   const SizedBox(height: 4),
-                  InkWell(
-                    onTap: () => _launchPhone(phone),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Icon(Icons.phone_rounded,
-                            size: 15, color: CssTheme.textMuted),
-                        const SizedBox(width: 6),
-                        Text(
-                          phone,
-                          style: const TextStyle(
-                            fontSize: 13,
-                            color: CssTheme.textMuted,
-                          ),
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      InkWell(
+                        onTap: () => _launchPhone(phone),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(Icons.phone_rounded,
+                                size: 15, color: CssTheme.textMuted),
+                            const SizedBox(width: 6),
+                            Text(
+                              phone,
+                              style: const TextStyle(
+                                fontSize: 13,
+                                color: CssTheme.textMuted,
+                              ),
+                            ),
+                          ],
                         ),
-                      ],
-                    ),
+                      ),
+                      const SizedBox(width: 4),
+                      _CopyIconButton(
+                          value: phone, tooltip: 'Kopier telefonnummer'),
+                    ],
                   ),
                 ],
                 if (email.isNotEmpty) ...[
                   const SizedBox(height: 3),
-                  InkWell(
-                    onTap: () => _launchEmail(email),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Icon(Icons.mail_outline_rounded,
-                            size: 15, color: CssTheme.textMuted),
-                        const SizedBox(width: 6),
-                        Text(
-                          email,
-                          style: const TextStyle(
-                            fontSize: 13,
-                            color: CssTheme.textMuted,
-                          ),
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      InkWell(
+                        onTap: () => _launchEmail(email),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(Icons.mail_outline_rounded,
+                                size: 15, color: CssTheme.textMuted),
+                            const SizedBox(width: 6),
+                            Text(
+                              email,
+                              style: const TextStyle(
+                                fontSize: 13,
+                                color: CssTheme.textMuted,
+                              ),
+                            ),
+                          ],
                         ),
-                      ],
-                    ),
+                      ),
+                      const SizedBox(width: 4),
+                      _CopyIconButton(
+                          value: email, tooltip: 'Kopier e-post'),
+                    ],
                   ),
                 ],
               ],
@@ -282,21 +310,21 @@ class _ContactCard extends StatelessWidget {
 
           // Video call button
           IconButton(
-            tooltip: 'Videosamtale',
+            tooltip: S.t('videoCall'),
             icon: Icon(Icons.videocam, size: 22, color: Colors.blue.shade700),
             onPressed: () => onVideoCall(peerId, name),
           ),
 
           // Edit button
           IconButton(
-            tooltip: 'Rediger kontakt',
+            tooltip: S.t('editContact'),
             icon: const Icon(Icons.edit_outlined, size: 20),
             onPressed: () => _showEditDialog(context, peerId, name, phone, email),
           ),
 
           // Chat button
           IconButton(
-            tooltip: 'Send melding',
+            tooltip: S.t('sendMessage'),
             icon: const Icon(Icons.chat_bubble_outline_rounded),
             onPressed: () {
               Navigator.of(context).push(
@@ -310,6 +338,8 @@ class _ContactCard extends StatelessWidget {
             },
           ),
         ],
+          ),
+        ),
       ),
     );
   }
@@ -340,16 +370,16 @@ class _ContactCard extends StatelessWidget {
                   children: [
                     TextField(
                       controller: phoneCtrl,
-                      decoration: const InputDecoration(
-                        labelText: 'Telefon',
+                      decoration: InputDecoration(
+                        labelText: S.t('phone'),
                         border: OutlineInputBorder(),
                       ),
                     ),
                     const SizedBox(height: 12),
                     TextField(
                       controller: emailCtrl,
-                      decoration: const InputDecoration(
-                        labelText: 'E-post',
+                      decoration: InputDecoration(
+                        labelText: S.t('email'),
                         border: OutlineInputBorder(),
                       ),
                     ),
@@ -359,7 +389,7 @@ class _ContactCard extends StatelessWidget {
               actions: [
                 TextButton(
                   onPressed: () => Navigator.pop(ctx),
-                  child: const Text('Avbryt'),
+                  child: Text(S.t('cancel')),
                 ),
                 FilledButton(
                   onPressed: saving
@@ -380,7 +410,7 @@ class _ContactCard extends StatelessWidget {
                             setDialogState(() => saving = false);
                             if (ctx.mounted) {
                               ScaffoldMessenger.of(ctx).showSnackBar(
-                                SnackBar(content: Text('Feil: $e')),
+                                SnackBar(content: Text('${S.t('error')}: $e')),
                               );
                             }
                           }
@@ -394,7 +424,7 @@ class _ContactCard extends StatelessWidget {
                             color: Colors.white,
                           ),
                         )
-                      : const Text('Lagre'),
+                      : Text(S.t('save')),
                 ),
               ],
             );
@@ -410,5 +440,34 @@ class _ContactCard extends StatelessWidget {
 
   void _launchEmail(String email) {
     launchUrl(Uri(scheme: 'mailto', path: email));
+  }
+}
+
+class _CopyIconButton extends StatelessWidget {
+  final String value;
+  final String tooltip;
+
+  const _CopyIconButton({required this.value, required this.tooltip});
+
+  @override
+  Widget build(BuildContext context) {
+    return IconButton(
+      tooltip: tooltip,
+      visualDensity: VisualDensity.compact,
+      padding: EdgeInsets.zero,
+      constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+      iconSize: 14,
+      icon: const Icon(Icons.copy, color: CssTheme.textMuted),
+      onPressed: () async {
+        await Clipboard.setData(ClipboardData(text: value));
+        if (!context.mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Kopiert: $value'),
+            duration: const Duration(seconds: 2),
+          ),
+        );
+      },
+    );
   }
 }

@@ -77,7 +77,7 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const { company_id, title, body = '', exclude_user_id, gig_id, role_filter, type: notifType = 'gig' } = await req.json();
+    const { company_id, title, body = '', exclude_user_id, gig_id, role_filter, type: notifType = 'gig', user_ids: explicitUserIds } = await req.json();
 
     if (!company_id || !title) {
       return new Response(
@@ -91,30 +91,37 @@ Deno.serve(async (req) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
     );
 
-    // 1. Get company members (optionally filtered by role)
-    let query = supabase
-      .from('company_members')
-      .select('user_id, role')
-      .eq('company_id', company_id);
+    let userIds: string[];
 
-    if (role_filter) {
-      query = query.eq('role', role_filter);
+    if (Array.isArray(explicitUserIds) && explicitUserIds.length > 0) {
+      // Send only to the specified users (e.g. expense approval)
+      userIds = explicitUserIds.filter((uid: string) => uid !== exclude_user_id);
+    } else {
+      // Broadcast to all company members (e.g. new gig)
+      let query = supabase
+        .from('company_members')
+        .select('user_id, role')
+        .eq('company_id', company_id);
+
+      if (role_filter) {
+        query = query.eq('role', role_filter);
+      }
+
+      const { data: members, error: membersError } = await query;
+
+      if (membersError) {
+        console.error('Error fetching members:', membersError);
+        return new Response(
+          JSON.stringify({ error: 'Failed to fetch company members' }),
+          { status: 500, headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' } },
+        );
+      }
+
+      // Filter out the sender
+      userIds = (members ?? [])
+        .map(m => m.user_id)
+        .filter(uid => uid !== exclude_user_id);
     }
-
-    const { data: members, error: membersError } = await query;
-
-    if (membersError) {
-      console.error('Error fetching members:', membersError);
-      return new Response(
-        JSON.stringify({ error: 'Failed to fetch company members' }),
-        { status: 500, headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' } },
-      );
-    }
-
-    // Filter out the sender
-    const userIds = (members ?? [])
-      .map(m => m.user_id)
-      .filter(uid => uid !== exclude_user_id);
 
     if (userIds.length === 0) {
       return new Response(

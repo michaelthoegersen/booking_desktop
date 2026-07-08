@@ -22,8 +22,11 @@ import '../pages/mgmt/mgmt_messages_page.dart';
 import '../pages/archive_page.dart';
 import '../services/chat_service.dart';
 import '../pages/bus_requests_page.dart';
+import '../pages/admin_page.dart';
 import '../contacts/dm_inbox_screen.dart';
 import '../state/active_company.dart';
+import '../services/platform_admin_service.dart';
+import '../localization/s.dart';
 
 // --------------------------------------------------------------------------
 // DATA
@@ -43,21 +46,23 @@ class _ExtraTab {
   });
 }
 
-const _routeTitles = {
-  '/': 'Dashboard',
-  '/calendar': 'Calendar',
-  '/new': 'New offer',
-  '/edit': 'Edit offers',
-  '/archive': 'Archive',
-  '/customers': 'Customers',
-  '/invoices': 'Invoices',
-  '/economy': 'Economy',
-  '/issues': 'Issues',
-  '/chat': 'Chat',
-  '/contacts': 'Contacts',
-  '/bus-requests': 'Bus Requests',
-  '/settings': 'Settings',
-  '/routes': 'Route Manager',
+Map<String, String> _routeTitles() => {
+  '/': S.t('dashboard'),
+  '/calendar': S.t('calendar'),
+  '/new': S.t('newOffer'),
+  '/edit': S.t('editOffers'),
+  '/archive': S.t('archive'),
+  '/customers': S.t('customers'),
+  '/invoices': S.t('invoices'),
+  '/economy': S.t('economy'),
+  '/issues': S.t('issues'),
+  '/chat': S.t('chat'),
+  '/contacts': S.t('contacts'),
+  '/bus-requests': S.t('busRequests'),
+  '/settings': S.t('settings'),
+  '/routes': S.t('routeManager'),
+  '/lager': 'Lager',
+  '/admin': 'Platform admin',
 };
 
 // --------------------------------------------------------------------------
@@ -105,7 +110,7 @@ class _AppShellState extends State<AppShell> {
     final tab = _ExtraTab(
       id: DateTime.now().microsecondsSinceEpoch.toString(),
       route: route,
-      title: _routeTitles[route] ?? route,
+      title: _routeTitles()[route] ?? route,
       page: _buildPageForRoute(route),
     );
 
@@ -155,8 +160,10 @@ class _AppShellState extends State<AppShell> {
         return const BusRequestsPage();
       case '/dm-inbox':
         return const DmInboxScreen();
+      case '/admin':
+        return const AdminPage();
       default:
-        return Center(child: Text('Unknown route: $route'));
+        return Center(child: Text('${S.t('unknownRoute')}: $route'));
     }
   }
 
@@ -223,7 +230,7 @@ class _TabBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final currentPath = GoRouterState.of(context).uri.path;
-    final tab0Title = _routeTitles[currentPath] ?? currentPath;
+    final tab0Title = _routeTitles()[currentPath] ?? currentPath;
 
     return Container(
       height: 36,
@@ -381,7 +388,7 @@ class _TopBarState extends State<_TopBar> {
     if (active == null || all.length <= 1) return const SizedBox.shrink();
 
     return PopupMenuButton<String>(
-      tooltip: 'Switch company',
+      tooltip: S.t('switchCompany'),
       onSelected: (id) {
         activeCompanyNotifier.switchTo(id);
         final company = activeCompanyNotifier.value;
@@ -453,10 +460,10 @@ class _TopBarState extends State<_TopBar> {
         children: [
           // ---------------- Title ----------------
           RichText(
-            text: const TextSpan(
+            text: TextSpan(
               children: [
                 // Hovednavn
-                TextSpan(
+                const TextSpan(
                   text: "TourFlow",
                   style: TextStyle(
                     fontSize: 22,
@@ -466,7 +473,7 @@ class _TopBarState extends State<_TopBar> {
                 ),
 
                 // Separator
-                TextSpan(
+                const TextSpan(
                   text: "  —  ",
                   style: TextStyle(
                     fontSize: 16,
@@ -476,8 +483,8 @@ class _TopBarState extends State<_TopBar> {
 
                 // Undertittel
                 TextSpan(
-                  text: "booking system for nightliners",
-                  style: TextStyle(
+                  text: S.t('bookingSystemSubtitle'),
+                  style: const TextStyle(
                     fontSize: 14,
                     fontWeight: FontWeight.w500,
                     color: Colors.white70,
@@ -493,7 +500,7 @@ class _TopBarState extends State<_TopBar> {
 
           // ---------------- USER MENU ----------------
           PopupMenuButton<String>(
-            tooltip: "Account",
+            tooltip: S.t('account'),
 
             onSelected: (value) async {
               if (value == "logout") {
@@ -512,8 +519,8 @@ class _TopBarState extends State<_TopBar> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text(
-                      "Signed in as",
+                    Text(
+                      S.t('signedInAs'),
                       style: TextStyle(
                         fontSize: 11,
                         color: Colors.grey,
@@ -533,13 +540,13 @@ class _TopBarState extends State<_TopBar> {
               const PopupMenuDivider(),
 
               // 🚪 Logout
-              const PopupMenuItem(
+              PopupMenuItem(
                 value: "logout",
                 child: Row(
                   children: [
-                    Icon(Icons.logout, size: 18),
-                    SizedBox(width: 8),
-                    Text("Log out"),
+                    const Icon(Icons.logout, size: 18),
+                    const SizedBox(width: 8),
+                    Text(S.t('logOut')),
                   ],
                 ),
               ),
@@ -752,7 +759,7 @@ class _SideNavState extends State<_SideNav> {
                   children: [
                     _NavItem(
                       icon: Icons.dashboard_rounded,
-                      label: "Dashboard",
+                      label: S.t('dashboard'),
                       route: "/",
                       badge: _pendingOfferAcceptances,
                       onOpenInNewTab: widget.onOpenInNewTab,
@@ -761,7 +768,7 @@ class _SideNavState extends State<_SideNav> {
 
                     _NavItem(
                       icon: Icons.calendar_month,
-                      label: "Calendar",
+                      label: S.t('calendar'),
                       route: "/calendar",
                       onOpenInNewTab: widget.onOpenInNewTab,
                       overrideActiveRoute: widget.overrideActiveRoute,
@@ -769,7 +776,7 @@ class _SideNavState extends State<_SideNav> {
 
                     _NavItem(
                       icon: Icons.add_circle_outline,
-                      label: "New offer",
+                      label: S.t('newOffer'),
                       route: "/new",
                       onOpenInNewTab: widget.onOpenInNewTab,
                       overrideActiveRoute: widget.overrideActiveRoute,
@@ -777,7 +784,7 @@ class _SideNavState extends State<_SideNav> {
 
                     _NavItem(
                       icon: Icons.edit_note,
-                      label: "Edit offers",
+                      label: S.t('editOffers'),
                       route: "/edit",
                       onOpenInNewTab: widget.onOpenInNewTab,
                       overrideActiveRoute: widget.overrideActiveRoute,
@@ -785,7 +792,7 @@ class _SideNavState extends State<_SideNav> {
 
                     _NavItem(
                       icon: Icons.archive_outlined,
-                      label: "Archive",
+                      label: S.t('archive'),
                       route: "/archive",
                       onOpenInNewTab: widget.onOpenInNewTab,
                       overrideActiveRoute: widget.overrideActiveRoute,
@@ -793,7 +800,7 @@ class _SideNavState extends State<_SideNav> {
 
                     _NavItem(
                       icon: Icons.apartment_rounded,
-                      label: "Customers",
+                      label: S.t('customers'),
                       route: "/customers",
                       onOpenInNewTab: widget.onOpenInNewTab,
                       overrideActiveRoute: widget.overrideActiveRoute,
@@ -801,7 +808,7 @@ class _SideNavState extends State<_SideNav> {
 
                     _NavItem(
                       icon: Icons.receipt_long_rounded,
-                      label: "Invoices",
+                      label: S.t('invoices'),
                       route: "/invoices",
                       onOpenInNewTab: widget.onOpenInNewTab,
                       overrideActiveRoute: widget.overrideActiveRoute,
@@ -809,7 +816,7 @@ class _SideNavState extends State<_SideNav> {
 
                     _NavItem(
                       icon: Icons.bar_chart_rounded,
-                      label: "Economy",
+                      label: S.t('economy'),
                       route: "/economy",
                       onOpenInNewTab: widget.onOpenInNewTab,
                       overrideActiveRoute: widget.overrideActiveRoute,
@@ -817,7 +824,7 @@ class _SideNavState extends State<_SideNav> {
 
                     _NavItem(
                       icon: Icons.report_problem_rounded,
-                      label: "Issues",
+                      label: S.t('issues'),
                       route: "/issues",
                       badge: _unseenCount,
                       onOpenInNewTab: widget.onOpenInNewTab,
@@ -826,7 +833,7 @@ class _SideNavState extends State<_SideNav> {
 
                     _NavItem(
                       icon: Icons.chat_bubble_outline_rounded,
-                      label: "Chat",
+                      label: S.t('chat'),
                       route: "/chat",
                       badge: _unreadChatCount,
                       onOpenInNewTab: widget.onOpenInNewTab,
@@ -835,8 +842,16 @@ class _SideNavState extends State<_SideNav> {
 
                     _NavItem(
                       icon: Icons.contacts_rounded,
-                      label: "Contacts",
+                      label: S.t('contacts'),
                       route: "/contacts",
+                      onOpenInNewTab: widget.onOpenInNewTab,
+                      overrideActiveRoute: widget.overrideActiveRoute,
+                    ),
+
+                    _NavItem(
+                      icon: Icons.inventory_2_rounded,
+                      label: 'Lager',
+                      route: "/lager",
                       onOpenInNewTab: widget.onOpenInNewTab,
                       overrideActiveRoute: widget.overrideActiveRoute,
                     ),
@@ -844,7 +859,7 @@ class _SideNavState extends State<_SideNav> {
                     if (Supabase.instance.client.auth.currentUser?.email == 'michael@nttas.com')
                       _NavItem(
                         icon: Icons.directions_bus_rounded,
-                        label: "Bus Requests",
+                        label: S.t('busRequests'),
                         route: "/bus-requests",
                         badge: _pendingBusRequests,
                         onOpenInNewTab: widget.onOpenInNewTab,
@@ -857,9 +872,24 @@ class _SideNavState extends State<_SideNav> {
 
             const SizedBox(height: 8),
 
+            // Platform admin — synlig kun for michael@nttas.com (is_platform_admin)
+            ValueListenableBuilder<bool>(
+              valueListenable: platformAdminNotifier,
+              builder: (_, isAdmin, __) {
+                if (!isAdmin) return const SizedBox.shrink();
+                return _NavItem(
+                  icon: Icons.shield_rounded,
+                  label: 'Platform admin',
+                  route: '/admin',
+                  onOpenInNewTab: widget.onOpenInNewTab,
+                  overrideActiveRoute: widget.overrideActiveRoute,
+                );
+              },
+            ),
+
             _NavItem(
               icon: Icons.settings,
-              label: "Settings",
+              label: S.t('settings'),
               route: "/settings",
               onOpenInNewTab: widget.onOpenInNewTab,
               overrideActiveRoute: widget.overrideActiveRoute,
@@ -917,21 +947,20 @@ class _NavItemState extends State<_NavItem> {
           final result = await showDialog<String>(
             context: context,
             builder: (ctx) => AlertDialog(
-              title: const Text('Unsaved changes'),
-              content: const Text(
-                  'You have unsaved changes. Do you want to save before leaving?'),
+              title: Text(S.t('unsavedChanges')),
+              content: Text(S.t('unsavedChangesBody')),
               actions: [
                 TextButton(
                   onPressed: () => Navigator.of(ctx).pop('cancel'),
-                  child: const Text('Cancel'),
+                  child: Text(S.t('cancel')),
                 ),
                 TextButton(
                   onPressed: () => Navigator.of(ctx).pop('discard'),
-                  child: const Text('Don\'t save'),
+                  child: Text(S.t('dontSave')),
                 ),
                 FilledButton(
                   onPressed: () => Navigator.of(ctx).pop('save'),
-                  child: const Text('Save'),
+                  child: Text(S.t('save')),
                 ),
               ],
             ),
@@ -961,14 +990,14 @@ class _NavItemState extends State<_NavItem> {
             overlay.size.width - _tapPosition.dx,
             overlay.size.height - _tapPosition.dy,
           ),
-          items: const [
+          items: [
             PopupMenuItem(
               value: 'new_tab',
               child: Row(
                 children: [
-                  Icon(Icons.tab, size: 18),
-                  SizedBox(width: 8),
-                  Text('Åpne i ny fane'),
+                  const Icon(Icons.tab, size: 18),
+                  const SizedBox(width: 8),
+                  Text(S.t('openInNewTab')),
                 ],
               ),
             ),

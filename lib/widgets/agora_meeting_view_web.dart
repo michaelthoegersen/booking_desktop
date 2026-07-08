@@ -5,11 +5,16 @@ import 'dart:ui_web' as ui_web;
 
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:web/web.dart' as web;
 
 const _agoraAppId = '4fe1ae5ea7454ba9adc19030d559ce74';
 const _tokenUrl =
     'https://fqefvgqlrntwgschkugf.supabase.co/functions/v1/agora-token';
+
+const _prefVideoDevice = 'agora_video_device_id';
+const _prefRecordingDevice = 'agora_recording_device_id';
+const _prefPlaybackDevice = 'agora_playback_device_id';
 
 @JS('agoraWeb.init')
 external JSPromise<JSBoolean> _jsInit(
@@ -23,6 +28,27 @@ external void _jsMuteAudio(JSBoolean muted);
 
 @JS('agoraWeb.muteVideo')
 external void _jsMuteVideo(JSBoolean muted);
+
+@JS('agoraWeb.listDevices')
+external JSPromise<JSString> _jsListDevices();
+
+@JS('agoraWeb.setMicrophone')
+external JSPromise<JSBoolean> _jsSetMicrophone(JSString deviceId);
+
+@JS('agoraWeb.setCamera')
+external JSPromise<JSBoolean> _jsSetCamera(JSString deviceId);
+
+@JS('agoraWeb.setSpeaker')
+external JSPromise<JSBoolean> _jsSetSpeaker(JSString deviceId);
+
+@JS('agoraWeb.selectedMicId')
+external set _jsSelectedMicId(JSString? id);
+
+@JS('agoraWeb.selectedCameraId')
+external set _jsSelectedCameraId(JSString? id);
+
+@JS('agoraWeb.selectedSpeakerId')
+external set _jsSelectedSpeakerId(JSString? id);
 
 /// Agora video meeting widget for Flutter Web.
 /// Uses the Agora Web SDK via JS interop.
@@ -49,12 +75,31 @@ class _AgoraMeetingViewWebState extends State<AgoraMeetingViewWeb> {
   bool _videoMuted = false;
   late String _viewId;
 
+  List<MapEntry<String, String>> _cameras = [];
+  List<MapEntry<String, String>> _microphones = [];
+  List<MapEntry<String, String>> _speakers = [];
+  String? _selectedCameraId;
+  String? _selectedMicId;
+  String? _selectedSpeakerId;
+
   @override
   void initState() {
     super.initState();
     _viewId = 'agora-container-${widget.channelName.hashCode}';
     _registerView();
-    _initAgora();
+    _restoreSavedDevices().then((_) => _initAgora());
+  }
+
+  Future<void> _restoreSavedDevices() async {
+    final prefs = await SharedPreferences.getInstance();
+    _selectedCameraId = prefs.getString(_prefVideoDevice);
+    _selectedMicId = prefs.getString(_prefRecordingDevice);
+    _selectedSpeakerId = prefs.getString(_prefPlaybackDevice);
+    if (_selectedCameraId != null) _jsSelectedCameraId = _selectedCameraId!.toJS;
+    if (_selectedMicId != null) _jsSelectedMicId = _selectedMicId!.toJS;
+    if (_selectedSpeakerId != null) {
+      _jsSelectedSpeakerId = _selectedSpeakerId!.toJS;
+    }
   }
 
   void _registerView() {
@@ -152,6 +197,183 @@ class _AgoraMeetingViewWebState extends State<AgoraMeetingViewWeb> {
     widget.onLeave?.call();
   }
 
+  Future<void> _loadDevices() async {
+    try {
+      final jsonStr = (await _jsListDevices().toDart).toDart;
+      final data = jsonDecode(jsonStr) as Map<String, dynamic>;
+      List<MapEntry<String, String>> parse(String key) {
+        final list = (data[key] as List?) ?? const [];
+        return list
+            .map((e) {
+              final m = e as Map<String, dynamic>;
+              return MapEntry(
+                  (m['id'] as String?) ?? '', (m['name'] as String?) ?? 'Ukjent');
+            })
+            .where((e) => e.key.isNotEmpty)
+            .toList();
+      }
+
+      if (mounted) {
+        setState(() {
+          _cameras = parse('cameras');
+          _microphones = parse('microphones');
+          _speakers = parse('speakers');
+        });
+      }
+    } catch (e) {
+      debugPrint('Agora web listDevices error: $e');
+    }
+  }
+
+  Future<void> _setCamera(String id) async {
+    await _jsSetCamera(id.toJS).toDart;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_prefVideoDevice, id);
+    if (mounted) setState(() => _selectedCameraId = id);
+  }
+
+  Future<void> _setMicrophone(String id) async {
+    await _jsSetMicrophone(id.toJS).toDart;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_prefRecordingDevice, id);
+    if (mounted) setState(() => _selectedMicId = id);
+  }
+
+  Future<void> _setSpeaker(String id) async {
+    await _jsSetSpeaker(id.toJS).toDart;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_prefPlaybackDevice, id);
+    if (mounted) setState(() => _selectedSpeakerId = id);
+  }
+
+  Future<void> _showDeviceSettings() async {
+    await _loadDevices();
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (ctx, setDialogState) {
+            return AlertDialog(
+              backgroundColor: const Color(0xFF1f1f1f),
+              title:
+                  const Text('Enheter', style: TextStyle(color: Colors.white)),
+              content: SizedBox(
+                width: 380,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    _deviceDropdown(
+                      label: 'Kamera',
+                      icon: Icons.videocam,
+                      value: _selectedCameraId,
+                      items: _cameras,
+                      onChanged: (id) async {
+                        if (id == null) return;
+                        await _setCamera(id);
+                        setDialogState(() {});
+                      },
+                    ),
+                    const SizedBox(height: 16),
+                    _deviceDropdown(
+                      label: 'Mikrofon',
+                      icon: Icons.mic,
+                      value: _selectedMicId,
+                      items: _microphones,
+                      onChanged: (id) async {
+                        if (id == null) return;
+                        await _setMicrophone(id);
+                        setDialogState(() {});
+                      },
+                    ),
+                    const SizedBox(height: 16),
+                    _deviceDropdown(
+                      label: 'Høyttaler',
+                      icon: Icons.volume_up,
+                      value: _selectedSpeakerId,
+                      items: _speakers,
+                      onChanged: (id) async {
+                        if (id == null) return;
+                        await _setSpeaker(id);
+                        setDialogState(() {});
+                      },
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(ctx).pop(),
+                  child: const Text('Lukk',
+                      style: TextStyle(color: Colors.white70)),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _deviceDropdown({
+    required String label,
+    required IconData icon,
+    required String? value,
+    required List<MapEntry<String, String>> items,
+    required ValueChanged<String?> onChanged,
+  }) {
+    final hasValue = value != null && items.any((e) => e.key == value);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Icon(icon, color: Colors.white70, size: 16),
+            const SizedBox(width: 6),
+            Text(label,
+                style: const TextStyle(
+                    color: Colors.white70,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600)),
+          ],
+        ),
+        const SizedBox(height: 6),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          decoration: BoxDecoration(
+            color: const Color(0xFF2a2a2a),
+            borderRadius: BorderRadius.circular(6),
+          ),
+          child: DropdownButtonHideUnderline(
+            child: DropdownButton<String>(
+              isExpanded: true,
+              dropdownColor: const Color(0xFF2a2a2a),
+              value: hasValue ? value : null,
+              hint: Text(
+                items.isEmpty ? 'Ingen enheter funnet' : 'Velg enhet',
+                style: const TextStyle(color: Colors.white54, fontSize: 13),
+              ),
+              icon: const Icon(Icons.arrow_drop_down, color: Colors.white70),
+              style: const TextStyle(color: Colors.white, fontSize: 13),
+              items: items
+                  .map((e) => DropdownMenuItem<String>(
+                        value: e.key,
+                        child: Text(
+                          e.value,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ))
+                  .toList(),
+              onChanged: items.isEmpty ? null : onChanged,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Container(
@@ -199,6 +421,13 @@ class _AgoraMeetingViewWebState extends State<AgoraMeetingViewWeb> {
                   label: _videoMuted ? 'Video av' : 'Video',
                   active: !_videoMuted,
                   onPressed: _toggleVideo,
+                ),
+                const SizedBox(width: 16),
+                _controlButton(
+                  icon: Icons.tune,
+                  label: 'Enheter',
+                  active: true,
+                  onPressed: _showDeviceSettings,
                 ),
                 const SizedBox(width: 16),
                 _controlButton(

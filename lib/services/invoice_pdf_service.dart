@@ -5,6 +5,7 @@ import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 
 import '../models/invoice.dart';
+import '../state/active_company.dart';
 
 class InvoicePdfService {
   // VAT rates (same as offer_pdf_service.dart)
@@ -389,8 +390,12 @@ class InvoicePdfService {
 
     rows.add(row("Total excl. VAT", _formatNok(excl), boldText: true));
 
+    final isMossTruck =
+        activeCompanyNotifier.value?.name == 'Moss Turbusser';
     vatMap.forEach((country, value) {
-      final rate = ((_vatRates[country] ?? 0) * 100).round();
+      final rate = isMossTruck
+          ? 25
+          : ((_vatRates[country] ?? 0) * 100).round();
       rows.add(row("VAT $country $rate%", _formatNok(value), italic: true));
     });
 

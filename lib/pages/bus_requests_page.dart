@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../localization/s.dart';
 import '../ui/css_theme.dart';
 import '../services/bus_availability_service.dart';
 
@@ -91,16 +92,16 @@ class _BusRequestsPageState extends State<BusRequestsPage> {
     final confirm = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Reject request?'),
-        content: const Text('This will mark the request as rejected.'),
+        title: Text(S.t('rejectRequest')),
+        content: Text(S.t('rejectRequestDesc')),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancel'),
+            child: Text(S.t('cancel')),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Reject'),
+            child: Text(S.t('reject')),
           ),
         ],
       ),
@@ -199,7 +200,7 @@ class _BusRequestsPageState extends State<BusRequestsPage> {
         .update({'status': 'confirmed'}).eq('id', requestId);
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Forespørsel bekreftet')),
+        SnackBar(content: Text(S.t('requestConfirmed'))),
       );
     }
     await _load();
@@ -209,17 +210,17 @@ class _BusRequestsPageState extends State<BusRequestsPage> {
     final confirm = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Avslå forespørsel?'),
-        content: const Text('Er du sikker på at du vil avslå denne forespørselen?'),
+        title: Text(S.t('rejectRequest')),
+        content: Text(S.t('rejectRequestDesc')),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Avbryt'),
+            child: Text(S.t('cancel')),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(ctx, true),
             style: FilledButton.styleFrom(backgroundColor: Colors.red),
-            child: const Text('Avslå'),
+            child: Text(S.t('reject')),
           ),
         ],
       ),
@@ -230,7 +231,7 @@ class _BusRequestsPageState extends State<BusRequestsPage> {
           .update({'status': 'declined'}).eq('id', requestId);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Forespørsel avslått')),
+          SnackBar(content: Text(S.t('reject'))),
         );
       }
       await _load();
@@ -241,16 +242,16 @@ class _BusRequestsPageState extends State<BusRequestsPage> {
     final confirm = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Archive request?'),
-        content: const Text('This request will be moved to your archive.'),
+        title: Text(S.t('archiveRequest')),
+        content: Text(S.t('archiveRequestDesc')),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancel'),
+            child: Text(S.t('cancel')),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Archive'),
+            child: Text(S.t('archived')),
           ),
         ],
       ),
@@ -274,18 +275,17 @@ class _BusRequestsPageState extends State<BusRequestsPage> {
     final confirm = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Delete permanently?'),
-        content: const Text(
-            'This request will be permanently deleted. This action cannot be undone.'),
+        title: Text(S.t('deletePermanently')),
+        content: Text(S.t('deleteRequestDesc')),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancel'),
+            child: Text(S.t('cancel')),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(ctx, true),
             style: FilledButton.styleFrom(backgroundColor: Colors.red),
-            child: const Text('Delete permanently'),
+            child: Text(S.t('deletePermanently')),
           ),
         ],
       ),
@@ -313,7 +313,7 @@ class _BusRequestsPageState extends State<BusRequestsPage> {
                     style: Theme.of(context).textTheme.headlineMedium,
                   ),
                   Text(
-                    'Incoming requests from management companies',
+                    S.t('incomingRequests'),
                     style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                           color: CssTheme.textMuted,
                         ),
@@ -329,7 +329,7 @@ class _BusRequestsPageState extends State<BusRequestsPage> {
                     label: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        const Text('Pending'),
+                        Text(S.t('pending')),
                         if (_pendingCount > 0) ...[
                           const SizedBox(width: 6),
                           _BadgeChip(count: _pendingCount),
@@ -337,13 +337,13 @@ class _BusRequestsPageState extends State<BusRequestsPage> {
                       ],
                     ),
                   ),
-                  const ButtonSegment(value: 'quoted', label: Text('Quoted')),
+                  ButtonSegment(value: 'quoted', label: Text(S.t('quoted'))),
                   ButtonSegment(
                     value: 'accepted_by_client',
                     label: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        const Text('Awaiting confirm'),
+                        Text(S.t('awaitingConfirm')),
                         if (_awaitingConfirmCount > 0) ...[
                           const SizedBox(width: 6),
                           _BadgeChip(count: _awaitingConfirmCount),
@@ -351,8 +351,8 @@ class _BusRequestsPageState extends State<BusRequestsPage> {
                       ],
                     ),
                   ),
-                  const ButtonSegment(value: 'all', label: Text('All')),
-                  const ButtonSegment(value: 'archived', label: Text('Archived')),
+                  ButtonSegment(value: 'all', label: Text(S.t('all'))),
+                  ButtonSegment(value: 'archived', label: Text(S.t('archived'))),
                 ],
                 selected: {_filterStatus},
                 onSelectionChanged: (s) {
@@ -379,10 +379,10 @@ class _BusRequestsPageState extends State<BusRequestsPage> {
                             const SizedBox(height: 16),
                             Text(
                               _filterStatus == 'pending'
-                                  ? 'No pending requests'
+                                  ? S.t('noPendingRequests')
                                   : _filterStatus == 'archived'
-                                      ? 'No archived requests'
-                                      : 'No requests',
+                                      ? S.t('noArchivedRequests')
+                                      : S.t('noRequests'),
                               style: Theme.of(context)
                                   .textTheme
                                   .titleMedium
@@ -600,7 +600,7 @@ class _BusRequestCardState extends State<_BusRequestCard> {
               if (pax != null)
                 _InfoChip(
                   icon: Icons.people,
-                  label: '$pax passengers',
+                  label: '$pax ${S.t('passengers')}',
                 ),
               if (busCount != null && busCount > 1)
                 _InfoChip(
@@ -610,13 +610,13 @@ class _BusRequestCardState extends State<_BusRequestCard> {
               if (trailer)
                 _InfoChip(
                   icon: Icons.rv_hookup,
-                  label: 'Trailer',
+                  label: S.t('trailer'),
                 ),
               if (createdAt != null)
                 _InfoChip(
                   icon: Icons.access_time,
                   label:
-                      'Received ${DateFormat('dd.MM.yyyy HH:mm').format(DateTime.parse(createdAt).toLocal())}',
+                      '${S.t('received')} ${DateFormat('dd.MM.yyyy HH:mm').format(DateTime.parse(createdAt).toLocal())}',
                 ),
             ],
           ),
@@ -642,14 +642,14 @@ class _BusRequestCardState extends State<_BusRequestCard> {
           if (dateFrom.isNotEmpty) ...[
             const SizedBox(height: 10),
             _loadingAvailability
-                ? const Row(
+                ? Row(
                     children: [
-                      SizedBox(
+                      const SizedBox(
                         width: 14, height: 14,
                         child: CircularProgressIndicator(strokeWidth: 2),
                       ),
-                      SizedBox(width: 8),
-                      Text('Checking availability...', style: TextStyle(fontSize: 12, color: CssTheme.textMuted)),
+                      const SizedBox(width: 8),
+                      Text(S.t('checkingAvailability'), style: const TextStyle(fontSize: 12, color: CssTheme.textMuted)),
                     ],
                   )
                 : _availability != null
@@ -690,7 +690,7 @@ class _BusRequestCardState extends State<_BusRequestCard> {
                 OutlinedButton.icon(
                   onPressed: widget.onReject,
                   icon: const Icon(Icons.close, size: 16),
-                  label: const Text('Reject'),
+                  label: Text(S.t('reject')),
                   style: OutlinedButton.styleFrom(
                     foregroundColor: Colors.red,
                     side: const BorderSide(color: Colors.red),
@@ -700,7 +700,7 @@ class _BusRequestCardState extends State<_BusRequestCard> {
                 FilledButton.icon(
                   onPressed: widget.onCreateOffer,
                   icon: const Icon(Icons.add_circle_outline, size: 16),
-                  label: const Text('Create offer'),
+                  label: Text(S.t('createOffer')),
                 ),
               ],
             ),
@@ -713,7 +713,7 @@ class _BusRequestCardState extends State<_BusRequestCard> {
                 OutlinedButton.icon(
                   onPressed: widget.onDecline,
                   icon: const Icon(Icons.close, size: 16),
-                  label: const Text('Avslå'),
+                  label: Text(S.t('reject')),
                   style: OutlinedButton.styleFrom(
                     foregroundColor: Colors.red,
                     side: const BorderSide(color: Colors.red),
@@ -723,7 +723,7 @@ class _BusRequestCardState extends State<_BusRequestCard> {
                 FilledButton.icon(
                   onPressed: widget.onAccept,
                   icon: const Icon(Icons.check, size: 16),
-                  label: const Text('Bekreft'),
+                  label: Text(S.t('confirm')),
                   style: FilledButton.styleFrom(backgroundColor: Colors.green),
                 ),
               ],
@@ -739,7 +739,7 @@ class _BusRequestCardState extends State<_BusRequestCard> {
                 OutlinedButton.icon(
                   onPressed: widget.onArchive,
                   icon: const Icon(Icons.archive_outlined, size: 16),
-                  label: const Text('Archive'),
+                  label: Text(S.t('archived')),
                 ),
               ],
             ),
@@ -753,13 +753,13 @@ class _BusRequestCardState extends State<_BusRequestCard> {
                 OutlinedButton.icon(
                   onPressed: widget.onRestore,
                   icon: const Icon(Icons.unarchive_outlined, size: 16),
-                  label: const Text('Restore'),
+                  label: Text(S.t('restore')),
                 ),
                 const SizedBox(width: 10),
                 OutlinedButton.icon(
                   onPressed: widget.onDelete,
                   icon: const Icon(Icons.delete_forever, size: 16),
-                  label: const Text('Delete permanently'),
+                  label: Text(S.t('deletePermanently')),
                   style: OutlinedButton.styleFrom(
                     foregroundColor: Colors.red,
                     side: const BorderSide(color: Colors.red),

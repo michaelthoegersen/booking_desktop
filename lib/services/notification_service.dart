@@ -15,35 +15,41 @@ class NotificationService {
 
   /// Send a notification to a driver identified by their display name.
   /// Sends to ALL profiles matching the name (handles duplicates gracefully).
+  /// Pick a localized title/body pair. [titlesByLang] keys: 'no','en','sv'.
+  /// If the driver's profile has a language, use it; otherwise default to 'no'.
   static Future<bool> sendToDriver({
     required String driverName,
     required String title,
     String body = '',
     String? draftId,
+    Map<String, String>? titlesByLang,
+    Map<String, String>? bodiesByLang,
   }) async {
     try {
       debugPrint('🔔 sendToDriver: name="$driverName" title="$title"');
 
       final rows = await _sb
           .from('profiles')
-          .select('id')
+          .select('id, language')
           .eq('name', driverName);
 
-      final userIds = (rows as List)
-          .map((r) => r['id'] as String)
-          .toList();
+      final profiles = (rows as List).cast<Map<String, dynamic>>();
 
-      if (userIds.isEmpty) {
+      if (profiles.isEmpty) {
         debugPrint('🔔 sendToDriver: no profile found for "$driverName"');
         return false;
       }
 
-      debugPrint('🔔 sendToDriver: found ${userIds.length} profile(s): $userIds');
+      debugPrint('🔔 sendToDriver: found ${profiles.length} profile(s)');
 
       bool anySent = false;
-      for (final userId in userIds) {
+      for (final p in profiles) {
+        final userId = p['id'] as String;
+        final lang = (p['language'] as String?) ?? 'no';
+        final localTitle = titlesByLang?[lang] ?? titlesByLang?['en'] ?? title;
+        final localBody = bodiesByLang?[lang] ?? bodiesByLang?['en'] ?? body;
         final ok = await sendToUserId(
-            userId: userId, title: title, body: body, draftId: draftId);
+            userId: userId, title: localTitle, body: localBody, draftId: draftId);
         if (ok) anySent = true;
       }
       return anySent;

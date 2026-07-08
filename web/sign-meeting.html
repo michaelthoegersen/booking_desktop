@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="no">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Signer referat</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f5f5; color: #1a1a1a; }
+    .header { background: #1a1a1a; color: white; padding: 20px 28px; }
+    .header h1 { font-size: 15px; font-weight: 700; letter-spacing: 0.5px; }
+    .container { max-width: 600px; margin: 0 auto; padding: 24px 16px; }
+    .card { background: white; border-radius: 12px; padding: 28px; margin-top: 20px; box-shadow: 0 2px 12px rgba(0,0,0,0.06); }
+    .card h2 { font-size: 18px; margin-bottom: 8px; }
+    .card p { font-size: 14px; color: #666; margin-bottom: 14px; line-height: 1.5; }
+    .meeting-info { background: #f0f0f0; padding: 16px; border-radius: 8px; margin: 16px 0; }
+    .meeting-info strong { font-size: 16px; }
+    .meeting-info .meta { font-size: 13px; color: #666; margin-top: 4px; }
+    .btn { display: inline-block; padding: 14px 32px; border: none; border-radius: 10px; font-size: 15px; font-weight: 700; cursor: pointer; width: 100%; margin-top: 16px; }
+    .btn-sign { background: #1a1a1a; color: white; }
+    .btn-sign:hover { background: #333; }
+    .btn-sign:disabled { background: #ccc; cursor: not-allowed; }
+    .info-text { font-size: 12px; color: #999; margin-top: 12px; text-align: center; }
+    .error { color: #dc2626; font-size: 14px; margin-top: 8px; }
+
+    .spinner { text-align: center; padding: 60px 0; }
+    .spinner-ring { display: inline-block; width: 40px; height: 40px; border: 4px solid #e5e5e5; border-top-color: #333; border-radius: 50%; animation: spin 0.8s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .spinner p { margin-top: 16px; font-size: 15px; color: #666; }
+
+    .done-card { text-align: center; padding: 40px 28px; }
+    .done-card h2 { color: #16a34a; font-size: 20px; margin-bottom: 8px; }
+    .done-card p { color: #666; font-size: 14px; line-height: 1.5; }
+    .done-card .checkmark { font-size: 48px; margin-bottom: 16px; }
+
+    .already-card { text-align: center; padding: 40px 28px; }
+    .already-card h2 { color: #16a34a; font-size: 20px; margin-bottom: 8px; }
+    .already-card p { color: #666; font-size: 14px; }
+
+    .hidden { display: none; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>COMPLETE DRUMS</h1>
+  </div>
+
+  <!-- Loading -->
+  <div id="loading" class="container">
+    <div class="spinner">
+      <div class="spinner-ring"></div>
+      <p>Laster...</p>
+    </div>
+  </div>
+
+  <!-- Sign form -->
+  <div id="main" class="container hidden">
+    <iframe id="pdf-viewer" style="width:100%;height:65vh;border:1px solid #ddd;border-radius:8px;background:white;display:none;" title="Møtereferat"></iframe>
+    <div class="card">
+      <h2>Signer referat</h2>
+      <p>Du er bedt om å signere referatet for møtet nedenfor.</p>
+      <div class="meeting-info">
+        <strong id="meetingTitle"></strong>
+        <div class="meta" id="meetingMeta"></div>
+      </div>
+      <p>Ved å skrive inn ditt navn og trykke «Signer referat» bekrefter du at du har lest referatet og godkjenner innholdet.</p>
+      <div style="margin: 16px 0;">
+        <label for="sigName" style="display: block; font-size: 13px; font-weight: 600; color: #444; margin-bottom: 5px;">Ditt fulle navn</label>
+        <input type="text" id="sigName" required placeholder="Skriv inn navn..." style="width: 100%; padding: 10px 14px; border: 1px solid #ccc; border-radius: 8px; font-size: 15px; outline: none;">
+      </div>
+      <button class="btn btn-sign" id="signBtn" onclick="doSign()">Signer referat</button>
+      <div class="error hidden" id="errorMsg"></div>
+      <p class="info-text">Denne lenken er personlig og gjelder kun for deg.</p>
+    </div>
+  </div>
+
+  <!-- Already signed -->
+  <div id="already" class="container hidden">
+    <div class="card already-card">
+      <h2>Allerede signert</h2>
+      <p>Du har allerede signert dette referatet.</p>
+    </div>
+  </div>
+
+  <!-- Success -->
+  <div id="done" class="container hidden">
+    <div class="card done-card">
+      <div class="checkmark">✓</div>
+      <h2>Signert!</h2>
+      <p id="doneMsg"></p>
+    </div>
+  </div>
+
+  <!-- Error -->
+  <div id="errorPage" class="container hidden">
+    <div class="card" style="text-align: center; padding: 40px;">
+      <h2>Feil</h2>
+      <p id="errorPageMsg" style="color: #dc2626;"></p>
+    </div>
+  </div>
+
+  <script>
+    const API = 'https://fqefvgqlrntwgschkugf.supabase.co/functions/v1/meeting-sign';
+    const params = new URLSearchParams(window.location.search);
+    const token = params.get('token');
+
+    function show(id) {
+      ['loading', 'main', 'already', 'done', 'errorPage'].forEach(
+        s => document.getElementById(s).classList.toggle('hidden', s !== id)
+      );
+    }
+
+    async function load() {
+      if (!token) { showError('Mangler token i URL.'); return; }
+
+      try {
+        const res = await fetch(`${API}?token=${token}`);
+        const data = await res.json();
+
+        if (!res.ok) { showError(data.error || 'Ukjent feil.'); return; }
+
+        if (data.status === 'signed') {
+          show('already');
+          return;
+        }
+
+        document.getElementById('meetingTitle').textContent = data.meeting_title;
+        const date = data.meeting_date ? new Date(data.meeting_date).toLocaleDateString('nb-NO') : '';
+        const time = [data.meeting_time_start, data.meeting_time_end].filter(Boolean).map(t => t.substring(0,5)).join(' – ');
+        document.getElementById('meetingMeta').textContent = [date, time].filter(Boolean).join('  ·  ');
+        document.getElementById('sigName').value = data.signer_name;
+        if (data.pdf_url) {
+          const pdfViewer = document.getElementById('pdf-viewer');
+          pdfViewer.src = data.pdf_url;
+          pdfViewer.style.display = 'block';
+        }
+        show('main');
+      } catch (e) {
+        showError('Kunne ikke laste data: ' + e.message);
+      }
+    }
+
+    async function doSign() {
+      const name = document.getElementById('sigName').value.trim();
+      if (!name) { document.getElementById('sigName').focus(); return; }
+
+      const btn = document.getElementById('signBtn');
+      btn.disabled = true;
+      btn.textContent = 'Signerer...';
+
+      try {
+        const res = await fetch(`${API}?token=${token}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ signed_name: name }),
+        });
+        const data = await res.json();
+
+        if (data.status === 'signed' || data.status === 'already_signed') {
+          document.getElementById('doneMsg').textContent = 'Takk, ' + name + '! Du har signert referatet.';
+          show('done');
+        } else {
+          document.getElementById('errorMsg').textContent = 'Noe gikk galt.';
+          document.getElementById('errorMsg').classList.remove('hidden');
+          btn.disabled = false;
+          btn.textContent = 'Signer referat';
+        }
+      } catch (e) {
+        document.getElementById('errorMsg').textContent = 'Feil: ' + e.message;
+        document.getElementById('errorMsg').classList.remove('hidden');
+        btn.disabled = false;
+        btn.textContent = 'Signer referat';
+      }
+    }
+
+    function showError(msg) {
+      document.getElementById('errorPageMsg').textContent = msg;
+      show('errorPage');
+    }
+
+    load();
+  </script>
+</body>
+</html>

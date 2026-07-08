@@ -238,12 +238,23 @@ class _MeetingLivePageState extends State<MeetingLivePage> {
                   style: FilledButton.styleFrom(backgroundColor: Colors.blue.shade700),
                 ),
               const SizedBox(width: 12),
-              FilledButton.icon(
-                onPressed: _endMeeting,
-                icon: const Icon(Icons.stop, size: 18),
-                label: const Text('Avslutt møte'),
-                style: FilledButton.styleFrom(backgroundColor: Colors.red.shade700),
-              ),
+              if (_meeting?['status'] == 'completed')
+                FilledButton.icon(
+                  onPressed: () {
+                    _saveCurrentNotes();
+                    context.go('/m/meetings/${widget.meetingId}');
+                  },
+                  icon: const Icon(Icons.check, size: 18),
+                  label: const Text('Ferdig'),
+                  style: FilledButton.styleFrom(backgroundColor: Colors.green.shade700),
+                )
+              else
+                FilledButton.icon(
+                  onPressed: _endMeeting,
+                  icon: const Icon(Icons.stop, size: 18),
+                  label: const Text('Avslutt møte'),
+                  style: FilledButton.styleFrom(backgroundColor: Colors.red.shade700),
+                ),
             ],
           ),
           const SizedBox(height: 12),
@@ -317,13 +328,41 @@ class _MeetingLivePageState extends State<MeetingLivePage> {
                         ),
                         const SizedBox(height: 12),
 
-                        // Title + type badge
+                        // Title + type badge (click to edit)
                         Row(
                           children: [
                             Expanded(
-                              child: Text(itemTitle,
-                                  style: const TextStyle(
-                                      fontSize: 22, fontWeight: FontWeight.w900)),
+                              child: GestureDetector(
+                                onTap: () async {
+                                  final ctrl = TextEditingController(text: itemTitle);
+                                  final result = await showDialog<String>(
+                                    context: context,
+                                    builder: (ctx) => AlertDialog(
+                                      title: const Text('Rediger tittel'),
+                                      content: TextField(controller: ctrl, autofocus: true, onSubmitted: (v) => Navigator.pop(ctx, v.trim())),
+                                      actions: [
+                                        TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Avbryt')),
+                                        FilledButton(onPressed: () => Navigator.pop(ctx, ctrl.text.trim()), child: const Text('Lagre')),
+                                      ],
+                                    ),
+                                  );
+                                  ctrl.dispose();
+                                  if (result != null && result != itemTitle) {
+                                    await Supabase.instance.client.from('meeting_agenda_items').update({'title': result}).eq('id', currentItem['id']);
+                                    _load();
+                                  }
+                                },
+                                child: Row(
+                                  children: [
+                                    Expanded(
+                                      child: Text(itemTitle,
+                                          style: const TextStyle(
+                                              fontSize: 22, fontWeight: FontWeight.w900)),
+                                    ),
+                                    Icon(Icons.edit, size: 14, color: Colors.grey.shade400),
+                                  ],
+                                ),
+                              ),
                             ),
                             if (typeLabel != null)
                               Container(
@@ -356,10 +395,65 @@ class _MeetingLivePageState extends State<MeetingLivePage> {
                           ),
                         ],
 
-                        if (description.isNotEmpty) ...[
-                          const SizedBox(height: 12),
-                          Text(description, style: const TextStyle(fontSize: 14)),
-                        ],
+                        const SizedBox(height: 12),
+                        GestureDetector(
+                          onTap: () async {
+                            final ctrl = TextEditingController(text: description);
+                            final result = await showDialog<String>(
+                              context: context,
+                              builder: (ctx) => AlertDialog(
+                                title: const Text('Rediger beskrivelse'),
+                                content: SizedBox(
+                                  width: 450,
+                                  height: 200,
+                                  child: TextField(
+                                    controller: ctrl,
+                                    autofocus: true,
+                                    maxLines: null,
+                                    expands: true,
+                                    textAlignVertical: TextAlignVertical.top,
+                                    decoration: InputDecoration(
+                                      hintText: 'Beskrivelse...',
+                                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                                    ),
+                                  ),
+                                ),
+                                actions: [
+                                  TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Avbryt')),
+                                  FilledButton(onPressed: () => Navigator.pop(ctx, ctrl.text), child: const Text('Lagre')),
+                                ],
+                              ),
+                            );
+                            ctrl.dispose();
+                            if (result != null && result != description) {
+                              await Supabase.instance.client.from('meeting_agenda_items').update({'description': result}).eq('id', currentItem['id']);
+                              _load();
+                            }
+                          },
+                          child: Container(
+                            width: double.infinity,
+                            padding: const EdgeInsets.all(8),
+                            decoration: BoxDecoration(
+                              color: Colors.grey.shade50,
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Row(
+                              children: [
+                                Expanded(
+                                  child: Text(
+                                    description.isNotEmpty ? description : 'Legg til beskrivelse...',
+                                    style: TextStyle(
+                                      fontSize: 14,
+                                      color: description.isEmpty ? Colors.grey : null,
+                                      fontStyle: description.isEmpty ? FontStyle.italic : null,
+                                    ),
+                                  ),
+                                ),
+                                Icon(Icons.edit, size: 12, color: Colors.grey.shade400),
+                              ],
+                            ),
+                          ),
+                        ),
 
                         if (files.isNotEmpty) ...[
                           const SizedBox(height: 12),

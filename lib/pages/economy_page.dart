@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../localization/s.dart';
+import '../services/offers_export_pdf_service.dart';
 import '../state/active_company.dart';
 import '../ui/css_theme.dart';
 
@@ -17,12 +19,12 @@ enum _StatusFilter {
 
 extension _StatusFilterLabel on _StatusFilter {
   String get label => switch (this) {
-        _StatusFilter.all => 'All',
-        _StatusFilter.confirmedAndInvoiced => 'Confirmed + Invoiced',
-        _StatusFilter.confirmed => 'Confirmed only',
-        _StatusFilter.invoiced => 'Invoiced only',
-        _StatusFilter.inquiry => 'Inquiry only',
-        _StatusFilter.manual => 'Manual blocks',
+        _StatusFilter.all => S.t('all'),
+        _StatusFilter.confirmedAndInvoiced => S.t('confirmedAndInvoiced'),
+        _StatusFilter.confirmed => S.t('confirmedOnly'),
+        _StatusFilter.invoiced => S.t('invoicedOnly'),
+        _StatusFilter.inquiry => S.t('inquiryOnly'),
+        _StatusFilter.manual => S.t('manualBlocks'),
       };
 }
 
@@ -47,6 +49,8 @@ class _EconomyPageState extends State<EconomyPage> {
   // One entry per unique round_id (deduped)
   List<_Round> _rounds = [];
 
+  bool _exporting = false;
+
   @override
   void initState() {
     super.initState();
@@ -55,6 +59,41 @@ class _EconomyPageState extends State<EconomyPage> {
   }
 
   void _onCompanyChanged() => _load();
+
+  /// Export an overview of all offers (with full customer info + status) as a
+  /// PDF. Reads straight from the `offers` table for the active company so it
+  /// is independent of the samletdata aggregation shown on this page.
+  Future<void> _exportOffers() async {
+    if (_exporting) return;
+    setState(() => _exporting = true);
+    try {
+      final companyId = activeCompanyNotifier.value?.id;
+      var query = _supabase
+          .from('offers')
+          .select(
+              'id, title, production, company, contact, status, total_excl_vat, created_at, payload')
+          .eq('archived', false);
+      if (companyId != null) {
+        query = query.eq('owner_company_id', companyId);
+      }
+      final rows = await query.order('created_at', ascending: false);
+      final offers = (rows as List).cast<Map<String, dynamic>>();
+
+      await OffersExportPdfService.exportOffers(
+        offers: offers,
+        companyName: activeCompanyNotifier.value?.name ?? 'TourFlow',
+      );
+    } catch (e) {
+      debugPrint('Export offers error: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Eksport feilet: $e')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _exporting = false);
+    }
+  }
 
   @override
   void dispose() {
@@ -198,7 +237,7 @@ class _EconomyPageState extends State<EconomyPage> {
       if (!mounted) return;
       setState(() => _loading = false);
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Load error: $e'), backgroundColor: Colors.red),
+        SnackBar(content: Text('${S.t('loadError')}: $e'), backgroundColor: Colors.red),
       );
     }
   }
@@ -289,7 +328,7 @@ class _EconomyPageState extends State<EconomyPage> {
                   Row(
                     children: [
                       Text(
-                        'Economy',
+                        S.t('economy'),
                         style: Theme.of(context)
                             .textTheme
                             .titleLarge
@@ -332,9 +371,9 @@ class _EconomyPageState extends State<EconomyPage> {
                           value: _creatorFilter ?? '__all__',
                           underline: const SizedBox(),
                           items: [
-                            const DropdownMenuItem(
+                            DropdownMenuItem(
                               value: '__all__',
-                              child: Text('All creators'),
+                              child: Text(S.t('allCreators')),
                             ),
                             ..._creatorProfiles.map((p) => DropdownMenuItem(
                                   value: p['id'] as String,
@@ -350,6 +389,18 @@ class _EconomyPageState extends State<EconomyPage> {
                         ),
                       ],
                       const Spacer(),
+                      OutlinedButton.icon(
+                        onPressed: _exporting ? null : _exportOffers,
+                        icon: _exporting
+                            ? const SizedBox(
+                                width: 16,
+                                height: 16,
+                                child: CircularProgressIndicator(strokeWidth: 2),
+                              )
+                            : const Icon(Icons.picture_as_pdf_outlined, size: 18),
+                        label: const Text('Eksporter tilbud'),
+                      ),
+                      const SizedBox(width: 8),
                       IconButton(
                         icon: const Icon(Icons.refresh),
                         onPressed: _load,
@@ -364,21 +415,21 @@ class _EconomyPageState extends State<EconomyPage> {
                   Row(
                     children: [
                       _SummaryCard(
-                        label: 'Total $_selectedYear',
+                        label: '${S.t('total')} $_selectedYear',
                         value: _formatNok(_totalYear),
                         icon: Icons.trending_up,
                         color: Colors.green,
                       ),
                       const SizedBox(width: 12),
                       _SummaryCard(
-                        label: 'Avg per active month',
+                        label: S.t('avgPerActiveMonth'),
                         value: _formatNok(_avgMonth),
                         icon: Icons.calendar_month,
                         color: Colors.blue,
                       ),
                       const SizedBox(width: 12),
                       _SummaryCard(
-                        label: 'Days with buses out',
+                        label: S.t('daysWithBusesOut'),
                         value: '$_totalDays',
                         icon: Icons.directions_bus_outlined,
                         color: Colors.orange,
@@ -396,11 +447,11 @@ class _EconomyPageState extends State<EconomyPage> {
                         Expanded(
                           flex: 3,
                           child: _Section(
-                            title: 'Monthly Breakdown',
+                            title: S.t('monthlyBreakdown'),
                             child: _monthlyData.isEmpty
-                                ? const Center(
-                                    child: Text('No data',
-                                        style: TextStyle(
+                                ? Center(
+                                    child: Text(S.t('noData'),
+                                        style: const TextStyle(
                                             color: CssTheme.textMuted)))
                                 : _MonthlyTable(months: _monthlyData),
                           ),
@@ -409,11 +460,11 @@ class _EconomyPageState extends State<EconomyPage> {
                         Expanded(
                           flex: 2,
                           child: _Section(
-                            title: 'Per Production',
+                            title: S.t('perProduction'),
                             child: _productionData.isEmpty
-                                ? const Center(
-                                    child: Text('No data',
-                                        style: TextStyle(
+                                ? Center(
+                                    child: Text(S.t('noData'),
+                                        style: const TextStyle(
                                             color: CssTheme.textMuted)))
                                 : _ProductionTable(
                                     productions: _productionData,
@@ -448,9 +499,9 @@ class _MonthlyTable extends StatelessWidget {
         Padding(
           padding: const EdgeInsets.only(bottom: 8),
           child: Row(children: [
-            _h('Month', flex: 2),
-            _h('Days', flex: 1),
-            _h('Revenue', flex: 3),
+            _h(S.t('month'), flex: 2),
+            _h(S.t('days'), flex: 1),
+            _h(S.t('revenue'), flex: 3),
             _h('', flex: 4),
           ]),
         ),
@@ -537,9 +588,9 @@ class _ProductionTable extends StatelessWidget {
         Padding(
           padding: const EdgeInsets.only(bottom: 8),
           child: Row(children: [
-            _h('Production', flex: 4),
-            _h('Days', flex: 1),
-            _h('Revenue', flex: 3),
+            _h(S.t('production'), flex: 4),
+            _h(S.t('days'), flex: 1),
+            _h(S.t('revenue'), flex: 3),
             _h('%', flex: 1),
           ]),
         ),

@@ -7,6 +7,7 @@ list(APPEND FLUTTER_PLUGIN_LIST
   app_links
   iris_method_channel
   printing
+  syncfusion_pdfviewer_windows
   url_launcher_windows
 )
 

@@ -15,6 +15,7 @@ import '../widgets/bus_map_widget.dart';
 import '../models/bus_position.dart';
 import '../data/city_coords.dart';
 import '../services/openroute_routing.dart';
+import '../localization/s.dart';
 
 class DashboardPage extends StatefulWidget {
   const DashboardPage({super.key});
@@ -503,7 +504,7 @@ Future<void> _confirmDeleteDraft(
     context: context,
 
     builder: (_) => AlertDialog(
-      title: const Text("Delete draft"),
+      title: Text(S.t('deleteDraft')),
 
       content: Text(
         "Are you sure you want to permanently delete:\n\n$title",
@@ -516,7 +517,7 @@ Future<void> _confirmDeleteDraft(
               Navigator.of(context, rootNavigator: true)
                   .pop(false),
 
-          child: const Text("Cancel"),
+          child: Text(S.t('cancel')),
         ),
 
         FilledButton(
@@ -524,7 +525,7 @@ Future<void> _confirmDeleteDraft(
               Navigator.of(context, rootNavigator: true)
                   .pop(true),
 
-          child: const Text("Delete"),
+          child: Text(S.t('delete')),
         ),
       ],
     ),
@@ -549,8 +550,8 @@ Future<void> _confirmDeleteDraft(
     _loadRecentOffers();
 
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text("Draft deleted"),
+      SnackBar(
+        content: Text(S.t('draftDeleted')),
       ),
     );
 
@@ -576,21 +577,21 @@ Future<void> _confirmDeleteDraft(
       context: context,
       builder: (_) => AlertDialog(
         title: Text('Archive "$production"?'),
-        content: const Text(
-          'Do you also want to remove this draft from the calendar?',
+        content: Text(
+          S.t('removeFromCalendarQuestion'),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context, rootNavigator: true).pop(null),
-            child: const Text('Cancel'),
+            child: Text(S.t('cancel')),
           ),
           OutlinedButton(
             onPressed: () => Navigator.of(context, rootNavigator: true).pop('keep'),
-            child: const Text('Keep in calendar'),
+            child: Text(S.t('keepInCalendar')),
           ),
           FilledButton(
             onPressed: () => Navigator.of(context, rootNavigator: true).pop('remove'),
-            child: const Text('Remove from calendar'),
+            child: Text(S.t('removeFromCalendar')),
           ),
         ],
       ),
@@ -639,7 +640,7 @@ Future<void> _confirmDeleteDraft(
     final picked = await showDialog<Map<String, dynamic>>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Change creator'),
+        title: Text(S.t('changeCreator')),
         content: SizedBox(
           width: 320,
           child: ListView.builder(
@@ -667,7 +668,7 @@ Future<void> _confirmDeleteDraft(
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancel'),
+            child: Text(S.t('cancel')),
           ),
         ],
       ),
@@ -733,9 +734,9 @@ Widget _buildBusMapSection() {
         contentPadding: EdgeInsets.zero,
         leading: const Icon(Icons.map),
 
-        title: const Text(
-          "Bus locations today",
-          style: TextStyle(fontWeight: FontWeight.w700),
+        title: Text(
+          S.t('busLocationsToday'),
+          style: const TextStyle(fontWeight: FontWeight.w700),
         ),
 
         trailing: IconButton(
@@ -872,7 +873,7 @@ Widget build(BuildContext context) {
                     const Icon(Icons.notification_important, color: Colors.orange, size: 20),
                     const SizedBox(width: 8),
                     Text(
-                      'Offer status',
+                      S.t('offerStatus'),
                       style: Theme.of(context).textTheme.titleSmall?.copyWith(
                         fontWeight: FontWeight.w700,
                         color: Colors.orange.shade800,
@@ -915,7 +916,7 @@ Widget build(BuildContext context) {
                                     overflow: TextOverflow.ellipsis,
                                   ),
                                   Text(
-                                    'Awaiting your approval',
+                                    S.t('awaitingApproval'),
                                     style: TextStyle(fontSize: 11, color: Colors.orange.shade700),
                                   ),
                                 ],
@@ -963,7 +964,7 @@ Widget build(BuildContext context) {
                   children: [
 
                     Text(
-                      "Recent offers",
+                      S.t('recentOffers'),
                       style: Theme.of(context)
                           .textTheme
                           .titleMedium
@@ -980,7 +981,7 @@ Widget build(BuildContext context) {
                       child: TextField(
                         controller: _searchCtrl,
                         decoration: InputDecoration(
-                          hintText: 'Search offers…',
+                          hintText: S.t('searchOffers'),
                           prefixIcon: const Icon(Icons.search, size: 18),
                           contentPadding: const EdgeInsets.symmetric(
                             vertical: 0,
@@ -1001,7 +1002,7 @@ Widget build(BuildContext context) {
                           loadingRecent ? null : _loadRecentOffers,
 
                       icon: const Icon(Icons.refresh),
-                      label: const Text("Refresh"),
+                      label: Text(S.t('refresh')),
                     ),
                   ],
                 ),
@@ -1021,9 +1022,9 @@ Widget build(BuildContext context) {
 
                 else if (recentOffers.isEmpty)
 
-                  const Expanded(
+                  Expanded(
                     child: Center(
-                      child: Text("No offers yet."),
+                      child: Text(S.t('noOffersYet')),
                     ),
                   )
 
@@ -1147,7 +1148,7 @@ Widget build(BuildContext context) {
         subtitle: Text.rich(
           TextSpan(
             children: [
-              const TextSpan(text: 'Created: '),
+              TextSpan(text: '${S.t('created')}: '),
               TextSpan(
                 text: createdBy,
                 style: const TextStyle(
@@ -1159,8 +1160,8 @@ Widget build(BuildContext context) {
                     : (TapGestureRecognizer()
                         ..onTap = () => _changeCreator(id, createdBy)),
               ),
-              TextSpan(text: ' • Updated: $updatedBy\n'),
-              TextSpan(text: 'Last update: $updatedDate'),
+              TextSpan(text: ' • ${S.t('updated')}: $updatedBy\n'),
+              TextSpan(text: '${S.t('lastUpdate')}: $updatedDate'),
             ],
           ),
           style: const TextStyle(
@@ -1176,7 +1177,7 @@ Widget build(BuildContext context) {
             if (id.isNotEmpty)
               IconButton(
                 icon: const Icon(Icons.picture_as_pdf, color: Colors.red),
-                tooltip: 'PDF versions',
+                tooltip: S.t('tooltipPdfVersions'),
                 onPressed: () => _showPdfVersionsDialog(
                   context,
                   id,
@@ -1185,7 +1186,7 @@ Widget build(BuildContext context) {
               ),
             IconButton(
               icon: const Icon(Icons.archive_outlined),
-              tooltip: 'Archive',
+              tooltip: S.t('tooltipArchive'),
               onPressed: id.isEmpty
                   ? null
                   : () => _archiveDraft(id, production),
@@ -1267,10 +1268,10 @@ class _PdfViewDialogState extends State<_PdfViewDialog> {
                   const SizedBox(width: 8),
                   const Icon(Icons.picture_as_pdf, color: Colors.red),
                   const SizedBox(width: 8),
-                  const Expanded(
+                  Expanded(
                     child: Text(
-                      'PDF Preview',
-                      style: TextStyle(
+                      S.t('pdfPreview'),
+                      style: const TextStyle(
                         fontSize: 16,
                         fontWeight: FontWeight.w700,
                       ),
@@ -1306,7 +1307,7 @@ class _PdfViewDialogState extends State<_PdfViewDialog> {
                                   });
                                   _loadPdf();
                                 },
-                                child: const Text('Retry'),
+                                child: Text(S.t('retry')),
                               ),
                             ],
                           ),
@@ -1392,7 +1393,7 @@ class _PdfVersionsDialogState extends State<_PdfVersionsDialog> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Delete PDF version?'),
+        title: Text(S.t('deletePdfVersion')),
         content: Text(
           'This will delete the PDF sent to $email and remove the offer token.\n\n'
           '${status == 'approved' ? '⚠ This version is signed by both parties!' : status == 'accepted' ? '⚠ This version has been accepted by the customer!' : ''}',
@@ -1400,12 +1401,12 @@ class _PdfVersionsDialogState extends State<_PdfVersionsDialog> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancel'),
+            child: Text(S.t('cancel')),
           ),
           FilledButton(
             style: FilledButton.styleFrom(backgroundColor: Colors.red),
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Delete'),
+            child: Text(S.t('delete')),
           ),
         ],
       ),
@@ -1445,15 +1446,15 @@ class _PdfVersionsDialogState extends State<_PdfVersionsDialog> {
     final hasTokens = _tokens.isNotEmpty;
 
     return AlertDialog(
-      title: const Text('PDF Versions'),
+      title: Text(S.t('pdfVersions')),
       content: SizedBox(
         width: 440,
         child: _loading
             ? const Center(child: Padding(padding: EdgeInsets.all(20), child: CircularProgressIndicator()))
             : !hasOfferPdf && !hasTokens
-                ? const Padding(
-                    padding: EdgeInsets.all(16),
-                    child: Text('No PDFs have been generated yet.', style: TextStyle(color: Colors.grey)),
+                ? Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Text(S.t('noPdfsYet'), style: const TextStyle(color: Colors.grey)),
                   )
                 : SingleChildScrollView(
                     child: Column(
@@ -1465,8 +1466,8 @@ class _PdfVersionsDialogState extends State<_PdfVersionsDialog> {
                           ListTile(
                             contentPadding: EdgeInsets.zero,
                             leading: const Icon(Icons.description, color: Colors.blue),
-                            title: const Text('Saved offer', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
-                            subtitle: const Text('Latest saved version', style: TextStyle(fontSize: 12)),
+                            title: Text(S.t('savedOffer'), style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
+                            subtitle: Text(S.t('latestSavedVersion'), style: const TextStyle(fontSize: 12)),
                             trailing: IconButton(
                               icon: const Icon(Icons.open_in_new, size: 18),
                               onPressed: () => widget.onViewPdf(_offerPdfUrl(widget.offerPdfPath!)),
@@ -1498,7 +1499,7 @@ class _PdfVersionsDialogState extends State<_PdfVersionsDialog> {
                             case 'approved':
                               statusIcon = Icons.verified;
                               statusColor = Colors.green;
-                              statusLabel = 'Signed by both parties';
+                              statusLabel = S.t('signedByBothParties');
                             case 'accepted':
                               statusIcon = Icons.check_circle;
                               statusColor = Colors.orange;
@@ -1522,7 +1523,7 @@ class _PdfVersionsDialogState extends State<_PdfVersionsDialog> {
                                   children: [
                                     if (showOriginal)
                                       Tooltip(
-                                        message: 'Original offer',
+                                        message: S.t('originalOffer'),
                                         child: IconButton(
                                           icon: const Icon(Icons.picture_as_pdf, size: 18, color: Colors.red),
                                           onPressed: () => widget.onViewPdf(_pdfUrl(pdfPath!)),
@@ -1530,14 +1531,14 @@ class _PdfVersionsDialogState extends State<_PdfVersionsDialog> {
                                       ),
                                     if (showSigned)
                                       Tooltip(
-                                        message: 'Signed version',
+                                        message: S.t('signedVersion'),
                                         child: IconButton(
                                           icon: const Icon(Icons.verified, size: 18, color: Colors.green),
                                           onPressed: () => widget.onViewPdf(_pdfUrl(signedPath!)),
                                         ),
                                       ),
                                     Tooltip(
-                                      message: 'Delete',
+                                      message: S.t('delete'),
                                       child: IconButton(
                                         icon: Icon(Icons.delete_outline, size: 18, color: Colors.grey.shade400),
                                         onPressed: () => _deleteToken(token),
@@ -1556,7 +1557,7 @@ class _PdfVersionsDialogState extends State<_PdfVersionsDialog> {
       actions: [
         TextButton(
           onPressed: () => Navigator.pop(context),
-          child: const Text('Close'),
+          child: Text(S.t('close')),
         ),
       ],
     );

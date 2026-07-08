@@ -23,11 +23,12 @@ class BusAvailabilityService {
     // 2️⃣ Hent BUSSER SOM ER OPPTATT I PERIODEN
     // --------------------------------------------------
 
+    // lt/gt: allow a job to start on the same day another ends
     final busyRes = await _supabase
         .from('calendar')
         .select('bus,start_date,end_date,status')
-        .lte('start_date', end.toIso8601String())
-        .gte('end_date', start.toIso8601String());
+        .lt('start_date', end.toIso8601String())
+        .gt('end_date', start.toIso8601String());
 
     final busy = (busyRes as List)
         .where((e) => e['status'] != 'Cancelled')

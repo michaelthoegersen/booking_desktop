@@ -190,6 +190,103 @@ class _MgmtExpensesPageState extends State<MgmtExpensesPage> {
     }
   }
 
+  /// Mark an expense as paid — shows account number and confirms payment.
+  Future<void> _markPaid(Map<String, dynamic> expense) async {
+    final profile = expense['profiles'] as Map<String, dynamic>?;
+    final name = profile?['name'] as String? ?? 'Ukjent';
+    final amount = (expense['amount'] as num?)?.toDouble() ?? 0;
+    final userId = expense['user_id'] as String?;
+
+    // Fetch account number from profile
+    String? accountNumber;
+    if (userId != null) {
+      try {
+        final p = await _sb
+            .from('profiles')
+            .select('account_number')
+            .eq('id', userId)
+            .maybeSingle();
+        accountNumber = p?['account_number'] as String?;
+      } catch (_) {}
+    }
+
+    if (!mounted) return;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Betal utlegg'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('$name — ${_formatAmount(amount)}',
+                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
+            const SizedBox(height: 16),
+            if (accountNumber != null && accountNumber.isNotEmpty) ...[
+              const Text('Kontonummer:', style: TextStyle(fontSize: 12, color: Colors.grey)),
+              const SizedBox(height: 4),
+              SelectableText(
+                accountNumber,
+                style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w900, fontFamily: 'monospace'),
+              ),
+            ] else
+              const Text(
+                'Kontonummer ikke registrert.\nBe personen legge inn kontonummer i profilen sin.',
+                style: TextStyle(color: Colors.orange),
+              ),
+            const SizedBox(height: 16),
+            const Text('Marker som betalt etter at du har overført beløpet.',
+                style: TextStyle(fontSize: 13, color: Colors.grey)),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Avbryt'),
+          ),
+          FilledButton.icon(
+            onPressed: () => Navigator.pop(ctx, true),
+            icon: const Icon(Icons.check),
+            label: const Text('Marker som betalt'),
+            style: FilledButton.styleFrom(backgroundColor: Colors.blue),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+
+    try {
+      final uid = _sb.auth.currentUser?.id;
+      await _sb.from('expenses').update({
+        'paid_at': DateTime.now().toUtc().toIso8601String(),
+        'paid_by': uid,
+      }).eq('id', expense['id'] as String);
+
+      // Notify the person that they've been paid
+      if (userId != null) {
+        final amountStr = '${NumberFormat('#,##0', 'nb_NO').format(amount.round())} kr';
+        await _sb.functions.invoke('notify-company', body: {
+          'company_id': _companyId,
+          'type': 'expense',
+          'title': 'Utlegg utbetalt',
+          'body': 'Utlegget ditt på $amountStr er utbetalt',
+          'user_ids': [userId],
+        });
+      }
+
+      await _load();
+    } catch (e) {
+      debugPrint('Mark paid error: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Feil: $e'), backgroundColor: Colors.red),
+        );
+      }
+    }
+  }
+
   /// Generate and send reiseregning PDF to ebilag.
   Future<void> _sendReiseregning(Map<String, dynamic> expense) async {
     try {
@@ -410,6 +507,7 @@ class _MgmtExpensesPageState extends State<MgmtExpensesPage> {
     final receiptUrl = e['receipt_url'] as String?;
     final rejectionReason = e['rejection_reason'] as String? ?? '';
     final reiseregningSentAt = e['reiseregning_sent_at'] as String?;
+    final paidAt = e['paid_at'] as String?;
 
     return GestureDetector(
       onTap: () => _showExpenseDetail(e),
@@ -520,12 +618,35 @@ class _MgmtExpensesPageState extends State<MgmtExpensesPage> {
             Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const Icon(Icons.check_circle, size: 16, color: Colors.green),
-                const SizedBox(width: 4),
-                Text(
-                  'Godkjent',
-                  style: const TextStyle(fontSize: 12, color: Colors.green),
-                ),
+                if (paidAt != null) ...[
+                  const Icon(Icons.payments, size: 16, color: Colors.blue),
+                  const SizedBox(width: 4),
+                  Text(
+                    'Betalt ${_formatDate(paidAt)}',
+                    style: const TextStyle(fontSize: 12, color: Colors.blue),
+                  ),
+                ] else ...[
+                  const Icon(Icons.check_circle, size: 16, color: Colors.green),
+                  const SizedBox(width: 4),
+                  Text(
+                    'Godkjent',
+                    style: const TextStyle(fontSize: 12, color: Colors.green),
+                  ),
+                  // Show pay button for private expenses (no gig)
+                  if (gigId == null) ...[
+                    const SizedBox(width: 8),
+                    FilledButton.icon(
+                      onPressed: () => _markPaid(e),
+                      icon: const Icon(Icons.payments, size: 14),
+                      label: const Text('Betal', style: TextStyle(fontSize: 11)),
+                      style: FilledButton.styleFrom(
+                        backgroundColor: Colors.blue,
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                        minimumSize: const Size(0, 28),
+                      ),
+                    ),
+                  ],
+                ],
                 if (reiseregningSentAt != null) ...[
                   const SizedBox(width: 8),
                   Tooltip(

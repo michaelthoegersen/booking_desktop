@@ -15,6 +15,10 @@
         "destination": "/accept.html"
       },
       {
+        "source": "/sign-meeting.html",
+        "destination": "/sign-meeting.html"
+      },
+      {
         "source": "**",
         "destination": "/index.html"
       }

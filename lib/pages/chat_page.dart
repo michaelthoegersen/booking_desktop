@@ -13,6 +13,7 @@ import '../widgets/chat_attach_menu.dart';
 import '../widgets/chat_media_content.dart';
 import '../widgets/gif_picker.dart';
 import '../widgets/mention_helpers.dart';
+import '../localization/s.dart';
 import '../widgets/reaction_details_dialog.dart';
 import '../widgets/poll_create_dialog.dart';
 
@@ -51,9 +52,9 @@ class _ChatPageState extends State<ChatPage> {
         // Høyre: aktiv tråd
         Expanded(
           child: _selectedThread == null
-              ? const Center(
+              ? Center(
                   child: Text(
-                    'Velg en tråd',
+                    S.t('chooseThread'),
                     style: TextStyle(color: Colors.black45),
                   ),
                 )
@@ -162,13 +163,13 @@ class _ThreadList extends StatelessWidget {
       final picked = await showDialog<Map<String, dynamic>>(
         context: context,
         builder: (ctx) => AlertDialog(
-          title: const Text('Ny samtale'),
+          title: Text(S.t('newConversation')),
           content: SizedBox(
             width: 360,
             height: 400,
             child: contacts.isEmpty
-                ? const Center(
-                    child: Text('Ingen kontakter',
+                ? Center(
+                    child: Text(S.t('noContactsChat'),
                         style: TextStyle(color: CssTheme.textMuted)),
                   )
                 : ListView.builder(
@@ -196,7 +197,7 @@ class _ThreadList extends StatelessWidget {
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(ctx),
-              child: const Text('Avbryt'),
+              child: Text(S.t('cancel')),
             ),
           ],
         ),
@@ -241,7 +242,7 @@ class _ThreadList extends StatelessWidget {
               IconButton(
                 onPressed: () => _showNewDmPicker(context),
                 icon: const Icon(Icons.add),
-                tooltip: 'Ny direktemelding',
+                tooltip: S.t('newDirectMessage'),
               ),
             ],
           ),
@@ -254,17 +255,17 @@ class _ThreadList extends StatelessWidget {
                 return const Center(child: CircularProgressIndicator());
               }
               if (snapshot.hasError) {
-                return Center(child: Text('Feil: ${snapshot.error}'));
+                return Center(child: Text('${S.t('error')}: ${snapshot.error}'));
               }
 
               final threads = _groupToThreads(snapshot.data ?? []);
 
               if (threads.isEmpty) {
-                return const Center(
+                return Center(
                   child: Padding(
                     padding: EdgeInsets.all(24),
                     child: Text(
-                      'Ingen meldinger ennå',
+                      S.t('noMessagesYet'),
                       style: TextStyle(color: Colors.black45),
                     ),
                   ),
@@ -415,6 +416,11 @@ class _ThreadViewState extends State<_ThreadView> with MentionMixin {
   String? _editingMessageId;
   Map<String, dynamic>? _replyTo;
 
+  Uint8List? _pendingBytes;
+  String? _pendingFileName;
+  String? _pendingMessageType;
+  String? _pendingContentType;
+
   @override
   void initState() {
     super.initState();
@@ -466,20 +472,20 @@ class _ThreadViewState extends State<_ThreadView> with MentionMixin {
     final confirm = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Slett tråd'),
+        title: Text(S.t('deleteThread')),
         content: Text(
-          'Er du sikker på at du vil slette hele samtalen for '
+          '${S.t('confirmDeleteThread')} '
           '${widget.thread.produksjon} (${_fmtDate(widget.thread.dato)})?',
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(false),
-            child: const Text('Avbryt'),
+            child: Text(S.t('cancel')),
           ),
           FilledButton(
             onPressed: () => Navigator.of(ctx).pop(true),
             style: FilledButton.styleFrom(backgroundColor: Colors.red),
-            child: const Text('Slett'),
+            child: Text(S.t('delete')),
           ),
         ],
       ),
@@ -496,7 +502,7 @@ class _ThreadViewState extends State<_ThreadView> with MentionMixin {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Kunne ikke slette tråd: $e')),
+          SnackBar(content: Text('${S.t('couldNotDeleteThread')}: $e')),
         );
       }
     }
@@ -533,7 +539,8 @@ class _ThreadViewState extends State<_ThreadView> with MentionMixin {
 
   Future<void> _send() async {
     final text = _controller.text.trim();
-    if (text.isEmpty || _sending) return;
+    final hasAttachment = _pendingBytes != null;
+    if ((text.isEmpty && !hasAttachment) || _sending) return;
 
     setState(() => _sending = true);
     _controller.clear();
@@ -542,6 +549,34 @@ class _ThreadViewState extends State<_ThreadView> with MentionMixin {
       if (_editingMessageId != null) {
         await ChatService.updateMessage(_editingMessageId!, text);
         setState(() => _editingMessageId = null);
+      } else if (hasAttachment) {
+        final url = await ChatAttachmentService.uploadFile(
+          bytes: _pendingBytes!,
+          fileName: _pendingFileName!,
+          contentType: _pendingContentType!,
+        );
+        final mentions = List<String>.from(mentionedUserIds);
+        final isFile = _pendingMessageType == 'file';
+        await ChatService.sendAdminMessage(
+          dato: widget.thread.dato,
+          produksjon: widget.thread.produksjon,
+          message: isFile && text.isEmpty ? _pendingFileName! : text,
+          targetUserId: widget.thread.userId,
+          messageType: _pendingMessageType!,
+          attachmentUrl: url,
+          replyToId: _replyTo?['id'] as String?,
+          mentionedUserIds: mentions.isNotEmpty ? mentions : null,
+        );
+        clearMentions();
+        if (mounted) {
+          setState(() {
+            _replyTo = null;
+            _pendingBytes = null;
+            _pendingFileName = null;
+            _pendingMessageType = null;
+            _pendingContentType = null;
+          });
+        }
       } else {
         final mentions = List<String>.from(mentionedUserIds);
         await ChatService.sendAdminMessage(
@@ -558,7 +593,7 @@ class _ThreadViewState extends State<_ThreadView> with MentionMixin {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Feil ved sending: $e')),
+          SnackBar(content: Text('${S.t('sendError')}: $e')),
         );
       }
     } finally {
@@ -572,30 +607,12 @@ class _ThreadViewState extends State<_ThreadView> with MentionMixin {
     final file = result.files.first;
     final bytes = file.bytes;
     if (bytes == null) return;
-    setState(() => _sending = true);
-    try {
-      final url = await ChatAttachmentService.uploadFile(
-        bytes: bytes,
-        fileName: file.name,
-        contentType: 'image/${file.extension ?? 'png'}',
-      );
-      await ChatService.sendAdminMessage(
-        dato: widget.thread.dato,
-        produksjon: widget.thread.produksjon,
-        message: '',
-        targetUserId: widget.thread.userId,
-        messageType: 'image',
-        attachmentUrl: url,
-      );
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Feil ved opplasting: $e')),
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _sending = false);
-    }
+    setState(() {
+      _pendingBytes = bytes;
+      _pendingFileName = file.name;
+      _pendingMessageType = 'image';
+      _pendingContentType = 'image/${file.extension ?? 'png'}';
+    });
   }
 
   Future<void> _pickFile() async {
@@ -604,29 +621,65 @@ class _ThreadViewState extends State<_ThreadView> with MentionMixin {
     final file = result.files.first;
     final bytes = file.bytes;
     if (bytes == null) return;
-    setState(() => _sending = true);
-    try {
-      final url = await ChatAttachmentService.uploadFile(
-        bytes: bytes,
-        fileName: file.name,
-      );
-      await ChatService.sendAdminMessage(
-        dato: widget.thread.dato,
-        produksjon: widget.thread.produksjon,
-        message: file.name,
-        targetUserId: widget.thread.userId,
-        messageType: 'file',
-        attachmentUrl: url,
-      );
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Feil ved opplasting: $e')),
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _sending = false);
-    }
+    setState(() {
+      _pendingBytes = bytes;
+      _pendingFileName = file.name;
+      _pendingMessageType = 'file';
+      _pendingContentType = 'application/octet-stream';
+    });
+  }
+
+  void _clearPendingAttachment() {
+    setState(() {
+      _pendingBytes = null;
+      _pendingFileName = null;
+      _pendingMessageType = null;
+      _pendingContentType = null;
+    });
+  }
+
+  Widget _buildPendingAttachmentPreview() {
+    final type = _pendingMessageType;
+    return Container(
+      color: Colors.white,
+      padding: const EdgeInsets.fromLTRB(14, 8, 8, 0),
+      child: Row(
+        children: [
+          ClipRRect(
+            borderRadius: BorderRadius.circular(8),
+            child: SizedBox(
+              width: 56,
+              height: 56,
+              child: type == 'image' && _pendingBytes != null
+                  ? Image.memory(_pendingBytes!, fit: BoxFit.cover)
+                  : Container(
+                      color: Colors.black12,
+                      child: Icon(
+                        type == 'video'
+                            ? Icons.movie_outlined
+                            : Icons.insert_drive_file_outlined,
+                        size: 28,
+                        color: Colors.black54,
+                      ),
+                    ),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              _pendingFileName ?? '',
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 13),
+            ),
+          ),
+          IconButton(
+            icon: const Icon(Icons.close, size: 20),
+            onPressed: _clearPendingAttachment,
+          ),
+        ],
+      ),
+    );
   }
 
   void _showGifPicker() {
@@ -710,7 +763,7 @@ class _ThreadViewState extends State<_ThreadView> with MentionMixin {
               IconButton(
                 onPressed: _confirmDelete,
                 icon: const Icon(Icons.delete_outline_rounded),
-                tooltip: 'Slett tråd',
+                tooltip: S.t('deleteThread'),
                 style: IconButton.styleFrom(foregroundColor: Colors.red),
               ),
             ],
@@ -728,9 +781,9 @@ class _ThreadViewState extends State<_ThreadView> with MentionMixin {
               final messages = snapshot.data ?? [];
 
               if (messages.isEmpty) {
-                return const Center(
+                return Center(
                   child: Text(
-                    'Ingen meldinger',
+                    S.t('noMessages'),
                     style: TextStyle(color: Colors.black45),
                   ),
                 );
@@ -848,12 +901,15 @@ class _ThreadViewState extends State<_ThreadView> with MentionMixin {
               children: [
                 const Icon(Icons.edit, size: 16, color: Colors.black54),
                 const SizedBox(width: 8),
-                const Text('Redigerer melding', style: TextStyle(fontSize: 12, color: Colors.black54)),
+                Text(S.t('editingMessage'), style: TextStyle(fontSize: 12, color: Colors.black54)),
                 const Spacer(),
                 IconButton(icon: const Icon(Icons.close, size: 18), onPressed: _cancelEdit),
               ],
             ),
           ),
+
+        // Pending attachment preview
+        if (_pendingBytes != null) _buildPendingAttachmentPreview(),
 
         // Tekstfelt
         Container(
@@ -879,7 +935,7 @@ class _ThreadViewState extends State<_ThreadView> with MentionMixin {
                   keyboardType: TextInputType.multiline,
                   textCapitalization: TextCapitalization.sentences,
                   decoration: InputDecoration(
-                    hintText: 'Svar som Michael…',
+                    hintText: '${S.t('replyAs')} Michael…',
                     filled: true,
                     fillColor: const Color(0xFFF5F5F5),
                     contentPadding: const EdgeInsets.symmetric(
@@ -909,7 +965,7 @@ class _ThreadViewState extends State<_ThreadView> with MentionMixin {
                         _editingMessageId != null ? Icons.check_rounded : Icons.send_rounded,
                         size: 18,
                       ),
-                      label: Text(_editingMessageId != null ? 'Lagre' : 'Send'),
+                      label: Text(_editingMessageId != null ? S.t('save') : 'Send'),
                       style: FilledButton.styleFrom(
                         backgroundColor: Colors.black,
                         padding: const EdgeInsets.symmetric(
@@ -958,7 +1014,7 @@ class _DesktopBubble extends StatelessWidget {
   final String messageType;
   final String? attachmentUrl;
 
-  static const _emojiOptions = ['👍', '👎', '❤️', '😂', '😮', '😢', '😡', '🙏', '🔥', '🎉', '💯', '👀'];
+  static const _emojiOptions = ['✅', '👍', '👎', '❤️', '😂', '😮', '😢', '😡', '🙏', '🔥', '🎉', '💯', '👀'];
 
   const _DesktopBubble({
     required this.messageId,
@@ -1094,7 +1150,7 @@ class _DesktopBubble extends StatelessWidget {
                       if (editedAt != null) ...[
                         const SizedBox(width: 4),
                         Text(
-                          '(redigert)',
+                          S.t('edited'),
                           style: TextStyle(
                             fontSize: 10,
                             fontStyle: FontStyle.italic,
@@ -1187,26 +1243,26 @@ class _DesktopBubble extends StatelessWidget {
             }).toList(),
           ),
         ),
-        const PopupMenuItem<String>(
+        PopupMenuItem<String>(
           value: 'copy',
-          child: Row(children: [Icon(Icons.copy, size: 18), SizedBox(width: 8), Text('Kopier')]),
+          child: Row(children: [Icon(Icons.copy, size: 18), SizedBox(width: 8), Text(S.t('copy'))]),
         ),
         if (onReply != null)
-          const PopupMenuItem<String>(
+          PopupMenuItem<String>(
             value: 'reply',
-            child: Row(children: [Icon(Icons.reply, size: 18), SizedBox(width: 8), Text('Svar')]),
+            child: Row(children: [Icon(Icons.reply, size: 18), SizedBox(width: 8), Text(S.t('reply'))]),
           ),
         if (onEdit != null)
-          const PopupMenuItem<String>(
+          PopupMenuItem<String>(
             value: 'edit',
-            child: Row(children: [Icon(Icons.edit, size: 18), SizedBox(width: 8), Text('Rediger')]),
+            child: Row(children: [Icon(Icons.edit, size: 18), SizedBox(width: 8), Text(S.t('edit'))]),
           ),
       ],
     ).then((value) {
       if (value == 'copy') {
         Clipboard.setData(ClipboardData(text: message));
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Kopiert'), duration: Duration(seconds: 1)),
+          SnackBar(content: Text(S.t('copied')), duration: Duration(seconds: 1)),
         );
       }
       if (value == 'reply') onReply?.call();

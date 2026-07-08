@@ -206,15 +206,11 @@ class _NewCompanyDialogState extends State<NewCompanyDialog> {
 
       if (!mounted) return;
 
-      // When ownerCompanyId is set, pop with the new company's ID so the
-      // caller can auto-select it. Otherwise use legacy bool for old callers.
-      Navigator.of(context).pop(
-        widget.ownerCompanyId != null ? companyId : true,
-      );
+      Navigator.of(context).pop(true);
     } catch (e) {
       debugPrint("CREATE COMPANY ERROR: $e");
 
-      _show("Failed to save company");
+      _show("Failed to save company: $e");
     } finally {
       if (mounted) setState(() => _saving = false);
     }
@@ -396,6 +392,17 @@ class _NewCompanyDialogState extends State<NewCompanyDialog> {
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   const SizedBox(height: 4),
+                                  _BrregInvoiceSearch(
+                                    onSelected: (c) => setState(() {
+                                      _invoiceNameCtrl.text = c.name;
+                                      _invoiceOrgNrCtrl.text = c.orgNr;
+                                      _invoiceAddressCtrl.text = c.address ?? '';
+                                      _invoicePostalCodeCtrl.text = c.postalCode ?? '';
+                                      _invoiceCityCtrl.text = c.city ?? '';
+                                      _invoiceCountryCtrl.text = c.country ?? '';
+                                    }),
+                                  ),
+                                  const SizedBox(height: 8),
                                   TextField(
                                     controller: _invoiceNameCtrl,
                                     decoration: const InputDecoration(
@@ -810,6 +817,17 @@ class _EditCompanyDialogState extends State<EditCompanyDialog> {
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   const SizedBox(height: 4),
+                                  _BrregInvoiceSearch(
+                                    onSelected: (c) => setState(() {
+                                      _invoiceNameCtrl.text = c.name;
+                                      _invoiceOrgNrCtrl.text = c.orgNr;
+                                      _invoiceAddressCtrl.text = c.address ?? '';
+                                      _invoicePostalCodeCtrl.text = c.postalCode ?? '';
+                                      _invoiceCityCtrl.text = c.city ?? '';
+                                      _invoiceCountryCtrl.text = c.country ?? '';
+                                    }),
+                                  ),
+                                  const SizedBox(height: 8),
                                   TextField(
                                     controller: _invoiceNameCtrl,
                                     decoration: const InputDecoration(
@@ -917,6 +935,102 @@ class _EditCompanyDialogState extends State<EditCompanyDialog> {
           ),
         ),
       ),
+    );
+  }
+}
+
+// ── Brreg search widget for invoice recipient ──────────────────────────
+
+class _BrregInvoiceSearch extends StatefulWidget {
+  final void Function(BrregCompany) onSelected;
+
+  const _BrregInvoiceSearch({required this.onSelected});
+
+  @override
+  State<_BrregInvoiceSearch> createState() => _BrregInvoiceSearchState();
+}
+
+class _BrregInvoiceSearchState extends State<_BrregInvoiceSearch> {
+  final _ctrl = TextEditingController();
+  List<BrregCompany> _results = [];
+  bool _searching = false;
+  Timer? _debounce;
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    _debounce?.cancel();
+    super.dispose();
+  }
+
+  void _onChanged(String q) {
+    _debounce?.cancel();
+    if (q.trim().length < 2) {
+      setState(() => _results = []);
+      return;
+    }
+    _debounce = Timer(const Duration(milliseconds: 400), () async {
+      if (!mounted) return;
+      setState(() => _searching = true);
+      try {
+        final res = await BrregService.search(q.trim(), size: 8);
+        if (mounted) setState(() => _results = res);
+      } catch (_) {}
+      if (mounted) setState(() => _searching = false);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        TextField(
+          controller: _ctrl,
+          onChanged: _onChanged,
+          decoration: InputDecoration(
+            labelText: 'Søk fakturamottaker i Brønnøysund',
+            prefixIcon: const Icon(Icons.search),
+            suffixIcon: _searching
+                ? const Padding(
+                    padding: EdgeInsets.all(12),
+                    child: SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)),
+                  )
+                : null,
+            isDense: true,
+          ),
+        ),
+        if (_results.isNotEmpty)
+          Container(
+            constraints: const BoxConstraints(maxHeight: 200),
+            margin: const EdgeInsets.only(top: 4),
+            decoration: BoxDecoration(
+              border: Border.all(color: Colors.grey.shade300),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: ListView.builder(
+              shrinkWrap: true,
+              itemCount: _results.length,
+              itemBuilder: (_, i) {
+                final c = _results[i];
+                return ListTile(
+                  dense: true,
+                  title: Text(c.name, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
+                  subtitle: Text(
+                    '${c.orgNr}  ·  ${[c.address, c.postalCode, c.city].where((s) => s != null && s.isNotEmpty).join(', ')}',
+                    style: const TextStyle(fontSize: 11),
+                  ),
+                  onTap: () {
+                    widget.onSelected(c);
+                    _ctrl.clear();
+                    setState(() => _results = []);
+                  },
+                );
+              },
+            ),
+          ),
+      ],
     );
   }
 }

@@ -123,6 +123,36 @@ class _MgmtDashboardPageState extends State<MgmtDashboardPage> {
         gigEvents.add(m);
       }
 
+      // Mark rehearsals that belong to a multi-date offer so the dashboard
+      // can label them "Prøve" instead of "Øvelse".
+      try {
+        final ids = gigEvents.map((g) => g['id'] as String).toList();
+        if (ids.isNotEmpty) {
+          final junction = await _sb
+              .from('gig_offer_gigs')
+              .select('gig_id, offer_id')
+              .inFilter('gig_id', ids);
+          final offerCounts = <String, int>{};
+          for (final r in (junction as List)) {
+            final off = r['offer_id'] as String?;
+            if (off != null) {
+              offerCounts[off] = (offerCounts[off] ?? 0) + 1;
+            }
+          }
+          final offerForGig = <String, String>{};
+          for (final r in junction) {
+            offerForGig[r['gig_id'] as String] = r['offer_id'] as String;
+          }
+          for (final g in gigEvents) {
+            final off = offerForGig[g['id'] as String];
+            g['_is_offer_part'] =
+                off != null && (offerCounts[off] ?? 0) > 1;
+          }
+        }
+      } catch (e) {
+        debugPrint('Dashboard mark offer parts error: $e');
+      }
+
       // Merge and sort by date
       final all = [...tourShows, ...gigEvents];
       all.sort((a, b) => (a['_sortDate'] as String).compareTo(b['_sortDate'] as String));
@@ -463,8 +493,21 @@ class _EventCard extends StatelessWidget {
       final firma = event['customer_firma'] as String? ?? '';
       final custName = event['customer_name'] as String? ?? '';
       if (type == 'rehearsal') {
-        title = 'Øvelse';
-        subtitle = [venue, city].where((s) => s.isNotEmpty).join(' · ');
+        final isOfferPart = event['_is_offer_part'] == true;
+        title = isOfferPart ? 'Prøve' : 'Øvelse';
+        final venueLine =
+            [venue, city].where((s) => s.isNotEmpty).join(' · ');
+        final customerLine =
+            [firma, custName].where((s) => s.isNotEmpty).join(' — ');
+        // Show customer firma for offer-rehearsals so the row reads like a
+        // gig row.
+        if (isOfferPart && customerLine.isNotEmpty) {
+          subtitle = venueLine.isEmpty
+              ? customerLine
+              : '$venueLine  ·  $customerLine';
+        } else {
+          subtitle = venueLine;
+        }
       } else {
         title = [if (venue.isNotEmpty) venue, if (city.isNotEmpty) city].join(', ');
         if (title.isEmpty) title = 'Gig';
@@ -575,8 +618,13 @@ class _EventCard extends StatelessWidget {
                   borderRadius: BorderRadius.circular(999),
                   border: Border.all(color: Colors.purple.withValues(alpha: 0.3)),
                 ),
-                child: const Text('Øvelse',
-                    style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Colors.purple)),
+                child: Text(
+                  event['_is_offer_part'] == true ? 'Prøve' : 'Øvelse',
+                  style: const TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                      color: Colors.purple),
+                ),
               ),
               const SizedBox(width: 8),
             ] else if (isGig) ...[

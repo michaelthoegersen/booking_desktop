@@ -132,7 +132,7 @@ Deno.serve(async (req) => {
 
       const { data: job, error: jobError } = await supabase
         .from('samletdata')
-        .select('sjafor, d_drive')
+        .select('sjafor, d_drive, produksjon, dato, kjoretoy')
         .eq('id', job_id)
         .single();
 
@@ -153,7 +153,7 @@ Deno.serve(async (req) => {
 
       const { data: profiles } = await supabase
         .from('profiles')
-        .select('id, name, fcm_token')
+        .select('id, name, fcm_token, language')
         .in('name', drivers);
 
       if (!profiles || profiles.length === 0) {
@@ -163,15 +163,73 @@ Deno.serve(async (req) => {
         );
       }
 
-      // Insert in-app notification for each driver
-      const notificationRows = profiles.map(p => ({
-        user_id: p.id,
-        title: 'Ny jobb tildelt 🚍',
-        body: 'Du har fått en ny jobb i TourFlow',
-        read: false,
-        type: 'tour',
-        draft_id: job_id,
-      }));
+      // Fun, dynamic notification messages per language
+      const prod = (job.produksjon || '').replace(/\s*\+\s*trailer/gi, '').trim();
+      const dato = job.dato || '';
+
+      const funTitles: Record<string, string[]> = {
+        no: [
+          '🚍 Tut tut! Ny tur!',
+          '🚌 Beep beep — ny jobb!',
+          '🛞 Rattet kaller!',
+          '🚍 Veien venter!',
+          '🚌💨 Ny tur i sikte!',
+          '🗺️ Pakk kofferten — ny tur!',
+          '🚍 La hjulene rulle!',
+          '🛣️ Neste stopp: ny jobb!',
+        ],
+        en: [
+          '🚍 Beep beep! New tour!',
+          '🚌 Honk honk — new job!',
+          '🛞 The wheel is calling!',
+          '🚍 The road awaits!',
+          '🚌💨 New tour ahead!',
+          '🗺️ Pack your bags — new tour!',
+          '🚍 Let the wheels roll!',
+          '🛣️ Next stop: new job!',
+        ],
+        sv: [
+          '🚍 Tut tut! Ny tur!',
+          '🚌 Beep beep — nytt jobb!',
+          '🛞 Ratten kallar!',
+          '🚍 Vägen väntar!',
+          '🚌💨 Ny tur i sikte!',
+          '🗺️ Packa väskan — ny tur!',
+          '🚍 Låt hjulen rulla!',
+          '🛣️ Nästa stopp: nytt jobb!',
+        ],
+      };
+
+      const defaultBody: Record<string, string> = {
+        no: 'Sjekk TourFlow for detaljer',
+        en: 'Check TourFlow for details',
+        sv: 'Kolla TourFlow för detaljer',
+      };
+
+      function pickTitle(lang: string): string {
+        const list = funTitles[lang] || funTitles['en'];
+        return list[Math.floor(Math.random() * list.length)];
+      }
+
+      function buildBody(lang: string): string {
+        if (prod && dato) return `${prod} — ${dato}`;
+        if (prod) return prod;
+        if (dato) return dato;
+        return defaultBody[lang] || defaultBody['en'];
+      }
+
+      // Insert in-app notification for each driver (per-language)
+      const notificationRows = profiles.map(p => {
+        const lang = p.language || 'no';
+        return {
+          user_id: p.id,
+          title: pickTitle(lang),
+          body: buildBody(lang),
+          read: false,
+          type: 'tour',
+          draft_id: job_id,
+        };
+      });
 
       const { error: insertError } = await supabase
         .from('notifications')
@@ -194,11 +252,12 @@ Deno.serve(async (req) => {
       const results: any[] = [];
 
       for (const profile of withTokens) {
+        const lang = profile.language || 'no';
         const fcmResult = await sendFcm(
           accessToken,
           profile.fcm_token,
-          'Ny jobb tildelt 🚍',
-          'Du har fått en ny jobb i TourFlow',
+          pickTitle(lang),
+          buildBody(lang),
           { draft_id: job_id, type: 'tour' },
         );
         results.push({ name: profile.name, response: fcmResult.result });
