@@ -1630,8 +1630,6 @@ class _GigOfferPageState extends State<GigOfferPage> {
                           _buildRehearsalsCard(),
                         ],
                         const SizedBox(height: 20),
-                        _buildExtrasCard(),
-                        const SizedBox(height: 20),
                         _buildPriceParamsCard(),
                         const SizedBox(height: 20),
                         _buildScheduleCard(),
@@ -1719,7 +1717,7 @@ class _GigOfferPageState extends State<GigOfferPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _cardTitle(title),
+          if (title.isNotEmpty) _cardTitle(title),
           child,
         ],
       ),
@@ -2231,45 +2229,45 @@ class _GigOfferPageState extends State<GigOfferPage> {
     );
   }
 
-  Widget _buildExtrasCard() {
+  Widget _extrasSection() {
     final cs = Theme.of(context).colorScheme;
-    return _card(
-      title: 'Ekstrakostnader',
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          if (_extras.isEmpty)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 4),
-              child: Text(
-                'Legg til kostnader som skal med i tilbud og avtale — '
-                'f.eks. komponering for en produksjon. Du velger selv hvem '
-                'pengene skal gå til på gigghyra.',
-                style: TextStyle(fontSize: 12, color: cs.onSurfaceVariant),
-              ),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text('Ekstrakostnader',
+            style: TextStyle(fontWeight: FontWeight.w900, fontSize: 14)),
+        const SizedBox(height: 8),
+        if (_extras.isEmpty)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 4),
+            child: Text(
+              'Legg til kostnader som skal med i tilbud og avtale — '
+              'f.eks. komponering for en produksjon. Du velger selv hvem '
+              'pengene skal gå til på gigghyra.',
+              style: TextStyle(fontSize: 12, color: cs.onSurfaceVariant),
             ),
-          ..._extras.asMap().entries.map((e) => _extraSummaryRow(e.key, e.value)),
-          const SizedBox(height: 8),
-          Align(
-            alignment: Alignment.centerLeft,
-            child: InkWell(
-              onTap: () => _showExtraDialog(),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(vertical: 4),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(Icons.add, size: 16, color: cs.primary),
-                    const SizedBox(width: 4),
-                    Text('Legg til ekstrakostnad',
-                        style: TextStyle(fontSize: 13, color: cs.primary)),
-                  ],
-                ),
+          ),
+        ..._extras.asMap().entries.map((e) => _extraSummaryRow(e.key, e.value)),
+        const SizedBox(height: 8),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: InkWell(
+            onTap: () => _showExtraDialog(),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 4),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.add, size: 16, color: cs.primary),
+                  const SizedBox(width: 4),
+                  Text('Legg til ekstrakostnad',
+                      style: TextStyle(fontSize: 13, color: cs.primary)),
+                ],
               ),
             ),
           ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 
@@ -2875,71 +2873,28 @@ class _GigOfferPageState extends State<GigOfferPage> {
               _markupPct = v;
               setState(() => _recalc());
             }),
-            Padding(
-              padding: const EdgeInsets.only(bottom: 8),
-              child: Row(
-                children: [
-                  SizedBox(
-                    width: 24, height: 24,
-                    child: Checkbox(
-                      value: _markupOnAll,
-                      onChanged: (v) {
-                        setState(() { _markupOnAll = v ?? false; _recalc(); });
-                      },
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Text('Påslag kun på hyrer (show + prøver)',
-                      style: TextStyle(fontSize: 12, color: cs.onSurfaceVariant)),
-                ],
-              ),
-            ),
-            // In-ear
-            Padding(
-              padding: const EdgeInsets.only(bottom: 8),
-              child: Row(
-                children: [
-                  SizedBox(
-                    width: 140,
-                    child: Row(
-                      children: [
-                        Text('In-Ear', style: TextStyle(fontSize: 13, color: cs.onSurfaceVariant)),
-                        const SizedBox(width: 6),
-                        SizedBox(width: 24, height: 24,
-                          child: Checkbox(
-                            value: _inearIncluded,
-                            onChanged: (v) { setState(() { _inearIncluded = v ?? false; _recalc(); }); },
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  SizedBox(
-                    width: 120,
-                    child: TextFormField(
-                      key: const ValueKey('param_inear_price'),
-                      initialValue: _nf.format(_inearPrice),
-                      style: const TextStyle(fontSize: 13),
-                      textAlign: TextAlign.right,
-                      keyboardType: TextInputType.number,
-                      decoration: const InputDecoration(isDense: true, contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 8)),
-                      onChanged: (v) {
-                        final parsed = double.tryParse(v.replaceAll(RegExp(r'[^0-9.]'), ''));
-                        if (parsed != null) { _inearPrice = parsed; setState(() => _recalc()); }
-                      },
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            // Playback toggle
-            SwitchListTile(
-              title: const Text('Playback fra oss', style: TextStyle(fontSize: 13)),
-              value: _playbackFromUs,
-              onChanged: (v) => setState(() => _playbackFromUs = v),
-              contentPadding: EdgeInsets.zero,
-              dense: true,
-            ),
+            _paramToggle('Påslag kun på hyrer', _markupOnAll, (v) {
+              setState(() {
+                _markupOnAll = v;
+                _recalc();
+              });
+            }),
+            _paramToggle('In-Ear fra oss', _inearIncluded, (v) {
+              setState(() {
+                _inearIncluded = v;
+                _recalc();
+              });
+            }),
+            if (_inearIncluded)
+              _paramRow('In-Ear pris', _inearPrice, (v) {
+                _inearPrice = v;
+                setState(() => _recalc());
+              }),
+            _paramToggle('Playback fra oss', _playbackFromUs, (v) {
+              setState(() => _playbackFromUs = v);
+            }),
+            const SizedBox(height: 12),
+            _extrasSection(),
           ],
 
           // ── Transport section ──
@@ -3286,6 +3241,30 @@ class _GigOfferPageState extends State<GigOfferPage> {
                 if (num != null) onChanged(num / 100);
               },
             ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// On/off row aligned to the same label column as [_paramRow] — one
+  /// consistent control (a switch) for all boolean price parameters.
+  Widget _paramToggle(
+      String label, bool value, ValueChanged<bool> onChanged) {
+    final cs = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 4),
+      child: Row(
+        children: [
+          SizedBox(
+            width: 140,
+            child: Text(label,
+                style: TextStyle(fontSize: 13, color: cs.onSurfaceVariant)),
+          ),
+          Switch(
+            value: value,
+            onChanged: onChanged,
+            materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
           ),
         ],
       ),
