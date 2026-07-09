@@ -5712,50 +5712,12 @@ Container(
     crossAxisAlignment: CrossAxisAlignment.start,
     children: [
 
-      Text(
-        S.t('status'),
-        style: const TextStyle(
-          fontWeight: FontWeight.w900,
-          fontSize: 14,
-        ),
-      ),
-
-      const SizedBox(height: 8),
-
-      DropdownButtonFormField<String>(
-        value: _validStatus(offer.status),
-        isExpanded: true,
-
-        decoration: const InputDecoration(
-          prefixIcon: Icon(Icons.flag),
-          border: OutlineInputBorder(),
-        ),
-
-        items: [
-  DropdownMenuItem(
-    value: "Draft",
-    child: Text("📝 ${S.t('draft')}"),
-  ),
-  DropdownMenuItem(
-    value: "Inquiry",
-    child: Text("📨 ${S.t('inquiry')}"),
-  ),
-  DropdownMenuItem(
-    value: "Confirmed",
-    child: Text("✅ ${S.t('confirmed')}"),
-  ),
-  DropdownMenuItem(
-    value: "Invoiced",
-    child: Text("🧾 ${S.t('invoiced')}"),
-  ),
-],
-
-        onChanged: (v) {
-          if (v == null) return;
-
-          setState(() {
-            offer.status = v;
-          });
+      _PricingOverrideCard(
+        offer: offer,
+        onChanged: () {
+          setState(() {});
+          _recalcAllRounds();
+          CurrentOfferStore.set(offer);
         },
       ),
 
@@ -7125,20 +7087,39 @@ _BusSettingsCard(
     setState(() {});
   },
 ),
-_PricingOverrideCard(
-  offer: widget.offer,
-  onChanged: () {
-
-    setState(() {});
-
-    // 🔥 Recalc totals live
-    final state =
-        context.findAncestorStateOfType<_NewOfferPageState>();
-
-    state?._recalcAllRounds();
+// ================= STATUS =================
+Text(
+  S.t('status'),
+  style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 14),
+),
+const SizedBox(height: 8),
+DropdownButtonFormField<String>(
+  value: const ['Draft', 'Inquiry', 'Confirmed', 'Invoiced']
+          .contains(widget.offer.status)
+      ? widget.offer.status
+      : 'Draft',
+  isExpanded: true,
+  decoration: const InputDecoration(
+    prefixIcon: Icon(Icons.flag),
+    border: OutlineInputBorder(),
+  ),
+  items: [
+    DropdownMenuItem(value: "Draft", child: Text("📝 ${S.t('draft')}")),
+    DropdownMenuItem(value: "Inquiry", child: Text("📨 ${S.t('inquiry')}")),
+    DropdownMenuItem(
+        value: "Confirmed", child: Text("✅ ${S.t('confirmed')}")),
+    DropdownMenuItem(
+        value: "Invoiced", child: Text("🧾 ${S.t('invoiced')}")),
+  ],
+  onChanged: (v) {
+    if (v == null) return;
+    setState(() {
+      widget.offer.status = v;
+    });
     CurrentOfferStore.set(widget.offer);
   },
 ),
+const SizedBox(height: 12),
 // ================= BUTTONS =================
 Column(
   children: [
