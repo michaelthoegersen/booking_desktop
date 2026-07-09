@@ -534,7 +534,13 @@ class _MgmtGigDetailPageState extends State<MgmtGigDetailPage>
       }
     }
     final isMain = _shows.indexOf(sh) == mainId;
-    return perf * (isMain ? _creoFeeMinimum : _extraShowFee);
+    // Bruk tilbudets lagrede satser (Tilbud bestemmer), fall tilbake til
+    // selskapets pricing_defaults kun hvis tilbudet mangler dem.
+    final creo = (_offerData?['creo_fee_minimum'] as num?)?.toDouble() ??
+        _creoFeeMinimum;
+    final extra = (_offerData?['extra_show_fee'] as num?)?.toDouble() ??
+        _extraShowFee;
+    return perf * (isMain ? creo : extra);
   }
 
   double get _showsTotal =>
