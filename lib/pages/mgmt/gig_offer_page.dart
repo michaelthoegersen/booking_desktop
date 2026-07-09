@@ -122,6 +122,10 @@ class _GigOfferPageState extends State<GigOfferPage> {
   final _transportPriceCtrl = TextEditingController(text: '0');
   int _transportKm = 0;
   double _transportPricePerKm = SettingsStore.current.transportPricePerKm;
+  // Bumped only when km / kr-km are set programmatically (Beregn rute, satser)
+  // so those fields refresh without dropping focus while typing.
+  int _kmRev = 0;
+  int _krKmRev = 0;
   bool _privatbilExpanded = false;
 
   // ── Transport route calculator ──────────────────────────────────────────
@@ -823,6 +827,7 @@ class _GigOfferPageState extends State<GigOfferPage> {
         if (mounted) {
           setState(() {
             _transportKm = km * _routePersons * (_routeReturn ? 2 : 1);
+            _kmRev++;
             _tollStations = tollHits;
             _recalc();
             _syncTransportFromPrivatbil();
@@ -2689,7 +2694,7 @@ class _GigOfferPageState extends State<GigOfferPage> {
               SizedBox(
                 width: 80,
                 child: TextFormField(
-                  key: ValueKey('reh_perf_$_rehearsalPerformers'),
+                  key: const ValueKey('reh_perf'),
                   initialValue: '$_rehearsalPerformers',
                   style: const TextStyle(fontSize: 13),
                   textAlign: TextAlign.right,
@@ -2719,7 +2724,7 @@ class _GigOfferPageState extends State<GigOfferPage> {
               SizedBox(
                 width: 80,
                 child: TextFormField(
-                  key: ValueKey('reh_count_$_rehearsalCount'),
+                  key: const ValueKey('reh_count'),
                   initialValue: '$_rehearsalCount',
                   style: const TextStyle(fontSize: 13),
                   textAlign: TextAlign.right,
@@ -2749,7 +2754,7 @@ class _GigOfferPageState extends State<GigOfferPage> {
               SizedBox(
                 width: 120,
                 child: TextFormField(
-                  key: ValueKey('reh_price_${_rehearsalPricePerPerson.round()}'),
+                  key: const ValueKey('reh_price'),
                   initialValue: _nf.format(_rehearsalPricePerPerson),
                   style: const TextStyle(fontSize: 13),
                   textAlign: TextAlign.right,
@@ -2998,7 +3003,7 @@ class _GigOfferPageState extends State<GigOfferPage> {
               SizedBox(
                 width: 50,
                 child: TextFormField(
-                  key: ValueKey('route_persons_$_routePersons'),
+                  key: const ValueKey('route_persons'),
                   initialValue: '$_routePersons',
                   decoration: const InputDecoration(isDense: true),
                   keyboardType: TextInputType.number,
@@ -3031,7 +3036,7 @@ class _GigOfferPageState extends State<GigOfferPage> {
             _recalc();
             if (_transportModes.isNotEmpty) _recalcTransportPrice();
             setState(() {});
-          }, integer: true),
+          }, integer: true, fieldKey: ValueKey('param_km_$_kmRev')),
           if (_tollStations.isNotEmpty)
             Padding(
               padding: const EdgeInsets.only(bottom: 8),
@@ -3120,7 +3125,7 @@ class _GigOfferPageState extends State<GigOfferPage> {
                         SizedBox(
                           width: 80,
                           child: TextFormField(
-                            key: ValueKey('kr_km_${_transportPricePerKm.toStringAsFixed(2)}'),
+                            key: ValueKey('kr_km_$_krKmRev'),
                             initialValue: _transportPricePerKm % 1 == 0 ? _transportPricePerKm.toInt().toString() : _transportPricePerKm.toStringAsFixed(2),
                             decoration: const InputDecoration(isDense: true),
                             keyboardType: TextInputType.number,
@@ -3232,6 +3237,7 @@ class _GigOfferPageState extends State<GigOfferPage> {
     return GestureDetector(
       onTap: () {
         _transportPricePerKm = rate;
+        _krKmRev++;
         _recalcTransportPrice();
       },
       child: Container(
@@ -3256,7 +3262,7 @@ class _GigOfferPageState extends State<GigOfferPage> {
 
   Widget _paramRow(
       String label, double value, ValueChanged<double> onChanged,
-      {bool integer = false}) {
+      {bool integer = false, Key? fieldKey}) {
     final cs = Theme.of(context).colorScheme;
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
@@ -3271,7 +3277,10 @@ class _GigOfferPageState extends State<GigOfferPage> {
           SizedBox(
             width: 120,
             child: TextFormField(
-              key: ValueKey('param_${label}_${integer ? value.round() : value}'),
+              // Stable key so typing never re-creates the field (which would
+              // drop focus after one character). Fields that also change
+              // programmatically pass a [fieldKey] with a revision counter.
+              key: fieldKey ?? ValueKey('param_$label'),
               initialValue:
                   integer ? '${value.round()}' : _nf.format(value),
               style: const TextStyle(fontSize: 13),
