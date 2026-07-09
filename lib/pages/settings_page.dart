@@ -2,6 +2,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../models/app_settings.dart';
 import '../models/company_branding.dart';
 import '../models/profile_field.dart';
 import '../services/branding_service.dart';
@@ -41,6 +42,8 @@ class _SettingsPageState extends State<SettingsPage> {
   late TextEditingController markupPctCtrl;
   late TextEditingController inearPriceCtrl;
   late TextEditingController transportPerKmCtrl;
+
+  String _currency = 'NOK';
 
   // --- Swedish pricing model ---
   late TextEditingController sweTimlonCtrl;
@@ -511,6 +514,7 @@ class _SettingsPageState extends State<SettingsPage> {
     markupPctCtrl = TextEditingController(text: (s.markupPct * 100).toStringAsFixed(0));
     inearPriceCtrl = TextEditingController(text: s.inearPrice.toStringAsFixed(0));
     transportPerKmCtrl = TextEditingController(text: s.transportPricePerKm.toStringAsFixed(2));
+    _currency = kCurrencies.contains(s.currency) ? s.currency : 'NOK';
 
     final swe = s.sweSettings;
     sweTimlonCtrl = TextEditingController(text: swe.timlon.toStringAsFixed(0));
@@ -1314,6 +1318,7 @@ class _SettingsPageState extends State<SettingsPage> {
       markupPct: _parseDouble(markupPctCtrl.text, current.markupPct * 100) / 100,
       inearPrice: _parseDouble(inearPriceCtrl.text, current.inearPrice),
       transportPricePerKm: _parseDouble(transportPerKmCtrl.text, current.transportPricePerKm),
+      currency: _currency,
       sweSettings: SweSettings(
         timlon: _parseDouble(sweTimlonCtrl.text, current.sweSettings.timlon),
         timmarPerDag: _parseDouble(sweTimmarCtrl.text, current.sweSettings.timmarPerDag),
@@ -2383,6 +2388,27 @@ class _SettingsPageState extends State<SettingsPage> {
                   hintText: "e.g. 9710.05.12345",
                   prefixIcon: Icon(Icons.account_balance),
                 ),
+              ),
+            ),
+
+            const SizedBox(height: 10),
+
+            // ---------------- CURRENCY ----------------
+            SizedBox(
+              width: 360,
+              child: DropdownButtonFormField<String>(
+                value: _currency,
+                decoration: const InputDecoration(
+                  labelText: 'Currency',
+                  prefixIcon: Icon(Icons.payments_outlined),
+                ),
+                items: kCurrencies
+                    .map((c) =>
+                        DropdownMenuItem(value: c, child: Text(c)))
+                    .toList(),
+                onChanged: (v) {
+                  if (v != null) setState(() => _currency = v);
+                },
               ),
             ),
 

@@ -7399,6 +7399,37 @@ class _PricingOverrideCardState extends State<_PricingOverrideCard> {
             ),
           ),
           children: [
+            // Per-draft currency — uavhengig av pris-overstyringen.
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: DropdownButtonFormField<String?>(
+                value: kCurrencies.contains(widget.offer.currency)
+                    ? widget.offer.currency
+                    : null,
+                isExpanded: true,
+                decoration: const InputDecoration(
+                  labelText: 'Currency',
+                  prefixIcon: Icon(Icons.payments_outlined),
+                  isDense: true,
+                ),
+                items: [
+                  DropdownMenuItem<String?>(
+                    value: null,
+                    child: Text(
+                        'Company default (${SettingsStore.current.currency})'),
+                  ),
+                  ...kCurrencies.map((c) => DropdownMenuItem<String?>(
+                        value: c,
+                        child: Text(c),
+                      )),
+                ],
+                onChanged: (v) {
+                  setState(() => widget.offer.currency = v);
+                  CurrentOfferStore.set(widget.offer);
+                  widget.onChanged();
+                },
+              ),
+            ),
             SwitchListTile(
               contentPadding: EdgeInsets.zero,
               title: Text(S.t('overrideGlobalPricing')),

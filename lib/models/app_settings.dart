@@ -1,6 +1,9 @@
 import 'ferry_definition.dart';
 import 'swe_settings.dart';
 
+/// Currencies a company/offer can be priced in.
+const List<String> kCurrencies = ['NOK', 'SEK', 'EUR', 'USD', 'GBP', 'DKK'];
+
 class AppSettings {
   final double dayPrice;
   final double extraKmPrice;
@@ -42,6 +45,9 @@ class AppSettings {
   final double inearPrice;
   final double transportPricePerKm;
 
+  /// Default currency for offers (company-level). Per-draft can override.
+  final String currency;
+
   const AppSettings({
     required this.dayPrice,
     required this.extraKmPrice,
@@ -66,6 +72,8 @@ class AppSettings {
     this.markupPct = 0.25,
     this.inearPrice = 7000,
     this.transportPricePerKm = 3.50,
+
+    this.currency = 'NOK',
 
     /// ✅ NEW
     this.ferries = const [],
@@ -93,6 +101,7 @@ class AppSettings {
     double? markupPct,
     double? inearPrice,
     double? transportPricePerKm,
+    String? currency,
 
     /// ✅ NEW
     List<FerryDefinition>? ferries,
@@ -119,6 +128,7 @@ class AppSettings {
       markupPct: markupPct ?? this.markupPct,
       inearPrice: inearPrice ?? this.inearPrice,
       transportPricePerKm: transportPricePerKm ?? this.transportPricePerKm,
+      currency: currency ?? this.currency,
 
       /// ✅ NEW
       ferries: ferries ?? this.ferries,

@@ -51,6 +51,7 @@ class SettingsStore {
   static const _kMarkupPct = "markupPct";
   static const _kInearPrice = "inearPrice";
   static const _kTransportPricePerKm = "transportPricePerKm";
+  static const _kCurrency = "currency";
 
   // --- Swedish pricing model ---
   static const _kSweTimlon = "swe_timlon";
@@ -134,6 +135,7 @@ class SettingsStore {
           prefs.getDouble(_kInearPrice) ?? current.inearPrice,
       transportPricePerKm:
           prefs.getDouble(_kTransportPricePerKm) ?? current.transportPricePerKm,
+      currency: prefs.getString(_kCurrency) ?? current.currency,
       ferries: current.ferries,
       sweSettings: current.sweSettings.copyWith(
         timlon: prefs.getDouble(_kSweTimlon),
@@ -197,6 +199,7 @@ class SettingsStore {
     await prefs.setDouble(_kMarkupPct, current.markupPct);
     await prefs.setDouble(_kInearPrice, current.inearPrice);
     await prefs.setDouble(_kTransportPricePerKm, current.transportPricePerKm);
+    await prefs.setString(_kCurrency, current.currency);
 
     final swe = current.sweSettings;
     await prefs.setDouble(_kSweTimlon, swe.timlon);

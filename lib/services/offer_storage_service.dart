@@ -318,6 +318,7 @@ class OfferStorageService {
     'bus': offer.bus,
     'globalBusSlots': offer.globalBusSlots,
     'pricingModel': offer.pricingModel,
+    'currency': offer.currency,
 
     // ⭐⭐⭐ LEGG TIL DENNE LINJA
     'pricingOverride': offer.pricingOverride?.toJson(),
@@ -440,6 +441,7 @@ if (r['ferryPerLeg'] != null) {
   }
 
   draft.pricingModel = (data['pricingModel'] as String?) ?? 'norsk';
+  draft.currency = data['currency'] as String?;
 
   // ✅ BACKUP: hvis bare ligger i JSON
   if (draft.bus == null && data['bus'] != null) {

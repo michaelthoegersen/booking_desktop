@@ -124,6 +124,10 @@ OfferPricingOverride? pricingOverride;
   /// Supported: 'no', 'en', 'sv', 'de'.
   String language;
 
+  /// Per-draft currency (e.g. 'NOK', 'SEK', 'EUR'). null = use the company
+  /// default from Settings.
+  String? currency;
+
   final List<OfferRound> rounds;
 
   /// Global bus selection per slot — sets default for all rounds.
@@ -146,6 +150,7 @@ OfferPricingOverride? pricingOverride;
     Map<int, double?>? roundOverrides,
     this.pricingModel = 'norsk',
     this.language = 'no',
+    this.currency,
   })  : roundOverrides = roundOverrides ?? {},
         rounds = List.generate(12, (_) => OfferRound()),
         globalBusSlots = List.generate(4, (_) => null);
@@ -215,6 +220,9 @@ OfferPricingOverride? pricingOverride;
     // Output language for the PDF ('no' / 'en' / 'sv' / 'de')
     'language': language,
 
+    // Per-draft currency (null = company default)
+    'currency': currency,
+
     // Per-round price overrides
     'roundOverrides': roundOverrides.map((k, v) => MapEntry(k.toString(), v)),
 
@@ -256,6 +264,8 @@ OfferPricingOverride? pricingOverride;
 
     // Output language (backwards compatible — default 'no')
     language: (json['language'] as String?) ?? 'no',
+
+    currency: json['currency'] as String?,
 
     // Per-round price overrides
     roundOverrides: _parseRoundOverrides(json['roundOverrides']),
