@@ -301,6 +301,13 @@ class _MgmtGigDetailPageState extends State<MgmtGigDetailPage>
         } catch (e) {
           debugPrint('Load offer extras error: $e');
         }
+        // Load the offer (final_calc + pricing params) for BOTH single- and
+        // multi-date offers, so show prices use the offer's saved CREO/satser.
+        _offerData = await _sb
+            .from('gig_offers')
+            .select('*')
+            .eq('id', _linkedOfferId!)
+            .maybeSingle();
         final junctionRows = await _sb
             .from('gig_offer_gigs')
             .select('gig_id')
@@ -332,12 +339,6 @@ class _MgmtGigDetailPageState extends State<MgmtGigDetailPage>
                   Map<String, dynamic>.from(r as Map));
             }
           }
-          // Load the offer for final_calc and pricing params
-          _offerData = await _sb
-              .from('gig_offers')
-              .select('*')
-              .eq('id', _linkedOfferId!)
-              .maybeSingle();
         }
       }
 
