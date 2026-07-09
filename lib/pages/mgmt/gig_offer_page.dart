@@ -1625,7 +1625,7 @@ class _GigOfferPageState extends State<GigOfferPage> {
                         _buildCustomerCard(),
                         const SizedBox(height: 20),
                         _buildShowsCard(),
-                        if (_shows.isNotEmpty) ...[
+                        if (_dateEntries.any((e) => e.isRehearsal)) ...[
                           const SizedBox(height: 20),
                           _buildRehearsalsCard(),
                         ],
