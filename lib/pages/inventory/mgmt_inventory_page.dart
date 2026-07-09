@@ -24,6 +24,7 @@ class _MgmtInventoryPageState extends State<MgmtInventoryPage> {
   List<Map<String, dynamic>> _items = [];
   String _search = '';
   String? _filterType; // null = all
+  final Set<String> _expanded = {}; // item ids whose units are shown
 
   @override
   void initState() {
@@ -171,15 +172,22 @@ class _MgmtInventoryPageState extends State<MgmtInventoryPage> {
 
   Widget _itemRow(BuildContext context, Map<String, dynamic> item) {
     final cs = Theme.of(context).colorScheme;
+    final id = item['id'] as String;
     final category = (item['category'] as String?)?.trim();
     final ref = (item['ref_number'] as String?)?.trim();
-    final serials = (item['serials'] as List?)?.length ?? 0;
-    final children = _childrenOf(item['id'] as String);
+    final serialsList = (item['serials'] as List?)
+            ?.map((e) => e.toString())
+            .toList() ??
+        const <String>[];
+    final children = _childrenOf(id);
+    final qtyInt = ((item['quantity'] as num?) ?? 1).floor();
+    final expandable = serialsList.isNotEmpty;
+    final expanded = _expanded.contains(id);
     final sub = [
       if (category != null && category.isNotEmpty) category,
       fmtQty(item),
       if (ref != null && ref.isNotEmpty) 'nr. $ref',
-      if (serials > 0) '$serials serienr.',
+      if (serialsList.isNotEmpty) '${serialsList.length} serienr.',
       if (children.isNotEmpty) 'Inneholder ${children.length}',
     ].join('  ·  ');
 
@@ -229,6 +237,20 @@ class _MgmtInventoryPageState extends State<MgmtInventoryPage> {
                 const SizedBox(width: 10),
                 locationPill(context, item),
                 const SizedBox(width: 4),
+                if (expandable)
+                  IconButton(
+                    icon: Icon(
+                        expanded ? Icons.expand_less : Icons.expand_more,
+                        size: 22),
+                    tooltip: expanded ? 'Skjul enheter' : 'Vis enheter',
+                    onPressed: () => setState(() {
+                      if (expanded) {
+                        _expanded.remove(id);
+                      } else {
+                        _expanded.add(id);
+                      }
+                    }),
+                  ),
                 IconButton(
                   icon: const Icon(Icons.account_tree_outlined, size: 20),
                   tooltip: 'Innhold i enhet',
@@ -247,6 +269,52 @@ class _MgmtInventoryPageState extends State<MgmtInventoryPage> {
                 ),
               ],
             ),
+            if (expandable && expanded)
+              Padding(
+                padding: const EdgeInsets.only(left: 52, top: 4, bottom: 2),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: List.generate(
+                    qtyInt > serialsList.length ? qtyInt : serialsList.length,
+                    (i) {
+                      final sn = i < serialsList.length ? serialsList[i] : '';
+                      final hasSn = sn.trim().isNotEmpty;
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: 4),
+                        child: Row(
+                          children: [
+                            Icon(Icons.tag,
+                                size: 15, color: cs.onSurfaceVariant),
+                            const SizedBox(width: 6),
+                            SizedBox(
+                              width: 62,
+                              child: Text('Enhet ${i + 1}',
+                                  style: TextStyle(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w600,
+                                      color: cs.onSurfaceVariant)),
+                            ),
+                            Expanded(
+                              child: Text(
+                                hasSn ? sn : 'uten serienr.',
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  color: hasSn
+                                      ? cs.onSurface
+                                      : cs.onSurfaceVariant,
+                                  fontStyle: hasSn
+                                      ? FontStyle.normal
+                                      : FontStyle.italic,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              ),
             if (children.isNotEmpty)
               Padding(
                 padding: const EdgeInsets.only(left: 52, top: 4, bottom: 2),
