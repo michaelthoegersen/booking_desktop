@@ -186,7 +186,8 @@ class _MgmtInventoryPageState extends State<MgmtInventoryPage> {
     }).toList();
     final children = _childrenOf(id);
     final qtyInt = ((item['quantity'] as num?) ?? 1).floor();
-    final expandable = qtyInt > 1 || serialUnits.isNotEmpty;
+    final expandable =
+        qtyInt > 1 || serialUnits.isNotEmpty || children.isNotEmpty;
     final expanded = _expanded.contains(id);
     final sub = [
       if (category != null && category.isNotEmpty) category,
@@ -348,7 +349,7 @@ class _MgmtInventoryPageState extends State<MgmtInventoryPage> {
                   ),
                 ),
               ),
-            if (children.isNotEmpty)
+            if (children.isNotEmpty && expanded)
               Padding(
                 padding: const EdgeInsets.only(left: 52, top: 4, bottom: 2),
                 child: Column(
