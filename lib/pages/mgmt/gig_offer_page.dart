@@ -3380,10 +3380,22 @@ class _GigOfferPageState extends State<GigOfferPage> {
             key: ValueKey('schedule_${selected.gigId ?? _scheduleSelectedIdx}'),
             child: Column(
               children: [
-                for (int i = 0; i < selected.schedRows.length; i++) ...[
-                  if (i > 0) const SizedBox(height: 12),
-                  _buildSchedRow(selected, i),
-                ],
+                ReorderableListView(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  buildDefaultDragHandles: false,
+                  onReorder: (oldIndex, newIndex) {
+                    setState(() {
+                      if (newIndex > oldIndex) newIndex -= 1;
+                      final item = selected.schedRows.removeAt(oldIndex);
+                      selected.schedRows.insert(newIndex, item);
+                    });
+                  },
+                  children: [
+                    for (int i = 0; i < selected.schedRows.length; i++)
+                      _buildSchedRow(selected, i),
+                  ],
+                ),
                 const SizedBox(height: 8),
                 Align(
                   alignment: Alignment.centerLeft,
@@ -3403,22 +3415,12 @@ class _GigOfferPageState extends State<GigOfferPage> {
     );
   }
 
-  /// One reorderable Tidsplan row — up/down arrows + the field(s). Built-in
+  /// One reorderable Tidsplan row — a drag handle + the field(s). Built-in
   /// rows show a single labelled field; custom rows show a title + value and
-  /// a remove button.
+  /// a remove button. Drag freely to reorder.
   Widget _buildSchedRow(_DateEntry entry, int i) {
+    final cs = Theme.of(context).colorScheme;
     final row = entry.schedRows[i];
-    final isFirst = i == 0;
-    final isLast = i == entry.schedRows.length - 1;
-    void move(int delta) {
-      final ni = i + delta;
-      if (ni < 0 || ni >= entry.schedRows.length) return;
-      setState(() {
-        final tmp = entry.schedRows[i];
-        entry.schedRows[i] = entry.schedRows[ni];
-        entry.schedRows[ni] = tmp;
-      });
-    }
 
     final Widget field = row.isCustom
         ? Column(
@@ -3443,38 +3445,35 @@ class _GigOfferPageState extends State<GigOfferPage> {
             _DateEntry.builtinSchedLabel(row.key),
             maxLines: null);
 
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            IconButton(
-              icon: const Icon(Icons.keyboard_arrow_up, size: 20),
-              visualDensity: VisualDensity.compact,
-              tooltip: 'Flytt opp',
-              onPressed: isFirst ? null : () => move(-1),
+    return Padding(
+      key: ObjectKey(row),
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          ReorderableDragStartListener(
+            index: i,
+            child: MouseRegion(
+              cursor: SystemMouseCursors.grab,
+              child: Padding(
+                padding: const EdgeInsets.only(top: 8, right: 4),
+                child: Icon(Icons.drag_indicator,
+                    size: 20, color: cs.onSurfaceVariant),
+              ),
             ),
-            IconButton(
-              icon: const Icon(Icons.keyboard_arrow_down, size: 20),
-              visualDensity: VisualDensity.compact,
-              tooltip: 'Flytt ned',
-              onPressed: isLast ? null : () => move(1),
-            ),
-          ],
-        ),
-        const SizedBox(width: 4),
-        Expanded(child: field),
-        if (row.isCustom)
-          IconButton(
-            icon: const Icon(Icons.close, size: 18),
-            visualDensity: VisualDensity.compact,
-            tooltip: 'Fjern',
-            onPressed: () => setState(() {
-              entry.schedRows.removeAt(i).dispose();
-            }),
           ),
-      ],
+          Expanded(child: field),
+          if (row.isCustom)
+            IconButton(
+              icon: const Icon(Icons.close, size: 18),
+              visualDensity: VisualDensity.compact,
+              tooltip: 'Fjern',
+              onPressed: () => setState(() {
+                entry.schedRows.removeAt(i).dispose();
+              }),
+            ),
+        ],
+      ),
     );
   }
 
