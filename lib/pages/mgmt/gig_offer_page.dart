@@ -2051,113 +2051,182 @@ class _GigOfferPageState extends State<GigOfferPage> {
 
   Widget _buildShowsCard() {
     final cs = Theme.of(context).colorScheme;
-    final existing = _shows.map((s) => s.showTypeId).toSet();
-    final available =
-        _showTypes.where((t) => !existing.contains(t['id'])).toList();
+    final selected =
+        _shows.asMap().entries.where((e) => e.value.selected).toList();
 
     return _card(
       title: 'Shows',
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _tf(_showDescCtrl, 'Showbeskrivelse', maxLines: 2),
-          if (_shows.isNotEmpty) ...[
-            const SizedBox(height: 12),
+          _showPickerField(),
+          if (selected.isNotEmpty) ...[
+            const SizedBox(height: 16),
+            _tf(_showDescCtrl, 'Showbeskrivelse', maxLines: 2),
+            const SizedBox(height: 16),
             Padding(
               padding: const EdgeInsets.only(bottom: 6),
               child: Row(
                 children: [
-                  const SizedBox(width: 36),
                   Expanded(
                       child: Text('Show',
                           style: TextStyle(
                               fontSize: 11,
                               fontWeight: FontWeight.w700,
                               color: cs.onSurfaceVariant))),
-                  SizedBox(
-                      width: 50,
-                      child: Text('T',
-                          textAlign: TextAlign.center,
-                          style: TextStyle(
-                              fontSize: 11,
-                              fontWeight: FontWeight.w700,
-                              color: cs.onSurfaceVariant))),
-                  SizedBox(
-                      width: 50,
-                      child: Text('D',
-                          textAlign: TextAlign.center,
-                          style: TextStyle(
-                              fontSize: 11,
-                              fontWeight: FontWeight.w700,
-                              color: cs.onSurfaceVariant))),
-                  SizedBox(
-                      width: 50,
-                      child: Text('A',
-                          textAlign: TextAlign.center,
-                          style: TextStyle(
-                              fontSize: 11,
-                              fontWeight: FontWeight.w700,
-                              color: cs.onSurfaceVariant))),
+                  _showColHeader('T', cs),
+                  _showColHeader('D', cs),
+                  _showColHeader('A', cs),
                   const SizedBox(width: 36),
                 ],
               ),
             ),
-            ..._shows.asMap().entries.map((e) => _showRow(e.key, e.value)),
+            ...selected.map((e) => _showRow(e.key, e.value)),
           ],
-          const SizedBox(height: 8),
-          Align(
-            alignment: Alignment.centerLeft,
-            child: PopupMenuButton<String>(
-              onSelected: (v) {
-                if (v == '_new') {
-                  _createNewShowType();
-                } else {
-                  final t = available.firstWhere((t) => t['id'] == v, orElse: () => {});
-                  if (t.isNotEmpty) {
-                    setState(() {
-                      _shows.add(_OfferShow(
-                        showTypeId: t['id'] as String?,
-                        showName: t['name'] as String? ?? '',
-                        drummers: (t['drummers'] as num?)?.toInt() ?? 0,
-                        dancers: (t['dancers'] as num?)?.toInt() ?? 0,
-                        others: (t['others'] as num?)?.toInt() ?? 0,
-                        selected: true,
-                        sortOrder: _shows.length,
-                      ));
-                      _recalc();
-                    });
-                  }
-                }
-              },
-              itemBuilder: (_) => [
-                ...available.map((t) => PopupMenuItem(
-                      value: t['id'] as String,
-                      child: Text(t['name'] as String? ?? ''),
-                    )),
-                if (available.isNotEmpty) const PopupMenuDivider(),
-                const PopupMenuItem(
-                  value: '_new',
-                  child: Row(
-                    children: [
-                      Icon(Icons.add_circle_outline, size: 16),
-                      SizedBox(width: 8),
-                      Text('Ny showtype...', style: TextStyle(fontWeight: FontWeight.w600)),
-                    ],
-                  ),
+        ],
+      ),
+    );
+  }
+
+  Widget _showColHeader(String t, ColorScheme cs) => SizedBox(
+        width: 50,
+        child: Text(t,
+            textAlign: TextAlign.center,
+            style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+                color: cs.onSurfaceVariant)),
+      );
+
+  /// Dropdown-styled trigger that opens the multi-select show picker.
+  Widget _showPickerField() {
+    final cs = Theme.of(context).colorScheme;
+    final names = _shows
+        .where((s) => s.selected)
+        .map((s) =>
+            s.showName.trim().isEmpty ? '(uten navn)' : s.showName.trim())
+        .toList();
+    return InkWell(
+      borderRadius: BorderRadius.circular(10),
+      onTap: _openShowPicker,
+      child: InputDecorator(
+        decoration: const InputDecoration(
+          labelText: 'Show',
+          isDense: true,
+          contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+        ),
+        child: Row(
+          children: [
+            Expanded(
+              child: Text(
+                names.isEmpty ? 'Velg show…' : names.join(', '),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 13,
+                  color: names.isEmpty ? cs.onSurfaceVariant : cs.onSurface,
                 ),
-              ],
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(Icons.add, size: 16, color: cs.primary),
-                  const SizedBox(width: 4),
-                  Text('Legg til show',
-                    style: TextStyle(fontSize: 13, color: cs.primary),
-                  ),
-                ],
               ),
             ),
-          ),
-        ],
+            Icon(Icons.arrow_drop_down, color: cs.onSurfaceVariant),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Multi-select show picker: tick which shows are on the gig, or add a new
+  /// show type. Ticking off just deselects (keeps data + per-date indices).
+  Future<void> _openShowPicker() async {
+    await showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setLocal) {
+          final cs = Theme.of(ctx).colorScheme;
+          final existingTypeIds =
+              _shows.map((s) => s.showTypeId).whereType<String>().toSet();
+          final available = _showTypes
+              .where((t) => !existingTypeIds.contains(t['id']))
+              .toList();
+          return AlertDialog(
+            title: const Text('Velg show'),
+            content: SizedBox(
+              width: 420,
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    ..._shows.asMap().entries.map((e) {
+                      final i = e.key;
+                      final s = e.value;
+                      final nm = s.showName.trim().isEmpty
+                          ? '(uten navn)'
+                          : s.showName.trim();
+                      return CheckboxListTile(
+                        dense: true,
+                        contentPadding: EdgeInsets.zero,
+                        controlAffinity: ListTileControlAffinity.leading,
+                        value: s.selected,
+                        title: Text(nm),
+                        onChanged: (v) {
+                          setState(() {
+                            _shows[i].selected = v ?? false;
+                            _recalc();
+                          });
+                          setLocal(() {});
+                        },
+                      );
+                    }),
+                    ...available.map((t) => CheckboxListTile(
+                          dense: true,
+                          contentPadding: EdgeInsets.zero,
+                          controlAffinity: ListTileControlAffinity.leading,
+                          value: false,
+                          title: Text(t['name'] as String? ?? ''),
+                          onChanged: (v) {
+                            setState(() {
+                              _shows.add(_OfferShow(
+                                showTypeId: t['id'] as String?,
+                                showName: t['name'] as String? ?? '',
+                                drummers:
+                                    (t['drummers'] as num?)?.toInt() ?? 0,
+                                dancers:
+                                    (t['dancers'] as num?)?.toInt() ?? 0,
+                                others: (t['others'] as num?)?.toInt() ?? 0,
+                                selected: true,
+                                sortOrder: _shows.length,
+                              ));
+                              _recalc();
+                            });
+                            setLocal(() {});
+                          },
+                        )),
+                    if (_shows.isEmpty && available.isEmpty)
+                      Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        child: Text('Ingen showtyper ennå.',
+                            style: TextStyle(color: cs.onSurfaceVariant)),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+            actions: [
+              TextButton.icon(
+                onPressed: () async {
+                  Navigator.pop(ctx);
+                  await _createNewShowType();
+                },
+                icon: const Icon(Icons.add, size: 18),
+                label: const Text('Ny showtype…'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('Ferdig'),
+              ),
+            ],
+          );
+        },
       ),
     );
   }
@@ -2436,18 +2505,6 @@ class _GigOfferPageState extends State<GigOfferPage> {
         children: [
           Row(
             children: [
-              SizedBox(
-                width: 36,
-                child: Checkbox(
-                  value: s.selected,
-                  onChanged: (v) {
-                    setState(() {
-                      _shows[index].selected = v ?? false;
-                      _recalc();
-                    });
-                  },
-                ),
-              ),
               Expanded(
                 child: TextField(
                   key: ValueKey('show_name_${s.id ?? index}'),
@@ -2498,9 +2555,10 @@ class _GigOfferPageState extends State<GigOfferPage> {
                 child: IconButton(
                   icon: Icon(Icons.close,
                       size: 16, color: cs.onSurfaceVariant),
+                  tooltip: 'Fjern fra gig',
                   onPressed: () {
                     setState(() {
-                      _shows.removeAt(index);
+                      _shows[index].selected = false;
                       _recalc();
                     });
                   },
