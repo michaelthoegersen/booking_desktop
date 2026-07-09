@@ -267,7 +267,36 @@ class _InventoryItemDialogState extends State<_InventoryItemDialog> {
   String? _locRef;
   bool _saving = false;
 
+  /// One serial-number field per unit (kept in sync with quantity).
+  final List<TextEditingController> _serialCtrls = [];
+
   bool get _isEdit => widget.item != null;
+
+  int _qtyInt() {
+    final q = num.tryParse(_qty.text.trim().replaceAll(',', '.')) ?? 1;
+    final n = q.floor();
+    if (n < 0) return 0;
+    if (n > 200) return 200; // sanity cap on serial fields
+    return n;
+  }
+
+  void _syncSerialCount(int n, List<String> seed) {
+    while (_serialCtrls.length > n) {
+      _serialCtrls.removeLast().dispose();
+    }
+    while (_serialCtrls.length < n) {
+      final i = _serialCtrls.length;
+      _serialCtrls.add(
+          TextEditingController(text: i < seed.length ? seed[i] : ''));
+    }
+  }
+
+  void _onQtyChanged() {
+    final n = _qtyInt();
+    if (n != _serialCtrls.length) {
+      setState(() => _syncSerialCount(n, _serialCtrls.map((c) => c.text).toList()));
+    }
+  }
 
   @override
   void initState() {
@@ -286,16 +315,26 @@ class _InventoryItemDialogState extends State<_InventoryItemDialog> {
     } else {
       _locRef = it?['location_ref'] as String?;
     }
+    final existingSerials = (it?['serials'] as List?)
+            ?.map((e) => e.toString())
+            .toList() ??
+        const <String>[];
+    _syncSerialCount(_qtyInt(), existingSerials);
+    _qty.addListener(_onQtyChanged);
   }
 
   @override
   void dispose() {
+    _qty.removeListener(_onQtyChanged);
     _name.dispose();
     _category.dispose();
     _ref.dispose();
     _qty.dispose();
     _unit.dispose();
     _notes.dispose();
+    for (final c in _serialCtrls) {
+      c.dispose();
+    }
     super.dispose();
   }
 
@@ -313,6 +352,10 @@ class _InventoryItemDialogState extends State<_InventoryItemDialog> {
       'unit': _unit.text.trim().isEmpty ? null : _unit.text.trim(),
       'notes': _notes.text.trim().isEmpty ? null : _notes.text.trim(),
     };
+
+    final serials =
+        _serialCtrls.map((c) => c.text.trim()).where((s) => s.isNotEmpty).toList();
+    data['serials'] = serials.isEmpty ? null : serials;
 
     try {
       if (_isEdit) {
@@ -389,6 +432,30 @@ class _InventoryItemDialogState extends State<_InventoryItemDialog> {
                   ),
                 ],
               ),
+              if (_serialCtrls.length > 1) ...[
+                const SizedBox(height: 14),
+                const Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text('Serienumre (ett per enhet)',
+                      style: TextStyle(fontWeight: FontWeight.w700)),
+                ),
+                const SizedBox(height: 8),
+                ...List.generate(
+                  _serialCtrls.length,
+                  (i) => Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: TextField(
+                      controller: _serialCtrls[i],
+                      textCapitalization: TextCapitalization.characters,
+                      decoration: InputDecoration(
+                        labelText: 'Serienr. #${i + 1}',
+                        border: const OutlineInputBorder(),
+                        isDense: true,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
               const SizedBox(height: 10),
               TextField(
                 controller: _notes,

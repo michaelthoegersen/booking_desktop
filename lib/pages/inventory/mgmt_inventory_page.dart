@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../services/inventory_service.dart';
 import '../../state/active_company.dart';
+import 'container_contents_dialog.dart';
 import 'inventory_common.dart';
 
 /// Management inventory is never assigned to a vehicle — only Lager / Spillested.
@@ -56,9 +57,14 @@ class _MgmtInventoryPageState extends State<MgmtInventoryPage> {
     }
   }
 
+  List<Map<String, dynamic>> _childrenOf(String id) =>
+      _items.where((it) => it['parent_id'] == id).toList();
+
   List<Map<String, dynamic>> get _filtered {
     final q = _search.trim().toLowerCase();
     return _items.where((it) {
+      // Contents of a container are shown nested under it, not as top rows.
+      if (it['parent_id'] != null) return false;
       if (_filterType != null && it['location_type'] != _filterType) {
         return false;
       }
@@ -167,10 +173,14 @@ class _MgmtInventoryPageState extends State<MgmtInventoryPage> {
     final cs = Theme.of(context).colorScheme;
     final category = (item['category'] as String?)?.trim();
     final ref = (item['ref_number'] as String?)?.trim();
+    final serials = (item['serials'] as List?)?.length ?? 0;
+    final children = _childrenOf(item['id'] as String);
     final sub = [
       if (category != null && category.isNotEmpty) category,
       fmtQty(item),
       if (ref != null && ref.isNotEmpty) 'nr. $ref',
+      if (serials > 0) '$serials serienr.',
+      if (children.isNotEmpty) 'Inneholder ${children.length}',
     ].join('  ·  ');
 
     return Container(
@@ -182,45 +192,92 @@ class _MgmtInventoryPageState extends State<MgmtInventoryPage> {
       ),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-        child: Row(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Container(
-              width: 40,
-              height: 40,
-              decoration: BoxDecoration(
-                color: cs.surfaceContainerHighest,
-                borderRadius: BorderRadius.circular(10),
+            Row(
+              children: [
+                Container(
+                  width: 40,
+                  height: 40,
+                  decoration: BoxDecoration(
+                    color: cs.surfaceContainerHighest,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Icon(children.isNotEmpty
+                      ? Icons.inventory_rounded
+                      : Icons.inventory_2_outlined),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(item['name'] as String? ?? '',
+                          style:
+                              const TextStyle(fontWeight: FontWeight.w700)),
+                      if (sub.trim().isNotEmpty)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 2),
+                          child: Text(sub,
+                              style: TextStyle(
+                                  fontSize: 12, color: cs.onSurfaceVariant)),
+                        ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 10),
+                locationPill(context, item),
+                const SizedBox(width: 4),
+                IconButton(
+                  icon: const Icon(Icons.account_tree_outlined, size: 20),
+                  tooltip: 'Innhold i enhet',
+                  onPressed: () async {
+                    await showContainerContentsDialog(context, _service, item);
+                    _load();
+                  },
+                ),
+                inventoryActionsMenu(
+                  context: context,
+                  item: item,
+                  service: _service,
+                  refLabel: _refLabel,
+                  onChanged: _load,
+                  locationTypes: _mgmtLocationTypes,
+                ),
+              ],
+            ),
+            if (children.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(left: 52, top: 4, bottom: 2),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: children.map((c) {
+                    final ccat = (c['category'] as String?)?.trim();
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: 4),
+                      child: Row(
+                        children: [
+                          Icon(Icons.subdirectory_arrow_right,
+                              size: 16, color: cs.onSurfaceVariant),
+                          const SizedBox(width: 6),
+                          Expanded(
+                            child: Text(
+                              [
+                                c['name'] as String? ?? '',
+                                if (ccat != null && ccat.isNotEmpty) ccat,
+                                fmtQty(c),
+                              ].join('  ·  '),
+                              style: TextStyle(
+                                  fontSize: 13, color: cs.onSurfaceVariant),
+                            ),
+                          ),
+                        ],
+                      ),
+                    );
+                  }).toList(),
+                ),
               ),
-              child: const Icon(Icons.inventory_2_outlined),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(item['name'] as String? ?? '',
-                      style: const TextStyle(fontWeight: FontWeight.w700)),
-                  if (sub.trim().isNotEmpty)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 2),
-                      child: Text(sub,
-                          style: TextStyle(
-                              fontSize: 12, color: cs.onSurfaceVariant)),
-                    ),
-                ],
-              ),
-            ),
-            const SizedBox(width: 10),
-            locationPill(context, item),
-            const SizedBox(width: 4),
-            inventoryActionsMenu(
-              context: context,
-              item: item,
-              service: _service,
-              refLabel: _refLabel,
-              onChanged: _load,
-              locationTypes: _mgmtLocationTypes,
-            ),
           ],
         ),
       ),

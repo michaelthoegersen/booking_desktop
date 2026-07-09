@@ -86,6 +86,13 @@ class InventoryService {
     if (moveQty <= 0) moveQty = total;
     if (moveQty > total) moveQty = total;
     final movingAll = moveQty >= total;
+    final moveCount = moveQty.floor();
+
+    final srcSerials = _serialsOf(item);
+
+    // Is this a container (does it have contents)?
+    final childRows = await _sb.from(itemsTable).select('id').eq('parent_id', id);
+    final hasChildren = (childRows as List).isNotEmpty;
 
     final stamp = {
       'updated_by': user?.id,
@@ -106,26 +113,30 @@ class InventoryService {
     });
 
     if (movingAll) {
-      // Merge into an identical row already at the destination if one exists
-      // (e.g. moving everything back onto stock that's already on the shelf),
-      // otherwise just relocate this row.
-      final match = await _findIdenticalAt(
-        cid: cid,
-        name: item['name'] as String? ?? '',
-        category: item['category'] as String?,
-        ref: item['ref_number'] as String?,
-        unit: item['unit'] as String?,
-        toType: toType,
-        toRef: toRef,
-        excludeId: id,
-      );
+      // A container never merges (that would orphan its contents) — it always
+      // relocates as one unit. Otherwise merge into an identical row already at
+      // the destination if one exists (e.g. moving everything back onto stock).
+      final match = hasChildren
+          ? null
+          : await _findIdenticalAt(
+              cid: cid,
+              name: item['name'] as String? ?? '',
+              category: item['category'] as String?,
+              ref: item['ref_number'] as String?,
+              unit: item['unit'] as String?,
+              toType: toType,
+              toRef: toRef,
+              excludeId: id,
+            );
       if (match != null) {
         final existing = (match['quantity'] as num?) ?? 0;
+        final mergedSerials = [..._serialsOf(match), ...srcSerials];
         // Re-point this row's move history onto the surviving row so the
         // ON DELETE CASCADE below doesn't wipe it.
         await _sb.from(movesTable).update({'item_id': match['id']}).eq('item_id', id);
         await _sb.from(itemsTable).update({
           'quantity': existing + total,
+          'serials': mergedSerials.isEmpty ? null : mergedSerials,
           ...stamp,
         }).eq('id', match['id']);
         await _sb.from(itemsTable).delete().eq('id', id);
@@ -135,11 +146,27 @@ class InventoryService {
           'location_ref': toRef,
           ...stamp,
         }).eq('id', id);
+        // Move the container's contents along with it.
+        if (hasChildren) {
+          await _sb.from(itemsTable).update({
+            'location_type': toType,
+            'location_ref': toRef,
+            ...stamp,
+          }).eq('parent_id', id);
+        }
       }
     } else {
-      // Leave the remainder at the source.
+      // Partial: split quantity AND serials between source and destination.
+      final movedSerials = srcSerials.length > moveCount
+          ? srcSerials.sublist(srcSerials.length - moveCount)
+          : List<String>.from(srcSerials);
+      final remainingSerials = srcSerials.length > moveCount
+          ? srcSerials.sublist(0, srcSerials.length - moveCount)
+          : <String>[];
+
       await _sb.from(itemsTable).update({
         'quantity': total - moveQty,
+        'serials': remainingSerials.isEmpty ? null : remainingSerials,
         ...stamp,
       }).eq('id', id);
 
@@ -156,8 +183,10 @@ class InventoryService {
       );
       if (match != null) {
         final existing = (match['quantity'] as num?) ?? 0;
+        final mergedSerials = [..._serialsOf(match), ...movedSerials];
         await _sb.from(itemsTable).update({
           'quantity': existing + moveQty,
+          'serials': mergedSerials.isEmpty ? null : mergedSerials,
           ...stamp,
         }).eq('id', match['id']);
       } else {
@@ -169,6 +198,7 @@ class InventoryService {
           'quantity': moveQty,
           'unit': item['unit'],
           'notes': item['notes'],
+          'serials': movedSerials.isEmpty ? null : movedSerials,
           'location_type': toType,
           'location_ref': toRef,
           'status': item['status'],
@@ -179,6 +209,33 @@ class InventoryService {
     }
 
     _bump();
+  }
+
+  /// Put [itemId] inside container [parentId] (or take it out with null).
+  /// When placed inside, its current location is synced to the container's.
+  Future<void> setParent({
+    required String itemId,
+    String? parentId,
+    String? locType,
+    String? locRef,
+  }) async {
+    final data = <String, dynamic>{
+      'parent_id': parentId,
+      'updated_by': _sb.auth.currentUser?.id,
+      'updated_at': DateTime.now().toIso8601String(),
+    };
+    if (parentId != null && locType != null) {
+      data['location_type'] = locType;
+      data['location_ref'] = locRef;
+    }
+    await _sb.from(itemsTable).update(data).eq('id', itemId);
+    _bump();
+  }
+
+  static List<String> _serialsOf(Map<String, dynamic> item) {
+    final raw = item['serials'];
+    if (raw is List) return raw.map((e) => e.toString()).toList();
+    return const <String>[];
   }
 
   /// Find an identical item (same name/category/ref/unit) already at the
