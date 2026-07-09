@@ -219,22 +219,131 @@ class _ShowEquipmentDialogState extends State<_ShowEquipmentDialog> {
     }
   }
 
-  List<Map<String, dynamic>> get _filtered {
+  /// Flattened display list: top-level items (containers shown as a unit)
+  /// followed by their contents, so each item inside a case can be ticked
+  /// individually (for taking something out loose).
+  List<({Map<String, dynamic> item, bool isChild, bool isContainer})>
+      get _entries {
     final q = _search.trim().toLowerCase();
-    if (q.isEmpty) return _items;
-    return _items.where((it) {
+    bool matches(Map<String, dynamic> it) {
+      if (q.isEmpty) return true;
       final hay = [it['name'], it['category'], it['ref_number']]
           .whereType<String>()
           .join(' ')
           .toLowerCase();
       return hay.contains(q);
-    }).toList();
+    }
+
+    final childrenByParent = <String, List<Map<String, dynamic>>>{};
+    for (final it in _items) {
+      final p = it['parent_id'] as String?;
+      if (p != null) childrenByParent.putIfAbsent(p, () => []).add(it);
+    }
+
+    final entries =
+        <({Map<String, dynamic> item, bool isChild, bool isContainer})>[];
+    for (final it in _items) {
+      if (it['parent_id'] != null) continue; // children render under parent
+      final id = it['id'] as String;
+      final children = childrenByParent[id] ?? const <Map<String, dynamic>>[];
+      final selfMatch = matches(it);
+      final shownChildren =
+          selfMatch ? children : children.where(matches).toList();
+      if (!selfMatch && shownChildren.isEmpty) continue;
+      entries
+          .add((item: it, isChild: false, isContainer: children.isNotEmpty));
+      for (final c in shownChildren) {
+        entries.add((item: c, isChild: true, isContainer: false));
+      }
+    }
+    return entries;
+  }
+
+  Widget _buildItemRow(BuildContext context, Map<String, dynamic> it,
+      {required bool isChild, required bool isContainer}) {
+    final cs = Theme.of(context).colorScheme;
+    final itemId = it['id'] as String;
+    final on = _linkedQty.containsKey(itemId);
+    final qty = _linkedQty[itemId] ?? 1;
+    final note = _linkedNote[itemId];
+    return Padding(
+      padding: EdgeInsets.only(left: isChild ? 24 : 0, top: 2, bottom: 2),
+      child: Row(
+        children: [
+          if (isChild)
+            Icon(Icons.subdirectory_arrow_right,
+                size: 16, color: cs.onSurfaceVariant),
+          Checkbox(
+            value: on,
+            onChanged: (v) => _toggle(itemId, v ?? false),
+          ),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    if (isContainer) ...[
+                      Icon(Icons.inventory_rounded, size: 16, color: cs.primary),
+                      const SizedBox(width: 4),
+                    ],
+                    Flexible(
+                      child: Text(it['name'] as String? ?? '',
+                          style: const TextStyle(fontWeight: FontWeight.w600)),
+                    ),
+                    if (isContainer)
+                      Padding(
+                        padding: const EdgeInsets.only(left: 6),
+                        child: Text('Enhet',
+                            style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w700,
+                                color: cs.primary)),
+                      ),
+                  ],
+                ),
+                Text('på lager: ${fmtQty(it)}',
+                    style:
+                        TextStyle(fontSize: 12, color: cs.onSurfaceVariant)),
+                if (on && (note?.isNotEmpty ?? false))
+                  Padding(
+                    padding: const EdgeInsets.only(top: 2),
+                    child: Text(note!,
+                        style: TextStyle(
+                            fontSize: 12,
+                            fontStyle: FontStyle.italic,
+                            color: cs.primary)),
+                  ),
+              ],
+            ),
+          ),
+          if (on)
+            IconButton(
+              icon: Icon(
+                (note?.isNotEmpty ?? false)
+                    ? Icons.chat_bubble
+                    : Icons.chat_bubble_outline,
+                size: 18,
+              ),
+              tooltip: 'Kommentar',
+              visualDensity: VisualDensity.compact,
+              onPressed: () => _promptNote(itemId, it['name'] as String? ?? ''),
+            ),
+          if (on)
+            _QtyStepper(
+              value: qty,
+              max: (it['quantity'] as num?) ?? 1,
+              onChanged: (q) => _setQty(itemId, q),
+            ),
+        ],
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
-    final items = _filtered;
+    final entries = _entries;
 
     return AlertDialog(
       title: Column(
@@ -274,95 +383,20 @@ class _ShowEquipmentDialogState extends State<_ShowEquipmentDialog> {
                       ),
                       const SizedBox(height: 8),
                       Expanded(
-                        child: items.isEmpty
+                        child: entries.isEmpty
                             ? Center(
                                 child: Text('Ingen treff.',
                                     style:
                                         TextStyle(color: cs.onSurfaceVariant)))
                             : ListView.builder(
-                                itemCount: items.length,
+                                itemCount: entries.length,
                                 itemBuilder: (_, i) {
-                                  final it = items[i];
-                                  final itemId = it['id'] as String;
-                                  final on = _linkedQty.containsKey(itemId);
-                                  final qty = _linkedQty[itemId] ?? 1;
-                                  final cat =
-                                      (it['category'] as String?)?.trim();
-                                  return Padding(
-                                    padding:
-                                        const EdgeInsets.symmetric(vertical: 2),
-                                    child: Row(
-                                      children: [
-                                        Checkbox(
-                                          value: on,
-                                          onChanged: (v) =>
-                                              _toggle(itemId, v ?? false),
-                                        ),
-                                        Expanded(
-                                          child: Column(
-                                            crossAxisAlignment:
-                                                CrossAxisAlignment.start,
-                                            children: [
-                                              Text(it['name'] as String? ?? '',
-                                                  style: const TextStyle(
-                                                      fontWeight:
-                                                          FontWeight.w600)),
-                                              Text(
-                                                [
-                                                  if (cat != null &&
-                                                      cat.isNotEmpty)
-                                                    cat,
-                                                  'på lager: ${fmtQty(it)}',
-                                                ].join('  ·  '),
-                                                style: TextStyle(
-                                                    fontSize: 12, color: cs.onSurfaceVariant),
-                                              ),
-                                              if (on &&
-                                                  (_linkedNote[itemId]
-                                                          ?.isNotEmpty ??
-                                                      false))
-                                                Padding(
-                                                  padding: const EdgeInsets
-                                                      .only(top: 2),
-                                                  child: Text(
-                                                    _linkedNote[itemId]!,
-                                                    style: TextStyle(
-                                                      fontSize: 12,
-                                                      fontStyle:
-                                                          FontStyle.italic,
-                                                      color: cs.primary,
-                                                    ),
-                                                  ),
-                                                ),
-                                            ],
-                                          ),
-                                        ),
-                                        if (on)
-                                          IconButton(
-                                            icon: Icon(
-                                              (_linkedNote[itemId]
-                                                          ?.isNotEmpty ??
-                                                      false)
-                                                  ? Icons.chat_bubble
-                                                  : Icons.chat_bubble_outline,
-                                              size: 18,
-                                            ),
-                                            tooltip: 'Kommentar',
-                                            visualDensity:
-                                                VisualDensity.compact,
-                                            onPressed: () => _promptNote(
-                                                itemId,
-                                                it['name'] as String? ?? ''),
-                                          ),
-                                        if (on)
-                                          _QtyStepper(
-                                            value: qty,
-                                            max: (it['quantity'] as num?) ?? 1,
-                                            onChanged: (q) =>
-                                                _setQty(itemId, q),
-                                          ),
-                                      ],
-                                    ),
+                                  final e = entries[i];
+                                  return _buildItemRow(
+                                    context,
+                                    e.item,
+                                    isChild: e.isChild,
+                                    isContainer: e.isContainer,
                                   );
                                 },
                               ),
