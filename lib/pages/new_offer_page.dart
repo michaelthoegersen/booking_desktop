@@ -6932,70 +6932,53 @@ CurrentOfferStore.set(widget.offer);
 
                       const SizedBox(height: 6),
 
-                      Row(
-  children: [
+                      // ================= COMPANY SEARCH =================
+                      TextField(
+                        controller: _companyCtrl,
+                        onChanged: _search,
+                        decoration: InputDecoration(
+                          labelText: S.t('searchCompany'),
+                          prefixIcon: const Icon(Icons.apartment),
+                          suffixIcon: _loading
+                              ? const SizedBox(
+                                  width: 18,
+                                  height: 18,
+                                  child: CircularProgressIndicator(
+                                      strokeWidth: 2),
+                                )
+                              : null,
+                        ),
+                      ),
 
-    // ================= COMPANY SEARCH =================
-    Expanded(
-      child: TextField(
-        controller: _companyCtrl,
-        onChanged: _search,
-        decoration: InputDecoration(
-          labelText: S.t('searchCompany'),
-          prefixIcon: const Icon(Icons.apartment),
-          suffixIcon: _loading
-              ? const SizedBox(
-                  width: 18,
-                  height: 18,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                )
-              : null,
-        ),
-      ),
-    ),
-
-    const SizedBox(width: 8),
-
-    // ================= ADD COMPANY =================
-    SizedBox(
-      width: 96,
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.end,
-        children: [
-          IconButton(
-            tooltip: S.t('addNewCompany'),
-            icon: const Icon(Icons.add_business),
-            onPressed: _createCompanyInline,
-          ),
-        ],
-      ),
-    ),
-],
-),
-
-if (_companySuggestions.isNotEmpty)
-  Container(
-    margin: const EdgeInsets.only(top: 4),
-    constraints: const BoxConstraints(maxHeight: 180),
-    decoration: BoxDecoration(
-      color: cs.surface,
-      border: Border.all(color: cs.outlineVariant),
-      borderRadius: BorderRadius.circular(12),
-    ),
-    child: ListView.builder(
-      shrinkWrap: true,
-      itemCount: _companySuggestions.length,
-      itemBuilder: (_, i) {
-        final c = _companySuggestions[i];
-
-        return ListTile(
-          dense: true,
-          title: Text(c['name'] ?? ''),
-          onTap: () => _select(c),
-        );
-      },
-    ),
-  ),
+                      // Forslag + "legg til ny bedrift" rett fra dropdownen.
+                      if (_companyCtrl.text.trim().length >= 2 &&
+                          _companyCtrl.text.trim() != widget.offer.company)
+                        Container(
+                          margin: const EdgeInsets.only(top: 4),
+                          constraints: const BoxConstraints(maxHeight: 220),
+                          decoration: BoxDecoration(
+                            color: cs.surface,
+                            border: Border.all(color: cs.outlineVariant),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: ListView(
+                            shrinkWrap: true,
+                            children: [
+                              ..._companySuggestions.map((c) => ListTile(
+                                    dense: true,
+                                    title: Text(c['name'] ?? ''),
+                                    onTap: () => _select(c),
+                                  )),
+                              ListTile(
+                                dense: true,
+                                leading: const Icon(Icons.add_business,
+                                    size: 20),
+                                title: Text(S.t('addNewCompany')),
+                                onTap: _createCompanyInline,
+                              ),
+                            ],
+                          ),
+                        ),
 
 const SizedBox(height: 16),
 
@@ -7007,86 +6990,68 @@ Text(
 
 const SizedBox(height: 6),
 
-Row(
-  children: [
-
-    Expanded(
-      child: DropdownButtonFormField<String>(
-        value: _contactId,
-        isExpanded: true,
-        decoration: const InputDecoration(
-            prefixIcon: Icon(Icons.person_outline)),
-        items: _contacts.map((c) {
-          return DropdownMenuItem(
-            value: c['id'].toString(),
-            child: Text(
-              c['name'] ?? '',
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
-          );
-        }).toList(),
-
-        onChanged: (v) {
-
-  final ct = _contacts.firstWhere(
-    (e) => e['id'].toString() == v,
-  );
-final phone = ct['phone'] ?? '';
-final email = ct['email'] ?? '';
-
-setState(() {
-  _contactId = v;
-
-  widget.offer.contact = ct['name'] ?? '';
-  widget.offer.phone   = phone;
-  widget.offer.email   = email;
-
-  // 🔥 SYNC TIL TEXTFIELDS
-  final page =
-      context.findAncestorStateOfType<_NewOfferPageState>();
-
-  page?.phoneCtrl.text = phone;
-  page?.emailCtrl.text = email;
-});
-
-  CurrentOfferStore.set(widget.offer);
-}
-      ),
-    ),
-
-    const SizedBox(width: 8),
-
-    SizedBox(
-      width: 96,
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.end,
-        children: [
-          // ➕ ADD CONTACT
-          IconButton(
-            icon: const Icon(Icons.add),
-            tooltip: S.t('addContact'),
-            onPressed: _currentCompanyId == null
-                ? null
-                : () => _openContactDialog(),
+DropdownButtonFormField<String>(
+  value: _contactId,
+  isExpanded: true,
+  decoration: const InputDecoration(
+      prefixIcon: Icon(Icons.person_outline)),
+  items: [
+    ..._contacts.map((c) => DropdownMenuItem(
+          value: c['id'].toString(),
+          child: Text(
+            c['name'] ?? '',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
           ),
-          // ✏️ EDIT CONTACT
-          IconButton(
-            icon: const Icon(Icons.edit),
-            tooltip: S.t('editEntry'),
-            onPressed: _contactId == null
-                ? null
-                : () {
-                    final c = _contacts.firstWhere(
-                      (e) => e['id'].toString() == _contactId,
-                    );
-                    _openContactDialog(existing: c);
-                  },
-          ),
-        ],
+        )),
+    if (_contactId != null)
+      DropdownMenuItem(
+        value: '__edit__',
+        child: Row(children: [
+          const Icon(Icons.edit, size: 18),
+          const SizedBox(width: 8),
+          Text(S.t('editEntry')),
+        ]),
       ),
+    DropdownMenuItem(
+      enabled: _currentCompanyId != null,
+      value: '__add__',
+      child: Row(children: [
+        const Icon(Icons.add, size: 18),
+        const SizedBox(width: 8),
+        Text(S.t('addContact')),
+      ]),
     ),
   ],
+  onChanged: (v) {
+    if (v == '__add__') {
+      _openContactDialog();
+      return;
+    }
+    if (v == '__edit__') {
+      final c = _contacts.firstWhere(
+          (e) => e['id'].toString() == _contactId,
+          orElse: () => {});
+      if (c.isNotEmpty) _openContactDialog(existing: c);
+      return;
+    }
+    final ct = _contacts.firstWhere(
+      (e) => e['id'].toString() == v,
+    );
+    final phone = ct['phone'] ?? '';
+    final email = ct['email'] ?? '';
+    setState(() {
+      _contactId = v;
+      widget.offer.contact = ct['name'] ?? '';
+      widget.offer.phone = phone;
+      widget.offer.email = email;
+      final page =
+          context.findAncestorStateOfType<_NewOfferPageState>();
+      page?.phoneCtrl.text = phone;
+      page?.emailCtrl.text = email;
+    });
+    CurrentOfferStore.set(widget.offer);
+  },
 ),
 
 const SizedBox(height: 16),
@@ -7100,60 +7065,44 @@ Text(
 
 const SizedBox(height: 6),
 
-Row(
-  children: [
-
-    Expanded(
-      child: DropdownButtonFormField<String>(
-        value: _productionId,
-        isExpanded: true,
-        decoration: const InputDecoration(
-            prefixIcon: Icon(Icons.theaters_outlined)),
-        items: _productions.map((p) {
-          return DropdownMenuItem(
-            value: p['id'].toString(),
-            child: Text(
-              p['name'] ?? '',
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
-          );
-        }).toList(),
-
-        onChanged: (v) {
-          if (v == null) return;
-
-          final pr = _productions.firstWhere(
-            (e) => e['id'].toString() == v,
-          );
-
-          setState(() {
-            _productionId = v;
-            widget.offer.production = pr['name'] ?? '';
-          });
-        },
-      ),
-    ),
-
-    const SizedBox(width: 8),
-
-    SizedBox(
-      width: 96,
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.end,
-        children: [
-          // ➕ ADD PRODUCTION
-          IconButton(
-            icon: const Icon(Icons.add),
-            tooltip: S.t('addProduction'),
-            onPressed: _currentCompanyId == null
-                ? null
-                : _openProductionDialog,
+DropdownButtonFormField<String>(
+  value: _productionId,
+  isExpanded: true,
+  decoration: const InputDecoration(
+      prefixIcon: Icon(Icons.theaters_outlined)),
+  items: [
+    ..._productions.map((p) => DropdownMenuItem(
+          value: p['id'].toString(),
+          child: Text(
+            p['name'] ?? '',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
           ),
-        ],
-      ),
+        )),
+    DropdownMenuItem(
+      enabled: _currentCompanyId != null,
+      value: '__add__',
+      child: Row(children: [
+        const Icon(Icons.add, size: 18),
+        const SizedBox(width: 8),
+        Text(S.t('addProduction')),
+      ]),
     ),
   ],
+  onChanged: (v) {
+    if (v == null) return;
+    if (v == '__add__') {
+      _openProductionDialog();
+      return;
+    }
+    final pr = _productions.firstWhere(
+      (e) => e['id'].toString() == v,
+    );
+    setState(() {
+      _productionId = v;
+      widget.offer.production = pr['name'] ?? '';
+    });
+  },
 ),
 const SizedBox(height: 16),
 
