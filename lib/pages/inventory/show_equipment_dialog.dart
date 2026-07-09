@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../services/inventory_service.dart';
 import '../../services/show_equipment_service.dart';
@@ -265,9 +266,7 @@ class _ShowEquipmentDialogState extends State<_ShowEquipmentDialog> {
                                         if (on)
                                           _QtyStepper(
                                             value: qty,
-                                            unit: (it['unit'] as String?)
-                                                    ?.trim() ??
-                                                '',
+                                            max: (it['quantity'] as num?) ?? 1,
                                             onChanged: (q) =>
                                                 _setQty(itemId, q),
                                           ),
@@ -298,23 +297,64 @@ class _ShowEquipmentDialogState extends State<_ShowEquipmentDialog> {
   }
 }
 
-/// Compact −/N/+ quantity control.
+/// Compact −/N/+ quantity control, capped at [max] (stock on hand).
+/// Tap the number to type a value directly.
 class _QtyStepper extends StatelessWidget {
   final num value;
-  final String unit;
+  final num? max;
   final ValueChanged<num> onChanged;
 
   const _QtyStepper({
     required this.value,
-    required this.unit,
+    this.max,
     required this.onChanged,
   });
+
+  static String _n(num v) =>
+      v == v.roundToDouble() ? v.toInt().toString() : '$v';
+
+  num _clamp(num v) {
+    if (v < 1) return 1;
+    if (max != null && v > max!) return max!;
+    return v;
+  }
+
+  Future<void> _promptValue(BuildContext context) async {
+    final ctrl = TextEditingController(text: _n(value));
+    final res = await showDialog<num>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Antall som trengs'),
+        content: TextField(
+          controller: ctrl,
+          autofocus: true,
+          keyboardType: TextInputType.number,
+          inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+          decoration: InputDecoration(
+            border: const OutlineInputBorder(),
+            helperText: max != null ? 'På lager: ${_n(max!)}' : null,
+          ),
+          onSubmitted: (_) =>
+              Navigator.pop(context, num.tryParse(ctrl.text.trim())),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Avbryt')),
+          FilledButton(
+              onPressed: () =>
+                  Navigator.pop(context, num.tryParse(ctrl.text.trim())),
+              child: const Text('OK')),
+        ],
+      ),
+    );
+    if (res != null) onChanged(_clamp(res));
+  }
 
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
-    final label =
-        value == value.roundToDouble() ? value.toInt().toString() : '$value';
+    final atMax = max != null && value >= max!;
     return Container(
       decoration: BoxDecoration(
         border: Border.all(color: cs.outlineVariant),
@@ -328,18 +368,22 @@ class _QtyStepper extends StatelessWidget {
             visualDensity: VisualDensity.compact,
             onPressed: value > 1 ? () => onChanged(value - 1) : null,
           ),
-          ConstrainedBox(
-            constraints: const BoxConstraints(minWidth: 28),
-            child: Text(
-              unit.isNotEmpty ? '$label $unit' : label,
-              textAlign: TextAlign.center,
-              style: const TextStyle(fontWeight: FontWeight.w700),
+          InkWell(
+            onTap: () => _promptValue(context),
+            borderRadius: BorderRadius.circular(6),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(minWidth: 40),
+              child: Text(
+                max != null ? '${_n(value)} / ${_n(max!)}' : _n(value),
+                textAlign: TextAlign.center,
+                style: const TextStyle(fontWeight: FontWeight.w700),
+              ),
             ),
           ),
           IconButton(
             icon: const Icon(Icons.add, size: 18),
             visualDensity: VisualDensity.compact,
-            onPressed: () => onChanged(value + 1),
+            onPressed: atMax ? null : () => onChanged(value + 1),
           ),
         ],
       ),
