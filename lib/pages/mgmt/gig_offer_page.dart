@@ -1733,6 +1733,53 @@ class _GigOfferPageState extends State<GigOfferPage> {
     );
   }
 
+  /// Same chrome as [_card] but with a clickable header (title + chevron)
+  /// that collapses/expands the content.
+  Widget _collapsibleCard({
+    required String title,
+    required bool expanded,
+    required VoidCallback onToggle,
+    required Widget child,
+  }) {
+    final cs = Theme.of(context).colorScheme;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(24),
+      decoration: _cardDecoration(),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          InkWell(
+            onTap: onToggle,
+            borderRadius: BorderRadius.circular(8),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(title,
+                      style: const TextStyle(
+                          fontWeight: FontWeight.w800,
+                          fontSize: 15,
+                          letterSpacing: -0.2)),
+                ),
+                Icon(expanded ? Icons.expand_less : Icons.expand_more,
+                    color: cs.onSurfaceVariant),
+              ],
+            ),
+          ),
+          if (expanded) ...[
+            const SizedBox(height: 12),
+            Divider(
+                height: 1,
+                thickness: 1,
+                color: cs.outlineVariant.withValues(alpha: 0.5)),
+            const SizedBox(height: 18),
+            child,
+          ],
+        ],
+      ),
+    );
+  }
+
   Widget _tf(TextEditingController ctrl, String label, {int? maxLines = 1}) {
     return TextField(
       controller: ctrl,
@@ -2777,6 +2824,9 @@ class _GigOfferPageState extends State<GigOfferPage> {
   // ────────────────────────────────────────────────────────────────────────────
 
   bool _priceParamsExpanded = false;
+  bool _scheduleExpanded = true;
+  bool _stageExpanded = true;
+  bool _notesExpanded = true;
   final Set<String> _transportModes = {}; // 'privatbil', 'hyrebil', 'manuelt'
 
   // Hyre (varebil) pricing
@@ -3322,8 +3372,11 @@ class _GigOfferPageState extends State<GigOfferPage> {
         ? _DateEntry()
         : _dateEntries[_scheduleSelectedIdx];
 
-    return _card(
+    return _collapsibleCard(
       title: 'Tidsplan',
+      expanded: _scheduleExpanded,
+      onToggle: () =>
+          setState(() => _scheduleExpanded = !_scheduleExpanded),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -3482,8 +3535,10 @@ class _GigOfferPageState extends State<GigOfferPage> {
   // ────────────────────────────────────────────────────────────────────────────
 
   Widget _buildStageCard() {
-    return _card(
+    return _collapsibleCard(
       title: 'Scene',
+      expanded: _stageExpanded,
+      onToggle: () => setState(() => _stageExpanded = !_stageExpanded),
       child: Column(
         children: [
           _row2(
@@ -3502,8 +3557,10 @@ class _GigOfferPageState extends State<GigOfferPage> {
   // ────────────────────────────────────────────────────────────────────────────
 
   Widget _buildNotesCard() {
-    return _card(
+    return _collapsibleCard(
       title: 'Notater',
+      expanded: _notesExpanded,
+      onToggle: () => setState(() => _notesExpanded = !_notesExpanded),
       child: Column(
         children: [
           _tf(_notesContractCtrl, 'Notater for kontrakt', maxLines: 3),
