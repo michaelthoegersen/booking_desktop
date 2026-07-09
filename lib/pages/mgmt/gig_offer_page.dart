@@ -1638,10 +1638,6 @@ class _GigOfferPageState extends State<GigOfferPage> {
                         _buildCustomerCard(),
                         const SizedBox(height: 20),
                         _buildShowsCard(),
-                        if (_dateEntries.any((e) => e.isRehearsal)) ...[
-                          const SizedBox(height: 20),
-                          _buildRehearsalsCard(),
-                        ],
                         const SizedBox(height: 20),
                         _buildPriceParamsCard(),
                         const SizedBox(height: 20),
@@ -2625,12 +2621,17 @@ class _GigOfferPageState extends State<GigOfferPage> {
   // PRØVER (REHEARSALS)
   // ────────────────────────────────────────────────────────────────────────────
 
-  Widget _buildRehearsalsCard() {
+  Widget _rehearsalsSection() {
     final cs = Theme.of(context).colorScheme;
-    return _card(
-      title: 'Prøver',
-      child: Column(
-        children: [
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Align(
+          alignment: Alignment.centerLeft,
+          child: Text('Prøver',
+              style: TextStyle(fontWeight: FontWeight.w900, fontSize: 14)),
+        ),
+        const SizedBox(height: 8),
           Row(
             children: [
               SizedBox(
@@ -2768,7 +2769,6 @@ class _GigOfferPageState extends State<GigOfferPage> {
             ),
           ],
         ],
-      ),
     );
   }
 
@@ -2908,6 +2908,13 @@ class _GigOfferPageState extends State<GigOfferPage> {
             }),
             const SizedBox(height: 12),
             _extrasSection(),
+          ],
+
+          // ── Prøver (inside Prisparametre, only with a rehearsal day) ──
+          if (_priceParamsExpanded &&
+              _dateEntries.any((e) => e.isRehearsal)) ...[
+            const Divider(height: 24),
+            _rehearsalsSection(),
           ],
 
           // ── Transport section (inside Prisparametre) ──
