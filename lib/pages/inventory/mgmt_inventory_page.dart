@@ -192,7 +192,6 @@ class _MgmtInventoryPageState extends State<MgmtInventoryPage> {
       if (category != null && category.isNotEmpty) category,
       fmtQty(item),
       if (ref != null && ref.isNotEmpty) 'nr. $ref',
-      if (serialUnits.isNotEmpty) '${serialUnits.length} serienr.',
       if (children.isNotEmpty) 'Inneholder ${children.length}',
     ].join('  ·  ');
 
@@ -314,29 +313,32 @@ class _MgmtInventoryPageState extends State<MgmtInventoryPage> {
                                       color: cs.onSurfaceVariant)),
                             ),
                             Expanded(
-                              child: Column(
-                                crossAxisAlignment:
-                                    CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    hasSn ? sn : 'uten serienr.',
-                                    style: TextStyle(
-                                      fontSize: 13,
-                                      color: hasSn
-                                          ? cs.onSurface
-                                          : cs.onSurfaceVariant,
-                                      fontStyle: hasSn
-                                          ? FontStyle.normal
-                                          : FontStyle.italic,
+                              child: Text.rich(
+                                TextSpan(
+                                  children: [
+                                    TextSpan(
+                                      text: hasSn ? sn : 'uten serienr.',
+                                      style: TextStyle(
+                                        fontSize: 13,
+                                        color: hasSn
+                                            ? cs.onSurface
+                                            : cs.onSurfaceVariant,
+                                        fontStyle: hasSn
+                                            ? FontStyle.normal
+                                            : FontStyle.italic,
+                                      ),
                                     ),
-                                  ),
-                                  if (note.isNotEmpty)
-                                    Text(note,
+                                    if (note.isNotEmpty)
+                                      TextSpan(
+                                        text: '  ·  $note',
                                         style: TextStyle(
-                                            fontSize: 12,
-                                            fontStyle: FontStyle.italic,
-                                            color: cs.primary)),
-                                ],
+                                          fontSize: 13,
+                                          fontStyle: FontStyle.italic,
+                                          color: cs.primary,
+                                        ),
+                                      ),
+                                  ],
+                                ),
                               ),
                             ),
                           ],
