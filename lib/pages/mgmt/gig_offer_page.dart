@@ -2910,7 +2910,8 @@ class _GigOfferPageState extends State<GigOfferPage> {
             _extrasSection(),
           ],
 
-          // ── Transport section ──
+          // ── Transport section (inside Prisparametre) ──
+          if (_priceParamsExpanded) ...[
           const Divider(height: 24),
           const Text('Transport', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 14)),
           const SizedBox(height: 8),
@@ -3148,6 +3149,7 @@ class _GigOfferPageState extends State<GigOfferPage> {
                 ],
               ),
             ),
+          ],
           ],
         ],
       ),
