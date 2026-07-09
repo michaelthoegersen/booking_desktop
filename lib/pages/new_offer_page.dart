@@ -5737,9 +5737,9 @@ Container(
       ),
       const SizedBox(height: 6),
       SegmentedButton<String>(
-        segments: [
-          ButtonSegment(value: 'norsk', label: Text("🇳🇴 ${S.t('norwegian')}")),
-          ButtonSegment(value: 'svensk', label: Text("🇸🇪 ${S.t('swedish')}")),
+        segments: const [
+          ButtonSegment(value: 'norsk', label: Text('Per day')),
+          ButtonSegment(value: 'svensk', label: Text('Per leg')),
         ],
         selected: {offer.pricingModel},
         onSelectionChanged: (selected) async {
@@ -5761,17 +5761,26 @@ Container(
         style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
       ),
       const SizedBox(height: 6),
-      SegmentedButton<String>(
-        segments: const [
-          ButtonSegment(value: 'no', label: Text('🇳🇴 NO')),
-          ButtonSegment(value: 'en', label: Text('🇬🇧 EN')),
-          ButtonSegment(value: 'sv', label: Text('🇸🇪 SV')),
-          ButtonSegment(value: 'de', label: Text('🇩🇪 DE')),
+      DropdownButtonFormField<String>(
+        value: const ['no', 'en', 'sv', 'de'].contains(offer.language)
+            ? offer.language
+            : 'no',
+        isExpanded: true,
+        decoration: const InputDecoration(
+          prefixIcon: Icon(Icons.translate),
+          border: OutlineInputBorder(),
+          isDense: true,
+        ),
+        items: const [
+          DropdownMenuItem(value: 'no', child: Text('Norsk')),
+          DropdownMenuItem(value: 'en', child: Text('English')),
+          DropdownMenuItem(value: 'sv', child: Text('Svenska')),
+          DropdownMenuItem(value: 'de', child: Text('Deutsch')),
         ],
-        selected: {offer.language},
-        onSelectionChanged: (selected) {
+        onChanged: (v) {
+          if (v == null) return;
           setState(() {
-            offer.language = selected.first;
+            offer.language = v;
           });
         },
       ),
