@@ -2177,29 +2177,28 @@ class _InfoTabState extends State<_InfoTab> {
                 MapEntry('Adresse', gig['customer_address']),
                 MapEntry('EHF', gig['invoice_on_ehf'] == true ? 'Ja' : null),
               ]),
-              // Fakturamottaker (alternativ) — editerbart inline. Toggle
-              // bestemmer om alt_invoice-feltene faktisk skal brukes ved
-              // fakturering; selve feltene er alltid synlige/editerbare.
-              _editCard(cs, 'Fakturamottaker', [
-                _EditField('Bruk alternativ', 'alt_invoice_enabled',
-                    isBool: true),
-                _EditField('Firma', 'alt_invoice_firma'),
-                _EditField('Kontakt', 'alt_invoice_name'),
-                _EditField('Telefon', 'alt_invoice_phone'),
-                _EditField('E-post', 'alt_invoice_email'),
-                _EditField('Org.nr', 'alt_invoice_org_nr'),
-                _EditField('Adresse', 'alt_invoice_address'),
-                _EditField('Faktura på EHF', 'alt_invoice_on_ehf',
-                    isBool: true),
-              ]),
-              _editCard(cs, 'Tider', [
-                _EditField('Oppmøte', 'meeting_time'),
-                _EditField('Get-in', 'get_in_time'),
-                _EditField('Prøver', 'rehearsal_time'),
-                _EditField('Opptreden', 'performance_time'),
-                _EditField('Get-out', 'get_out_time'),
-                _EditField('Notat', 'meeting_notes', multiline: true),
-              ]),
+              // Fakturamottaker — vis alternativ-feltene kun når "annen
+              // fakturamottaker" er huket av i tilbudet; ellers bare "Samme
+              // som Kunde".
+              if (gig['alt_invoice_enabled'] == true)
+                _editCard(cs, 'Fakturamottaker', [
+                  _EditField('Bruk alternativ', 'alt_invoice_enabled',
+                      isBool: true),
+                  _EditField('Firma', 'alt_invoice_firma'),
+                  _EditField('Kontakt', 'alt_invoice_name'),
+                  _EditField('Telefon', 'alt_invoice_phone'),
+                  _EditField('E-post', 'alt_invoice_email'),
+                  _EditField('Org.nr', 'alt_invoice_org_nr'),
+                  _EditField('Adresse', 'alt_invoice_address'),
+                  _EditField('Faktura på EHF', 'alt_invoice_on_ehf',
+                      isBool: true),
+                ])
+              else
+                _readOnlyCard(cs, 'Fakturamottaker', const [
+                  MapEntry('Mottaker', 'Samme som Kunde'),
+                ]),
+              // Tider — kun Tidsplan-punktene fra tilbudet (med verdi).
+              _readOnlyCard(cs, 'Tider', _tidsplanEntries()),
             ],
           ),
         ),
@@ -2218,24 +2217,70 @@ class _InfoTabState extends State<_InfoTab> {
                   MapEntry('In-ear pris', 'kr ${NumberFormat('#,##0', 'nb_NO').format((gig['inear_price'] as num?)?.toDouble() ?? 0)}'),
                 MapEntry('Playback fra oss', gig['playback_from_us'] != false ? 'Ja' : 'Nei'),
               ]),
-              _readOnlyCard(cs, 'Transport & Extra', [
-                MapEntry('Km', gig['transport_km']?.toString()),
-                if (gig['transport_price'] != null)
-                  MapEntry('Transport', 'kr ${NumberFormat('#,##0', 'nb_NO').format((gig['transport_price'] as num).toDouble())}'),
-                MapEntry('Extra', gig['extra_desc']),
-                if (gig['extra_price'] != null)
-                  MapEntry('Extra pris', 'kr ${NumberFormat('#,##0', 'nb_NO').format((gig['extra_price'] as num).toDouble())}'),
-              ]),
-              _editCard(cs, 'Notater', [
-                _EditField('For kontrakt', 'notes_for_contract', multiline: true),
-                _EditField('Fra arrangør', 'info_from_organizer', multiline: true),
-                _EditField('Showbeskrivelse', 'show_desc', multiline: true),
+              // Notater — kun de som faktisk er fylt ut i tilbudet.
+              _readOnlyCard(cs, 'Notater', [
+                MapEntry('For kontrakt', gig['notes_for_contract']),
+                MapEntry('Fra arrangør', gig['info_from_organizer']),
+                MapEntry('Showbeskrivelse', gig['show_desc']),
               ]),
             ],
           ),
         ),
       ],
     );
+  }
+
+  /// Tidsplan-rader fra tilbudets `schedule_items` (rekkefølge + custom-rader),
+  /// mappet til label/verdi. Tomme rader filtreres bort av `_readOnlyCard`.
+  List<MapEntry<String, dynamic>> _tidsplanEntries() {
+    const labels = {
+      'meeting': 'Oppmøte',
+      'getin': 'Get-in',
+      'rehearsal': 'Prøver',
+      'performance': 'Opptreden',
+      'getout': 'Get-out',
+      'notes': 'Oppmøtenotat',
+    };
+    const cols = {
+      'meeting': 'meeting_time',
+      'getin': 'get_in_time',
+      'rehearsal': 'rehearsal_time',
+      'performance': 'performance_time',
+      'getout': 'get_out_time',
+      'notes': 'meeting_notes',
+    };
+    final items = gig['schedule_items'];
+    final order = <Map<String, dynamic>>[];
+    if (items is List && items.isNotEmpty) {
+      for (final it in items) {
+        if (it is Map) order.add(Map<String, dynamic>.from(it));
+      }
+    } else {
+      for (final k in const [
+        'meeting',
+        'getin',
+        'rehearsal',
+        'performance',
+        'getout',
+        'notes'
+      ]) {
+        order.add({'k': k});
+      }
+    }
+    final entries = <MapEntry<String, dynamic>>[];
+    for (final it in order) {
+      final k = it['k'] as String?;
+      if (k == 'custom') {
+        final t = (it['t'] as String?)?.trim() ?? '';
+        final v = (it['v'] as String?)?.trim() ?? '';
+        if (t.isNotEmpty || v.isNotEmpty) {
+          entries.add(MapEntry(t.isEmpty ? 'Punkt' : t, v));
+        }
+      } else if (k != null && labels.containsKey(k)) {
+        entries.add(MapEntry(labels[k]!, gig[cols[k]]));
+      }
+    }
+    return entries;
   }
 
   Widget _readOnlyCard(ColorScheme cs, String title, List<MapEntry<String, dynamic>> entries) {
