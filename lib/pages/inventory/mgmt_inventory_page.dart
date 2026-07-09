@@ -235,22 +235,31 @@ class _MgmtInventoryPageState extends State<MgmtInventoryPage> {
                   ),
                 ),
                 const SizedBox(width: 10),
+                SizedBox(
+                  width: 40,
+                  child: expandable
+                      ? IconButton(
+                          padding: EdgeInsets.zero,
+                          icon: Icon(
+                              expanded
+                                  ? Icons.expand_less
+                                  : Icons.expand_more,
+                              size: 22),
+                          tooltip:
+                              expanded ? 'Skjul enheter' : 'Vis enheter',
+                          onPressed: () => setState(() {
+                            if (expanded) {
+                              _expanded.remove(id);
+                            } else {
+                              _expanded.add(id);
+                            }
+                          }),
+                        )
+                      : null,
+                ),
+                const SizedBox(width: 4),
                 locationPill(context, item),
                 const SizedBox(width: 4),
-                if (expandable)
-                  IconButton(
-                    icon: Icon(
-                        expanded ? Icons.expand_less : Icons.expand_more,
-                        size: 22),
-                    tooltip: expanded ? 'Skjul enheter' : 'Vis enheter',
-                    onPressed: () => setState(() {
-                      if (expanded) {
-                        _expanded.remove(id);
-                      } else {
-                        _expanded.add(id);
-                      }
-                    }),
-                  ),
                 IconButton(
                   icon: const Icon(Icons.account_tree_outlined, size: 20),
                   tooltip: 'Innhold i enhet',
