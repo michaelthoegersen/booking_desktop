@@ -106,12 +106,36 @@ class InventoryService {
     });
 
     if (movingAll) {
-      // Relocate the whole row.
-      await _sb.from(itemsTable).update({
-        'location_type': toType,
-        'location_ref': toRef,
-        ...stamp,
-      }).eq('id', id);
+      // Merge into an identical row already at the destination if one exists
+      // (e.g. moving everything back onto stock that's already on the shelf),
+      // otherwise just relocate this row.
+      final match = await _findIdenticalAt(
+        cid: cid,
+        name: item['name'] as String? ?? '',
+        category: item['category'] as String?,
+        ref: item['ref_number'] as String?,
+        unit: item['unit'] as String?,
+        toType: toType,
+        toRef: toRef,
+        excludeId: id,
+      );
+      if (match != null) {
+        final existing = (match['quantity'] as num?) ?? 0;
+        // Re-point this row's move history onto the surviving row so the
+        // ON DELETE CASCADE below doesn't wipe it.
+        await _sb.from(movesTable).update({'item_id': match['id']}).eq('item_id', id);
+        await _sb.from(itemsTable).update({
+          'quantity': existing + total,
+          ...stamp,
+        }).eq('id', match['id']);
+        await _sb.from(itemsTable).delete().eq('id', id);
+      } else {
+        await _sb.from(itemsTable).update({
+          'location_type': toType,
+          'location_ref': toRef,
+          ...stamp,
+        }).eq('id', id);
+      }
     } else {
       // Leave the remainder at the source.
       await _sb.from(itemsTable).update({
