@@ -267,8 +267,9 @@ class _InventoryItemDialogState extends State<_InventoryItemDialog> {
   String? _locRef;
   bool _saving = false;
 
-  /// One serial-number field per unit (kept in sync with quantity).
+  /// One serial-number field + one comment field per unit (synced with qty).
   final List<TextEditingController> _serialCtrls = [];
+  final List<TextEditingController> _serialNoteCtrls = [];
 
   bool get _isEdit => widget.item != null;
 
@@ -280,21 +281,28 @@ class _InventoryItemDialogState extends State<_InventoryItemDialog> {
     return n;
   }
 
-  void _syncSerialCount(int n, List<String> seed) {
+  void _syncSerialCount(int n, List<String> snSeed, List<String> noteSeed) {
     while (_serialCtrls.length > n) {
       _serialCtrls.removeLast().dispose();
+      _serialNoteCtrls.removeLast().dispose();
     }
     while (_serialCtrls.length < n) {
       final i = _serialCtrls.length;
       _serialCtrls.add(
-          TextEditingController(text: i < seed.length ? seed[i] : ''));
+          TextEditingController(text: i < snSeed.length ? snSeed[i] : ''));
+      _serialNoteCtrls.add(
+          TextEditingController(text: i < noteSeed.length ? noteSeed[i] : ''));
     }
   }
 
   void _onQtyChanged() {
     final n = _qtyInt();
     if (n != _serialCtrls.length) {
-      setState(() => _syncSerialCount(n, _serialCtrls.map((c) => c.text).toList()));
+      setState(() => _syncSerialCount(
+            n,
+            _serialCtrls.map((c) => c.text).toList(),
+            _serialNoteCtrls.map((c) => c.text).toList(),
+          ));
     }
   }
 
@@ -315,11 +323,19 @@ class _InventoryItemDialogState extends State<_InventoryItemDialog> {
     } else {
       _locRef = it?['location_ref'] as String?;
     }
-    final existingSerials = (it?['serials'] as List?)
-            ?.map((e) => e.toString())
-            .toList() ??
-        const <String>[];
-    _syncSerialCount(_qtyInt(), existingSerials);
+    final rawSerials = (it?['serials'] as List?) ?? const [];
+    final snSeed = <String>[];
+    final noteSeed = <String>[];
+    for (final e in rawSerials) {
+      if (e is Map) {
+        snSeed.add((e['sn'] ?? '').toString());
+        noteSeed.add((e['note'] ?? '').toString());
+      } else {
+        snSeed.add(e.toString());
+        noteSeed.add('');
+      }
+    }
+    _syncSerialCount(_qtyInt(), snSeed, noteSeed);
     _qty.addListener(_onQtyChanged);
   }
 
@@ -333,6 +349,9 @@ class _InventoryItemDialogState extends State<_InventoryItemDialog> {
     _unit.dispose();
     _notes.dispose();
     for (final c in _serialCtrls) {
+      c.dispose();
+    }
+    for (final c in _serialNoteCtrls) {
       c.dispose();
     }
     super.dispose();
@@ -353,9 +372,14 @@ class _InventoryItemDialogState extends State<_InventoryItemDialog> {
       'notes': _notes.text.trim().isEmpty ? null : _notes.text.trim(),
     };
 
-    final serials =
-        _serialCtrls.map((c) => c.text.trim()).where((s) => s.isNotEmpty).toList();
-    data['serials'] = serials.isEmpty ? null : serials;
+    final serialEntries = <Map<String, dynamic>>[];
+    for (var i = 0; i < _serialCtrls.length; i++) {
+      final sn = _serialCtrls[i].text.trim();
+      final note = _serialNoteCtrls[i].text.trim();
+      if (sn.isEmpty && note.isEmpty) continue;
+      serialEntries.add({'sn': sn, 'note': note});
+    }
+    data['serials'] = serialEntries.isEmpty ? null : serialEntries;
 
     try {
       if (_isEdit) {
@@ -444,14 +468,38 @@ class _InventoryItemDialogState extends State<_InventoryItemDialog> {
                   _serialCtrls.length,
                   (i) => Padding(
                     padding: const EdgeInsets.only(bottom: 8),
-                    child: TextField(
-                      controller: _serialCtrls[i],
-                      textCapitalization: TextCapitalization.characters,
-                      decoration: InputDecoration(
-                        labelText: 'Serienr. #${i + 1}',
-                        border: const OutlineInputBorder(),
-                        isDense: true,
-                      ),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(
+                          flex: 4,
+                          child: TextField(
+                            controller: _serialCtrls[i],
+                            textCapitalization:
+                                TextCapitalization.characters,
+                            decoration: InputDecoration(
+                              labelText: 'Serienr. #${i + 1}',
+                              border: const OutlineInputBorder(),
+                              isDense: true,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          flex: 5,
+                          child: TextField(
+                            controller: _serialNoteCtrls[i],
+                            textCapitalization:
+                                TextCapitalization.sentences,
+                            inputFormatters: kCapFirst,
+                            decoration: const InputDecoration(
+                              labelText: 'Kommentar',
+                              border: OutlineInputBorder(),
+                              isDense: true,
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                 ),

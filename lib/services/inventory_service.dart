@@ -159,10 +159,10 @@ class InventoryService {
       // Partial: split quantity AND serials between source and destination.
       final movedSerials = srcSerials.length > moveCount
           ? srcSerials.sublist(srcSerials.length - moveCount)
-          : List<String>.from(srcSerials);
+          : List<dynamic>.from(srcSerials);
       final remainingSerials = srcSerials.length > moveCount
           ? srcSerials.sublist(0, srcSerials.length - moveCount)
-          : <String>[];
+          : <dynamic>[];
 
       await _sb.from(itemsTable).update({
         'quantity': total - moveQty,
@@ -232,10 +232,12 @@ class InventoryService {
     _bump();
   }
 
-  static List<String> _serialsOf(Map<String, dynamic> item) {
+  /// Raw serial entries (each a `{sn, note}` map, or a legacy plain string).
+  /// Returned untyped so split/merge preserves whatever shape is stored.
+  static List<dynamic> _serialsOf(Map<String, dynamic> item) {
     final raw = item['serials'];
-    if (raw is List) return raw.map((e) => e.toString()).toList();
-    return const <String>[];
+    if (raw is List) return List<dynamic>.from(raw);
+    return const <dynamic>[];
   }
 
   /// Find an identical item (same name/category/ref/unit) already at the

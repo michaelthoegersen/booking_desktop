@@ -175,19 +175,24 @@ class _MgmtInventoryPageState extends State<MgmtInventoryPage> {
     final id = item['id'] as String;
     final category = (item['category'] as String?)?.trim();
     final ref = (item['ref_number'] as String?)?.trim();
-    final serialsList = (item['serials'] as List?)
-            ?.map((e) => e.toString())
-            .toList() ??
-        const <String>[];
+    final serialUnits = ((item['serials'] as List?) ?? const []).map((e) {
+      if (e is Map) {
+        return (
+          sn: (e['sn'] ?? '').toString(),
+          note: (e['note'] ?? '').toString(),
+        );
+      }
+      return (sn: e.toString(), note: '');
+    }).toList();
     final children = _childrenOf(id);
     final qtyInt = ((item['quantity'] as num?) ?? 1).floor();
-    final expandable = serialsList.isNotEmpty;
+    final expandable = serialUnits.isNotEmpty;
     final expanded = _expanded.contains(id);
     final sub = [
       if (category != null && category.isNotEmpty) category,
       fmtQty(item),
       if (ref != null && ref.isNotEmpty) 'nr. $ref',
-      if (serialsList.isNotEmpty) '${serialsList.length} serienr.',
+      if (serialUnits.isNotEmpty) '${serialUnits.length} serienr.',
       if (children.isNotEmpty) 'Inneholder ${children.length}',
     ].join('  ·  ');
 
@@ -284,13 +289,18 @@ class _MgmtInventoryPageState extends State<MgmtInventoryPage> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: List.generate(
-                    qtyInt > serialsList.length ? qtyInt : serialsList.length,
+                    qtyInt > serialUnits.length ? qtyInt : serialUnits.length,
                     (i) {
-                      final sn = i < serialsList.length ? serialsList[i] : '';
-                      final hasSn = sn.trim().isNotEmpty;
+                      final sn =
+                          i < serialUnits.length ? serialUnits[i].sn.trim() : '';
+                      final note = i < serialUnits.length
+                          ? serialUnits[i].note.trim()
+                          : '';
+                      final hasSn = sn.isNotEmpty;
                       return Padding(
                         padding: const EdgeInsets.only(bottom: 4),
                         child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Icon(Icons.tag,
                                 size: 15, color: cs.onSurfaceVariant),
@@ -304,17 +314,29 @@ class _MgmtInventoryPageState extends State<MgmtInventoryPage> {
                                       color: cs.onSurfaceVariant)),
                             ),
                             Expanded(
-                              child: Text(
-                                hasSn ? sn : 'uten serienr.',
-                                style: TextStyle(
-                                  fontSize: 13,
-                                  color: hasSn
-                                      ? cs.onSurface
-                                      : cs.onSurfaceVariant,
-                                  fontStyle: hasSn
-                                      ? FontStyle.normal
-                                      : FontStyle.italic,
-                                ),
+                              child: Column(
+                                crossAxisAlignment:
+                                    CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    hasSn ? sn : 'uten serienr.',
+                                    style: TextStyle(
+                                      fontSize: 13,
+                                      color: hasSn
+                                          ? cs.onSurface
+                                          : cs.onSurfaceVariant,
+                                      fontStyle: hasSn
+                                          ? FontStyle.normal
+                                          : FontStyle.italic,
+                                    ),
+                                  ),
+                                  if (note.isNotEmpty)
+                                    Text(note,
+                                        style: TextStyle(
+                                            fontSize: 12,
+                                            fontStyle: FontStyle.italic,
+                                            color: cs.primary)),
+                                ],
                               ),
                             ),
                           ],
