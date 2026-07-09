@@ -972,6 +972,12 @@ if (r.flightCost > 0) {
 // ---------------------------------------------------
 // Recalculate all rounds (for PDF + totals)
 // ---------------------------------------------------
+/// Rebuild the whole page (incl. the right-panel preview) — used by child
+/// panels (e.g. Status in the left panel) so changes reflect immediately.
+void refreshPreview() {
+  if (mounted) setState(() {});
+}
+
 Future<void> _recalcAllRounds() async {
   // Pre-fetch legs for ALL rounds in parallel before calculating.
   // Rounds that share routes benefit from a single DB call.
@@ -7117,6 +7123,9 @@ DropdownButtonFormField<String>(
       widget.offer.status = v;
     });
     CurrentOfferStore.set(widget.offer);
+    // Rebuild the page so the right-panel preview reflects the new status
+    // live (ValueNotifier won't re-notify on the same offer reference).
+    context.findAncestorStateOfType<_NewOfferPageState>()?.refreshPreview();
   },
 ),
 const SizedBox(height: 12),
