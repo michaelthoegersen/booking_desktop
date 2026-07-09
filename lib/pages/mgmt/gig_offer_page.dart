@@ -1671,23 +1671,55 @@ class _GigOfferPageState extends State<GigOfferPage> {
   // CARD HELPER
   // ────────────────────────────────────────────────────────────────────────────
 
-  Widget _card({required String title, required Widget child}) {
+  /// Shared card chrome — soft border, subtle lift, generous padding.
+  BoxDecoration _cardDecoration() {
     final cs = Theme.of(context).colorScheme;
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(22),
-      decoration: BoxDecoration(
-        color: cs.surfaceContainerLowest,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: cs.outlineVariant),
-      ),
+    return BoxDecoration(
+      color: cs.surfaceContainerLowest,
+      borderRadius: BorderRadius.circular(16),
+      border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.7)),
+      boxShadow: [
+        BoxShadow(
+          color: Colors.black.withValues(alpha: 0.035),
+          blurRadius: 14,
+          offset: const Offset(0, 5),
+        ),
+      ],
+    );
+  }
+
+  /// Shared section heading with a hairline rule underneath.
+  Widget _cardTitle(String title) {
+    final cs = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 18),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(title,
-              style:
-                  const TextStyle(fontWeight: FontWeight.w900, fontSize: 15)),
-          const SizedBox(height: 16),
+              style: const TextStyle(
+                  fontWeight: FontWeight.w800,
+                  fontSize: 15,
+                  letterSpacing: -0.2)),
+          const SizedBox(height: 12),
+          Divider(
+              height: 1,
+              thickness: 1,
+              color: cs.outlineVariant.withValues(alpha: 0.5)),
+        ],
+      ),
+    );
+  }
+
+  Widget _card({required String title, required Widget child}) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(24),
+      decoration: _cardDecoration(),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _cardTitle(title),
           child,
         ],
       ),
@@ -3586,18 +3618,12 @@ class _GigOfferPageState extends State<GigOfferPage> {
     final transportCombined = transportGig + _rehearsalTransport;
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(22),
-      decoration: BoxDecoration(
-        color: cs.surfaceContainerLowest,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: cs.outlineVariant),
-      ),
+      padding: const EdgeInsets.all(24),
+      decoration: _cardDecoration(),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text('Beregning',
-              style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15)),
-          const SizedBox(height: 16),
+          _cardTitle('Beregning'),
           if (_dateEntries.length > 1)
             _calcRowInfo('Antall datoer', '${_dateEntries.length}'),
           _calcRowInfo(
@@ -4227,18 +4253,12 @@ class _GigOfferPageState extends State<GigOfferPage> {
 
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(22),
-      decoration: BoxDecoration(
-        color: cs.surfaceContainerLowest,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: cs.outlineVariant),
-      ),
+      padding: const EdgeInsets.all(24),
+      decoration: _cardDecoration(),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          const Text('Handlinger',
-              style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15)),
-          const SizedBox(height: 16),
+          _cardTitle('Handlinger'),
           FilledButton.icon(
             onPressed: _saving ? null : _save,
             icon: _saving
