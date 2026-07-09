@@ -6954,14 +6954,22 @@ CurrentOfferStore.set(widget.offer);
       ),
     ),
 
-    const SizedBox(width: 6),
+    const SizedBox(width: 8),
 
     // ================= ADD COMPANY =================
-IconButton(
-  tooltip: S.t('addNewCompany'),
-  icon: const Icon(Icons.add_business),
-  onPressed: _createCompanyInline,
-),
+    SizedBox(
+      width: 96,
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.end,
+        children: [
+          IconButton(
+            tooltip: S.t('addNewCompany'),
+            icon: const Icon(Icons.add_business),
+            onPressed: _createCompanyInline,
+          ),
+        ],
+      ),
+    ),
 ],
 ),
 
@@ -7006,7 +7014,8 @@ Row(
       child: DropdownButtonFormField<String>(
         value: _contactId,
         isExpanded: true,
-
+        decoration: const InputDecoration(
+            prefixIcon: Icon(Icons.person_outline)),
         items: _contacts.map((c) {
           return DropdownMenuItem(
             value: c['id'].toString(),
@@ -7046,30 +7055,36 @@ setState(() {
       ),
     ),
 
-    const SizedBox(width: 4),
+    const SizedBox(width: 8),
 
-    // ➕ ADD CONTACT
-    IconButton(
-      icon: const Icon(Icons.add),
-      tooltip: S.t('addContact'),
-      onPressed: _currentCompanyId == null
-          ? null
-          : () => _openContactDialog(),
-    ),
-
-    // ✏️ EDIT CONTACT
-    IconButton(
-      icon: const Icon(Icons.edit),
-      tooltip: S.t('editEntry'),
-      onPressed: _contactId == null
-          ? null
-          : () {
-              final c = _contacts.firstWhere(
-                (e) => e['id'].toString() == _contactId,
-              );
-
-              _openContactDialog(existing: c);
-            },
+    SizedBox(
+      width: 96,
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.end,
+        children: [
+          // ➕ ADD CONTACT
+          IconButton(
+            icon: const Icon(Icons.add),
+            tooltip: S.t('addContact'),
+            onPressed: _currentCompanyId == null
+                ? null
+                : () => _openContactDialog(),
+          ),
+          // ✏️ EDIT CONTACT
+          IconButton(
+            icon: const Icon(Icons.edit),
+            tooltip: S.t('editEntry'),
+            onPressed: _contactId == null
+                ? null
+                : () {
+                    final c = _contacts.firstWhere(
+                      (e) => e['id'].toString() == _contactId,
+                    );
+                    _openContactDialog(existing: c);
+                  },
+          ),
+        ],
+      ),
     ),
   ],
 ),
@@ -7092,7 +7107,8 @@ Row(
       child: DropdownButtonFormField<String>(
         value: _productionId,
         isExpanded: true,
-
+        decoration: const InputDecoration(
+            prefixIcon: Icon(Icons.theaters_outlined)),
         items: _productions.map((p) {
           return DropdownMenuItem(
             value: p['id'].toString(),
@@ -7119,15 +7135,23 @@ Row(
       ),
     ),
 
-    const SizedBox(width: 4),
+    const SizedBox(width: 8),
 
-    // ➕ ADD PRODUCTION
-    IconButton(
-      icon: const Icon(Icons.add),
-      tooltip: S.t('addProduction'),
-      onPressed: _currentCompanyId == null
-          ? null
-          : _openProductionDialog,
+    SizedBox(
+      width: 96,
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.end,
+        children: [
+          // ➕ ADD PRODUCTION
+          IconButton(
+            icon: const Icon(Icons.add),
+            tooltip: S.t('addProduction'),
+            onPressed: _currentCompanyId == null
+                ? null
+                : _openProductionDialog,
+          ),
+        ],
+      ),
     ),
   ],
 ),
