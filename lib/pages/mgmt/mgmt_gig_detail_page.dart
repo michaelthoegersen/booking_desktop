@@ -2197,8 +2197,14 @@ class _InfoTabState extends State<_InfoTab> {
                 _readOnlyCard(cs, 'Fakturamottaker', const [
                   MapEntry('Mottaker', 'Samme som Kunde'),
                 ]),
-              // Tider — kun Tidsplan-punktene fra tilbudet (med verdi).
-              _readOnlyCard(cs, 'Tider', _tidsplanEntries()),
+              _editCard(cs, 'Tider', [
+                _EditField('Oppmøte', 'meeting_time'),
+                _EditField('Get-in', 'get_in_time'),
+                _EditField('Prøver', 'rehearsal_time'),
+                _EditField('Opptreden', 'performance_time'),
+                _EditField('Get-out', 'get_out_time'),
+                _EditField('Notat', 'meeting_notes', multiline: true),
+              ]),
             ],
           ),
         ),
@@ -2217,70 +2223,16 @@ class _InfoTabState extends State<_InfoTab> {
                   MapEntry('In-ear pris', 'kr ${NumberFormat('#,##0', 'nb_NO').format((gig['inear_price'] as num?)?.toDouble() ?? 0)}'),
                 MapEntry('Playback fra oss', gig['playback_from_us'] != false ? 'Ja' : 'Nei'),
               ]),
-              // Notater — kun de som faktisk er fylt ut i tilbudet.
-              _readOnlyCard(cs, 'Notater', [
-                MapEntry('For kontrakt', gig['notes_for_contract']),
-                MapEntry('Fra arrangør', gig['info_from_organizer']),
-                MapEntry('Showbeskrivelse', gig['show_desc']),
+              _editCard(cs, 'Notater', [
+                _EditField('For kontrakt', 'notes_for_contract', multiline: true),
+                _EditField('Fra arrangør', 'info_from_organizer', multiline: true),
+                _EditField('Showbeskrivelse', 'show_desc', multiline: true),
               ]),
             ],
           ),
         ),
       ],
     );
-  }
-
-  /// Tidsplan-rader fra tilbudets `schedule_items` (rekkefølge + custom-rader),
-  /// mappet til label/verdi. Tomme rader filtreres bort av `_readOnlyCard`.
-  List<MapEntry<String, dynamic>> _tidsplanEntries() {
-    const labels = {
-      'meeting': 'Oppmøte',
-      'getin': 'Get-in',
-      'rehearsal': 'Prøver',
-      'performance': 'Opptreden',
-      'getout': 'Get-out',
-      'notes': 'Oppmøtenotat',
-    };
-    const cols = {
-      'meeting': 'meeting_time',
-      'getin': 'get_in_time',
-      'rehearsal': 'rehearsal_time',
-      'performance': 'performance_time',
-      'getout': 'get_out_time',
-      'notes': 'meeting_notes',
-    };
-    final items = gig['schedule_items'];
-    final order = <Map<String, dynamic>>[];
-    if (items is List && items.isNotEmpty) {
-      for (final it in items) {
-        if (it is Map) order.add(Map<String, dynamic>.from(it));
-      }
-    } else {
-      for (final k in const [
-        'meeting',
-        'getin',
-        'rehearsal',
-        'performance',
-        'getout',
-        'notes'
-      ]) {
-        order.add({'k': k});
-      }
-    }
-    final entries = <MapEntry<String, dynamic>>[];
-    for (final it in order) {
-      final k = it['k'] as String?;
-      if (k == 'custom') {
-        final t = (it['t'] as String?)?.trim() ?? '';
-        final v = (it['v'] as String?)?.trim() ?? '';
-        if (t.isNotEmpty || v.isNotEmpty) {
-          entries.add(MapEntry(t.isEmpty ? 'Punkt' : t, v));
-        }
-      } else if (k != null && labels.containsKey(k)) {
-        entries.add(MapEntry(labels[k]!, gig[cols[k]]));
-      }
-    }
-    return entries;
   }
 
   Widget _readOnlyCard(ColorScheme cs, String title, List<MapEntry<String, dynamic>> entries) {
