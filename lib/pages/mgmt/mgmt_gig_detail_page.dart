@@ -2579,29 +2579,17 @@ class _ShowsPrisTabState extends State<_ShowsPrisTab> {
     final fc = widget.offerData!['final_calc'];
     if (fc != null) {
       final rawLines = fc['lines'] as List? ?? [];
-      final lines = rawLines.map<({String label, double amount})>((l) {
-        return (
-          label: l['label'] as String? ?? '',
-          amount: (l['amount'] as num?)?.toDouble() ?? 0,
-        );
-      }).toList();
-      // Merge CompleteKonto + BookingHonorar into Utøverhyrer
-      double ck = 0, bh = 0;
-      for (final l in lines) {
-        if (l.label == 'CompleteKonto') ck = l.amount;
-        if (l.label == 'BookingHonorar') bh = l.amount;
-      }
-      final merged = lines
-          .map((l) => l.label == 'Utøverhyrer'
-              ? (label: l.label, amount: l.amount + ck + bh)
-              : l)
-          .where((l) =>
-              l.amount > 0 &&
-              l.label != 'CompleteKonto' &&
-              l.label != 'BookingHonorar')
+      // Intern visning — vis Utøverhyrer, CompleteKonto og BookingHonorar som
+      // egne linjer (ikke slått sammen). Kunde-PDF er en egen kodesti.
+      final lines = rawLines
+          .map<({String label, double amount})>((l) => (
+                label: l['label'] as String? ?? '',
+                amount: (l['amount'] as num?)?.toDouble() ?? 0,
+              ))
+          .where((l) => l.amount > 0)
           .toList();
       final total = (fc['total'] as num?)?.toDouble() ?? 0;
-      return (lines: merged, total: total);
+      return (lines: lines, total: total);
     }
     // Fallback: compute from offer params
     return _computeFromOffer();
@@ -2646,8 +2634,6 @@ class _ShowsPrisTabState extends State<_ShowsPrisTab> {
 
     final subtotal = performerFees + inearTotal + totalTransport + rehearsalTotal;
     final markupBase = markupOnAll ? subtotal : performerFees;
-    // Merge markup into performer fees for display
-    final displayPerformerFees = performerFees + (markupBase * completePct) + (markupBase * bookingPct);
 
     final ovJson = o['calc_overrides'];
     final ov = <String, double>{};
@@ -2656,16 +2642,17 @@ class _ShowsPrisTabState extends State<_ShowsPrisTab> {
         if (e.value is num) ov[e.key as String] = (e.value as num).toDouble();
       }
     }
-    // If overrides exist for individual lines, use them but still merge markup
-    final pfOv = ov['performer_fees'];
-    final ckOv = ov['complete_konto'];
-    final bhOv = ov['booking_honorar'];
-    final finalPF = (pfOv ?? performerFees) + (ckOv ?? markupBase * completePct) + (bhOv ?? markupBase * bookingPct);
 
     double ovv(String key, double calc) => ov.containsKey(key) ? ov[key]! : calc;
 
+    // Egne linjer for Utøverhyrer, CompleteKonto og BookingHonorar (ikke slått
+    // sammen) — intern visning.
     final lines = <({String label, double amount})>[
-      (label: 'Utøverhyrer', amount: ov.containsKey('performer_fees') || ov.containsKey('complete_konto') || ov.containsKey('booking_honorar') ? finalPF : displayPerformerFees),
+      (label: 'Utøverhyrer', amount: ovv('performer_fees', performerFees)),
+      (label: 'CompleteKonto',
+          amount: ovv('complete_konto', markupBase * completePct)),
+      (label: 'BookingHonorar',
+          amount: ovv('booking_honorar', markupBase * bookingPct)),
       (label: 'In-Ear', amount: ovv('inear', inearTotal)),
       (label: 'Transport', amount: ovv('transport', totalTransport)),
       (label: 'Prøver', amount: ovv('rehearsal', rehearsalTotal)),
