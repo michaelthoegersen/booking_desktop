@@ -2913,7 +2913,11 @@ class _GigOfferPageState extends State<GigOfferPage> {
           // ── Transport section (inside Prisparametre) ──
           if (_priceParamsExpanded) ...[
           const Divider(height: 24),
-          const Text('Transport', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 14)),
+          const Align(
+            alignment: Alignment.centerLeft,
+            child: Text('Transport',
+                style: TextStyle(fontWeight: FontWeight.w900, fontSize: 14)),
+          ),
           const SizedBox(height: 8),
           // Route (always visible)
           TextField(controller: _transportFromCtrl, decoration: const InputDecoration(labelText: 'Fra', prefixIcon: Icon(Icons.trip_origin, size: 18), isDense: true)),
