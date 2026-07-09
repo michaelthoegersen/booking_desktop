@@ -6003,6 +6003,10 @@ class _LeftOfferCardState extends State<_LeftOfferCard> {
 
   String? _contactId;
   String? _productionId;
+  // Bumpes når en handling ("legg til"/"rediger") velges i dropdownen, så
+  // FormField-en bygges på nytt og viser den faktiske verdien igjen (ikke
+  // handlings-valget).
+  int _dropRev = 0;
 
   String? _currentCompanyId;
 
@@ -6991,6 +6995,7 @@ Text(
 const SizedBox(height: 6),
 
 DropdownButtonFormField<String>(
+  key: ValueKey('contact_$_dropRev'),
   value: _contactId,
   isExpanded: true,
   decoration: const InputDecoration(
@@ -7025,6 +7030,7 @@ DropdownButtonFormField<String>(
   ],
   onChanged: (v) {
     if (v == '__add__') {
+      setState(() => _dropRev++);
       _openContactDialog();
       return;
     }
@@ -7032,6 +7038,7 @@ DropdownButtonFormField<String>(
       final c = _contacts.firstWhere(
           (e) => e['id'].toString() == _contactId,
           orElse: () => {});
+      setState(() => _dropRev++);
       if (c.isNotEmpty) _openContactDialog(existing: c);
       return;
     }
@@ -7066,6 +7073,7 @@ Text(
 const SizedBox(height: 6),
 
 DropdownButtonFormField<String>(
+  key: ValueKey('prod_$_dropRev'),
   value: _productionId,
   isExpanded: true,
   decoration: const InputDecoration(
@@ -7092,6 +7100,7 @@ DropdownButtonFormField<String>(
   onChanged: (v) {
     if (v == null) return;
     if (v == '__add__') {
+      setState(() => _dropRev++);
       _openProductionDialog();
       return;
     }
