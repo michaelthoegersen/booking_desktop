@@ -16,22 +16,21 @@ class ShowEquipmentService {
   static const String gigShowTable = 'gig_show_equipment';
   static const String gigShowColumn = 'gig_show_id';
 
-  /// Item ids → needed quantity for the show ([table], [column], [id]).
-  static Future<Map<String, num>> linkedQuantities({
+  /// Rows linked to the show ([table], [column], [id]) — {item_id, quantity, note}.
+  static Future<List<Map<String, dynamic>>> linkedRows({
     required String table,
     required String column,
     required String id,
   }) async {
-    final rows =
-        await _sb.from(table).select('item_id, quantity').eq(column, id);
-    final map = <String, num>{};
-    for (final r in (rows as List)) {
-      map[r['item_id'] as String] = (r['quantity'] as num?) ?? 1;
-    }
-    return map;
+    final rows = await _sb
+        .from(table)
+        .select('item_id, quantity, note')
+        .eq(column, id);
+    return List<Map<String, dynamic>>.from(rows as List);
   }
 
   /// Link an item to the show (or update its quantity if already linked).
+  /// Partial upsert: only [quantity] is written, so an existing note is kept.
   static Future<void> addLink({
     required String table,
     required String column,
@@ -45,6 +44,23 @@ class ShowEquipmentService {
       'company_id': _companyId,
       'quantity': quantity,
       'created_by': _sb.auth.currentUser?.id,
+    }, onConflict: '$column,item_id');
+  }
+
+  /// Set (or clear) the per-link comment. Partial upsert keeps the quantity.
+  static Future<void> setNote({
+    required String table,
+    required String column,
+    required String id,
+    required String itemId,
+    String? note,
+  }) async {
+    final clean = (note == null || note.trim().isEmpty) ? null : note.trim();
+    await _sb.from(table).upsert({
+      column: id,
+      'item_id': itemId,
+      'company_id': _companyId,
+      'note': clean,
     }, onConflict: '$column,item_id');
   }
 

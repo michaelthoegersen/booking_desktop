@@ -80,6 +80,7 @@ class _ShowEquipmentDialogState extends State<_ShowEquipmentDialog> {
   bool _loading = true;
   List<Map<String, dynamic>> _items = [];
   Map<String, num> _linkedQty = {};
+  Map<String, String?> _linkedNote = {};
   String _search = '';
 
   @override
@@ -91,15 +92,23 @@ class _ShowEquipmentDialogState extends State<_ShowEquipmentDialog> {
   Future<void> _load() async {
     try {
       final items = await mgmtInventoryService.listItems();
-      final linked = await ShowEquipmentService.linkedQuantities(
+      final rows = await ShowEquipmentService.linkedRows(
         table: widget.table,
         column: widget.column,
         id: widget.id,
       );
+      final qty = <String, num>{};
+      final note = <String, String?>{};
+      for (final r in rows) {
+        final itemId = r['item_id'] as String;
+        qty[itemId] = (r['quantity'] as num?) ?? 1;
+        note[itemId] = r['note'] as String?;
+      }
       if (mounted) {
         setState(() {
           _items = items;
-          _linkedQty = linked;
+          _linkedQty = qty;
+          _linkedNote = note;
           _loading = false;
         });
       }
@@ -115,6 +124,7 @@ class _ShowEquipmentDialogState extends State<_ShowEquipmentDialog> {
         _linkedQty[itemId] = 1;
       } else {
         _linkedQty.remove(itemId);
+        _linkedNote.remove(itemId);
       }
     });
     try {
@@ -157,6 +167,53 @@ class _ShowEquipmentDialogState extends State<_ShowEquipmentDialog> {
     } catch (e) {
       if (!mounted) return;
       setState(() => _linkedQty[itemId] = prev);
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('Kunne ikke lagre: $e')));
+    }
+  }
+
+  Future<void> _promptNote(String itemId, String itemName) async {
+    final ctrl = TextEditingController(text: _linkedNote[itemId] ?? '');
+    final res = await showDialog<String>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: Text('Kommentar — $itemName'),
+        content: TextField(
+          controller: ctrl,
+          autofocus: true,
+          maxLines: 3,
+          textCapitalization: TextCapitalization.sentences,
+          inputFormatters: kCapFirst,
+          decoration: const InputDecoration(
+            hintText: 'F.eks. hvilke trommer vi skal ha med',
+            border: OutlineInputBorder(),
+          ),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Avbryt')),
+          FilledButton(
+              onPressed: () => Navigator.pop(context, ctrl.text),
+              child: const Text('Lagre')),
+        ],
+      ),
+    );
+    if (res == null) return; // cancelled
+    final note = res.trim().isEmpty ? null : res.trim();
+    final prev = _linkedNote[itemId];
+    setState(() => _linkedNote[itemId] = note);
+    try {
+      await ShowEquipmentService.setNote(
+        table: widget.table,
+        column: widget.column,
+        id: widget.id,
+        itemId: itemId,
+        note: note,
+      );
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _linkedNote[itemId] = prev);
       ScaffoldMessenger.of(context)
           .showSnackBar(SnackBar(content: Text('Kunne ikke lagre: $e')));
     }
@@ -260,9 +317,43 @@ class _ShowEquipmentDialogState extends State<_ShowEquipmentDialog> {
                                                 style: TextStyle(
                                                     fontSize: 12, color: cs.onSurfaceVariant),
                                               ),
+                                              if (on &&
+                                                  (_linkedNote[itemId]
+                                                          ?.isNotEmpty ??
+                                                      false))
+                                                Padding(
+                                                  padding: const EdgeInsets
+                                                      .only(top: 2),
+                                                  child: Text(
+                                                    _linkedNote[itemId]!,
+                                                    style: TextStyle(
+                                                      fontSize: 12,
+                                                      fontStyle:
+                                                          FontStyle.italic,
+                                                      color: cs.primary,
+                                                    ),
+                                                  ),
+                                                ),
                                             ],
                                           ),
                                         ),
+                                        if (on)
+                                          IconButton(
+                                            icon: Icon(
+                                              (_linkedNote[itemId]
+                                                          ?.isNotEmpty ??
+                                                      false)
+                                                  ? Icons.chat_bubble
+                                                  : Icons.chat_bubble_outline,
+                                              size: 18,
+                                            ),
+                                            tooltip: 'Kommentar',
+                                            visualDensity:
+                                                VisualDensity.compact,
+                                            onPressed: () => _promptNote(
+                                                itemId,
+                                                it['name'] as String? ?? ''),
+                                          ),
                                         if (on)
                                           _QtyStepper(
                                             value: qty,
