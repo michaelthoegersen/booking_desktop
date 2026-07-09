@@ -186,7 +186,7 @@ class _MgmtInventoryPageState extends State<MgmtInventoryPage> {
     }).toList();
     final children = _childrenOf(id);
     final qtyInt = ((item['quantity'] as num?) ?? 1).floor();
-    final expandable = serialUnits.isNotEmpty;
+    final expandable = qtyInt > 1 || serialUnits.isNotEmpty;
     final expanded = _expanded.contains(id);
     final sub = [
       if (category != null && category.isNotEmpty) category,
