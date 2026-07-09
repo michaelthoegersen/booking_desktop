@@ -2291,7 +2291,7 @@ class _GigOfferPageState extends State<GigOfferPage> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         const Text('Ekstrakostnader',
-            style: TextStyle(fontWeight: FontWeight.w900, fontSize: 14)),
+            style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15, letterSpacing: -0.2)),
         const SizedBox(height: 8),
         if (_extras.isEmpty)
           Padding(
@@ -2676,7 +2676,7 @@ class _GigOfferPageState extends State<GigOfferPage> {
         const Align(
           alignment: Alignment.centerLeft,
           child: Text('Prøver',
-              style: TextStyle(fontWeight: FontWeight.w900, fontSize: 14)),
+              style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15, letterSpacing: -0.2)),
         ),
         const SizedBox(height: 8),
           Row(
@@ -2824,9 +2824,9 @@ class _GigOfferPageState extends State<GigOfferPage> {
   // ────────────────────────────────────────────────────────────────────────────
 
   bool _priceParamsExpanded = false;
-  bool _scheduleExpanded = true;
-  bool _stageExpanded = true;
-  bool _notesExpanded = true;
+  bool _scheduleExpanded = false;
+  bool _stageExpanded = false;
+  bool _notesExpanded = false;
   final Set<String> _transportModes = {}; // 'privatbil', 'hyrebil', 'manuelt'
 
   // Hyre (varebil) pricing
@@ -2920,7 +2920,7 @@ class _GigOfferPageState extends State<GigOfferPage> {
                 const Expanded(
                   child: Text('Prisparametre',
                       style: TextStyle(
-                          fontWeight: FontWeight.w900, fontSize: 14)),
+                          fontWeight: FontWeight.w800, fontSize: 15, letterSpacing: -0.2)),
                 ),
                 Icon(
                     _priceParamsExpanded
@@ -2981,7 +2981,7 @@ class _GigOfferPageState extends State<GigOfferPage> {
           const Align(
             alignment: Alignment.centerLeft,
             child: Text('Transport',
-                style: TextStyle(fontWeight: FontWeight.w900, fontSize: 14)),
+                style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15, letterSpacing: -0.2)),
           ),
           const SizedBox(height: 8),
           // Route (always visible)
