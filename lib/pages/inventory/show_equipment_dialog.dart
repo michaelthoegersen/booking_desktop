@@ -78,7 +78,7 @@ class _ShowEquipmentDialog extends StatefulWidget {
 class _ShowEquipmentDialogState extends State<_ShowEquipmentDialog> {
   bool _loading = true;
   List<Map<String, dynamic>> _items = [];
-  Set<String> _linked = {};
+  Map<String, num> _linkedQty = {};
   String _search = '';
 
   @override
@@ -90,7 +90,7 @@ class _ShowEquipmentDialogState extends State<_ShowEquipmentDialog> {
   Future<void> _load() async {
     try {
       final items = await mgmtInventoryService.listItems();
-      final linked = await ShowEquipmentService.linkedItemIds(
+      final linked = await ShowEquipmentService.linkedQuantities(
         table: widget.table,
         column: widget.column,
         id: widget.id,
@@ -98,7 +98,7 @@ class _ShowEquipmentDialogState extends State<_ShowEquipmentDialog> {
       if (mounted) {
         setState(() {
           _items = items;
-          _linked = linked;
+          _linkedQty = linked;
           _loading = false;
         });
       }
@@ -108,32 +108,54 @@ class _ShowEquipmentDialogState extends State<_ShowEquipmentDialog> {
   }
 
   Future<void> _toggle(String itemId, bool on) async {
-    // Optimistic UI
+    final prev = _linkedQty[itemId];
     setState(() {
       if (on) {
-        _linked.add(itemId);
+        _linkedQty[itemId] = 1;
       } else {
-        _linked.remove(itemId);
+        _linkedQty.remove(itemId);
       }
     });
     try {
       if (on) {
         await ShowEquipmentService.addLink(
-            table: widget.table, column: widget.column, id: widget.id, itemId: itemId);
+            table: widget.table,
+            column: widget.column,
+            id: widget.id,
+            itemId: itemId,
+            quantity: 1);
       } else {
         await ShowEquipmentService.removeLink(
             table: widget.table, column: widget.column, id: widget.id, itemId: itemId);
       }
     } catch (e) {
       if (!mounted) return;
-      // Revert on failure
       setState(() {
-        if (on) {
-          _linked.remove(itemId);
+        if (prev == null) {
+          _linkedQty.remove(itemId);
         } else {
-          _linked.add(itemId);
+          _linkedQty[itemId] = prev;
         }
       });
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('Kunne ikke lagre: $e')));
+    }
+  }
+
+  Future<void> _setQty(String itemId, num qty) async {
+    if (qty < 1) qty = 1;
+    final prev = _linkedQty[itemId] ?? 1;
+    setState(() => _linkedQty[itemId] = qty);
+    try {
+      await ShowEquipmentService.addLink(
+          table: widget.table,
+          column: widget.column,
+          id: widget.id,
+          itemId: itemId,
+          quantity: qty);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _linkedQty[itemId] = prev);
       ScaffoldMessenger.of(context)
           .showSnackBar(SnackBar(content: Text('Kunne ikke lagre: $e')));
     }
@@ -204,23 +226,53 @@ class _ShowEquipmentDialogState extends State<_ShowEquipmentDialog> {
                                 itemBuilder: (_, i) {
                                   final it = items[i];
                                   final itemId = it['id'] as String;
-                                  final on = _linked.contains(itemId);
+                                  final on = _linkedQty.containsKey(itemId);
+                                  final qty = _linkedQty[itemId] ?? 1;
                                   final cat =
                                       (it['category'] as String?)?.trim();
-                                  return CheckboxListTile(
-                                    dense: true,
-                                    value: on,
-                                    controlAffinity:
-                                        ListTileControlAffinity.leading,
-                                    title: Text(it['name'] as String? ?? ''),
-                                    subtitle: Text(
-                                      [
-                                        if (cat != null && cat.isNotEmpty) cat,
-                                        fmtQty(it),
-                                        locDisplay(it),
-                                      ].join('  ·  '),
+                                  return Padding(
+                                    padding:
+                                        const EdgeInsets.symmetric(vertical: 2),
+                                    child: Row(
+                                      children: [
+                                        Checkbox(
+                                          value: on,
+                                          onChanged: (v) =>
+                                              _toggle(itemId, v ?? false),
+                                        ),
+                                        Expanded(
+                                          child: Column(
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.start,
+                                            children: [
+                                              Text(it['name'] as String? ?? '',
+                                                  style: const TextStyle(
+                                                      fontWeight:
+                                                          FontWeight.w600)),
+                                              Text(
+                                                [
+                                                  if (cat != null &&
+                                                      cat.isNotEmpty)
+                                                    cat,
+                                                  'på lager: ${fmtQty(it)}',
+                                                ].join('  ·  '),
+                                                style: TextStyle(
+                                                    fontSize: 12, color: cs.onSurfaceVariant),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                        if (on)
+                                          _QtyStepper(
+                                            value: qty,
+                                            unit: (it['unit'] as String?)
+                                                    ?.trim() ??
+                                                '',
+                                            onChanged: (q) =>
+                                                _setQty(itemId, q),
+                                          ),
+                                      ],
                                     ),
-                                    onChanged: (v) => _toggle(itemId, v ?? false),
                                   );
                                 },
                               ),
@@ -231,7 +283,7 @@ class _ShowEquipmentDialogState extends State<_ShowEquipmentDialog> {
       actions: [
         Row(
           children: [
-            Text('${_linked.length} valgt',
+            Text('${_linkedQty.length} valgt',
                 style: TextStyle(color: cs.onSurfaceVariant)),
             const Spacer(),
             FilledButton(
@@ -242,6 +294,55 @@ class _ShowEquipmentDialogState extends State<_ShowEquipmentDialog> {
         ),
       ],
       actionsPadding: const EdgeInsets.fromLTRB(24, 0, 24, 16),
+    );
+  }
+}
+
+/// Compact −/N/+ quantity control.
+class _QtyStepper extends StatelessWidget {
+  final num value;
+  final String unit;
+  final ValueChanged<num> onChanged;
+
+  const _QtyStepper({
+    required this.value,
+    required this.unit,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final label =
+        value == value.roundToDouble() ? value.toInt().toString() : '$value';
+    return Container(
+      decoration: BoxDecoration(
+        border: Border.all(color: cs.outlineVariant),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          IconButton(
+            icon: const Icon(Icons.remove, size: 18),
+            visualDensity: VisualDensity.compact,
+            onPressed: value > 1 ? () => onChanged(value - 1) : null,
+          ),
+          ConstrainedBox(
+            constraints: const BoxConstraints(minWidth: 28),
+            child: Text(
+              unit.isNotEmpty ? '$label $unit' : label,
+              textAlign: TextAlign.center,
+              style: const TextStyle(fontWeight: FontWeight.w700),
+            ),
+          ),
+          IconButton(
+            icon: const Icon(Icons.add, size: 18),
+            visualDensity: VisualDensity.compact,
+            onPressed: () => onChanged(value + 1),
+          ),
+        ],
+      ),
     );
   }
 }

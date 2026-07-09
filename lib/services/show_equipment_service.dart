@@ -16,28 +16,36 @@ class ShowEquipmentService {
   static const String gigShowTable = 'gig_show_equipment';
   static const String gigShowColumn = 'gig_show_id';
 
-  /// Item ids currently linked to the show identified by ([table], [column], [id]).
-  static Future<Set<String>> linkedItemIds({
+  /// Item ids → needed quantity for the show ([table], [column], [id]).
+  static Future<Map<String, num>> linkedQuantities({
     required String table,
     required String column,
     required String id,
   }) async {
-    final rows = await _sb.from(table).select('item_id').eq(column, id);
-    return {for (final r in (rows as List)) r['item_id'] as String};
+    final rows =
+        await _sb.from(table).select('item_id, quantity').eq(column, id);
+    final map = <String, num>{};
+    for (final r in (rows as List)) {
+      map[r['item_id'] as String] = (r['quantity'] as num?) ?? 1;
+    }
+    return map;
   }
 
+  /// Link an item to the show (or update its quantity if already linked).
   static Future<void> addLink({
     required String table,
     required String column,
     required String id,
     required String itemId,
+    num quantity = 1,
   }) async {
     await _sb.from(table).upsert({
       column: id,
       'item_id': itemId,
       'company_id': _companyId,
+      'quantity': quantity,
       'created_by': _sb.auth.currentUser?.id,
-    }, onConflict: '$column,item_id', ignoreDuplicates: true);
+    }, onConflict: '$column,item_id');
   }
 
   static Future<void> removeLink({
