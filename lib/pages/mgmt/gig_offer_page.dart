@@ -119,13 +119,8 @@ class _GigOfferPageState extends State<GigOfferPage> {
   bool _inearIncluded = false;
   double _inearPrice = SettingsStore.current.inearPrice;
   double _transportPrice = 0;
-  final _transportPriceCtrl = TextEditingController(text: '0');
   int _transportKm = 0;
   double _transportPricePerKm = SettingsStore.current.transportPricePerKm;
-  // Bumped only when km / kr-km are set programmatically (Beregn rute, satser)
-  // so those fields refresh without dropping focus while typing.
-  int _kmRev = 0;
-  int _krKmRev = 0;
   bool _privatbilExpanded = false;
 
   // ── Transport route calculator ──────────────────────────────────────────
@@ -150,7 +145,6 @@ class _GigOfferPageState extends State<GigOfferPage> {
   int _rehearsalCount = 0;
   double _rehearsalPricePerPerson = 0;
   double _rehearsalTransport = 0;
-  final _rehearsalTransportCtrl = TextEditingController(text: '0');
 
   // ── Markup scope ────────────────────────────────────────────────────────
   bool _markupOnAll = false; // false = only performer fees, true = entire subtotal
@@ -226,11 +220,9 @@ class _GigOfferPageState extends State<GigOfferPage> {
     _notesContractCtrl.dispose();
     _infoOrgCtrl.dispose();
     _notesCtrl.dispose();
-    _transportPriceCtrl.dispose();
     _transportFromCtrl.dispose();
     _transportToCtrl.dispose();
     _transportViaCtrl.dispose();
-    _rehearsalTransportCtrl.dispose();
     _hyreDaysCtrl.dispose();
     _hyreDayRateCtrl.dispose();
     _hyreInclKmCtrl.dispose();
@@ -316,12 +308,10 @@ class _GigOfferPageState extends State<GigOfferPage> {
         _transportPrice = storedPrice != null
             ? _dbl(storedPrice, 0)
             : _transportKm * _transportPricePerKm;
-        _transportPriceCtrl.text = _nf.format(_transportPrice);
-        _rehearsalPerformers = (offer['rehearsal_performers'] as num?)?.toInt() ?? 0;
+            _rehearsalPerformers = (offer['rehearsal_performers'] as num?)?.toInt() ?? 0;
         _rehearsalCount = (offer['rehearsal_count'] as num?)?.toInt() ?? 0;
         _rehearsalPricePerPerson = _dbl(offer['rehearsal_price_per_person'], 0);
         _rehearsalTransport = _dbl(offer['rehearsal_transport'], 0);
-        _rehearsalTransportCtrl.text = _nf.format(_rehearsalTransport);
         _markupOnAll = offer['markup_on_all'] == true;
         // Load manual overrides
         final ovJson = offer['calc_overrides'];
@@ -649,8 +639,7 @@ class _GigOfferPageState extends State<GigOfferPage> {
       _inearIncluded = gig['inear_from_us'] == true;
       _inearPrice = _dbl(gig['inear_price'], 7000);
       _transportPrice = _dbl(gig['transport_price'], 0);
-      _transportPriceCtrl.text = _nf.format(_transportPrice);
-      _transportKm = (gig['transport_km'] as num?)?.toInt() ?? 0;
+        _transportKm = (gig['transport_km'] as num?)?.toInt() ?? 0;
       if (gig['transport_price'] != null && _transportKm > 0) {
         _transportPricePerKm =
             _dbl(gig['transport_price'], 0) / _transportKm;
@@ -827,7 +816,6 @@ class _GigOfferPageState extends State<GigOfferPage> {
         if (mounted) {
           setState(() {
             _transportKm = km * _routePersons * (_routeReturn ? 2 : 1);
-            _kmRev++;
             _tollStations = tollHits;
             _recalc();
             _syncTransportFromPrivatbil();
@@ -941,10 +929,7 @@ class _GigOfferPageState extends State<GigOfferPage> {
     if (!hasRehearsal) {
       _rehearsalCount = 0;
       _rehearsalPricePerPerson = 0;
-      if (_rehearsalTransport != 0) {
-        _rehearsalTransport = 0;
-        _rehearsalTransportCtrl.text = '0';
-      }
+      _rehearsalTransport = 0;
     }
 
     // Rehearsals (performer fees only — transport is in transport line)
@@ -976,7 +961,6 @@ class _GigOfferPageState extends State<GigOfferPage> {
   /// Update _transportPrice from privatbil calculator values
   void _syncTransportFromPrivatbil() {
     _transportPrice = _transportTotal + _tollCost;
-    _transportPriceCtrl.text = _nf.format(_transportPrice);
   }
 
   // ────────────────────────────────────────────────────────────────────────────
@@ -2651,21 +2635,15 @@ class _GigOfferPageState extends State<GigOfferPage> {
     required int value,
     required ValueChanged<int> onChanged,
   }) {
-    return SizedBox(
+    return _NumField(
+      key: key,
+      value: value,
+      nf: _nf,
+      mode: _NumFieldMode.integer,
       width: 50,
-      child: TextFormField(
-        key: key,
-        initialValue: '$value',
-        textAlign: TextAlign.center,
-        style: const TextStyle(fontSize: 13),
-        keyboardType: TextInputType.number,
-        inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-        decoration: const InputDecoration(
-          isDense: true,
-          contentPadding: EdgeInsets.symmetric(horizontal: 4, vertical: 6),
-        ),
-        onChanged: (v) => onChanged(int.tryParse(v) ?? 0),
-      ),
+      textAlign: TextAlign.center,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+      onChanged: (v) => onChanged(v.round()),
     );
   }
 
@@ -2691,25 +2669,16 @@ class _GigOfferPageState extends State<GigOfferPage> {
                 child: Text('Antall utøvere',
                     style: TextStyle(fontSize: 13, color: cs.onSurfaceVariant)),
               ),
-              SizedBox(
+              _NumField(
+                key: const ValueKey('reh_perf'),
+                value: _rehearsalPerformers,
+                nf: _nf,
+                mode: _NumFieldMode.integer,
                 width: 80,
-                child: TextFormField(
-                  key: const ValueKey('reh_perf'),
-                  initialValue: '$_rehearsalPerformers',
-                  style: const TextStyle(fontSize: 13),
-                  textAlign: TextAlign.right,
-                  keyboardType: TextInputType.number,
-                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                  decoration: const InputDecoration(
-                    isDense: true,
-                    contentPadding:
-                        EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                  ),
-                  onChanged: (v) {
-                    _rehearsalPerformers = int.tryParse(v) ?? 0;
-                    setState(() => _recalc());
-                  },
-                ),
+                onChanged: (v) {
+                  _rehearsalPerformers = v.round();
+                  setState(() => _recalc());
+                },
               ),
             ],
           ),
@@ -2721,25 +2690,16 @@ class _GigOfferPageState extends State<GigOfferPage> {
                 child: Text('Antall prøver',
                     style: TextStyle(fontSize: 13, color: cs.onSurfaceVariant)),
               ),
-              SizedBox(
+              _NumField(
+                key: const ValueKey('reh_count'),
+                value: _rehearsalCount,
+                nf: _nf,
+                mode: _NumFieldMode.integer,
                 width: 80,
-                child: TextFormField(
-                  key: const ValueKey('reh_count'),
-                  initialValue: '$_rehearsalCount',
-                  style: const TextStyle(fontSize: 13),
-                  textAlign: TextAlign.right,
-                  keyboardType: TextInputType.number,
-                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                  decoration: const InputDecoration(
-                    isDense: true,
-                    contentPadding:
-                        EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                  ),
-                  onChanged: (v) {
-                    _rehearsalCount = int.tryParse(v) ?? 0;
-                    setState(() => _recalc());
-                  },
-                ),
+                onChanged: (v) {
+                  _rehearsalCount = v.round();
+                  setState(() => _recalc());
+                },
               ),
             ],
           ),
@@ -2751,28 +2711,16 @@ class _GigOfferPageState extends State<GigOfferPage> {
                 child: Text('Pris per person/prøve',
                     style: TextStyle(fontSize: 13, color: cs.onSurfaceVariant)),
               ),
-              SizedBox(
+              _NumField(
+                key: const ValueKey('reh_price'),
+                value: _rehearsalPricePerPerson,
+                nf: _nf,
+                mode: _NumFieldMode.money,
                 width: 120,
-                child: TextFormField(
-                  key: const ValueKey('reh_price'),
-                  initialValue: _nf.format(_rehearsalPricePerPerson),
-                  style: const TextStyle(fontSize: 13),
-                  textAlign: TextAlign.right,
-                  keyboardType: TextInputType.number,
-                  decoration: const InputDecoration(
-                    isDense: true,
-                    contentPadding:
-                        EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                  ),
-                  onChanged: (v) {
-                    final parsed = double.tryParse(
-                        v.replaceAll(RegExp(r'[^0-9.]'), ''));
-                    if (parsed != null) {
-                      _rehearsalPricePerPerson = parsed;
-                      setState(() => _recalc());
-                    }
-                  },
-                ),
+                onChanged: (v) {
+                  _rehearsalPricePerPerson = v;
+                  setState(() => _recalc());
+                },
               ),
             ],
           ),
@@ -2784,27 +2732,16 @@ class _GigOfferPageState extends State<GigOfferPage> {
                 child: Text('Transport (prøver)',
                     style: TextStyle(fontSize: 13, color: cs.onSurfaceVariant)),
               ),
-              SizedBox(
+              _NumField(
+                key: const ValueKey('reh_transport'),
+                value: _rehearsalTransport,
+                nf: _nf,
+                mode: _NumFieldMode.money,
                 width: 120,
-                child: TextField(
-                  controller: _rehearsalTransportCtrl,
-                  style: const TextStyle(fontSize: 13),
-                  textAlign: TextAlign.right,
-                  keyboardType: TextInputType.number,
-                  decoration: const InputDecoration(
-                    isDense: true,
-                    contentPadding:
-                        EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                  ),
-                  onChanged: (v) {
-                    final parsed = double.tryParse(
-                        v.replaceAll(RegExp(r'[^0-9.]'), ''));
-                    if (parsed != null) {
-                      _rehearsalTransport = parsed;
-                      setState(() => _recalc());
-                    }
-                  },
-                ),
+                onChanged: (v) {
+                  _rehearsalTransport = v;
+                  setState(() => _recalc());
+                },
               ),
             ],
           ),
@@ -2906,7 +2843,6 @@ class _GigOfferPageState extends State<GigOfferPage> {
     if (_transportModes.contains('privatbil')) total += _privatbilTotal;
     if (_transportModes.contains('hyrebil')) total += _hyreTotal;
     _transportPrice = total;
-    _transportPriceCtrl.text = _nf.format(_transportPrice);
     setState(() {});
   }
 
@@ -3036,7 +2972,7 @@ class _GigOfferPageState extends State<GigOfferPage> {
             _recalc();
             if (_transportModes.isNotEmpty) _recalcTransportPrice();
             setState(() {});
-          }, integer: true, fieldKey: ValueKey('param_km_$_kmRev')),
+          }, integer: true),
           if (_tollStations.isNotEmpty)
             Padding(
               padding: const EdgeInsets.only(bottom: 8),
@@ -3048,19 +2984,18 @@ class _GigOfferPageState extends State<GigOfferPage> {
             child: Row(
               children: [
                 SizedBox(width: 140, child: Text('Transportpris', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: cs.onSurface))),
-                SizedBox(
+                _NumField(
+                  key: const ValueKey('num_transportpris'),
+                  value: _transportPrice,
+                  nf: _nf,
+                  mode: _NumFieldMode.money,
                   width: 120,
-                  child: TextField(
-                    controller: _transportPriceCtrl,
-                    style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w900),
-                    textAlign: TextAlign.right,
-                    keyboardType: TextInputType.number,
-                    decoration: const InputDecoration(isDense: true, contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 8)),
-                    onChanged: (v) {
-                      final parsed = double.tryParse(v.replaceAll(RegExp(r'[^0-9.]'), ''));
-                      if (parsed != null) { _transportPrice = parsed; setState(() => _recalc()); }
-                    },
-                  ),
+                  style: const TextStyle(
+                      fontSize: 14, fontWeight: FontWeight.w900),
+                  onChanged: (v) {
+                    _transportPrice = v;
+                    setState(() => _recalc());
+                  },
                 ),
                 const SizedBox(width: 6),
                 Text('kr', style: TextStyle(fontSize: 12, color: cs.onSurfaceVariant)),
@@ -3122,19 +3057,18 @@ class _GigOfferPageState extends State<GigOfferPage> {
                         const SizedBox(width: 4),
                         _rateChip('5,30', 5.30),
                         const SizedBox(width: 8),
-                        SizedBox(
+                        _NumField(
+                          key: const ValueKey('num_krkm'),
+                          value: _transportPricePerKm,
+                          nf: _nf,
+                          mode: _NumFieldMode.rate,
                           width: 80,
-                          child: TextFormField(
-                            key: ValueKey('kr_km_$_krKmRev'),
-                            initialValue: _transportPricePerKm % 1 == 0 ? _transportPricePerKm.toInt().toString() : _transportPricePerKm.toStringAsFixed(2),
-                            decoration: const InputDecoration(isDense: true),
-                            keyboardType: TextInputType.number,
-                            textAlign: TextAlign.end,
-                            onChanged: (v) {
-                              final parsed = double.tryParse(v.replaceAll(',', '.').replaceAll(RegExp(r'[^0-9.]'), ''));
-                              if (parsed != null) { _transportPricePerKm = parsed; _recalcTransportPrice(); }
-                            },
-                          ),
+                          contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 8, vertical: 8),
+                          onChanged: (v) {
+                            _transportPricePerKm = v;
+                            _recalcTransportPrice();
+                          },
                         ),
                       ],
                     ),
@@ -3237,7 +3171,6 @@ class _GigOfferPageState extends State<GigOfferPage> {
     return GestureDetector(
       onTap: () {
         _transportPricePerKm = rate;
-        _krKmRev++;
         _recalcTransportPrice();
       },
       child: Container(
@@ -3261,8 +3194,8 @@ class _GigOfferPageState extends State<GigOfferPage> {
   }
 
   Widget _paramRow(
-      String label, double value, ValueChanged<double> onChanged,
-      {bool integer = false, Key? fieldKey}) {
+      String label, num value, ValueChanged<double> onChanged,
+      {bool integer = false}) {
     final cs = Theme.of(context).colorScheme;
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
@@ -3271,32 +3204,15 @@ class _GigOfferPageState extends State<GigOfferPage> {
           SizedBox(
             width: 140,
             child: Text(label,
-                style:
-                    TextStyle(fontSize: 13, color: cs.onSurfaceVariant)),
+                style: TextStyle(fontSize: 13, color: cs.onSurfaceVariant)),
           ),
-          SizedBox(
+          _NumField(
+            key: ValueKey('num_$label'),
+            value: value,
+            nf: _nf,
+            mode: integer ? _NumFieldMode.integer : _NumFieldMode.money,
+            onChanged: onChanged,
             width: 120,
-            child: TextFormField(
-              // Stable key so typing never re-creates the field (which would
-              // drop focus after one character). Fields that also change
-              // programmatically pass a [fieldKey] with a revision counter.
-              key: fieldKey ?? ValueKey('param_$label'),
-              initialValue:
-                  integer ? '${value.round()}' : _nf.format(value),
-              style: const TextStyle(fontSize: 13),
-              textAlign: TextAlign.right,
-              keyboardType: TextInputType.number,
-              decoration: const InputDecoration(
-                isDense: true,
-                contentPadding:
-                    EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-              ),
-              onChanged: (v) {
-                final parsed =
-                    double.tryParse(v.replaceAll(RegExp(r'[^0-9.]'), ''));
-                if (parsed != null) onChanged(parsed);
-              },
-            ),
           ),
         ],
       ),
@@ -3316,24 +3232,13 @@ class _GigOfferPageState extends State<GigOfferPage> {
                 style:
                     TextStyle(fontSize: 13, color: cs.onSurfaceVariant)),
           ),
-          SizedBox(
+          _NumField(
+            key: ValueKey('numpct_$label'),
+            value: value,
+            nf: _nf,
+            mode: _NumFieldMode.percent,
+            onChanged: onChanged,
             width: 120,
-            child: TextFormField(
-              key: ValueKey('param_$label'),
-              initialValue: '${(value * 100).round()} %',
-              style: const TextStyle(fontSize: 13),
-              textAlign: TextAlign.right,
-              decoration: const InputDecoration(
-                isDense: true,
-                contentPadding:
-                    EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-              ),
-              onChanged: (v) {
-                final num = double.tryParse(
-                    v.replaceAll('%', '').replaceAll(' ', '').trim());
-                if (num != null) onChanged(num / 100);
-              },
-            ),
           ),
         ],
       ),
@@ -5188,5 +5093,151 @@ class _OfferExtra {
       default:
         return 'Fordeles på gruppa (som show)';
     }
+  }
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// NUMBER FIELD — 0 as default, select-all on focus (so the 0 is replaced when
+// you start typing), and empty → 0 again on blur. Syncs to programmatic value
+// changes when not focused.
+// ────────────────────────────────────────────────────────────────────────────
+
+enum _NumFieldMode { integer, money, percent, rate }
+
+class _NumField extends StatefulWidget {
+  final num value;
+  final _NumFieldMode mode;
+  final ValueChanged<double> onChanged;
+  final NumberFormat nf;
+  final double width;
+  final TextStyle? style;
+  final EdgeInsets? contentPadding;
+  final TextAlign textAlign;
+
+  const _NumField({
+    super.key,
+    required this.value,
+    required this.onChanged,
+    required this.nf,
+    this.mode = _NumFieldMode.money,
+    this.width = 120,
+    this.style,
+    this.contentPadding,
+    this.textAlign = TextAlign.right,
+  });
+
+  @override
+  State<_NumField> createState() => _NumFieldState();
+}
+
+class _NumFieldState extends State<_NumField> {
+  late final TextEditingController _ctrl;
+  late final FocusNode _focus;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = TextEditingController(text: _display(widget.value));
+    _focus = FocusNode();
+    _focus.addListener(_onFocusChange);
+  }
+
+  String _display(num v) {
+    switch (widget.mode) {
+      case _NumFieldMode.integer:
+        return '${v.round()}';
+      case _NumFieldMode.percent:
+        return '${(v * 100).round()} %';
+      case _NumFieldMode.rate:
+        return v % 1 == 0 ? '${v.toInt()}' : v.toStringAsFixed(2);
+      case _NumFieldMode.money:
+        return widget.nf.format(v);
+    }
+  }
+
+  double _parse(String text) {
+    switch (widget.mode) {
+      case _NumFieldMode.integer:
+        return (int.tryParse(text.replaceAll(RegExp(r'[^0-9]'), '')) ?? 0)
+            .toDouble();
+      case _NumFieldMode.percent:
+        return (double.tryParse(text
+                    .replaceAll('%', '')
+                    .replaceAll(' ', '')
+                    .replaceAll(',', '.')) ??
+                0) /
+            100;
+      case _NumFieldMode.rate:
+      case _NumFieldMode.money:
+        return double.tryParse(
+                text.replaceAll(',', '.').replaceAll(RegExp(r'[^0-9.]'), '')) ??
+            0;
+    }
+  }
+
+  void _onFocusChange() {
+    if (_focus.hasFocus) {
+      // Select all so the first keystroke replaces the value (no backspace).
+      _ctrl.selection =
+          TextSelection(baseOffset: 0, extentOffset: _ctrl.text.length);
+    } else {
+      // Empty → 0, otherwise re-format nicely.
+      final v = _ctrl.text.trim().isEmpty ? 0.0 : _parse(_ctrl.text);
+      _ctrl.text = _display(v);
+      widget.onChanged(v);
+    }
+  }
+
+  @override
+  void didUpdateWidget(_NumField old) {
+    super.didUpdateWidget(old);
+    // Reflect programmatic value changes (e.g. Beregn rute) unless the user is
+    // currently editing this field.
+    if (!_focus.hasFocus && widget.value != old.value) {
+      final d = _display(widget.value);
+      if (_ctrl.text != d) _ctrl.text = d;
+    }
+  }
+
+  @override
+  void dispose() {
+    _focus.removeListener(_onFocusChange);
+    _focus.dispose();
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  List<TextInputFormatter> get _formatters {
+    switch (widget.mode) {
+      case _NumFieldMode.integer:
+      case _NumFieldMode.percent:
+        return [FilteringTextInputFormatter.digitsOnly];
+      case _NumFieldMode.rate:
+      case _NumFieldMode.money:
+        return [FilteringTextInputFormatter.allow(RegExp(r'[0-9.,]'))];
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: widget.width,
+      child: TextField(
+        controller: _ctrl,
+        focusNode: _focus,
+        style: widget.style ?? const TextStyle(fontSize: 13),
+        textAlign: widget.textAlign,
+        keyboardType: TextInputType.number,
+        inputFormatters: _formatters,
+        decoration: InputDecoration(
+          isDense: true,
+          contentPadding: widget.contentPadding ??
+              const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+        ),
+        onChanged: (text) {
+          widget.onChanged(text.trim().isEmpty ? 0.0 : _parse(text));
+        },
+      ),
+    );
   }
 }
