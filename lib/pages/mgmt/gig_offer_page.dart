@@ -929,6 +929,19 @@ class _GigOfferPageState extends State<GigOfferPage> {
     final tollBase = _tollStations.fold<double>(0, (s, t) => s + t.priceCar);
     _tollCost = tollBase * tollMultiplier;
 
+    // If no date is marked as a rehearsal, the Prøver section is hidden and
+    // must not contribute to the price. Reset its parameters so both the
+    // calculation and the (re-opened) fields stay consistent.
+    final hasRehearsal = _dateEntries.any((e) => e.isRehearsal);
+    if (!hasRehearsal) {
+      _rehearsalCount = 0;
+      _rehearsalPricePerPerson = 0;
+      if (_rehearsalTransport != 0) {
+        _rehearsalTransport = 0;
+        _rehearsalTransportCtrl.text = '0';
+      }
+    }
+
     // Rehearsals (performer fees only — transport is in transport line)
     _rehearsalTotal = _rehearsalPerformers * _rehearsalCount * _rehearsalPricePerPerson;
 
