@@ -2913,12 +2913,20 @@ class _GigOfferPageState extends State<GigOfferPage> {
         children: [
           // ── Collapsable Prisparametre ──
           GestureDetector(
+            behavior: HitTestBehavior.opaque,
             onTap: () => setState(() => _priceParamsExpanded = !_priceParamsExpanded),
             child: Row(
               children: [
-                Icon(_priceParamsExpanded ? Icons.expand_less : Icons.expand_more, size: 20),
-                const SizedBox(width: 4),
-                const Text('Prisparametre', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 14)),
+                const Expanded(
+                  child: Text('Prisparametre',
+                      style: TextStyle(
+                          fontWeight: FontWeight.w900, fontSize: 14)),
+                ),
+                Icon(
+                    _priceParamsExpanded
+                        ? Icons.expand_less
+                        : Icons.expand_more,
+                    color: cs.onSurfaceVariant),
               ],
             ),
           ),
