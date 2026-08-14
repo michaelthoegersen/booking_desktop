@@ -26,32 +26,46 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const {
-      to,
-      subject,
-      body,
-      contentType,
-      attachments,
-      // SMTP credentials — either passed directly or looked up from DB
-      smtpHost,
-      smtpPort,
-      smtpUser,
-      smtpPass,
-      fromEmail,
-      fromName,
-    } = (await req.json()) as {
+    const payload = (await req.json()) as {
       to: string;
       subject: string;
       body: string;
       contentType?: string;
-      attachments?: { name: string; contentBytes: string }[];
+      isHtml?: boolean;
+      attachments?: {
+        name?: string;
+        contentBytes?: string;
+        filename?: string;
+        content?: string;
+      }[];
       smtpHost?: string;
       smtpPort?: number;
       smtpUser?: string;
       smtpPass?: string;
       fromEmail?: string;
+      from?: string;
       fromName?: string;
     };
+
+    const {
+      to,
+      subject,
+      body,
+      contentType,
+      smtpHost,
+      smtpPort,
+      smtpUser,
+      smtpPass,
+      fromName,
+    } = payload;
+
+    // Accept both the desktop key spellings and the web-client spellings.
+    const fromEmail = payload.fromEmail ?? payload.from;
+    const isHtml = payload.contentType === "HTML" || payload.isHtml === true;
+    const attachments = (payload.attachments ?? []).map((a) => ({
+      name: a.name ?? a.filename ?? "attachment.pdf",
+      contentBytes: a.contentBytes ?? a.content ?? "",
+    }));
 
     if (!to || !subject || !body) {
       return new Response(
@@ -147,7 +161,6 @@ Deno.serve(async (req) => {
     await client.login({ username: user!, password: pass! });
 
     // Build email content
-    const isHtml = contentType === "HTML";
     const fromHeader = senderName
       ? `"${senderName}" <${senderEmail}>`
       : senderEmail;
