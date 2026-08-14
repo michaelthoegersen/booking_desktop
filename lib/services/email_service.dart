@@ -205,7 +205,13 @@ class EmailService {
       );
       if (sent) return;
     }
-    // No SMTP or OAuth configured — throw instead of using michael@nttas.com
+    // No SMTP or OAuth configured — throw instead of using michael@nttas.com.
+    // When the Graph fallback ran and returned a concrete error, surface THAT
+    // instead of the generic "connect Microsoft" text, so the real cause is
+    // visible in the UI rather than guessed at.
+    if (kIsWeb && lastGraphSendError != null && lastGraphSendError!.isNotEmpty) {
+      throw Exception('Microsoft Graph-sending feilet: $lastGraphSendError');
+    }
     throw Exception(_emailNotConfiguredMessage(companyId: companyId));
   }
 
@@ -253,6 +259,10 @@ class EmailService {
       companyId: companyId,
     );
   }
+
+  /// Last concrete error from the ms-graph-send edge function, captured so the
+  /// UI can show the real reason instead of the generic fallback message.
+  static String? lastGraphSendError;
 
   static Future<void> sendEmailWithAttachments({
     required String to,
@@ -315,7 +325,13 @@ class EmailService {
       );
       if (sent) return;
     }
-    // No SMTP or OAuth configured — throw instead of using michael@nttas.com
+    // No SMTP or OAuth configured — throw instead of using michael@nttas.com.
+    // When the Graph fallback ran and returned a concrete error, surface THAT
+    // instead of the generic "connect Microsoft" text, so the real cause is
+    // visible in the UI rather than guessed at.
+    if (kIsWeb && lastGraphSendError != null && lastGraphSendError!.isNotEmpty) {
+      throw Exception('Microsoft Graph-sending feilet: $lastGraphSendError');
+    }
     throw Exception(_emailNotConfiguredMessage(companyId: companyId));
   }
 
@@ -331,6 +347,7 @@ class EmailService {
     bool isHtml = false,
     String? companyId,
   }) async {
+    lastGraphSendError = null;
     try {
       final cid = companyId ?? activeCompanyNotifier.value?.id;
       if (cid == null) return false;
@@ -352,11 +369,12 @@ class EmailService {
       final data = res.data;
       final sent = data is Map && data['sent'] == true;
       if (!sent) {
-        debugPrint(
-            'ms-graph-send not sent: ${data is Map ? data['error'] : data}');
+        lastGraphSendError = (data is Map ? data['error'] : data)?.toString();
+        debugPrint('ms-graph-send not sent: $lastGraphSendError');
       }
       return sent;
     } catch (e) {
+      lastGraphSendError = e.toString();
       debugPrint('ms-graph-send failed: $e');
       return false;
     }
