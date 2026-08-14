@@ -209,6 +209,12 @@ class EmailService {
     // When the Graph fallback ran and returned a concrete error, surface THAT
     // instead of the generic "connect Microsoft" text, so the real cause is
     // visible in the UI rather than guessed at.
+    // Prefer the real SMTP (Domeneshop) error — that is the actual delivery
+    // path for this company. The Microsoft Graph path only applies to companies
+    // that connected Microsoft, so its "no_oauth_connection" is noise here.
+    if (lastSmtpSendError != null && lastSmtpSendError!.isNotEmpty) {
+      throw Exception('E-postsending feilet: $lastSmtpSendError');
+    }
     if (kIsWeb && lastGraphSendError != null && lastGraphSendError!.isNotEmpty) {
       throw Exception('Microsoft Graph-sending feilet: $lastGraphSendError');
     }
@@ -263,6 +269,9 @@ class EmailService {
   /// Last concrete error from the ms-graph-send edge function, captured so the
   /// UI can show the real reason instead of the generic fallback message.
   static String? lastGraphSendError;
+
+  /// Last concrete error from the send-smtp-email edge function (Domeneshop).
+  static String? lastSmtpSendError;
 
   static Future<void> sendEmailWithAttachments({
     required String to,
@@ -329,6 +338,12 @@ class EmailService {
     // When the Graph fallback ran and returned a concrete error, surface THAT
     // instead of the generic "connect Microsoft" text, so the real cause is
     // visible in the UI rather than guessed at.
+    // Prefer the real SMTP (Domeneshop) error — that is the actual delivery
+    // path for this company. The Microsoft Graph path only applies to companies
+    // that connected Microsoft, so its "no_oauth_connection" is noise here.
+    if (lastSmtpSendError != null && lastSmtpSendError!.isNotEmpty) {
+      throw Exception('E-postsending feilet: $lastSmtpSendError');
+    }
     if (kIsWeb && lastGraphSendError != null && lastGraphSendError!.isNotEmpty) {
       throw Exception('Microsoft Graph-sending feilet: $lastGraphSendError');
     }
@@ -412,7 +427,22 @@ class EmailService {
         'content': base64Encode(a.bytes),
       }).toList();
     }
-    await sb.functions.invoke('send-smtp-email', body: payload);
+    lastSmtpSendError = null;
+    // Domeneshop rejects mail from some AWS IPs ([ACR04]) and the Supabase edge
+    // runtime gets a different AWS IP per invocation — so a rejected attempt
+    // usually goes through when retried on a fresh invocation. Retry a few
+    // times before giving up.
+    const maxAttempts = 6;
+    for (int attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        await sb.functions.invoke('send-smtp-email', body: payload);
+        return; // sent
+      } catch (e) {
+        lastSmtpSendError = e.toString();
+        if (attempt >= maxAttempts) rethrow;
+        await Future.delayed(Duration(milliseconds: 500 * attempt));
+      }
+    }
   }
 
   // --------------------------------------------------
