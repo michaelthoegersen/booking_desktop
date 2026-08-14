@@ -1556,6 +1556,7 @@ class _MgmtGigDetailPageState extends State<MgmtGigDetailPage>
                 ];
                 final delivered = <String>[];
                 final failed = <String>[];
+                String? sendError;
                 for (final rcpt in recipients) {
                   try {
                     await EmailService.sendEmailWithAttachments(
@@ -1570,6 +1571,7 @@ class _MgmtGigDetailPageState extends State<MgmtGigDetailPage>
                   } catch (e) {
                     debugPrint('Send to $rcpt failed: $e');
                     failed.add(rcpt);
+                    sendError = e.toString();
                   }
                 }
                 // Log who actually got it as a single send-history entry.
@@ -1593,7 +1595,13 @@ class _MgmtGigDetailPageState extends State<MgmtGigDetailPage>
                           ? 'Sent to ${delivered.length}; failed: ${failed.join(', ')}'
                           : 'Sendt til ${delivered.length}; feilet: ${failed.join(', ')}');
                   ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text(summary)),
+                    SnackBar(
+                      content: Text(sendError == null
+                          ? summary
+                          : '$summary\n\nÅrsak: $sendError'),
+                      duration: Duration(
+                          seconds: sendError == null ? 4 : 12),
+                    ),
                   );
                 }
               } catch (e) {
