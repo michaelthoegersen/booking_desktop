@@ -432,7 +432,7 @@ class EmailService {
     // runtime gets a different AWS IP per invocation — so a rejected attempt
     // usually goes through when retried on a fresh invocation. Retry a few
     // times before giving up.
-    const maxAttempts = 6;
+    const maxAttempts = 8;
     for (int attempt = 1; attempt <= maxAttempts; attempt++) {
       try {
         await sb.functions.invoke('send-smtp-email', body: payload);
@@ -440,7 +440,9 @@ class EmailService {
       } catch (e) {
         lastSmtpSendError = e.toString();
         if (attempt >= maxAttempts) rethrow;
-        await Future.delayed(Duration(milliseconds: 500 * attempt));
+        // No escalating backoff — a fresh invocation already gets independent
+        // routing, so retry immediately (a tiny gap just avoids hammering).
+        await Future.delayed(const Duration(milliseconds: 120));
       }
     }
   }

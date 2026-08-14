@@ -1559,7 +1559,10 @@ class _MgmtGigDetailPageState extends State<MgmtGigDetailPage>
                 final delivered = <String>[];
                 final failed = <String>[];
                 String? sendError;
-                for (final rcpt in recipients) {
+                // Send to all recipients concurrently — independent addresses,
+                // so no duplicate risk, and multiple recipients no longer add up
+                // in wall-clock time.
+                await Future.wait(recipients.map((rcpt) async {
                   try {
                     await EmailService.sendEmailWithAttachments(
                       to: rcpt,
@@ -1575,7 +1578,7 @@ class _MgmtGigDetailPageState extends State<MgmtGigDetailPage>
                     failed.add(rcpt);
                     sendError = e.toString();
                   }
-                }
+                }));
                 // Log who actually got it as a single send-history entry.
                 if (delivered.isNotEmpty) {
                   try {
