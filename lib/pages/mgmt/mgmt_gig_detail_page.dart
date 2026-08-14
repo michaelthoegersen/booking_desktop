@@ -1565,6 +1565,8 @@ class _MgmtGigDetailPageState extends State<MgmtGigDetailPage>
                       body: htmlBody,
                       attachments: attachments,
                       isHtml: true,
+                      // Mgmt-kontrakt: kun SMTP, ingen Microsoft-nødløsning.
+                      allowOAuthFallback: false,
                       companyId: _gig?['company_id'] as String?,
                     );
                     delivered.add(rcpt);
@@ -4014,6 +4016,8 @@ class _KontraktTabState extends State<_KontraktTab> {
             ),
           ],
           isHtml: true,
+          // Mgmt-kontrakt: kun SMTP, ingen Microsoft-nødløsning.
+          allowOAuthFallback: false,
           companyId: widget.gig['company_id'] as String?,
         );
       }

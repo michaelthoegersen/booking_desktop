@@ -261,6 +261,7 @@ class EmailService {
     required List<({String filename, Uint8List bytes})> attachments,
     bool isHtml = false,
     bool useSmtp = true,
+    bool allowOAuthFallback = true,
     String? companyId,
   }) async {
     if (useSmtp) {
@@ -280,11 +281,18 @@ class EmailService {
           }
           return;
         } catch (e) {
+          // SMTP-only callers (e.g. mgmt-kontrakt): surface the SMTP error
+          // directly — no Microsoft Graph fallback.
+          if (!allowOAuthFallback) rethrow;
           // Desktop: only fall back on SMTP-auth-disabled errors. Web: always
           // fall through to the Microsoft Graph edge function below.
           if (!kIsWeb && !_shouldFallbackToOAuth(e)) rethrow;
           debugPrint('SMTP send failed — trying Microsoft OAuth: $e');
         }
+      } else if (!allowOAuthFallback) {
+        throw Exception('Ingen SMTP-konto er satt opp for dette selskapet. '
+            'Gå til Innstillinger → E-post & Integrasjoner og legg til en '
+            'SMTP-konto.');
       }
     }
     // Delegated OAuth. Web → ms-graph-send edge function; desktop → client-side.
