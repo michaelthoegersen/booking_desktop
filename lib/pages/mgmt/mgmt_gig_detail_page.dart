@@ -1280,8 +1280,10 @@ class _MgmtGigDetailPageState extends State<MgmtGigDetailPage>
               Navigator.pop(ctx);
               ({Uint8List mainPdf, List<({String filename, Uint8List bytes, bool autoInclude})> riders, String title, String companyName})? result;
               try {
-                // Always prefer offer's final_calc as source of truth (Tilbud bestemmer)
-                final calc = _offerCalcFromDetail;
+                // Single-date: legacy summary so the show is itemised as its
+                // own line (visible price). Multi-date: offer's final_calc with
+                // per-date breakdown. Matches the preview and signed PDF.
+                final calc = _isMultiDate ? _offerCalcFromDetail : null;
                 final entries =
                     _isMultiDate ? await _pdfDateEntriesFromDetail() : null;
                 result = await IntensjonsavtalePdfService.generate(
@@ -3812,9 +3814,10 @@ class _KontraktTabState extends State<_KontraktTab> {
   Future<void> _buildPdf() async {
     if (mounted) setState(() => _generating = true);
     try {
-      // Use the offer's final_calc as the single source of truth for BOTH
-      // single- and multi-date (matches the emailed contract at _offerCalcFromDetail).
-      final calc = _offerCalc;
+      // Single-date uses the legacy price summary so the show is itemised as
+      // its own line; multi-date uses the offer's final_calc with per-date
+      // breakdown. Matches the emailed contract and the signed customer PDF.
+      final calc = _isMultiDate ? _offerCalc : null;
       final entries = _isMultiDate ? await _pdfDateEntries() : null;
       final result = await IntensjonsavtalePdfService.generate(
         gig: widget.gig,
