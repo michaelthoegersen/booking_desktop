@@ -60,11 +60,26 @@ async function rawSmtpSend(opts: {
 }) {
   const useSsl = opts.port === 465;
 
+  // Domeneshop blocks mail relayed from AWS IPv6 addresses ([ACR04]). The
+  // Supabase edge runtime is dual-stack and now prefers IPv6, which triggers
+  // the block. Force IPv4 by resolving the A record and connecting to the
+  // literal IPv4 address, while keeping the hostname for TLS SNI / cert check.
+  let connectHost = opts.host;
+  try {
+    const v4 = await Deno.resolveDns(opts.host, "A");
+    if (v4 && v4.length > 0) connectHost = v4[0];
+  } catch (_) {
+    // fall back to hostname-based resolution (dual-stack)
+  }
+
   let conn: Deno.TcpConn | Deno.TlsConn;
   if (useSsl) {
+    // Implicit-TLS (465): cert is bound to the hostname, so connect by name.
     conn = await Deno.connectTls({ hostname: opts.host, port: opts.port });
   } else {
-    conn = await Deno.connect({ hostname: opts.host, port: opts.port });
+    // Submission (587) + STARTTLS: connect to the IPv4 literal to force IPv4
+    // egress; the later Deno.startTls still validates against opts.host.
+    conn = await Deno.connect({ hostname: connectHost, port: opts.port });
   }
 
   let reader = conn.readable.getReader();
