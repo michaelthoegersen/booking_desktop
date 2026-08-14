@@ -3812,7 +3812,9 @@ class _KontraktTabState extends State<_KontraktTab> {
   Future<void> _buildPdf() async {
     if (mounted) setState(() => _generating = true);
     try {
-      final calc = _isMultiDate ? _offerCalc : null;
+      // Use the offer's final_calc as the single source of truth for BOTH
+      // single- and multi-date (matches the emailed contract at _offerCalcFromDetail).
+      final calc = _offerCalc;
       final entries = _isMultiDate ? await _pdfDateEntries() : null;
       final result = await IntensjonsavtalePdfService.generate(
         gig: widget.gig,
