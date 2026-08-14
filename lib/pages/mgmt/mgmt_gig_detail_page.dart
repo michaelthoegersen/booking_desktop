@@ -1311,6 +1311,15 @@ class _MgmtGigDetailPageState extends State<MgmtGigDetailPage>
                     : _gig!['id'] as String;
                 final venue = _gig?['venue_name'] ?? 'gig';
                 final dateFrom = _gig?['date_from'] ?? '';
+                // Norwegian-formatted date (dd.MM.yyyy) for the email body and
+                // subtitle — the raw value is ISO (yyyy-MM-dd).
+                String dateFromFmt;
+                try {
+                  dateFromFmt = DateFormat('dd.MM.yyyy')
+                      .format(DateTime.parse(dateFrom.toString()));
+                } catch (_) {
+                  dateFromFmt = dateFrom.toString();
+                }
                 final recipients = emailCtrl.text
                     .split(RegExp(r'[,;\s]+'))
                     .map((s) => s.trim())
@@ -1364,12 +1373,12 @@ class _MgmtGigDetailPageState extends State<MgmtGigDetailPage>
                     ? (isEn
                         ? '${_siblingGigs.length} dates'
                         : '${_siblingGigs.length} datoer')
-                    : '$venue $dateFrom';
+                    : '$venue $dateFromFmt';
                 final venueLabel = venue != ''
                     ? (isEn ? 'at $venue' : 'ved $venue')
                     : '';
                 final dateLabel = dateFrom != ''
-                    ? (isEn ? 'on $dateFrom' : 'den $dateFrom')
+                    ? (isEn ? 'on $dateFromFmt' : 'den $dateFromFmt')
                     : '';
                 final bodyDesc = _isMultiDate
                     ? (isEn
