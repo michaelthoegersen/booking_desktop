@@ -3740,8 +3740,7 @@ class _GigOfferPageState extends State<GigOfferPage> {
           if (_rehearsalTotal > 0)
             _editableCalcRow('rehearsal', 'Prøver', _rehearsalTotal),
           for (final e in _extras)
-            if (e.name.trim().isNotEmpty)
-              _calcRowInfo(e.name.trim(), '${_nf.format(e.amount)} kr'),
+            if (e.name.trim().isNotEmpty) _calcRowExtra(e),
           const Divider(height: 24),
           GestureDetector(
             onDoubleTap: () => _editOverride('total', _effectiveTotal),
@@ -3793,6 +3792,40 @@ class _GigOfferPageState extends State<GigOfferPage> {
               style:
                   TextStyle(fontSize: 13, color: cs.onSurfaceVariant)),
           Text(value, style: const TextStyle(fontSize: 13)),
+        ],
+      ),
+    );
+  }
+
+  /// Calc-card row for an ekstrakostnad — same look as _calcRowInfo, plus a
+  /// small line under it saying where the money goes on the payout side.
+  Widget _calcRowExtra(_OfferExtra e) {
+    final cs = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 6),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Expanded(
+                child: Text(e.name.trim(),
+                    style:
+                        TextStyle(fontSize: 13, color: cs.onSurfaceVariant)),
+              ),
+              const SizedBox(width: 8),
+              Text('${_nf.format(e.amount)} kr',
+                  style: const TextStyle(fontSize: 13)),
+            ],
+          ),
+          Padding(
+            padding: const EdgeInsets.only(top: 1),
+            child: Text(
+              e.allocationLabel((v) => _nf.format(v)),
+              style: TextStyle(fontSize: 10, color: cs.onSurfaceVariant),
+            ),
+          ),
         ],
       ),
     );
