@@ -3951,8 +3951,11 @@ class _KontraktTabState extends State<_KontraktTab> {
       // Generate signed PDF
       final acceptedName = _agreement!['accepted_name'] as String? ?? '';
       final acceptedAt = _agreement!['accepted_at'] as String?;
+      // accepted_at is timestamptz (UTC) — to local time first, so a
+      // signature after 22:00 norsk tid isn't stamped with the day before.
       final acceptedDate = acceptedAt != null
-          ? DateFormat('dd.MM.yyyy').format(DateTime.parse(acceptedAt))
+          ? DateFormat('dd.MM.yyyy')
+              .format(DateTime.parse(acceptedAt).toLocal())
           : DateFormat('dd.MM.yyyy').format(DateTime.now());
       final approvedDate = DateFormat('dd.MM.yyyy').format(DateTime.now());
 

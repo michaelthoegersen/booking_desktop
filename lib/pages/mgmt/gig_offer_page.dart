@@ -4262,8 +4262,10 @@ class _GigOfferPageState extends State<GigOfferPage> {
 
       final acceptedName = _agreement!['accepted_name'] as String? ?? '';
       final acceptedAt = _agreement!['accepted_at'] as String?;
+      // accepted_at is timestamptz (UTC) — to local time first, so a
+      // signature after 22:00 norsk tid isn't stamped with the day before.
       final acceptedDate = acceptedAt != null
-          ? df.format(DateTime.parse(acceptedAt))
+          ? df.format(DateTime.parse(acceptedAt).toLocal())
           : df.format(DateTime.now());
       final approvedDate = df.format(DateTime.now());
 
