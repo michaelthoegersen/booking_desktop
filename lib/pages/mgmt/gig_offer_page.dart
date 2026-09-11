@@ -3822,7 +3822,7 @@ class _GigOfferPageState extends State<GigOfferPage> {
           Padding(
             padding: const EdgeInsets.only(top: 1),
             child: Text(
-              e.allocationLabel((v) => _nf.format(v)),
+              e.allocationLabelShort((v) => _nf.format(v)),
               style: TextStyle(fontSize: 10, color: cs.onSurfaceVariant),
             ),
           ),
@@ -5157,6 +5157,20 @@ class _OfferExtra {
       default:
         return 'Hele beløpet (${fmt(amount)} kr) fordeles på gruppa '
             '(som show)';
+    }
+  }
+
+  /// Compact variant for the Beregning card, where the amount already stands
+  /// on the row itself — so a whole-amount payout only needs the recipient.
+  String allocationLabelShort(String Function(double) fmt) {
+    switch (allocation) {
+      case 'member':
+        return memberName ?? 'medlem';
+      case 'split':
+      case 'split_company':
+        return allocationLabel(fmt);
+      default:
+        return 'Fordeles på gruppa';
     }
   }
 }
