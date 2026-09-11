@@ -2335,7 +2335,7 @@ class _GigOfferPageState extends State<GigOfferPage> {
                         fontSize: 13, fontWeight: FontWeight.w600),
                   ),
                   const SizedBox(height: 2),
-                  Text(e.allocationLabel(),
+                  Text(e.allocationLabel((v) => _nf.format(v)),
                       style:
                           TextStyle(fontSize: 11, color: cs.onSurfaceVariant)),
                 ],
@@ -5108,17 +5108,22 @@ class _OfferExtra {
           'member_amount': memberAmount,
       };
 
-  /// Short human description of the payout allocation, for the summary row.
-  String allocationLabel() {
+  /// Short human description of where the money actually goes, for the
+  /// summary row. [fmt] formats a kr amount (the page's NumberFormat).
+  String allocationLabel(String Function(double) fmt) {
+    final who = memberName ?? 'medlem';
+    final toMember = memberAmount.clamp(0.0, amount);
+    final rest = amount - toMember;
     switch (allocation) {
       case 'member':
-        return 'Hele beløpet → ${memberName ?? 'medlem'}';
+        return 'Hele beløpet (${fmt(amount)} kr) → $who';
       case 'split':
-        return '${memberName ?? 'medlem'} + resten til gruppa';
+        return '$who ${fmt(toMember)} kr · gruppa ${fmt(rest)} kr';
       case 'split_company':
-        return '${memberName ?? 'medlem'} + resten til Complete';
+        return '$who ${fmt(toMember)} kr · Complete ${fmt(rest)} kr';
       default:
-        return 'Fordeles på gruppa (som show)';
+        return 'Hele beløpet (${fmt(amount)} kr) fordeles på gruppa '
+            '(som show)';
     }
   }
 }
