@@ -439,12 +439,6 @@ class _MgmtGigDetailPageState extends State<MgmtGigDetailPage>
     final map = section == 'skarp'
         ? _selectedSkarpByShow
         : _selectedBassByShow;
-    // Delete existing lineup for this section
-    await _sb
-        .from('gig_lineup')
-        .delete()
-        .eq('gig_id', widget.gigId)
-        .eq('section', section);
     // Insert new — one row per (user, show). Dedup by (user_id, show_id)
     // because the unique constraint (gig_id, user_id, section, show_id)
     // treats NULL show_id values as equal — so if the same user ends up in
@@ -471,6 +465,28 @@ class _MgmtGigDetailPageState extends State<MgmtGigDetailPage>
         });
       }
     }
+    // Safety: never wipe an existing lineup with an empty selection. The
+    // in-memory maps can be empty or half-loaded (a locked section renders no
+    // checkboxes), and the delete below would otherwise clear the whole
+    // section. Same guard as crew_gig_detail_page and the mobile repository.
+    if (rows.isEmpty) {
+      final existing = await _sb
+          .from('gig_lineup')
+          .select('id')
+          .eq('gig_id', widget.gigId)
+          .eq('section', section)
+          .limit(1);
+      if ((existing as List).isNotEmpty) {
+        debugPrint('[LINEUP] Refused to save empty lineup for $section');
+        return;
+      }
+    }
+    // Replace this section's lineup with the current selection.
+    await _sb
+        .from('gig_lineup')
+        .delete()
+        .eq('gig_id', widget.gigId)
+        .eq('section', section);
     if (rows.isNotEmpty) {
       await _sb.from('gig_lineup').insert(rows);
     }
