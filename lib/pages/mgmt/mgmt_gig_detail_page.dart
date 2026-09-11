@@ -482,10 +482,13 @@ class _MgmtGigDetailPageState extends State<MgmtGigDetailPage>
           ? 'lineup_locked_skarp'
           : 'lineup_locked_bass';
       final currentlyLocked = _gig?[field] == true;
-      // Always persist the current selection — both when locking AND when
-      // unlocking — so stale rows from a previous lock can't survive across
-      // a remove/re-lock cycle.
-      await _saveLineup(section);
+      // Persist the current selection only when LOCKING. Unlocking must never
+      // touch the saved lineup: _saveLineup deletes every row for the section
+      // before re-inserting, so an empty or partial in-memory selection wiped
+      // the whole lineup and all checkmarks disappeared.
+      if (!currentlyLocked) {
+        await _saveLineup(section);
+      }
       await _sb
           .from('gigs')
           .update({field: !currentlyLocked})
