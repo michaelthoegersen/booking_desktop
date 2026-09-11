@@ -1652,6 +1652,278 @@ class _MgmtGigDetailPageState extends State<MgmtGigDetailPage>
     );
   }
 
+  /// Send only the rider attachments — no Intensjonsavtale, no accept link
+  /// and no agreement token. For customers who just want the riders.
+  ///
+  /// Deliberately separate from _sendIntensjon: that flow creates an
+  /// agreement_tokens row, uploads the contract to storage and mails an
+  /// accept button, none of which apply here.
+  Future<void> _sendRidersOnly() async {
+    final emailCtrl =
+        TextEditingController(text: _gig?['customer_email'] ?? '');
+
+    // Riders come out of the same generator as the contract; the main PDF is
+    // simply not used.
+    ({
+      Uint8List mainPdf,
+      List<({String filename, Uint8List bytes, bool autoInclude})> riders,
+      String title,
+      String companyName
+    })? result;
+    try {
+      final calc = _isMultiDate ? _offerCalcFromDetail : null;
+      final entries = _isMultiDate ? await _pdfDateEntriesFromDetail() : null;
+      result = await IntensjonsavtalePdfService.generate(
+        gig: _gig!,
+        shows: _shows,
+        calcLines: calc?.lines,
+        calcTotal: calc?.total,
+        dateEntries: entries,
+        markupOnAll: _offerData?['markup_on_all'] == true,
+        lang: _intensjonLang,
+        extras: _offerExtras,
+      );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Kunne ikke hente riders: $e')),
+        );
+      }
+      emailCtrl.dispose();
+      return;
+    }
+
+    final allRiders = result.riders.toList();
+    if (allRiders.isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Ingen aktive riders å sende.')),
+        );
+      }
+      emailCtrl.dispose();
+      return;
+    }
+    // Everything is pre-checked here — the rider is the whole point of the
+    // mail, so the auto-include flag that governs the contract attachment
+    // doesn't apply.
+    final riderSelected = List<bool>.filled(allRiders.length, true);
+    final extraAttachments = <({String filename, Uint8List bytes})>[];
+
+    await showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSt) => AlertDialog(
+          title: const Text('Send kun riders'),
+          content: SizedBox(
+            width: 420,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Kun riderne sendes. Ingen intensjonsavtale og ingen '
+                    'aksepteringslenke.',
+                    style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: emailCtrl,
+                    decoration: const InputDecoration(
+                      labelText: 'Mottakere',
+                      hintText: 'navn@firma.no, neste@firma.no',
+                      helperText:
+                          'Skill flere e-poster med komma, semikolon eller mellomrom.',
+                      border: OutlineInputBorder(),
+                    ),
+                    minLines: 1,
+                    maxLines: 3,
+                  ),
+                  const SizedBox(height: 12),
+                  const Text('Riders:',
+                      style: TextStyle(fontWeight: FontWeight.w700)),
+                  ...allRiders.asMap().entries.map((e) => CheckboxListTile(
+                        value: riderSelected[e.key],
+                        dense: true,
+                        contentPadding: EdgeInsets.zero,
+                        controlAffinity: ListTileControlAffinity.leading,
+                        title: Text(e.value.filename,
+                            style: const TextStyle(fontSize: 13)),
+                        onChanged: (v) =>
+                            setSt(() => riderSelected[e.key] = v ?? false),
+                      )),
+                  if (extraAttachments.isNotEmpty) ...[
+                    const SizedBox(height: 8),
+                    const Text('Ekstra vedlegg:',
+                        style: TextStyle(fontWeight: FontWeight.w700)),
+                    ...extraAttachments.map((a) => Padding(
+                          padding: const EdgeInsets.only(left: 8, top: 4),
+                          child: Row(
+                            children: [
+                              const Icon(Icons.attach_file, size: 14),
+                              const SizedBox(width: 4),
+                              Expanded(
+                                  child: Text(a.filename,
+                                      style: const TextStyle(fontSize: 13))),
+                              IconButton(
+                                icon: const Icon(Icons.close, size: 14),
+                                onPressed: () =>
+                                    setSt(() => extraAttachments.remove(a)),
+                              ),
+                            ],
+                          ),
+                        )),
+                  ],
+                  const SizedBox(height: 8),
+                  OutlinedButton.icon(
+                    icon: const Icon(Icons.add, size: 16),
+                    label: const Text('Legg til PDF',
+                        style: TextStyle(fontSize: 12)),
+                    onPressed: () async {
+                      final pick = await FilePicker.platform.pickFiles(
+                        type: FileType.custom,
+                        allowedExtensions: ['pdf'],
+                        withData: true,
+                      );
+                      if (pick != null) {
+                        final f = pick.files.single;
+                        if (f.bytes != null) {
+                          setSt(() => extraAttachments
+                              .add((filename: f.name, bytes: f.bytes!)));
+                        }
+                      }
+                    },
+                  ),
+                ],
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Avbryt'),
+            ),
+            FilledButton.icon(
+              icon: const Icon(Icons.send),
+              label: const Text('Send'),
+              onPressed: () async {
+                Navigator.pop(ctx);
+
+                final recipients = emailCtrl.text
+                    .split(RegExp(r'[,;\s]+'))
+                    .map((e) => e.trim())
+                    .where((e) =>
+                        e.isNotEmpty && e.contains('@') && e.contains('.'))
+                    .toSet()
+                    .toList();
+                if (recipients.isEmpty) {
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                          content: Text('Oppgi minst én gyldig e-postadresse.')),
+                    );
+                  }
+                  return;
+                }
+
+                final attachments = <({String filename, Uint8List bytes})>[
+                  for (int i = 0; i < allRiders.length; i++)
+                    if (riderSelected[i])
+                      (
+                        filename: allRiders[i].filename,
+                        bytes: allRiders[i].bytes,
+                      ),
+                  ...extraAttachments,
+                ];
+                if (attachments.isEmpty) {
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Velg minst ett vedlegg.')),
+                    );
+                  }
+                  return;
+                }
+
+                final isEn = _intensjonLang == 'en';
+                final venue = _gig?['venue_name'] ?? '';
+                final dateFrom = _gig?['date_from'] ?? '';
+                String dateFromFmt;
+                try {
+                  dateFromFmt = DateFormat('dd.MM.yyyy')
+                      .format(DateTime.parse(dateFrom.toString()));
+                } catch (_) {
+                  dateFromFmt = dateFrom.toString();
+                }
+                final subjectLabel = _isMultiDate
+                    ? (isEn
+                        ? '${_siblingGigs.length} dates'
+                        : '${_siblingGigs.length} datoer')
+                    : '$venue $dateFromFmt';
+                final emailSubject =
+                    isEn ? 'Riders — $subjectLabel' : 'Riders — $subjectLabel';
+                final greeting = isEn ? 'Hello,' : 'Hei,';
+                final introLine = isEn
+                    ? 'Attached you will find the riders for the engagement.'
+                    : 'Vedlagt finner du riderne for oppdraget.';
+                final companyName = result!.companyName;
+                final htmlBody = '''
+<div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 600px; margin: 0 auto;">
+  <div style="background: #1a1a1a; padding: 24px 32px; border-radius: 8px 8px 0 0;">
+    <h1 style="color: white; font-size: 20px; margin: 0;">Riders</h1>
+    <p style="color: #aaa; font-size: 14px; margin: 4px 0 0;">$subjectLabel</p>
+  </div>
+  <div style="background: #ffffff; padding: 28px 32px; border: 1px solid #eee; border-top: none; border-radius: 0 0 8px 8px;">
+    <p style="font-size: 15px; line-height: 1.6; color: #333;">$greeting</p>
+    <p style="font-size: 15px; line-height: 1.6; color: #333;">$introLine</p>
+    <p style="font-size: 13px; color: #888; margin-top: 20px;">${isEn ? 'Kind regards' : 'Med vennlig hilsen'},<br><strong>$companyName</strong></p>
+  </div>
+</div>
+''';
+
+                final delivered = <String>[];
+                final failed = <String>[];
+                String? sendError;
+                await Future.wait(recipients.map((rcpt) async {
+                  try {
+                    await EmailService.sendEmailWithAttachments(
+                      to: rcpt,
+                      subject: emailSubject,
+                      body: htmlBody,
+                      attachments: attachments,
+                      isHtml: true,
+                      companyId: _gig?['company_id'] as String?,
+                    );
+                    delivered.add(rcpt);
+                  } catch (e) {
+                    debugPrint('Rider send to $rcpt failed: $e');
+                    failed.add(rcpt);
+                    sendError = e.toString();
+                  }
+                }));
+
+                if (mounted) {
+                  final summary = failed.isEmpty
+                      ? 'Riders sendt til ${delivered.length} mottaker(e).'
+                      : 'Sendt til ${delivered.length}; feilet: ${failed.join(', ')}';
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text(sendError == null
+                          ? summary
+                          : '$summary\n\nÅrsak: $sendError'),
+                      duration:
+                          Duration(seconds: sendError == null ? 4 : 12),
+                    ),
+                  );
+                }
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+    emailCtrl.dispose();
+  }
+
   // -------------------------------------------------------------------------
   // BUILD
   // -------------------------------------------------------------------------
@@ -2027,6 +2299,7 @@ class _MgmtGigDetailPageState extends State<MgmtGigDetailPage>
                         shows: _shows,
                         total: _total,
                         onSend: _sendIntensjon,
+                        onSendRiders: _sendRidersOnly,
                         siblingGigs: _siblingGigs,
                         offerData: _offerData,
                         offerExtras: _offerExtras,
@@ -3534,6 +3807,7 @@ class _KontraktTab extends StatefulWidget {
   final List<Map<String, dynamic>> shows;
   final double total;
   final Future<void> Function() onSend;
+  final Future<void> Function() onSendRiders;
   final List<Map<String, dynamic>> siblingGigs;
   final Map<String, dynamic>? offerData;
   final List<({String label, double amount})> offerExtras;
@@ -3544,6 +3818,7 @@ class _KontraktTab extends StatefulWidget {
     required this.shows,
     required this.total,
     required this.onSend,
+    required this.onSendRiders,
     this.siblingGigs = const [],
     this.offerData,
     this.offerExtras = const [],
@@ -3559,6 +3834,7 @@ class _KontraktTabState extends State<_KontraktTab> {
   Uint8List? _pdfBytes;
   bool _generating = true;
   bool _sending = false;
+  bool _sendingRiders = false;
 
   // Agreement status
   Map<String, dynamic>? _agreement;
@@ -4137,6 +4413,21 @@ class _KontraktTabState extends State<_KontraktTab> {
                   icon: const Icon(Icons.send, size: 18),
                   label: Text(_sending ? 'Sender…' : 'Send intensjonsavtale'),
                 ),
+                const SizedBox(height: 8),
+                // Some customers only want the riders — no contract, no
+                // accept link.
+                OutlinedButton.icon(
+                  onPressed: _sendingRiders
+                      ? null
+                      : () async {
+                          setState(() => _sendingRiders = true);
+                          await widget.onSendRiders();
+                          if (mounted) setState(() => _sendingRiders = false);
+                        },
+                  icon: const Icon(Icons.attach_file, size: 16),
+                  label: Text(
+                      _sendingRiders ? 'Sender…' : 'Send kun riders'),
+                ),
                 if (_generating) ...[
                   const SizedBox(height: 10),
                   Row(
@@ -4650,6 +4941,7 @@ class _ChatTabState extends State<_ChatTab> with MentionMixin {
   final _scrollCtrl = ScrollController();
   String _senderName = '';
   bool _sending = false;
+  bool _sendingRiders = false;
 
   // Edit state
   String? _editingId;
