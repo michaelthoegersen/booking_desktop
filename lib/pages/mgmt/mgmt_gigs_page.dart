@@ -1184,11 +1184,24 @@ class _NewGigDialogState extends State<_NewGigDialog> {
   Map<String, dynamic> _gigPayloadFor(DateTime date) {
     final df = DateFormat('yyyy-MM-dd');
     String? n(String s) => s.trim().isEmpty ? null : s.trim();
+
+    // "Gjenta på flere datoer" moves date_from to each selected date, so
+    // date_to has to move with it. Writing the original end date on every
+    // copy left them ending before they start (15.10.2026 – 10.09.2026).
+    // Carry the original's span instead: a one-day activity stays one day on
+    // the new date, a multi-day one keeps its length.
+    final spanDays = (_dateTo != null && _dateFrom != null)
+        ? _dateOnly(_dateTo!).difference(_dateOnly(_dateFrom!)).inDays
+        : 0;
+    final endDate = spanDays > 0
+        ? DateTime(date.year, date.month, date.day + spanDays)
+        : null;
+
     return {
       'company_id': widget.managementCompanyId,
       'type': _type,
       'date_from': df.format(date),
-      if (_dateTo != null) 'date_to': df.format(_dateTo!),
+      if (endDate != null) 'date_to': df.format(endDate),
       'status': _status,
       'venue_name': n(_venueCtrl.text),
       'city': n(_cityCtrl.text),
