@@ -295,9 +295,14 @@ class _CrewGigDetailPageState extends State<CrewGigDetailPage> {
       if (!currentlyLocked) {
         await _saveLineup(section);
       }
-      await _sb
-          .from('gigs')
-          .update({field: !currentlyLocked}).eq('id', widget.gigId);
+      // Via RPC: en direkte UPDATE på gigs blir stille blokkert av RLS for
+      // gruppeledere (policyen leser company_members.role, mens rollen ligger
+      // i profiles.role), og PostgREST melder ikke fra om 0 rader.
+      await _sb.rpc('set_lineup_lock', params: {
+        'p_gig_id': widget.gigId,
+        'p_section': section,
+        'p_locked': !currentlyLocked,
+      });
       // Refresh just the gig row so lock flag is up to date.
       final gig = await _sb
           .from('gigs')
