@@ -4189,8 +4189,10 @@ class _KontraktTabState extends State<_KontraktTab> {
                     ..._sendHistory.map((s) {
                       final ts = DateTime.tryParse(
                           s['sent_at']?.toString() ?? '');
+                      // Timestamps are timestamptz (UTC) — convert to the
+                      // viewer's local time before formatting.
                       final tsLabel = ts != null
-                          ? DateFormat('dd.MM.yyyy HH:mm').format(ts)
+                          ? DateFormat('dd.MM.yyyy HH:mm').format(ts.toLocal())
                           : '';
                       final rcpts = (s['recipients'] as List?)
                               ?.map((e) => e.toString())
@@ -4226,7 +4228,7 @@ class _KontraktTabState extends State<_KontraktTab> {
                     if (_agreement!['created_at'] != null) ...[
                       const SizedBox(height: 2),
                       Text(
-                        'Sendt: ${DateFormat('dd.MM.yyyy HH:mm').format(DateTime.parse(_agreement!['created_at']))}',
+                        'Sendt: ${DateFormat('dd.MM.yyyy HH:mm').format(DateTime.parse(_agreement!['created_at']).toLocal())}',
                         style: TextStyle(
                             fontSize: 12, color: cs.onSurfaceVariant),
                       ),
@@ -4252,7 +4254,7 @@ class _KontraktTabState extends State<_KontraktTab> {
                           ),
                           if (_agreement!['accepted_at'] != null)
                             Text(
-                              'Dato: ${DateFormat('dd.MM.yyyy HH:mm').format(DateTime.parse(_agreement!['accepted_at']))}',
+                              'Dato: ${DateFormat('dd.MM.yyyy HH:mm').format(DateTime.parse(_agreement!['accepted_at']).toLocal())}',
                               style: TextStyle(fontSize: 11, color: cs.onSurfaceVariant),
                             ),
                         ],
@@ -4297,7 +4299,7 @@ class _KontraktTabState extends State<_KontraktTab> {
                           ),
                           if (_agreement!['approved_at'] != null)
                             Text(
-                              'Godkjent: ${DateFormat('dd.MM.yyyy HH:mm').format(DateTime.parse(_agreement!['approved_at']))}',
+                              'Godkjent: ${DateFormat('dd.MM.yyyy HH:mm').format(DateTime.parse(_agreement!['approved_at']).toLocal())}',
                               style: TextStyle(fontSize: 11, color: cs.onSurfaceVariant),
                             ),
                         ],

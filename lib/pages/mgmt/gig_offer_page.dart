@@ -4415,7 +4415,7 @@ class _GigOfferPageState extends State<GigOfferPage> {
                     ),
                     if (_agreement!['accepted_at'] != null)
                       Text(
-                        'Dato: ${DateFormat('dd.MM.yyyy HH:mm').format(DateTime.parse(_agreement!['accepted_at']))}',
+                        'Dato: ${DateFormat('dd.MM.yyyy HH:mm').format(DateTime.parse(_agreement!['accepted_at']).toLocal())}',
                         style: TextStyle(fontSize: 11, color: cs.onSurfaceVariant),
                       ),
                   ],
@@ -4460,7 +4460,7 @@ class _GigOfferPageState extends State<GigOfferPage> {
                       Padding(
                         padding: const EdgeInsets.only(top: 4),
                         child: Text(
-                          'Godkjent: ${DateFormat('dd.MM.yyyy HH:mm').format(DateTime.parse(_agreement!['approved_at']))}',
+                          'Godkjent: ${DateFormat('dd.MM.yyyy HH:mm').format(DateTime.parse(_agreement!['approved_at']).toLocal())}',
                           style: TextStyle(fontSize: 11, color: cs.onSurfaceVariant),
                         ),
                       ),
