@@ -297,9 +297,12 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
       // ── Ekstrakostnader → gigghyre allocation ───────────────────────────
       // Each offer's extras are paid out ONCE, attached to the offer's first
       // show date (not a rehearsal). Allocation per extra:
-      //   group  → distributed to that gig's lineup, weighted by show hire
-      //   member → whole amount to the chosen member
-      //   split  → member_amount to the member, remainder to the group
+      //   group         → distributed to that gig's lineup, weighted by
+      //                    show hire
+      //   member        → whole amount to the chosen member
+      //   split         → member_amount to the member, remainder to the group
+      //   split_company → member_amount to the member, remainder stays with
+      //                   Complete (never paid out to the lineup)
       final offersById = <String, Map<String, dynamic>>{};
       final gigIdsByOffer = <String, List<String>>{};
       offerByGig.forEach((gid, off) {
@@ -337,13 +340,18 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
           double memberAmount;
           if (alloc == 'member' && memberId != null) {
             memberAmount = amount;
-          } else if (alloc == 'split' && memberId != null) {
+          } else if ((alloc == 'split' || alloc == 'split_company') &&
+              memberId != null) {
             memberAmount = ((raw['member_amount'] as num?)?.toDouble() ?? 0)
                 .clamp(0.0, amount);
           } else {
             memberAmount = 0;
           }
-          groupTotal += amount - memberAmount;
+          // 'split_company': the remainder belongs to Complete, so it is not
+          // distributed to the lineup.
+          if (alloc != 'split_company') {
+            groupTotal += amount - memberAmount;
+          }
           if (memberAmount > 0 && memberId != null) {
             memberExtras[memberId] =
                 (memberExtras[memberId] ?? 0) + memberAmount;

@@ -2383,6 +2383,9 @@ class _GigOfferPageState extends State<GigOfferPage> {
         builder: (ctx, setLocal) {
           final amount = parseNum(amountCtrl.text);
           final memAmt = parseNum(memberAmountCtrl.text).clamp(0.0, amount);
+          final isSplit =
+              allocation == 'split' || allocation == 'split_company';
+          final needsMember = allocation != 'group';
           return AlertDialog(
             title: Text(editing ? 'Rediger ekstrakostnad' : 'Ny ekstrakostnad'),
             content: SizedBox(
@@ -2440,7 +2443,19 @@ class _GigOfferPageState extends State<GigOfferPage> {
                       title: const Text('Splitt: medlem + resten til gruppa'),
                       onChanged: (v) => setLocal(() => allocation = v!),
                     ),
-                    if (allocation == 'member' || allocation == 'split') ...[
+                    RadioListTile<String>(
+                      value: 'split_company',
+                      groupValue: allocation,
+                      contentPadding: EdgeInsets.zero,
+                      dense: true,
+                      title: const Text('Splitt: medlem + resten til Complete'),
+                      subtitle: const Text(
+                        'Resten utbetales ikke — den blir hos Complete',
+                        style: TextStyle(fontSize: 11),
+                      ),
+                      onChanged: (v) => setLocal(() => allocation = v!),
+                    ),
+                    if (needsMember) ...[
                       const SizedBox(height: 8),
                       DropdownButtonFormField<String>(
                         initialValue: memberId,
@@ -2461,7 +2476,7 @@ class _GigOfferPageState extends State<GigOfferPage> {
                         }),
                       ),
                     ],
-                    if (allocation == 'split') ...[
+                    if (isSplit) ...[
                       const SizedBox(height: 8),
                       TextField(
                         controller: memberAmountCtrl,
@@ -2471,7 +2486,11 @@ class _GigOfferPageState extends State<GigOfferPage> {
                           labelText: 'Til medlemmet',
                           suffixText: 'kr',
                           helperText: amount > 0
-                              ? 'Gruppa får ${_nf.format(amount - memAmt)} kr'
+                              ? (allocation == 'split_company'
+                                  ? 'Complete beholder '
+                                      '${_nf.format(amount - memAmt)} kr'
+                                  : 'Gruppa får '
+                                      '${_nf.format(amount - memAmt)} kr')
                               : null,
                         ),
                         onChanged: (_) => setLocal(() {}),
@@ -2495,13 +2514,12 @@ class _GigOfferPageState extends State<GigOfferPage> {
                         content: Text('Fyll inn beskrivelse og beløp')));
                     return;
                   }
-                  if ((allocation == 'member' || allocation == 'split') &&
-                      memberId == null) {
+                  if (needsMember && memberId == null) {
                     ScaffoldMessenger.of(ctx).showSnackBar(const SnackBar(
                         content: Text('Velg medlem')));
                     return;
                   }
-                  final mAmt = allocation == 'split'
+                  final mAmt = isSplit
                       ? parseNum(memberAmountCtrl.text).clamp(0.0, amt)
                       : (allocation == 'member' ? amt : 0.0);
                   Navigator.pop(
@@ -5044,17 +5062,23 @@ class _OfferShow {
 /// allocated to band members on the payout side.
 ///
 /// Allocation (only affects gigghyre/payout, never the customer price):
-///   'group'  — distributed to the whole lineup like show money (weighted by
-///              each member's show hire).
-///   'member' — the whole amount goes to [memberId] (added to their gigghyre).
-///   'split'  — [memberAmount] goes to [memberId], the remainder to the group.
+///   'group'         — distributed to the whole lineup like show money
+///                     (weighted by each member's show hire).
+///   'member'        — the whole amount goes to [memberId] (added to their
+///                     gigghyre).
+///   'split'         — [memberAmount] goes to [memberId], the remainder to the
+///                     group.
+///   'split_company' — [memberAmount] goes to [memberId], the remainder stays
+///                     with Complete and is never paid out to the lineup.
 class _OfferExtra {
   String name;
   double amount;
-  String allocation; // 'group' | 'member' | 'split'
+  String allocation; // 'group' | 'member' | 'split' | 'split_company'
   String? memberId;
   String? memberName;
-  double memberAmount; // 'split' only: kr to the member; group gets the rest
+  // Splits only: kr to the member. The rest goes to the group ('split') or
+  // stays with Complete ('split_company').
+  double memberAmount;
 
   _OfferExtra({
     this.name = '',
@@ -5080,7 +5104,8 @@ class _OfferExtra {
         'allocation': allocation,
         if (memberId != null) 'member_id': memberId,
         if (memberName != null) 'member_name': memberName,
-        if (allocation == 'split') 'member_amount': memberAmount,
+        if (allocation == 'split' || allocation == 'split_company')
+          'member_amount': memberAmount,
       };
 
   /// Short human description of the payout allocation, for the summary row.
@@ -5090,6 +5115,8 @@ class _OfferExtra {
         return 'Hele beløpet → ${memberName ?? 'medlem'}';
       case 'split':
         return '${memberName ?? 'medlem'} + resten til gruppa';
+      case 'split_company':
+        return '${memberName ?? 'medlem'} + resten til Complete';
       default:
         return 'Fordeles på gruppa (som show)';
     }
