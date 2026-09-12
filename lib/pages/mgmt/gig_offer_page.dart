@@ -2385,7 +2385,8 @@ class _GigOfferPageState extends State<GigOfferPage> {
           final memAmt = parseNum(memberAmountCtrl.text).clamp(0.0, amount);
           final isSplit =
               allocation == 'split' || allocation == 'split_company';
-          final needsMember = allocation != 'group';
+          final needsMember =
+              allocation != 'group' && allocation != 'company';
           return AlertDialog(
             title: Text(editing ? 'Rediger ekstrakostnad' : 'Ny ekstrakostnad'),
             content: SizedBox(
@@ -2433,6 +2434,18 @@ class _GigOfferPageState extends State<GigOfferPage> {
                       contentPadding: EdgeInsets.zero,
                       dense: true,
                       title: const Text('Hele beløpet til ett medlem'),
+                      onChanged: (v) => setLocal(() => allocation = v!),
+                    ),
+                    RadioListTile<String>(
+                      value: 'company',
+                      groupValue: allocation,
+                      contentPadding: EdgeInsets.zero,
+                      dense: true,
+                      title: const Text('Hele beløpet til Complete'),
+                      subtitle: const Text(
+                        'Utbetales ikke — hele beløpet blir hos Complete',
+                        style: TextStyle(fontSize: 11),
+                      ),
                       onChanged: (v) => setLocal(() => allocation = v!),
                     ),
                     RadioListTile<String>(
@@ -2528,8 +2541,8 @@ class _GigOfferPageState extends State<GigOfferPage> {
                       name: nm,
                       amount: amt,
                       allocation: allocation,
-                      memberId: allocation == 'group' ? null : memberId,
-                      memberName: allocation == 'group' ? null : memberName,
+                      memberId: needsMember ? memberId : null,
+                      memberName: needsMember ? memberName : null,
                       memberAmount: mAmt.toDouble(),
                     ),
                   );
@@ -5103,12 +5116,14 @@ class _OfferShow {
 ///                     gigghyre).
 ///   'split'         — [memberAmount] goes to [memberId], the remainder to the
 ///                     group.
+///   'company'       — the whole amount stays with Complete and is never paid
+///                     out to the lineup.
 ///   'split_company' — [memberAmount] goes to [memberId], the remainder stays
 ///                     with Complete and is never paid out to the lineup.
 class _OfferExtra {
   String name;
   double amount;
-  String allocation; // 'group' | 'member' | 'split' | 'split_company'
+  String allocation; // 'group' | 'member' | 'company' | 'split' | 'split_company'
   String? memberId;
   String? memberName;
   // Splits only: kr to the member. The rest goes to the group ('split') or
@@ -5152,6 +5167,8 @@ class _OfferExtra {
     switch (allocation) {
       case 'member':
         return 'Hele beløpet (${fmt(amount)} kr) → $who';
+      case 'company':
+        return 'Hele beløpet (${fmt(amount)} kr) → Complete';
       case 'split':
         return '$who ${fmt(toMember)} kr · gruppa ${fmt(rest)} kr';
       case 'split_company':
@@ -5168,6 +5185,8 @@ class _OfferExtra {
     switch (allocation) {
       case 'member':
         return memberName ?? 'medlem';
+      case 'company':
+        return 'Complete';
       case 'split':
       case 'split_company':
         return allocationLabel(fmt);

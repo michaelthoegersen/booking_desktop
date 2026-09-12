@@ -301,6 +301,7 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
       //                    show hire
       //   member        → whole amount to the chosen member
       //   split         → member_amount to the member, remainder to the group
+      //   company       → the whole amount stays with Complete (never paid out)
       //   split_company → member_amount to the member, remainder stays with
       //                   Complete (never paid out to the lineup)
       final offersById = <String, Map<String, dynamic>>{};
@@ -347,9 +348,9 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
           } else {
             memberAmount = 0;
           }
-          // 'split_company': the remainder belongs to Complete, so it is not
-          // distributed to the lineup.
-          if (alloc != 'split_company') {
+          // Whatever belongs to Complete is not distributed to the lineup:
+          // all of it for 'company', the remainder for 'split_company'.
+          if (alloc != 'split_company' && alloc != 'company') {
             groupTotal += amount - memberAmount;
           }
           if (memberAmount > 0 && memberId != null) {
