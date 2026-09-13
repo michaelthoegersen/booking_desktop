@@ -492,7 +492,25 @@ class _MgmtGigDetailPageState extends State<MgmtGigDetailPage>
     }
   }
 
+  /// True when the offer this gig belongs to has been marked ready for
+  /// invoicing. Everything on the gig is read-only until økonomiansvarlig
+  /// unlocks it again.
+  bool get _invoiceLocked => _gig?['invoice_locked'] == true;
+
+  void _warnInvoiceLocked() {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Låst — tilbudet er meldt klart for fakturering. '
+            'Økonomiansvarlig må låse opp.'),
+      ),
+    );
+  }
+
   Future<void> _saveAndToggleLock(String section) async {
+    if (_invoiceLocked) {
+      _warnInvoiceLocked();
+      return;
+    }
     try {
       final field = section == 'skarp'
           ? 'lineup_locked_skarp'
@@ -2357,7 +2375,23 @@ class _InfoTabState extends State<_InfoTab> {
 
   Map<String, dynamic> get gig => widget.gig;
 
+  /// Offer marked ready for invoicing — every field on the gig is read-only
+  /// until økonomiansvarlig unlocks it.
+  bool get _invoiceLocked => gig['invoice_locked'] == true;
+
+  bool _blockedByInvoiceLock() {
+    if (!_invoiceLocked) return false;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Låst — tilbudet er meldt klart for fakturering. '
+            'Økonomiansvarlig må låse opp.'),
+      ),
+    );
+    return true;
+  }
+
   Future<void> _editField(String label, String dbField, {bool multiline = false}) async {
+    if (_blockedByInvoiceLock()) return;
     final current = gig[dbField]?.toString() ?? '';
     final ctrl = TextEditingController(text: current);
     final result = await showDialog<String>(
@@ -2395,6 +2429,7 @@ class _InfoTabState extends State<_InfoTab> {
   }
 
   Future<void> _editBool(String label, String dbField) async {
+    if (_blockedByInvoiceLock()) return;
     final current = gig[dbField] == true;
     await _sb.from('gigs').update({
       dbField: !current,
@@ -2405,6 +2440,7 @@ class _InfoTabState extends State<_InfoTab> {
   }
 
   Future<void> _editNumber(String label, String dbField) async {
+    if (_blockedByInvoiceLock()) return;
     final current = gig[dbField]?.toString() ?? '';
     final ctrl = TextEditingController(text: current);
     final result = await showDialog<String>(

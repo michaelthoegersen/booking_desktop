@@ -260,11 +260,22 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
     const validRoles = {'admin', 'gruppeleder_skarp', 'gruppeleder_bass', 'bruker'};
     String selectedRole = validRoles.contains(role) ? role : 'admin';
     String? selectedSection = section;
+    // Økonomiansvarlig is a flag rather than a role, so an admin keeps admin.
+    // Loaded alongside phone below and applied through setDialogState.
+    bool isFinance = false;
+    void Function(void Function())? applyLoaded;
 
     // Load phone separately
-    _sb.from('profiles').select('phone').eq('id', memberId).maybeSingle().then(
+    _sb
+        .from('profiles')
+        .select('phone, is_finance')
+        .eq('id', memberId)
+        .maybeSingle()
+        .then(
       (res) {
         phoneCtrl.text = (res?['phone'] ?? '').toString();
+        isFinance = res?['is_finance'] == true;
+        applyLoaded?.call(() {});
       },
     );
 
@@ -274,6 +285,9 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
         bool saving = false;
         return StatefulBuilder(
           builder: (ctx, setDialogState) {
+            // Lets the async profile load above refresh the checkbox once the
+            // is_finance value arrives.
+            applyLoaded = setDialogState;
             return AlertDialog(
               title: const Text('Rediger medlem'),
               content: SizedBox(
@@ -342,6 +356,21 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
                         setDialogState(() => selectedSection = v);
                       },
                     ),
+                    const SizedBox(height: 4),
+                    CheckboxListTile(
+                      value: isFinance,
+                      onChanged: (v) =>
+                          setDialogState(() => isFinance = v ?? false),
+                      title: const Text('Økonomiansvarlig'),
+                      subtitle: const Text(
+                        'Får varsel når et tilbud meldes klart for fakturering, '
+                        'og er den eneste som kan låse det opp igjen.',
+                        style: TextStyle(fontSize: 11),
+                      ),
+                      contentPadding: EdgeInsets.zero,
+                      controlAffinity: ListTileControlAffinity.leading,
+                      dense: true,
+                    ),
                   ],
                 ),
               ),
@@ -362,6 +391,7 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
                               'phone': phoneCtrl.text.trim(),
                               'role': selectedRole,
                               'section': selectedSection,
+                              'is_finance': isFinance,
                             }).eq('id', memberId);
                             if (ctx.mounted) Navigator.pop(ctx);
                             _load();

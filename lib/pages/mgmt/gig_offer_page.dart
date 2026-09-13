@@ -12,7 +12,6 @@ import '../../services/google_routes_service.dart';
 import '../../services/intensjonsavtale_pdf_service.dart';
 import '../../services/polyline_decoder.dart';
 import '../../services/toll_service.dart';
-import '../../services/tripletex_service.dart';
 import '../../state/active_company.dart';
 import '../../state/role_labels.dart';
 import '../../state/settings_store.dart';
@@ -165,8 +164,15 @@ class _GigOfferPageState extends State<GigOfferPage> {
   Map<String, double> _overrides = {};
 
   // _offerStatus removed — use _gigStatus for both gig and offer
-  int? _tripletexInvoiceId;
-  bool _sendingToTripletex = false;
+
+  // ── Klar for fakturering ───────────────────────────────────────────────────
+  // Set when someone marks the offer ready. While set, the offer and every gig
+  // it covers are locked for edits until økonomiansvarlig unlocks.
+  DateTime? _invoiceReadyAt;
+  bool _isFinance = false;
+  bool _markingInvoiceReady = false;
+
+  bool get _invoiceLocked => _invoiceReadyAt != null;
 
   // ── Agreement ───────────────────────────────────────────────────────────
   Map<String, dynamic>? _agreement;
@@ -284,6 +290,7 @@ class _GigOfferPageState extends State<GigOfferPage> {
       }
 
       _loadCompanies();
+      _loadFinanceFlag();
 
       if (_offerId != null) {
         // Load existing offer
@@ -326,7 +333,9 @@ class _GigOfferPageState extends State<GigOfferPage> {
         if (offer['invoiced_at'] != null) {
           _invoicedAt = DateTime.tryParse(offer['invoiced_at'].toString());
         }
-        _tripletexInvoiceId = (offer['tripletex_invoice_id'] as num?)?.toInt();
+        _invoiceReadyAt = offer['invoice_ready_at'] != null
+            ? DateTime.tryParse(offer['invoice_ready_at'].toString())
+            : null;
 
         // Load offer shows
         final rows = await _sb
@@ -654,6 +663,178 @@ class _GigOfferPageState extends State<GigOfferPage> {
   }
 
   // ────────────────────────────────────────────────────────────────────────────
+  // KLAR FOR FAKTURERING
+  // ────────────────────────────────────────────────────────────────────────────
+
+  Future<void> _loadFinanceFlag() async {
+    final uid = _sb.auth.currentUser?.id;
+    if (uid == null) return;
+    try {
+      final row = await _sb
+          .from('profiles')
+          .select('is_finance')
+          .eq('id', uid)
+          .maybeSingle();
+      if (mounted) {
+        setState(() => _isFinance = row?['is_finance'] == true);
+      }
+    } catch (e) {
+      debugPrint('Load finance flag: $e');
+    }
+  }
+
+  /// Gig ids this offer covers — the junction table is the source of truth,
+  /// with the legacy single gig_id as fallback.
+  Future<List<String>> _offerGigIds() async {
+    final ids = <String>{};
+    if (_offerId != null) {
+      try {
+        final rows = await _sb
+            .from('gig_offer_gigs')
+            .select('gig_id')
+            .eq('offer_id', _offerId!);
+        for (final r in (rows as List)) {
+          ids.add(r['gig_id'] as String);
+        }
+      } catch (e) {
+        debugPrint('Offer gig ids: $e');
+      }
+    }
+    for (final e in _dateEntries) {
+      if (e.gigId != null) ids.add(e.gigId!);
+    }
+    if (_gigId != null) ids.add(_gigId!);
+    return ids.toList();
+  }
+
+  Future<void> _markInvoiceReady() async {
+    if (_offerId == null) return;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Klar for fakturering'),
+        content: const Text(
+          'Økonomiansvarlig får beskjed, og tilbudet låses for endringer — '
+          'også tider, tidsplan og lag på de tilknyttede giggene.\n\n'
+          'Kun økonomiansvarlig kan låse opp igjen.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Avbryt'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Meld klar'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    setState(() => _markingInvoiceReady = true);
+    try {
+      // Save first, so what økonomi opens is what was marked ready.
+      await _save(silent: true);
+
+      final now = DateTime.now().toUtc().toIso8601String();
+      await _sb.from('gig_offers').update({
+        'invoice_ready_at': now,
+        'invoice_ready_by': _sb.auth.currentUser?.id,
+      }).eq('id', _offerId!);
+
+      final gigIds = await _offerGigIds();
+      if (gigIds.isNotEmpty) {
+        await _sb
+            .from('gigs')
+            .update({'invoice_locked': true}).inFilter('id', gigIds);
+      }
+
+      await _notifyFinance();
+
+      if (mounted) {
+        setState(() => _invoiceReadyAt = DateTime.now().toUtc());
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+              content: Text('Meldt klar for fakturering. Tilbudet er låst.')),
+        );
+      }
+    } catch (e) {
+      debugPrint('Mark invoice ready error: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Feil: $e'), backgroundColor: Colors.red),
+        );
+      }
+    }
+    if (mounted) setState(() => _markingInvoiceReady = false);
+  }
+
+  Future<void> _notifyFinance() async {
+    if (_companyId == null) return;
+    try {
+      final rows = await _sb
+          .from('profiles')
+          .select('id')
+          .eq('company_id', _companyId!)
+          .eq('is_finance', true);
+      final ids = (rows as List).map((r) => r['id'] as String).toList();
+      if (ids.isEmpty) {
+        debugPrint('No finance users to notify');
+        return;
+      }
+      final firma = _firmaCtrl.text.trim();
+      final dateFrom = _dateEntries.first.dateFrom;
+      final dateLabel =
+          dateFrom != null ? DateFormat('dd.MM.yyyy').format(dateFrom) : '';
+      await _sb.functions.invoke('notify-company', body: {
+        'company_id': _companyId,
+        'title': 'Klar for fakturering',
+        'body': [firma, dateLabel].where((v) => v.isNotEmpty).join(' — '),
+        'user_ids': ids,
+        'type': 'gig',
+        if (_gigId != null) 'gig_id': _gigId,
+      });
+    } catch (e) {
+      debugPrint('Notify finance error: $e');
+    }
+  }
+
+  Future<void> _unlockInvoice() async {
+    if (_offerId == null || !_isFinance) return;
+    setState(() => _markingInvoiceReady = true);
+    try {
+      await _sb.from('gig_offers').update({
+        'invoice_ready_at': null,
+        'invoice_ready_by': null,
+      }).eq('id', _offerId!);
+
+      final gigIds = await _offerGigIds();
+      if (gigIds.isNotEmpty) {
+        await _sb
+            .from('gigs')
+            .update({'invoice_locked': false}).inFilter('id', gigIds);
+      }
+
+      if (mounted) {
+        setState(() => _invoiceReadyAt = null);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Tilbudet er låst opp.')),
+        );
+      }
+    } catch (e) {
+      debugPrint('Unlock invoice error: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Feil: $e'), backgroundColor: Colors.red),
+        );
+      }
+    }
+    if (mounted) setState(() => _markingInvoiceReady = false);
+  }
+
+  // ────────────────────────────────────────────────────────────────────────────
   // COMPANIES / CONTACTS
   // ────────────────────────────────────────────────────────────────────────────
 
@@ -967,8 +1148,20 @@ class _GigOfferPageState extends State<GigOfferPage> {
   // SAVE — both gig and gig_offer
   // ────────────────────────────────────────────────────────────────────────────
 
-  Future<void> _save() async {
+  /// [silent] skips the closing snackbar/navigation so callers can save as a
+  /// step inside a larger action.
+  Future<void> _save({bool silent = false}) async {
     if (_companyId == null) return;
+    if (_invoiceLocked) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+              'Tilbudet er meldt klart for fakturering og låst. '
+              'Økonomiansvarlig må låse opp for å endre.'),
+        ),
+      );
+      return;
+    }
     if (_dateEntries.every((e) => e.dateFrom == null)) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Velg minst én dato')),
@@ -1364,7 +1557,7 @@ class _GigOfferPageState extends State<GigOfferPage> {
         }
       }
 
-      if (mounted) {
+      if (mounted && !silent) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Lagret')),
         );
@@ -3976,253 +4169,6 @@ class _GigOfferPageState extends State<GigOfferPage> {
   // SEND TO TRIPLETEX
   // ────────────────────────────────────────────────────────────────────────────
 
-  Future<void> _sendToTripletex() async {
-    if (_companyId == null || _offerId == null) return;
-
-    // ── Step 1: Build preview data (no API calls that create anything) ──
-    _recalc();
-
-    final customerName = _firmaCtrl.text.trim();
-    if (customerName.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Fyll inn kundenavn først')),
-      );
-      return;
-    }
-
-    final selectedShows = _shows.where((s) => s.selected).toList();
-    final previewLines = <Map<String, dynamic>>[];
-
-    if (selectedShows.isNotEmpty && _totalPerformers > 0) {
-      for (final show in selectedShows) {
-        final performers = show.drummers + show.dancers + show.others;
-        if (performers <= 0) continue;
-        final showFee = (_performerFees * performers / _totalPerformers);
-        previewLines.add({
-          'description': show.showName,
-          'amount': showFee.roundToDouble(),
-        });
-      }
-    }
-
-    if (_transportPrice > 0) {
-      previewLines.add({
-        'description': 'Transport',
-        'amount': _transportPrice.roundToDouble(),
-      });
-    }
-
-    if (_inearIncluded && _inearTotal > 0) {
-      previewLines.add({
-        'description': 'In-ear monitors',
-        'amount': _inearTotal.roundToDouble(),
-      });
-    }
-
-    final markup = _completeKonto + _bookingHonorar;
-    if (markup > 0) {
-      previewLines.add({
-        'description': 'Honorar',
-        'amount': markup.roundToDouble(),
-      });
-    }
-
-    if (previewLines.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Ingen fakturalinjer å sende')),
-      );
-      return;
-    }
-
-    final previewTotal = previewLines.fold<double>(
-      0, (s, l) => s + (l['amount'] as double),
-    );
-
-    // ── Step 2: Show confirmation dialog ──
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Bekreft faktura til Tripletex'),
-        content: SizedBox(
-          width: 420,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text('Kunde: $customerName',
-                  style: const TextStyle(fontWeight: FontWeight.bold)),
-              if (_orgNrCtrl.text.trim().isNotEmpty)
-                Text('Org.nr: ${_orgNrCtrl.text.trim()}'),
-              if (_emailCtrl.text.trim().isNotEmpty)
-                Text('E-post: ${_emailCtrl.text.trim()}'),
-              const SizedBox(height: 16),
-              const Text('Fakturalinjer:',
-                  style: TextStyle(fontWeight: FontWeight.bold)),
-              const SizedBox(height: 8),
-              ...previewLines.map((l) => Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 2),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Expanded(child: Text(l['description'] as String)),
-                        Text('${_nf.format(l['amount'])} kr'),
-                      ],
-                    ),
-                  )),
-              const Divider(),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  const Text('Totalt',
-                      style: TextStyle(fontWeight: FontWeight.bold)),
-                  Text('${_nf.format(previewTotal)} kr',
-                      style: const TextStyle(fontWeight: FontWeight.bold)),
-                ],
-              ),
-              const SizedBox(height: 16),
-              Text(
-                'Sendes som ${_invoiceOnEhf ? 'EHF' : 'e-post'} via Tripletex.',
-                style: TextStyle(
-                    fontSize: 12, color: Colors.grey.shade600),
-              ),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Avbryt'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Send faktura'),
-          ),
-        ],
-      ),
-    );
-
-    if (confirmed != true) return;
-
-    // ── Step 3: Actually send ──
-    setState(() => _sendingToTripletex = true);
-    try {
-      // Find or create customer
-      final customer = await TripletexService.findOrCreateCustomer(
-        _companyId!,
-        name: customerName,
-        orgNr: _orgNrCtrl.text.trim(),
-        email: _emailCtrl.text.trim(),
-      );
-      final customerId = (customer['id'] as num).toInt();
-      final resolvedName = customer['name'] as String? ?? customerName;
-      debugPrint('Resolved customer: id=$customerId name=$resolvedName');
-
-      // Set invoiceSendMethod on the customer — EHF requires ELMA registration
-      var sendMethod = _invoiceOnEhf ? 'EHF' : 'EMAIL';
-      try {
-        await TripletexService.updateCustomer(_companyId!, customerId, {
-          'invoiceSendMethod': sendMethod,
-        });
-        debugPrint('Customer $customerId invoiceSendMethod set to $sendMethod');
-      } catch (e) {
-        if (sendMethod == 'EHF') {
-          debugPrint('EHF not available for customer, falling back to EMAIL: $e');
-          sendMethod = 'EMAIL';
-          await TripletexService.updateCustomer(_companyId!, customerId, {
-            'invoiceSendMethod': 'EMAIL',
-          });
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('Kunden kan ikke motta EHF — sendes på e-post i stedet'),
-                backgroundColor: Colors.orange,
-              ),
-            );
-          }
-        } else {
-          rethrow;
-        }
-      }
-
-      // Build order lines
-      final orderLines = previewLines.map((l) => {
-        'description': l['description'],
-        'count': 1,
-        'unitPriceExcludingVatCurrency': l['amount'],
-      }).toList();
-
-      // Create order
-      final invoiceDate = DateFormat('yyyy-MM-dd').format(DateTime.now());
-
-      final order = await TripletexService.createOrder(_companyId!, {
-        'customer': {'id': customerId},
-        'orderDate': invoiceDate,
-        'deliveryDate': invoiceDate,
-        'invoicesDueIn': 14,
-        'orderLines': orderLines,
-      });
-
-      final orderId = (order['id'] as num).toInt();
-      debugPrint('Order created: $orderId');
-
-      // Create invoice from order (without sending yet)
-      final invoice = await TripletexService.invoiceOrder(
-        _companyId!,
-        orderId: orderId,
-        invoiceDate: invoiceDate,
-      );
-
-      final tripletexId = (invoice['id'] as num?)?.toInt() ??
-          (invoice['invoiceNumber'] as num?)?.toInt();
-
-      // Explicitly send via the resolved method (EHF or EMAIL)
-      if (tripletexId != null) {
-        debugPrint('Sending invoice $tripletexId as $sendMethod');
-        await TripletexService.sendInvoice(
-          _companyId!,
-          invoiceId: tripletexId,
-          sendType: sendMethod,
-          overrideEmail: sendMethod == 'EMAIL' ? _emailCtrl.text.trim() : null,
-        );
-      }
-
-      // Save tripletex_invoice_id + set status to invoiced
-      if (tripletexId != null) {
-        final now = DateTime.now().toUtc().toIso8601String();
-        await _sb.from('gig_offers').update({
-          'tripletex_invoice_id': tripletexId,
-          'status': 'invoiced',
-          if (_invoicedAt == null) 'invoiced_at': now,
-        }).eq('id', _offerId!);
-        // Update status on all linked gigs
-        for (final entry in _dateEntries) {
-          if (entry.gigId != null) {
-            await _sb.from('gigs').update({'status': 'invoiced'}).eq('id', entry.gigId!);
-          }
-        }
-        setState(() {
-          _tripletexInvoiceId = tripletexId;
-          _gigStatus = 'invoiced';
-          _invoicedAt ??= DateTime.now().toUtc();
-        });
-      }
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Faktura opprettet og sendt (ID: $tripletexId)')),
-        );
-      }
-    } catch (e) {
-      debugPrint('Tripletex send error: $e');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Feil: $e'), backgroundColor: Colors.red),
-        );
-      }
-    }
-    if (mounted) setState(() => _sendingToTripletex = false);
-  }
-
   // ────────────────────────────────────────────────────────────────────────────
   // HANDLINGER (RIGHT)
   // ────────────────────────────────────────────────────────────────────────────
@@ -4484,45 +4430,78 @@ class _GigOfferPageState extends State<GigOfferPage> {
               ),
           ],
 
-          // Tripletex invoice button
-          if (_offerId != null &&
-              (_gigStatus == 'confirmed' || _gigStatus == 'invoiced')) ...[
+          // ── Klar for fakturering ──
+          // Replaces the old "Send til Tripletex" button. Marking the offer
+          // ready notifies økonomiansvarlig and locks the offer and its gigs;
+          // only økonomiansvarlig can unlock.
+          if (_offerId != null) ...[
+            const SizedBox(height: 16),
+            const Divider(),
             const SizedBox(height: 12),
-            if (_tripletexInvoiceId != null)
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                decoration: BoxDecoration(
-                  color: Colors.green.shade50,
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: Colors.green.shade200),
-                ),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(Icons.check_circle, size: 16, color: Colors.green.shade700),
-                    const SizedBox(width: 8),
-                    Text(
-                      'Sendt til Tripletex (#$_tripletexInvoiceId)',
-                      style: TextStyle(
-                        fontWeight: FontWeight.w700,
-                        fontSize: 13,
-                        color: Colors.green.shade700,
-                      ),
-                    ),
-                  ],
-                ),
-              )
-            else
-              OutlinedButton.icon(
-                onPressed: _sendingToTripletex ? null : _sendToTripletex,
-                icon: _sendingToTripletex
+            const Text('Fakturering',
+                style: TextStyle(fontWeight: FontWeight.w900, fontSize: 13)),
+            const SizedBox(height: 8),
+            if (!_invoiceLocked)
+              FilledButton.icon(
+                onPressed: _markingInvoiceReady ? null : _markInvoiceReady,
+                icon: _markingInvoiceReady
                     ? const SizedBox(
                         width: 16,
                         height: 16,
                         child: CircularProgressIndicator(strokeWidth: 2))
-                    : const Icon(Icons.send, size: 16),
-                label: const Text('Send til Tripletex'),
+                    : const Icon(Icons.receipt_long, size: 18),
+                label: const Text('Klar for fakturering'),
+              )
+            else ...[
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: Colors.orange.withValues(alpha: 0.08),
+                  borderRadius: BorderRadius.circular(8),
+                  border:
+                      Border.all(color: Colors.orange.withValues(alpha: 0.3)),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Row(
+                      children: [
+                        Icon(Icons.lock, size: 16, color: Colors.orange),
+                        SizedBox(width: 6),
+                        Text('Låst for fakturering',
+                            style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w700,
+                                color: Colors.orange)),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Meldt klar ${DateFormat('dd.MM.yyyy HH:mm').format(_invoiceReadyAt!.toLocal())}',
+                      style:
+                          TextStyle(fontSize: 11, color: cs.onSurfaceVariant),
+                    ),
+                    if (!_isFinance)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 4),
+                        child: Text(
+                          'Økonomiansvarlig må låse opp for å endre.',
+                          style: TextStyle(
+                              fontSize: 11, color: cs.onSurfaceVariant),
+                        ),
+                      ),
+                  ],
+                ),
               ),
+              if (_isFinance) ...[
+                const SizedBox(height: 10),
+                OutlinedButton.icon(
+                  onPressed: _markingInvoiceReady ? null : _unlockInvoice,
+                  icon: const Icon(Icons.lock_open, size: 16),
+                  label: const Text('Lås opp'),
+                ),
+              ],
+            ],
           ],
         ],
       ),
