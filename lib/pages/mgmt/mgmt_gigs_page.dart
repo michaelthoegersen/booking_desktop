@@ -2438,6 +2438,33 @@ class _GigRow extends StatelessWidget {
               }),
               const SizedBox(width: 8),
             ],
+            // Marked ready for invoicing — shown next to the status badge,
+            // not instead of it.
+            if (gig['invoice_locked'] == true) ...[
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: Colors.orange.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(999),
+                  border:
+                      Border.all(color: Colors.orange.withValues(alpha: 0.3)),
+                ),
+                child: const Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.lock, size: 12, color: Colors.orange),
+                    SizedBox(width: 4),
+                    Text('Klar for fakturering',
+                        style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                            color: Colors.orange)),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+            ],
             if (type == 'gig' && status != 'cancelled')
               _GigStatusBadge(status: status),
             PopupMenuButton<String>(

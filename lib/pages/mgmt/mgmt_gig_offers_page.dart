@@ -490,6 +490,40 @@ class _MgmtGigOffersPageState extends State<MgmtGigOffersPage> {
                                     ),
                                     const SizedBox(width: 8),
                                   ],
+                                  // Klar for fakturering — shown in addition
+                                  // to the status badge, never instead of it.
+                                  if (o['invoice_ready_at'] != null) ...[
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 10, vertical: 4),
+                                      decoration: BoxDecoration(
+                                        color: Colors.orange
+                                            .withValues(alpha: 0.12),
+                                        borderRadius:
+                                            BorderRadius.circular(999),
+                                        border: Border.all(
+                                            color: Colors.orange
+                                                .withValues(alpha: 0.3)),
+                                      ),
+                                      child: const Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Icon(Icons.lock,
+                                              size: 12, color: Colors.orange),
+                                          SizedBox(width: 4),
+                                          Text(
+                                            'Klar for fakturering',
+                                            style: TextStyle(
+                                              fontSize: 12,
+                                              fontWeight: FontWeight.w700,
+                                              color: Colors.orange,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                    const SizedBox(width: 8),
+                                  ],
                                   // Status badge
                                   Container(
                                     padding: const EdgeInsets.symmetric(

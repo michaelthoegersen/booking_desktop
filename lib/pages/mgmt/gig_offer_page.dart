@@ -751,13 +751,18 @@ class _GigOfferPageState extends State<GigOfferPage> {
             .update({'invoice_locked': true}).inFilter('id', gigIds);
       }
 
-      await _notifyFinance();
+      final notified = await _notifyFinance();
 
       if (mounted) {
         setState(() => _invoiceReadyAt = DateTime.now().toUtc());
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-              content: Text('Meldt klar for fakturering. Tilbudet er låst.')),
+          SnackBar(
+            content: Text(notified > 0
+                ? 'Meldt klar for fakturering. Tilbudet er låst.'
+                : 'Tilbudet er låst, men ingen er satt som økonomiansvarlig — '
+                    'ingen fikk varsel. Sett det i Innstillinger → Medlemmer.'),
+            duration: Duration(seconds: notified > 0 ? 4 : 10),
+          ),
         );
       }
     } catch (e) {
@@ -771,8 +776,11 @@ class _GigOfferPageState extends State<GigOfferPage> {
     if (mounted) setState(() => _markingInvoiceReady = false);
   }
 
-  Future<void> _notifyFinance() async {
-    if (_companyId == null) return;
+  /// Returns how many økonomiansvarlige were notified, so the caller can say
+  /// something when nobody is configured — a silent no-op here looked exactly
+  /// like a delivered notification.
+  Future<int> _notifyFinance() async {
+    if (_companyId == null) return 0;
     try {
       final rows = await _sb
           .from('profiles')
@@ -782,7 +790,7 @@ class _GigOfferPageState extends State<GigOfferPage> {
       final ids = (rows as List).map((r) => r['id'] as String).toList();
       if (ids.isEmpty) {
         debugPrint('No finance users to notify');
-        return;
+        return 0;
       }
       final firma = _firmaCtrl.text.trim();
       final dateFrom = _dateEntries.first.dateFrom;
@@ -796,8 +804,10 @@ class _GigOfferPageState extends State<GigOfferPage> {
         'type': 'gig',
         if (_gigId != null) 'gig_id': _gigId,
       });
+      return ids.length;
     } catch (e) {
       debugPrint('Notify finance error: $e');
+      return 0;
     }
   }
 

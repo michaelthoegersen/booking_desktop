@@ -303,6 +303,10 @@ class _MgmtSideNavState extends State<_MgmtSideNav> {
   int _unreadMessages = 0;
   int _pendingAgreements = 0;
   int _pendingExpenses = 0;
+  /// Offers marked "Klar for fakturering". Counted on the Tilbud badge the
+  /// same way signed agreements are, but only for økonomiansvarlige — nobody
+  /// else's badge changes.
+  int _invoiceReadyOffers = 0;
   RealtimeChannel? _channel;
   Timer? _pollTimer;
 
@@ -312,6 +316,7 @@ class _MgmtSideNavState extends State<_MgmtSideNav> {
     _loadFlags();
     _loadUnreadMessages();
     _loadPendingAgreements();
+    _loadInvoiceReadyOffers();
     _loadPendingExpenses();
     companyFlagsNotifier.addListener(_onFlagsChanged);
     mgmtUnreadNotifier.addListener(_loadUnreadMessages);
@@ -340,7 +345,10 @@ class _MgmtSideNavState extends State<_MgmtSideNav> {
           event: PostgresChangeEvent.update,
           schema: 'public',
           table: 'agreement_tokens',
-          callback: (_) => _loadPendingAgreements(),
+          callback: (_) {
+            _loadPendingAgreements();
+            _loadInvoiceReadyOffers();
+          },
         )
         .onPostgresChanges(
           event: PostgresChangeEvent.all,
@@ -352,6 +360,7 @@ class _MgmtSideNavState extends State<_MgmtSideNav> {
     _pollTimer = Timer.periodic(const Duration(seconds: 15), (_) {
       _loadUnreadMessages();
       _loadPendingAgreements();
+    _loadInvoiceReadyOffers();
       _loadPendingExpenses();
     });
   }
@@ -370,6 +379,7 @@ class _MgmtSideNavState extends State<_MgmtSideNav> {
     _loadFlags();
     _loadUnreadMessages();
     _loadPendingAgreements();
+    _loadInvoiceReadyOffers();
     _loadPendingExpenses();
   }
 
@@ -470,6 +480,37 @@ class _MgmtSideNavState extends State<_MgmtSideNav> {
       if (mounted) setState(() => _pendingAgreements = (rows as List).length);
     } catch (e) {
       debugPrint('Pending agreements badge error: $e');
+    }
+  }
+
+  Future<void> _loadInvoiceReadyOffers() async {
+    try {
+      final companyId = activeCompanyNotifier.value?.id;
+      final uid = _sb.auth.currentUser?.id;
+      if (companyId == null || uid == null) return;
+
+      final me = await _sb
+          .from('profiles')
+          .select('is_finance')
+          .eq('id', uid)
+          .maybeSingle();
+      if (me?['is_finance'] != true) {
+        if (mounted && _invoiceReadyOffers != 0) {
+          setState(() => _invoiceReadyOffers = 0);
+        }
+        return;
+      }
+
+      final rows = await _sb
+          .from('gig_offers')
+          .select('id')
+          .eq('company_id', companyId)
+          .not('invoice_ready_at', 'is', null);
+      if (mounted) {
+        setState(() => _invoiceReadyOffers = (rows as List).length);
+      }
+    } catch (e) {
+      debugPrint('Invoice-ready badge error: $e');
     }
   }
 
@@ -577,7 +618,7 @@ class _MgmtSideNavState extends State<_MgmtSideNav> {
                       icon: Icons.request_quote_rounded,
                       label: 'Tilbud',
                       route: '/m/offers',
-                      badge: _pendingAgreements,
+                      badge: _pendingAgreements + _invoiceReadyOffers,
                     ),
                     _MgmtNavItem(
                       icon: Icons.receipt_long_rounded,
