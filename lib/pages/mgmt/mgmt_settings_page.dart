@@ -3,6 +3,7 @@ import 'dart:typed_data';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../models/profile_field.dart';
@@ -29,6 +30,8 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
   Map<String, dynamic>? _company;
   String? get _companyId => activeCompanyNotifier.value?.id;
   List<Map<String, dynamic>> _members = [];
+  /// Members who asked for a new password from the login screen.
+  List<Map<String, dynamic>> _resetRequests = [];
   List<Map<String, dynamic>> _showTypes = [];
   List<Map<String, dynamic>> _riders = [];
   bool _showTours = true;
@@ -184,6 +187,18 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
             .eq('company_id', _companyId!);
         _members = List<Map<String, dynamic>>.from(members);
 
+        try {
+          final reqs = await _sb
+              .from('password_reset_requests')
+              .select('id, email, user_id, requested_at')
+              .eq('company_id', _companyId!)
+              .eq('status', 'pending')
+              .order('requested_at', ascending: false);
+          _resetRequests = List<Map<String, dynamic>>.from(reqs);
+        } catch (e) {
+          debugPrint('Load reset requests: $e');
+        }
+
         final types = await _sb
             .from('show_types')
             .select('*')
@@ -242,6 +257,113 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
         if (column == 'show_bus_requests_mgmt') _showBusRequests = value;
       });
       _emitFlags();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Feil: $e'), backgroundColor: Colors.red),
+        );
+      }
+    }
+  }
+
+  Future<void> _dismissResetRequest(Map<String, dynamic> req) async {
+    try {
+      await _sb.from('password_reset_requests').update({
+        'status': 'dismissed',
+        'handled_at': DateTime.now().toUtc().toIso8601String(),
+        'handled_by': _sb.auth.currentUser?.id,
+      }).eq('id', req['id']);
+      _load();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Feil: $e')),
+        );
+      }
+    }
+  }
+
+  /// Set a new password for a locked-out member and close the request.
+  /// The password is shown once so it can be passed on — the app has no way to
+  /// email it.
+  Future<void> _setPasswordFor(Map<String, dynamic> req) async {
+    final userId = req['user_id'] as String?;
+    if (userId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Forespørselen mangler bruker.')),
+      );
+      return;
+    }
+
+    final ctrl = TextEditingController();
+    final pw = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Sett nytt passord'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(req['email'] as String? ?? '',
+                style: const TextStyle(fontWeight: FontWeight.w700)),
+            const SizedBox(height: 12),
+            TextField(
+              controller: ctrl,
+              autofocus: true,
+              decoration: const InputDecoration(
+                labelText: 'Nytt passord',
+                helperText: 'Minst 8 tegn. Gi det videre til medlemmet.',
+                border: OutlineInputBorder(),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Avbryt'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
+            child: const Text('Sett passord'),
+          ),
+        ],
+      ),
+    );
+    ctrl.dispose();
+    if (pw == null || pw.isEmpty || !mounted) return;
+    if (pw.length < 8) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Passordet må være minst 8 tegn.')),
+      );
+      return;
+    }
+
+    try {
+      final res = await _sb.functions.invoke(
+        'reset-password',
+        body: {'user_id': userId, 'password': pw},
+      );
+      final data = res.data;
+      if (data is Map && data['error'] != null) {
+        throw Exception(data['error']);
+      }
+
+      await _sb.from('password_reset_requests').update({
+        'status': 'handled',
+        'handled_at': DateTime.now().toUtc().toIso8601String(),
+        'handled_by': _sb.auth.currentUser?.id,
+      }).eq('id', req['id']);
+
+      _load();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Passord satt for ${req['email']}. Gi det videre.'),
+            duration: const Duration(seconds: 6),
+          ),
+        );
+      }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -846,6 +968,80 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
                   ),
 
                   const SizedBox(height: 24),
+
+                  // Members locked out of the app. Shown above the member list
+                  // because it is the one thing here that needs acting on.
+                  if (_resetRequests.isNotEmpty) ...[
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        color: Colors.orange.withValues(alpha: 0.08),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                            color: Colors.orange.withValues(alpha: 0.3)),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              const Icon(Icons.lock_reset,
+                                  size: 18, color: Colors.orange),
+                              const SizedBox(width: 6),
+                              Text(
+                                'Ber om nytt passord (${_resetRequests.length})',
+                                style: const TextStyle(
+                                    fontWeight: FontWeight.w900,
+                                    color: Colors.orange),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 8),
+                          ..._resetRequests.map((r) => Padding(
+                                padding: const EdgeInsets.symmetric(vertical: 4),
+                                child: Row(
+                                  children: [
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          Text(r['email'] as String? ?? '',
+                                              style: const TextStyle(
+                                                  fontWeight:
+                                                      FontWeight.w700)),
+                                          if (r['requested_at'] != null)
+                                            Text(
+                                              DateFormat('dd.MM.yyyy HH:mm')
+                                                  .format(DateTime.parse(
+                                                          r['requested_at']
+                                                              .toString())
+                                                      .toLocal()),
+                                              style: TextStyle(
+                                                  fontSize: 11,
+                                                  color: cs.onSurfaceVariant),
+                                            ),
+                                        ],
+                                      ),
+                                    ),
+                                    TextButton(
+                                      onPressed: () => _dismissResetRequest(r),
+                                      child: const Text('Avvis'),
+                                    ),
+                                    const SizedBox(width: 4),
+                                    FilledButton(
+                                      onPressed: () => _setPasswordFor(r),
+                                      child: const Text('Sett nytt passord'),
+                                    ),
+                                  ],
+                                ),
+                              )),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 24),
+                  ],
 
                   // Team members
                   InkWell(

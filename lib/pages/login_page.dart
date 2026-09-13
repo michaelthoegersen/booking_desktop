@@ -21,6 +21,73 @@ class _LoginPageState extends State<LoginPage> {
 
   final SupabaseClient _sb = Supabase.instance.client;
 
+  /// Members cannot reset their own password — the app does not use Supabase
+  /// Auth's email. Instead the request goes to the company's admins, who set a
+  /// new password from Innstillinger → Medlemmer.
+  Future<void> _requestPasswordReset() async {
+    final ctrl = TextEditingController(text: _emailCtrl.text.trim());
+    final email = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Glemt passord'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Skriv inn e-postadressen din, så gir vi beskjed til '
+              'administrator. Du får et nytt passord av dem.',
+              style: TextStyle(fontSize: 13),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: ctrl,
+              autofocus: true,
+              keyboardType: TextInputType.emailAddress,
+              decoration: const InputDecoration(
+                labelText: 'E-post',
+                border: OutlineInputBorder(),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Avbryt'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
+            child: const Text('Send forespørsel'),
+          ),
+        ],
+      ),
+    );
+    ctrl.dispose();
+    if (email == null || email.isEmpty || !mounted) return;
+
+    try {
+      await Supabase.instance.client.functions.invoke(
+        'request-password-reset',
+        body: {'email': email},
+      );
+    } catch (e) {
+      debugPrint('Password reset request error: $e');
+    }
+    // Same message either way — whether the address exists is not something
+    // an anonymous visitor should be able to find out.
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+              'Administrator har fått beskjed. Du blir kontaktet med nytt '
+              'passord.'),
+          duration: Duration(seconds: 6),
+        ),
+      );
+    }
+  }
+
   @override
   void dispose() {
     _emailCtrl.dispose();
@@ -204,7 +271,14 @@ const SizedBox(height: 20),
                       ),
               ),
             ),
-            const SizedBox(height: 20),
+            const SizedBox(height: 8),
+
+            // ---------------- FORGOT PASSWORD ----------------
+            TextButton(
+              onPressed: _loading ? null : _requestPasswordReset,
+              child: const Text('Glemt passord?'),
+            ),
+            const SizedBox(height: 12),
 
             // ---------------- BACK ----------------
             TextButton.icon(

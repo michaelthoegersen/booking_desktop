@@ -307,6 +307,8 @@ class _MgmtSideNavState extends State<_MgmtSideNav> {
   /// same way signed agreements are, but only for økonomiansvarlige — nobody
   /// else's badge changes.
   int _invoiceReadyOffers = 0;
+  /// Members locked out of the app who have asked for a new password.
+  int _passwordResetRequests = 0;
   RealtimeChannel? _channel;
   Timer? _pollTimer;
 
@@ -317,6 +319,7 @@ class _MgmtSideNavState extends State<_MgmtSideNav> {
     _loadUnreadMessages();
     _loadPendingAgreements();
     _loadInvoiceReadyOffers();
+    _loadPasswordResetRequests();
     _loadPendingExpenses();
     companyFlagsNotifier.addListener(_onFlagsChanged);
     mgmtUnreadNotifier.addListener(_loadUnreadMessages);
@@ -348,6 +351,7 @@ class _MgmtSideNavState extends State<_MgmtSideNav> {
           callback: (_) {
             _loadPendingAgreements();
             _loadInvoiceReadyOffers();
+    _loadPasswordResetRequests();
           },
         )
         .onPostgresChanges(
@@ -361,6 +365,7 @@ class _MgmtSideNavState extends State<_MgmtSideNav> {
       _loadUnreadMessages();
       _loadPendingAgreements();
     _loadInvoiceReadyOffers();
+    _loadPasswordResetRequests();
       _loadPendingExpenses();
     });
   }
@@ -380,6 +385,7 @@ class _MgmtSideNavState extends State<_MgmtSideNav> {
     _loadUnreadMessages();
     _loadPendingAgreements();
     _loadInvoiceReadyOffers();
+    _loadPasswordResetRequests();
     _loadPendingExpenses();
   }
 
@@ -511,6 +517,23 @@ class _MgmtSideNavState extends State<_MgmtSideNav> {
       }
     } catch (e) {
       debugPrint('Invoice-ready badge error: $e');
+    }
+  }
+
+  Future<void> _loadPasswordResetRequests() async {
+    try {
+      final companyId = activeCompanyNotifier.value?.id;
+      if (companyId == null) return;
+      final rows = await _sb
+          .from('password_reset_requests')
+          .select('id')
+          .eq('company_id', companyId)
+          .eq('status', 'pending');
+      if (mounted) {
+        setState(() => _passwordResetRequests = (rows as List).length);
+      }
+    } catch (e) {
+      debugPrint('Password reset badge error: $e');
     }
   }
 
@@ -663,6 +686,7 @@ class _MgmtSideNavState extends State<_MgmtSideNav> {
               icon: Icons.settings,
               label: 'Innstillinger',
               route: '/m/settings',
+              badge: _passwordResetRequests,
             ),
           ],
         ),
