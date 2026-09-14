@@ -4306,6 +4306,27 @@ class _KontraktTabState extends State<_KontraktTab> {
         extras: widget.offerExtras,
       );
 
+      // Archive the signed PDF. This exact file is what the customer receives,
+      // and it is the only evidence both parties signed — before this it was
+      // generated, mailed and discarded.
+      try {
+        final archiveGigId = widget.gig['id'] as String?;
+        final signedPath =
+            '$archiveGigId/signed_${_agreement!['id']}.pdf';
+        await _sb.storage.from('agreements').uploadBinary(
+              signedPath,
+              signedResult.mainPdf,
+              fileOptions: const FileOptions(
+                  contentType: 'application/pdf', upsert: true),
+            );
+        await _sb
+            .from('agreement_tokens')
+            .update({'signed_pdf_path': signedPath}).eq(
+                'id', _agreement!['id']);
+      } catch (e) {
+        debugPrint('Archive signed agreement error: $e');
+      }
+
       // Send signed PDF to customer
       final customerEmail = _agreement!['customer_email'] as String? ?? '';
       final venue = widget.gig['venue_name'] ?? '';

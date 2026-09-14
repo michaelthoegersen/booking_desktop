@@ -1,5 +1,7 @@
 import 'dart:async';
 
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:printing/printing.dart';
 import 'package:flutter/services.dart';
@@ -670,11 +672,11 @@ class _GigOfferPageState extends State<GigOfferPage> {
   /// Show the signed agreement so it can be checked against the offer before
   /// locking it for invoicing.
   ///
-  /// The signed PDF is not stored anywhere — _approveAgreement generates it and
-  /// mails it. So it is rebuilt here from the same inputs that flow used. The
-  /// one deliberate difference: the company signature date comes from the
-  /// stored approved_at rather than DateTime.now(), so a preview opened later
-  /// shows the date the customer actually received, not today's.
+  /// Loads the archived file — the exact PDF that was mailed to the customer
+  /// when both parties signed. Agreements approved before archiving existed
+  /// have no stored copy; those are rebuilt from the same inputs the approval
+  /// used, and the dialog says so, because a rebuild reflects the offer as it
+  /// stands today rather than as it was signed.
   Future<void> _previewSignedAgreement() async {
     if (_agreement == null) return;
 
@@ -685,6 +687,21 @@ class _GigOfferPageState extends State<GigOfferPage> {
     );
 
     try {
+      final storedPath = _agreement!['signed_pdf_path'] as String?;
+      if (storedPath != null && storedPath.isNotEmpty) {
+        try {
+          final bytes =
+              await _sb.storage.from('agreements').download(storedPath);
+          if (!mounted) return;
+          Navigator.of(context).pop();
+          await _showSignedPdf(bytes, archived: true);
+          return;
+        } catch (e) {
+          debugPrint('Download archived signed agreement failed: $e');
+          // Fall through to the rebuild below rather than showing nothing.
+        }
+      }
+
       final df = DateFormat('dd.MM.yyyy');
       final firstGigId = _dateEntries.first.gigId ?? _gigId;
       if (firstGigId == null) throw Exception('Fant ikke gig');
@@ -727,46 +744,7 @@ class _GigOfferPageState extends State<GigOfferPage> {
 
       if (!mounted) return;
       Navigator.of(context).pop(); // close the spinner
-
-      await showDialog(
-        context: context,
-        builder: (ctx) => Dialog(
-          insetPadding: const EdgeInsets.all(24),
-          child: Column(
-            children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(20, 16, 12, 8),
-                child: Row(
-                  children: [
-                    const Icon(Icons.verified, size: 18, color: Colors.blue),
-                    const SizedBox(width: 8),
-                    const Expanded(
-                      child: Text('Signert intensjonsavtale',
-                          style: TextStyle(
-                              fontWeight: FontWeight.w900, fontSize: 16)),
-                    ),
-                    IconButton(
-                      icon: const Icon(Icons.close),
-                      onPressed: () => Navigator.pop(ctx),
-                    ),
-                  ],
-                ),
-              ),
-              const Divider(height: 1),
-              Expanded(
-                child: PdfPreview(
-                  build: (_) => result.mainPdf,
-                  canChangePageFormat: false,
-                  canChangeOrientation: false,
-                  canDebug: false,
-                  allowPrinting: true,
-                  allowSharing: true,
-                ),
-              ),
-            ],
-          ),
-        ),
-      );
+      await _showSignedPdf(result.mainPdf, archived: false);
     } catch (e) {
       if (mounted) {
         Navigator.of(context).pop(); // close the spinner
@@ -775,6 +753,66 @@ class _GigOfferPageState extends State<GigOfferPage> {
         );
       }
     }
+  }
+
+  Future<void> _showSignedPdf(Uint8List bytes,
+      {required bool archived}) async {
+    await showDialog(
+      context: context,
+      builder: (ctx) => Dialog(
+        insetPadding: const EdgeInsets.all(24),
+        child: Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 16, 12, 8),
+              child: Row(
+                children: [
+                  Icon(archived ? Icons.verified : Icons.warning_amber_rounded,
+                      size: 18,
+                      color: archived ? Colors.blue : Colors.orange),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text('Signert intensjonsavtale',
+                            style: TextStyle(
+                                fontWeight: FontWeight.w900, fontSize: 16)),
+                        Text(
+                          archived
+                              ? 'Arkivert kopi — den kunden fikk tilsendt'
+                              : 'Ingen arkivert kopi for denne avtalen. '
+                                  'Gjenskapt fra tilbudet slik det er nå.',
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: archived ? Colors.blue : Colors.orange,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.close),
+                    onPressed: () => Navigator.pop(ctx),
+                  ),
+                ],
+              ),
+            ),
+            const Divider(height: 1),
+            Expanded(
+              child: PdfPreview(
+                build: (_) => bytes,
+                canChangePageFormat: false,
+                canChangeOrientation: false,
+                canDebug: false,
+                allowPrinting: true,
+                allowSharing: true,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   // ────────────────────────────────────────────────────────────────────────────
@@ -4366,6 +4404,25 @@ class _GigOfferPageState extends State<GigOfferPage> {
         dateEntries: entries,
         markupOnAll: _markupOnAll,
       );
+
+      // Archive the signed PDF. This exact file is what the customer receives,
+      // and it is the only evidence both parties signed — before this it was
+      // generated, mailed and discarded.
+      try {
+        final signedPath = '$firstGigId/signed_${_agreement!['id']}.pdf';
+        await _sb.storage.from('agreements').uploadBinary(
+              signedPath,
+              signedResult.mainPdf,
+              fileOptions: const FileOptions(
+                  contentType: 'application/pdf', upsert: true),
+            );
+        await _sb
+            .from('agreement_tokens')
+            .update({'signed_pdf_path': signedPath}).eq(
+                'id', _agreement!['id']);
+      } catch (e) {
+        debugPrint('Archive signed agreement error: $e');
+      }
 
       // Send signed PDF to customer
       final customerEmail = _agreement!['customer_email'] as String? ?? '';
