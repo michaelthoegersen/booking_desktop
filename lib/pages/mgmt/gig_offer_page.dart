@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:printing/printing.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
@@ -660,6 +661,120 @@ class _GigOfferPageState extends State<GigOfferPage> {
     if (v == null) return fallback;
     if (v is num) return v.toDouble();
     return double.tryParse(v.toString()) ?? fallback;
+  }
+
+  // ────────────────────────────────────────────────────────────────────────────
+  // SIGNERT AVTALE — FORHÅNDSVISNING
+  // ────────────────────────────────────────────────────────────────────────────
+
+  /// Show the signed agreement so it can be checked against the offer before
+  /// locking it for invoicing.
+  ///
+  /// The signed PDF is not stored anywhere — _approveAgreement generates it and
+  /// mails it. So it is rebuilt here from the same inputs that flow used. The
+  /// one deliberate difference: the company signature date comes from the
+  /// stored approved_at rather than DateTime.now(), so a preview opened later
+  /// shows the date the customer actually received, not today's.
+  Future<void> _previewSignedAgreement() async {
+    if (_agreement == null) return;
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const Center(child: CircularProgressIndicator()),
+    );
+
+    try {
+      final df = DateFormat('dd.MM.yyyy');
+      final firstGigId = _dateEntries.first.gigId ?? _gigId;
+      if (firstGigId == null) throw Exception('Fant ikke gig');
+
+      final gigMap = await _sb
+          .from('gigs')
+          .select('*')
+          .eq('id', firstGigId)
+          .single();
+      final showMaps = await _sb
+          .from('gig_shows')
+          .select('*')
+          .eq('gig_id', firstGigId)
+          .order('sort_order')
+          .then((rows) => List<Map<String, dynamic>>.from(rows));
+
+      final acceptedName = _agreement!['accepted_name'] as String? ?? '';
+      final acceptedAt = _agreement!['accepted_at'] as String?;
+      final acceptedDate = acceptedAt != null
+          ? df.format(DateTime.parse(acceptedAt).toLocal())
+          : '';
+      final approvedAt = _agreement!['approved_at'] as String?;
+      final approvedDate = approvedAt != null
+          ? df.format(DateTime.parse(approvedAt).toLocal())
+          : df.format(DateTime.now());
+
+      final entries = await _pdfDateEntries();
+      final result = await IntensjonsavtalePdfService.generate(
+        gig: gigMap,
+        shows: showMaps,
+        customerSignature: acceptedName,
+        customerSignatureDate: acceptedDate,
+        companySignature: 'Stian Skog',
+        companySignatureDate: approvedDate,
+        calcLines: _pdfCalcLines,
+        calcTotal: _pdfTotal,
+        dateEntries: entries,
+        markupOnAll: _markupOnAll,
+      );
+
+      if (!mounted) return;
+      Navigator.of(context).pop(); // close the spinner
+
+      await showDialog(
+        context: context,
+        builder: (ctx) => Dialog(
+          insetPadding: const EdgeInsets.all(24),
+          child: Column(
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 16, 12, 8),
+                child: Row(
+                  children: [
+                    const Icon(Icons.verified, size: 18, color: Colors.blue),
+                    const SizedBox(width: 8),
+                    const Expanded(
+                      child: Text('Signert intensjonsavtale',
+                          style: TextStyle(
+                              fontWeight: FontWeight.w900, fontSize: 16)),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.close),
+                      onPressed: () => Navigator.pop(ctx),
+                    ),
+                  ],
+                ),
+              ),
+              const Divider(height: 1),
+              Expanded(
+                child: PdfPreview(
+                  build: (_) => result.mainPdf,
+                  canChangePageFormat: false,
+                  canChangeOrientation: false,
+                  canDebug: false,
+                  allowPrinting: true,
+                  allowSharing: true,
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    } catch (e) {
+      if (mounted) {
+        Navigator.of(context).pop(); // close the spinner
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Kunne ikke hente avtalen: $e')),
+        );
+      }
+    }
   }
 
   // ────────────────────────────────────────────────────────────────────────────
@@ -4406,36 +4521,60 @@ class _GigOfferPageState extends State<GigOfferPage> {
               ),
             ],
 
+            // Tap to read the signed agreement — lets you compare it against
+            // the offer before locking it for invoicing.
             if (agreementStatus == 'approved')
-              Container(
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  color: Colors.blue.withValues(alpha: 0.08),
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.blue.withValues(alpha: 0.2)),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Row(
-                      children: [
-                        Icon(Icons.check_circle, size: 16, color: Colors.blue),
-                        SizedBox(width: 6),
-                        Text(
-                          'Avtale signert',
-                          style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: Colors.blue),
+              InkWell(
+                onTap: _previewSignedAgreement,
+                borderRadius: BorderRadius.circular(8),
+                child: Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: Colors.blue.withValues(alpha: 0.08),
+                    borderRadius: BorderRadius.circular(8),
+                    border:
+                        Border.all(color: Colors.blue.withValues(alpha: 0.2)),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Row(
+                        children: [
+                          Icon(Icons.check_circle,
+                              size: 16, color: Colors.blue),
+                          SizedBox(width: 6),
+                          Expanded(
+                            child: Text(
+                              'Avtale signert',
+                              style: TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w700,
+                                  color: Colors.blue),
+                            ),
+                          ),
+                          Icon(Icons.picture_as_pdf,
+                              size: 16, color: Colors.blue),
+                        ],
+                      ),
+                      if (_agreement!['approved_at'] != null)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 4),
+                          child: Text(
+                            'Godkjent: ${DateFormat('dd.MM.yyyy HH:mm').format(DateTime.parse(_agreement!['approved_at']).toLocal())}',
+                            style: TextStyle(
+                                fontSize: 11, color: cs.onSurfaceVariant),
+                          ),
                         ),
-                      ],
-                    ),
-                    if (_agreement!['approved_at'] != null)
                       Padding(
                         padding: const EdgeInsets.only(top: 4),
                         child: Text(
-                          'Godkjent: ${DateFormat('dd.MM.yyyy HH:mm').format(DateTime.parse(_agreement!['approved_at']).toLocal())}',
-                          style: TextStyle(fontSize: 11, color: cs.onSurfaceVariant),
+                          'Trykk for å se den signerte avtalen',
+                          style: TextStyle(
+                              fontSize: 11, color: cs.onSurfaceVariant),
                         ),
                       ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
           ],
