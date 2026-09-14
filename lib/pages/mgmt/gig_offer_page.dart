@@ -27,6 +27,7 @@ import '../../widgets/new_company_dialog.dart';
 class GigOfferPage extends StatefulWidget {
   final String? offerId;
   final String? gigId;
+
   /// When true (set via `?approve=1` query param), the page auto-triggers
   /// the approve+sign flow once the offer + agreement have loaded. Used so
   /// the "Godkjenn" button on the offer list card doesn't need to duplicate
@@ -149,7 +150,8 @@ class _GigOfferPageState extends State<GigOfferPage> {
   double _rehearsalTransport = 0;
 
   // ── Markup scope ────────────────────────────────────────────────────────
-  bool _markupOnAll = false; // false = only performer fees, true = entire subtotal
+  bool _markupOnAll =
+      false; // false = only performer fees, true = entire subtotal
 
   // ── Calculated ────────────────────────────────────────────────────────────
   double _performerFees = 0;
@@ -180,7 +182,6 @@ class _GigOfferPageState extends State<GigOfferPage> {
   // ── Agreement ───────────────────────────────────────────────────────────
   Map<String, dynamic>? _agreement;
   bool _approvingAgreement = false;
-
 
   String? get _companyId => activeCompanyNotifier.value?.id;
 
@@ -214,7 +215,9 @@ class _GigOfferPageState extends State<GigOfferPage> {
     _altInvPhoneCtrl.dispose();
     _altInvOrgNrCtrl.dispose();
     _altInvAddressCtrl.dispose();
-    for (final e in _dateEntries) { e.dispose(); }
+    for (final e in _dateEntries) {
+      e.dispose();
+    }
     _responsibleCtrl.dispose();
     _meetingTimeCtrl.dispose();
     _getInTimeCtrl.dispose();
@@ -275,19 +278,30 @@ class _GigOfferPageState extends State<GigOfferPage> {
           .maybeSingle();
       final pd = companyRow?['pricing_defaults'] as Map<String, dynamic>? ?? {};
       if (pd.isNotEmpty) {
-        _creoFeeMinimum = (pd['creo_fee_minimum'] as num?)?.toDouble() ?? _creoFeeMinimum;
-        _extraShowFee = (pd['extra_show_fee'] as num?)?.toDouble() ?? _extraShowFee;
+        _creoFeeMinimum =
+            (pd['creo_fee_minimum'] as num?)?.toDouble() ?? _creoFeeMinimum;
+        _extraShowFee =
+            (pd['extra_show_fee'] as num?)?.toDouble() ?? _extraShowFee;
         _markupPct = (pd['markup_pct'] as num?)?.toDouble() ?? _markupPct;
         _inearPrice = (pd['inear_price'] as num?)?.toDouble() ?? _inearPrice;
-        _transportPricePerKm = (pd['transport_price_per_km'] as num?)?.toDouble() ?? _transportPricePerKm;
-        _hyreDayRate = (pd['hyre_day_rate'] as num?)?.toDouble() ?? _hyreDayRate;
-        _hyreIncludedKmPerDay = (pd['hyre_included_km'] as num?)?.toDouble() ?? _hyreIncludedKmPerDay;
-        _hyreExtraKmRate = (pd['hyre_extra_km_rate'] as num?)?.toDouble() ?? _hyreExtraKmRate;
-        _hyreFuelPerMil = (pd['hyre_fuel_per_mil'] as num?)?.toDouble() ?? _hyreFuelPerMil;
-        _hyreDieselPrice = (pd['hyre_diesel_price'] as num?)?.toDouble() ?? _hyreDieselPrice;
+        _transportPricePerKm =
+            (pd['transport_price_per_km'] as num?)?.toDouble() ??
+                _transportPricePerKm;
+        _hyreDayRate =
+            (pd['hyre_day_rate'] as num?)?.toDouble() ?? _hyreDayRate;
+        _hyreIncludedKmPerDay = (pd['hyre_included_km'] as num?)?.toDouble() ??
+            _hyreIncludedKmPerDay;
+        _hyreExtraKmRate =
+            (pd['hyre_extra_km_rate'] as num?)?.toDouble() ?? _hyreExtraKmRate;
+        _hyreFuelPerMil =
+            (pd['hyre_fuel_per_mil'] as num?)?.toDouble() ?? _hyreFuelPerMil;
+        _hyreDieselPrice =
+            (pd['hyre_diesel_price'] as num?)?.toDouble() ?? _hyreDieselPrice;
         _hyreDayRateCtrl.text = _hyreDayRate.round().toString();
         _hyreInclKmCtrl.text = _hyreIncludedKmPerDay.round().toString();
-        _hyreExtraKmCtrl.text = _hyreExtraKmRate % 1 == 0 ? _hyreExtraKmRate.round().toString() : _hyreExtraKmRate.toStringAsFixed(2);
+        _hyreExtraKmCtrl.text = _hyreExtraKmRate % 1 == 0
+            ? _hyreExtraKmRate.round().toString()
+            : _hyreExtraKmRate.toStringAsFixed(2);
         _hyreFuelCtrl.text = _hyreFuelPerMil.toStringAsFixed(2);
         _hyreDieselCtrl.text = _hyreDieselPrice.round().toString();
       }
@@ -312,13 +326,15 @@ class _GigOfferPageState extends State<GigOfferPage> {
         _inearIncluded = offer['inear_included'] == true;
         _inearPrice = _dbl(offer['inear_price'], _s.inearPrice);
         _transportKm = (offer['transport_km'] as num?)?.toInt() ?? 0;
-        _transportPricePerKm = _dbl(offer['transport_price_per_km'], _s.transportPricePerKm);
+        _transportPricePerKm =
+            _dbl(offer['transport_price_per_km'], _s.transportPricePerKm);
         // Use stored transport_price if available, otherwise calculate from km
         final storedPrice = offer['transport_price'];
         _transportPrice = storedPrice != null
             ? _dbl(storedPrice, 0)
             : _transportKm * _transportPricePerKm;
-            _rehearsalPerformers = (offer['rehearsal_performers'] as num?)?.toInt() ?? 0;
+        _rehearsalPerformers =
+            (offer['rehearsal_performers'] as num?)?.toInt() ?? 0;
         _rehearsalCount = (offer['rehearsal_count'] as num?)?.toInt() ?? 0;
         _rehearsalPricePerPerson = _dbl(offer['rehearsal_price_per_person'], 0);
         _rehearsalTransport = _dbl(offer['rehearsal_transport'], 0);
@@ -369,7 +385,9 @@ class _GigOfferPageState extends State<GigOfferPage> {
 
         if (junctionList.isNotEmpty) {
           // Dispose old entries
-          for (final e in _dateEntries) { e.dispose(); }
+          for (final e in _dateEntries) {
+            e.dispose();
+          }
           _dateEntries = [];
 
           for (final j in junctionList) {
@@ -427,12 +445,16 @@ class _GigOfferPageState extends State<GigOfferPage> {
                   }
                 }
                 // If all selected shows match, set to null (= all)
-                final allSelectedIndices = _shows.asMap().entries
+                final allSelectedIndices = _shows
+                    .asMap()
+                    .entries
                     .where((e) => e.value.selected)
                     .map((e) => e.key)
                     .toSet();
-                if (entry.selectedShowIndices!.containsAll(allSelectedIndices) &&
-                    allSelectedIndices.containsAll(entry.selectedShowIndices!)) {
+                if (entry.selectedShowIndices!
+                        .containsAll(allSelectedIndices) &&
+                    allSelectedIndices
+                        .containsAll(entry.selectedShowIndices!)) {
                   entry.selectedShowIndices = null;
                 }
               }
@@ -475,8 +497,10 @@ class _GigOfferPageState extends State<GigOfferPage> {
             _dateEntries[0].countryCtrl.text = gig['country'] ?? 'NO';
             _dateEntries[0].meetingTimeCtrl.text = gig['meeting_time'] ?? '';
             _dateEntries[0].getInTimeCtrl.text = gig['get_in_time'] ?? '';
-            _dateEntries[0].rehearsalTimeCtrl.text = gig['rehearsal_time'] ?? '';
-            _dateEntries[0].performanceTimeCtrl.text = gig['performance_time'] ?? '';
+            _dateEntries[0].rehearsalTimeCtrl.text =
+                gig['rehearsal_time'] ?? '';
+            _dateEntries[0].performanceTimeCtrl.text =
+                gig['performance_time'] ?? '';
             _dateEntries[0].getOutTimeCtrl.text = gig['get_out_time'] ?? '';
             _dateEntries[0].meetingNotesCtrl.text = gig['meeting_notes'] ?? '';
             _dateEntries[0].loadScheduleItems(gig['schedule_items']);
@@ -509,11 +533,8 @@ class _GigOfferPageState extends State<GigOfferPage> {
         }
       } else if (_gigId != null) {
         // Opening from a gig directly (no offer yet)
-        final gig = await _sb
-            .from('gigs')
-            .select('*')
-            .eq('id', _gigId!)
-            .maybeSingle();
+        final gig =
+            await _sb.from('gigs').select('*').eq('id', _gigId!).maybeSingle();
         if (gig != null) {
           _applyGigFields(gig);
           _dateEntries = [_DateEntry()];
@@ -521,16 +542,16 @@ class _GigOfferPageState extends State<GigOfferPage> {
           _dateEntries[0].dateFrom = gig['date_from'] != null
               ? DateTime.tryParse(gig['date_from'])
               : null;
-          _dateEntries[0].dateTo = gig['date_to'] != null
-              ? DateTime.tryParse(gig['date_to'])
-              : null;
+          _dateEntries[0].dateTo =
+              gig['date_to'] != null ? DateTime.tryParse(gig['date_to']) : null;
           _dateEntries[0].venueCtrl.text = gig['venue_name'] ?? '';
           _dateEntries[0].cityCtrl.text = gig['city'] ?? '';
           _dateEntries[0].countryCtrl.text = gig['country'] ?? 'NO';
           _dateEntries[0].meetingTimeCtrl.text = gig['meeting_time'] ?? '';
           _dateEntries[0].getInTimeCtrl.text = gig['get_in_time'] ?? '';
           _dateEntries[0].rehearsalTimeCtrl.text = gig['rehearsal_time'] ?? '';
-          _dateEntries[0].performanceTimeCtrl.text = gig['performance_time'] ?? '';
+          _dateEntries[0].performanceTimeCtrl.text =
+              gig['performance_time'] ?? '';
           _dateEntries[0].getOutTimeCtrl.text = gig['get_out_time'] ?? '';
           _dateEntries[0].meetingNotesCtrl.text = gig['meeting_notes'] ?? '';
           _dateEntries[0].loadScheduleItems(gig['schedule_items']);
@@ -583,10 +604,8 @@ class _GigOfferPageState extends State<GigOfferPage> {
       // Prefer the most recent approved/accepted token over a newer pending
       // one — re-sending creates a fresh pending token that would otherwise
       // mask an existing customer acceptance.
-      final gigIds = _dateEntries
-          .map((e) => e.gigId)
-          .whereType<String>()
-          .toList();
+      final gigIds =
+          _dateEntries.map((e) => e.gigId).whereType<String>().toList();
       if (gigIds.isNotEmpty) {
         final all = await _sb
             .from('agreement_tokens')
@@ -596,17 +615,22 @@ class _GigOfferPageState extends State<GigOfferPage> {
         final list = List<Map<String, dynamic>>.from(all as List);
         Map<String, dynamic>? pick;
         for (final r in list) {
-          if (r['status'] == 'approved') { pick = r; break; }
+          if (r['status'] == 'approved') {
+            pick = r;
+            break;
+          }
         }
         if (pick == null) {
           for (final r in list) {
-            if (r['status'] == 'accepted') { pick = r; break; }
+            if (r['status'] == 'accepted') {
+              pick = r;
+              break;
+            }
           }
         }
         pick ??= list.isNotEmpty ? list.first : null;
         _agreement = pick;
       }
-
     } catch (e) {
       debugPrint('GigOfferPage load error: $e');
     }
@@ -651,10 +675,9 @@ class _GigOfferPageState extends State<GigOfferPage> {
       _inearIncluded = gig['inear_from_us'] == true;
       _inearPrice = _dbl(gig['inear_price'], 7000);
       _transportPrice = _dbl(gig['transport_price'], 0);
-        _transportKm = (gig['transport_km'] as num?)?.toInt() ?? 0;
+      _transportKm = (gig['transport_km'] as num?)?.toInt() ?? 0;
       if (gig['transport_price'] != null && _transportKm > 0) {
-        _transportPricePerKm =
-            _dbl(gig['transport_price'], 0) / _transportKm;
+        _transportPricePerKm = _dbl(gig['transport_price'], 0) / _transportKm;
       }
     }
   }
@@ -706,11 +729,8 @@ class _GigOfferPageState extends State<GigOfferPage> {
       final firstGigId = _dateEntries.first.gigId ?? _gigId;
       if (firstGigId == null) throw Exception('Fant ikke gig');
 
-      final gigMap = await _sb
-          .from('gigs')
-          .select('*')
-          .eq('id', firstGigId)
-          .single();
+      final gigMap =
+          await _sb.from('gigs').select('*').eq('id', firstGigId).single();
       final showMaps = await _sb
           .from('gig_shows')
           .select('*')
@@ -755,63 +775,75 @@ class _GigOfferPageState extends State<GigOfferPage> {
     }
   }
 
-  Future<void> _showSignedPdf(Uint8List bytes,
-      {required bool archived}) async {
+  Future<void> _showSignedPdf(Uint8List bytes, {required bool archived}) async {
     await showDialog(
       context: context,
-      builder: (ctx) => Dialog(
-        insetPadding: const EdgeInsets.all(24),
-        child: Column(
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 16, 12, 8),
-              child: Row(
-                children: [
-                  Icon(archived ? Icons.verified : Icons.warning_amber_rounded,
-                      size: 18,
-                      color: archived ? Colors.blue : Colors.orange),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text('Signert intensjonsavtale',
-                            style: TextStyle(
-                                fontWeight: FontWeight.w900, fontSize: 16)),
-                        Text(
+      builder: (ctx) {
+        // A Dialog gives its child unbounded height, so the Expanded below
+        // has nothing to expand into — that rendered as a blank sheet.
+        // Size it from the viewport instead.
+        final size = MediaQuery.of(ctx).size;
+        return Dialog(
+          insetPadding: const EdgeInsets.all(24),
+          child: SizedBox(
+            width: size.width * 0.9,
+            height: size.height * 0.9,
+            child: Column(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 16, 12, 8),
+                  child: Row(
+                    children: [
+                      Icon(
                           archived
-                              ? 'Arkivert kopi — den kunden fikk tilsendt'
-                              : 'Ingen arkivert kopi for denne avtalen. '
-                                  'Gjenskapt fra tilbudet slik det er nå.',
-                          style: TextStyle(
-                            fontSize: 11,
-                            color: archived ? Colors.blue : Colors.orange,
-                          ),
+                              ? Icons.verified
+                              : Icons.warning_amber_rounded,
+                          size: 18,
+                          color: archived ? Colors.blue : Colors.orange),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text('Signert intensjonsavtale',
+                                style: TextStyle(
+                                    fontWeight: FontWeight.w900, fontSize: 16)),
+                            Text(
+                              archived
+                                  ? 'Arkivert kopi — den kunden fikk tilsendt'
+                                  : 'Ingen arkivert kopi for denne avtalen. '
+                                      'Gjenskapt fra tilbudet slik det er nå.',
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: archived ? Colors.blue : Colors.orange,
+                              ),
+                            ),
+                          ],
                         ),
-                      ],
-                    ),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.close),
+                        onPressed: () => Navigator.pop(ctx),
+                      ),
+                    ],
                   ),
-                  IconButton(
-                    icon: const Icon(Icons.close),
-                    onPressed: () => Navigator.pop(ctx),
+                ),
+                const Divider(height: 1),
+                Expanded(
+                  child: PdfPreview(
+                    build: (_) => bytes,
+                    canChangePageFormat: false,
+                    canChangeOrientation: false,
+                    canDebug: false,
+                    allowPrinting: true,
+                    allowSharing: true,
                   ),
-                ],
-              ),
+                ),
+              ],
             ),
-            const Divider(height: 1),
-            Expanded(
-              child: PdfPreview(
-                build: (_) => bytes,
-                canChangePageFormat: false,
-                canChangeOrientation: false,
-                canDebug: false,
-                allowPrinting: true,
-                allowSharing: true,
-              ),
-            ),
-          ],
-        ),
-      ),
+          ),
+        );
+      },
     );
   }
 
@@ -1006,7 +1038,8 @@ class _GigOfferPageState extends State<GigOfferPage> {
     try {
       final res = await _sb
           .from('companies')
-          .select('id, name, org_nr, address, city, country, contacts!contacts_company_id_fkey(id, name, phone, email)')
+          .select(
+              'id, name, org_nr, address, city, country, contacts!contacts_company_id_fkey(id, name, phone, email)')
           .eq('owner_company_id', _companyId!)
           .order('name');
       final list = List<Map<String, dynamic>>.from(res);
@@ -1185,14 +1218,15 @@ class _GigOfferPageState extends State<GigOfferPage> {
   /// Which shows are active for a given date entry
   List<_OfferShow> _showsForDate(int dateIdx) {
     final entry = _dateEntries[dateIdx];
-    final allSelected = _shows.asMap().entries
-        .where((e) => e.value.selected)
-        .toList();
+    final allSelected =
+        _shows.asMap().entries.where((e) => e.value.selected).toList();
     if (entry.selectedShowIndices == null) {
       // null = use all selected shows
       return allSelected.map((e) => e.value).toList();
     }
-    return _shows.asMap().entries
+    return _shows
+        .asMap()
+        .entries
         .where((e) => entry.selectedShowIndices!.contains(e.key))
         .map((e) => e.value)
         .toList();
@@ -1277,18 +1311,18 @@ class _GigOfferPageState extends State<GigOfferPage> {
     }
 
     // Rehearsals (performer fees only — transport is in transport line)
-    _rehearsalTotal = _rehearsalPerformers * _rehearsalCount * _rehearsalPricePerPerson;
+    _rehearsalTotal =
+        _rehearsalPerformers * _rehearsalCount * _rehearsalPricePerPerson;
 
     // Subtotal before markup
     // Transport = gig transport × performance dates only + rehearsal transport.
     // Rehearsal dates use the separate rehearsal_transport parameter.
-    final numPerformanceDates = _dateEntries
-        .where((e) => !e.isRehearsal)
-        .length;
+    final numPerformanceDates =
+        _dateEntries.where((e) => !e.isRehearsal).length;
     final totalTransport =
         (_transportPrice * numPerformanceDates) + _rehearsalTransport;
-    final subtotalBeforeMarkup = _performerFees + _inearTotal +
-        totalTransport + _rehearsalTotal;
+    final subtotalBeforeMarkup =
+        _performerFees + _inearTotal + totalTransport + _rehearsalTotal;
 
     // Markup
     // Default: markup on everything except in-ear
@@ -1296,8 +1330,10 @@ class _GigOfferPageState extends State<GigOfferPage> {
     _completePct = _markupPct / 2;
     _bookingPct = _markupPct / 2;
     final markupBase = _markupOnAll
-        ? (_performerFees + _rehearsalTotal)  // only show/rehearsal fees
-        : (_performerFees + totalTransport + _rehearsalTotal);  // everything except in-ear
+        ? (_performerFees + _rehearsalTotal) // only show/rehearsal fees
+        : (_performerFees +
+            totalTransport +
+            _rehearsalTotal); // everything except in-ear
     _completeKonto = markupBase * _completePct;
     _bookingHonorar = markupBase * _bookingPct;
   }
@@ -1318,8 +1354,7 @@ class _GigOfferPageState extends State<GigOfferPage> {
     if (_invoiceLocked) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text(
-              'Tilbudet er meldt klart for fakturering og låst. '
+          content: Text('Tilbudet er meldt klart for fakturering og låst. '
               'Økonomiansvarlig må låse opp for å endre.'),
         ),
       );
@@ -1347,7 +1382,8 @@ class _GigOfferPageState extends State<GigOfferPage> {
         return {
           'company_id': _companyId,
           'type': entry.isRehearsal ? 'rehearsal' : 'gig',
-          'date_from': entry.dateFrom != null ? df.format(entry.dateFrom!) : null,
+          'date_from':
+              entry.dateFrom != null ? df.format(entry.dateFrom!) : null,
           'date_to': entry.dateTo != null ? df.format(entry.dateTo!) : null,
           'status': _gigStatus,
           'venue_name': n(entry.venueCtrl.text),
@@ -1406,7 +1442,9 @@ class _GigOfferPageState extends State<GigOfferPage> {
         int dateMainPerf = 0;
         int dateMainIdx = 0;
         for (int j = 0; j < dateShows.length; j++) {
-          final p = dateShows[j].drummers + dateShows[j].dancers + dateShows[j].others;
+          final p = dateShows[j].drummers +
+              dateShows[j].dancers +
+              dateShows[j].others;
           if (p > dateMainPerf) {
             dateMainPerf = p;
             dateMainIdx = j;
@@ -1431,7 +1469,8 @@ class _GigOfferPageState extends State<GigOfferPage> {
             'price': showPrice.round(),
             'price_is_custom': s.priceIsCustom,
             'sort_order': e.key,
-            'ekstrainnslag': s.ekstrainnslag.isNotEmpty ? s.ekstrainnslag : null,
+            'ekstrainnslag':
+                s.ekstrainnslag.isNotEmpty ? s.ekstrainnslag : null,
           };
         }).toList();
       }
@@ -1454,7 +1493,9 @@ class _GigOfferPageState extends State<GigOfferPage> {
           // Notify crew about the new gig
           try {
             final venue = n(entry.venueCtrl.text) ?? '';
-            final dateStr = entry.dateFrom != null ? DateFormat('dd.MM.yyyy').format(entry.dateFrom!) : '';
+            final dateStr = entry.dateFrom != null
+                ? DateFormat('dd.MM.yyyy').format(entry.dateFrom!)
+                : '';
             await _sb.functions.invoke('notify-company', body: {
               'company_id': _companyId,
               'title': 'Ny gig: $venue',
@@ -1528,9 +1569,8 @@ class _GigOfferPageState extends State<GigOfferPage> {
             await _sb.from('gig_shows').insert(row);
           }
         }
-        final allExistingIds = (existingShows as List)
-            .map((s) => s['id'] as String)
-            .toSet();
+        final allExistingIds =
+            (existingShows as List).map((s) => s['id'] as String).toSet();
         for (final orphanId in allExistingIds.difference(usedIds)) {
           await _sb.from('gig_shows').delete().eq('id', orphanId);
         }
@@ -1565,10 +1605,13 @@ class _GigOfferPageState extends State<GigOfferPage> {
         'transport_km': _transportKm,
         'transport_price_per_km': _transportPricePerKm,
         'transport_price': _transportPrice > 0 ? _transportPrice : null,
-        'rehearsal_performers': _rehearsalPerformers > 0 ? _rehearsalPerformers : null,
+        'rehearsal_performers':
+            _rehearsalPerformers > 0 ? _rehearsalPerformers : null,
         'rehearsal_count': _rehearsalCount > 0 ? _rehearsalCount : null,
-        'rehearsal_price_per_person': _rehearsalPricePerPerson > 0 ? _rehearsalPricePerPerson : null,
-        'rehearsal_transport': _rehearsalTransport > 0 ? _rehearsalTransport : null,
+        'rehearsal_price_per_person':
+            _rehearsalPricePerPerson > 0 ? _rehearsalPricePerPerson : null,
+        'rehearsal_transport':
+            _rehearsalTransport > 0 ? _rehearsalTransport : null,
         'markup_on_all': _markupOnAll,
         'extras': _extras
             .where((e) => e.name.trim().isNotEmpty)
@@ -1606,8 +1649,13 @@ class _GigOfferPageState extends State<GigOfferPage> {
               onSubmitted: (v) => Navigator.pop(ctx, int.tryParse(v)),
             ),
             actions: [
-              TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Avbryt')),
-              FilledButton(onPressed: () => Navigator.pop(ctx, int.tryParse(dueDaysCtrl.text)), child: const Text('OK')),
+              TextButton(
+                  onPressed: () => Navigator.pop(ctx),
+                  child: const Text('Avbryt')),
+              FilledButton(
+                  onPressed: () =>
+                      Navigator.pop(ctx, int.tryParse(dueDaysCtrl.text)),
+                  child: const Text('OK')),
             ],
           ),
         );
@@ -1649,7 +1697,8 @@ class _GigOfferPageState extends State<GigOfferPage> {
             'others': s.others,
             'selected': s.selected,
             'sort_order': e.key,
-            'ekstrainnslag': s.ekstrainnslag.isNotEmpty ? s.ekstrainnslag : null,
+            'ekstrainnslag':
+                s.ekstrainnslag.isNotEmpty ? s.ekstrainnslag : null,
           };
         }).toList();
         await _sb.from('gig_offer_shows').insert(showRows);
@@ -1678,7 +1727,8 @@ class _GigOfferPageState extends State<GigOfferPage> {
         if ((lineupCheck as List).isEmpty) {
           await _sb.from('gigs').delete().eq('id', gid);
         } else {
-          debugPrint('[OFFER SAVE] Refused to delete gig $gid — has lineup data');
+          debugPrint(
+              '[OFFER SAVE] Refused to delete gig $gid — has lineup data');
         }
       }
       _originalGigIds = Set.from(activeGigIds);
@@ -1810,8 +1860,12 @@ class _GigOfferPageState extends State<GigOfferPage> {
           ),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Avbryt')),
-          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Opprett')),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Avbryt')),
+          FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Opprett')),
         ],
       ),
     );
@@ -1829,7 +1883,8 @@ class _GigOfferPageState extends State<GigOfferPage> {
     final drummers = int.tryParse(drummersCtrl.text) ?? 0;
     final dancers = int.tryParse(dancersCtrl.text) ?? 0;
     final others = int.tryParse(othersCtrl.text) ?? 0;
-    final price = double.tryParse(priceCtrl.text.replaceAll(RegExp(r'[^0-9.]'), '')) ?? 0;
+    final price =
+        double.tryParse(priceCtrl.text.replaceAll(RegExp(r'[^0-9.]'), '')) ?? 0;
 
     nameCtrl.dispose();
     drummersCtrl.dispose();
@@ -1841,16 +1896,20 @@ class _GigOfferPageState extends State<GigOfferPage> {
 
     try {
       // Save to show_types table (persists in Settings)
-      final inserted = await _sb.from('show_types').insert({
-        'company_id': _companyId,
-        'name': name,
-        'drummers': drummers,
-        'dancers': dancers,
-        'others': others,
-        'price': price.round(),
-        'sort_order': _showTypes.length,
-        'active': true,
-      }).select().single();
+      final inserted = await _sb
+          .from('show_types')
+          .insert({
+            'company_id': _companyId,
+            'name': name,
+            'drummers': drummers,
+            'dancers': dancers,
+            'others': others,
+            'price': price.round(),
+            'sort_order': _showTypes.length,
+            'active': true,
+          })
+          .select()
+          .single();
 
       // Add to local show types list
       _showTypes.add(inserted);
@@ -2154,9 +2213,8 @@ class _GigOfferPageState extends State<GigOfferPage> {
 
   Widget _buildDatesCard() {
     final dfmt = DateFormat('dd.MM.yyyy');
-    final availableShows = _shows.asMap().entries
-        .where((e) => e.value.selected)
-        .toList();
+    final availableShows =
+        _shows.asMap().entries.where((e) => e.value.selected).toList();
     return _card(
       title: 'Datoer & steder',
       child: Column(
@@ -2164,7 +2222,8 @@ class _GigOfferPageState extends State<GigOfferPage> {
           ...List.generate(_dateEntries.length, (i) {
             final entry = _dateEntries[i];
             return Padding(
-              padding: EdgeInsets.only(bottom: i < _dateEntries.length - 1 ? 12 : 0),
+              padding:
+                  EdgeInsets.only(bottom: i < _dateEntries.length - 1 ? 12 : 0),
               child: Column(
                 children: [
                   Row(
@@ -2199,7 +2258,8 @@ class _GigOfferPageState extends State<GigOfferPage> {
                           decoration: const InputDecoration(
                             labelText: 'Venue',
                             isDense: true,
-                            contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+                            contentPadding: EdgeInsets.symmetric(
+                                horizontal: 10, vertical: 10),
                           ),
                         ),
                       ),
@@ -2213,7 +2273,8 @@ class _GigOfferPageState extends State<GigOfferPage> {
                           decoration: const InputDecoration(
                             labelText: 'By',
                             isDense: true,
-                            contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+                            contentPadding: EdgeInsets.symmetric(
+                                horizontal: 10, vertical: 10),
                           ),
                         ),
                       ),
@@ -2227,7 +2288,8 @@ class _GigOfferPageState extends State<GigOfferPage> {
                           decoration: const InputDecoration(
                             labelText: 'Land',
                             isDense: true,
-                            contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+                            contentPadding: EdgeInsets.symmetric(
+                                horizontal: 10, vertical: 10),
                           ),
                         ),
                       ),
@@ -2236,7 +2298,8 @@ class _GigOfferPageState extends State<GigOfferPage> {
                       Tooltip(
                         message: 'Prøve/øvelse',
                         child: FilterChip(
-                          label: const Text('Prøve', style: TextStyle(fontSize: 11)),
+                          label: const Text('Prøve',
+                              style: TextStyle(fontSize: 11)),
                           selected: entry.isRehearsal,
                           onSelected: (v) => setState(() {
                             entry.isRehearsal = v;
@@ -2277,10 +2340,12 @@ class _GigOfferPageState extends State<GigOfferPage> {
                             final isOn = entry.selectedShowIndices == null ||
                                 entry.selectedShowIndices!.contains(idx);
                             return FilterChip(
-                              label: Text(show.showName, style: const TextStyle(fontSize: 11)),
+                              label: Text(show.showName,
+                                  style: const TextStyle(fontSize: 11)),
                               selected: isOn,
                               visualDensity: VisualDensity.compact,
-                              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                              materialTapTargetSize:
+                                  MaterialTapTargetSize.shrinkWrap,
                               onSelected: (v) {
                                 setState(() {
                                   // Initialize from all selected if null
@@ -2323,15 +2388,19 @@ class _GigOfferPageState extends State<GigOfferPage> {
           _row2(
             DropdownButtonFormField<String>(
               value: _gigStatus,
-              decoration: const InputDecoration(
-                  labelText: 'Status', isDense: true),
+              decoration:
+                  const InputDecoration(labelText: 'Status', isDense: true),
               items: const {
                 'inquiry': 'Forespørsel',
                 'confirmed': 'Bekreftet',
                 'invoiced': 'Fakturert',
                 'completed': 'Fullført',
                 'cancelled': 'Avlyst',
-              }.entries.map((e) => DropdownMenuItem(value: e.key, child: Text(e.value))).toList(),
+              }
+                  .entries
+                  .map((e) =>
+                      DropdownMenuItem(value: e.key, child: Text(e.value)))
+                  .toList(),
               onChanged: (v) {
                 if (v != null) setState(() => _gigStatus = v);
               },
@@ -2381,14 +2450,12 @@ class _GigOfferPageState extends State<GigOfferPage> {
           const SizedBox(height: 14),
           _row2(_tf(_firmaCtrl, 'Firma'), _tf(_orgNrCtrl, 'Org.nr')),
           const SizedBox(height: 12),
-          _row2(
-              _tf(_nameCtrl, 'Kontaktperson'), _tf(_phoneCtrl, 'Telefon')),
+          _row2(_tf(_nameCtrl, 'Kontaktperson'), _tf(_phoneCtrl, 'Telefon')),
           const SizedBox(height: 12),
           _row2(_tf(_emailCtrl, 'E-post'), _tf(_addressCtrl, 'Adresse')),
           const SizedBox(height: 8),
           SwitchListTile(
-            title: const Text('Faktura på EHF',
-                style: TextStyle(fontSize: 13)),
+            title: const Text('Faktura på EHF', style: TextStyle(fontSize: 13)),
             value: _invoiceOnEhf,
             onChanged: (v) => setState(() => _invoiceOnEhf = v),
             contentPadding: EdgeInsets.zero,
@@ -2587,10 +2654,8 @@ class _GigOfferPageState extends State<GigOfferPage> {
                               _shows.add(_OfferShow(
                                 showTypeId: t['id'] as String?,
                                 showName: t['name'] as String? ?? '',
-                                drummers:
-                                    (t['drummers'] as num?)?.toInt() ?? 0,
-                                dancers:
-                                    (t['dancers'] as num?)?.toInt() ?? 0,
+                                drummers: (t['drummers'] as num?)?.toInt() ?? 0,
+                                dancers: (t['dancers'] as num?)?.toInt() ?? 0,
                                 others: (t['others'] as num?)?.toInt() ?? 0,
                                 selected: true,
                                 sortOrder: _shows.length,
@@ -2636,7 +2701,10 @@ class _GigOfferPageState extends State<GigOfferPage> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         const Text('Ekstrakostnader',
-            style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15, letterSpacing: -0.2)),
+            style: TextStyle(
+                fontWeight: FontWeight.w800,
+                fontSize: 15,
+                letterSpacing: -0.2)),
         const SizedBox(height: 8),
         if (_extras.isEmpty)
           Padding(
@@ -2741,8 +2809,7 @@ class _GigOfferPageState extends State<GigOfferPage> {
           final memAmt = parseNum(memberAmountCtrl.text).clamp(0.0, amount);
           final isSplit =
               allocation == 'split' || allocation == 'split_company';
-          final needsMember =
-              allocation != 'group' && allocation != 'company';
+          final needsMember = allocation != 'group' && allocation != 'company';
           return AlertDialog(
             title: Text(editing ? 'Rediger ekstrakostnad' : 'Ny ekstrakostnad'),
             content: SizedBox(
@@ -2763,8 +2830,8 @@ class _GigOfferPageState extends State<GigOfferPage> {
                     const SizedBox(height: 12),
                     TextField(
                       controller: amountCtrl,
-                      keyboardType: const TextInputType.numberWithOptions(
-                          decimal: true),
+                      keyboardType:
+                          const TextInputType.numberWithOptions(decimal: true),
                       decoration: const InputDecoration(
                         labelText: 'Beløp',
                         suffixText: 'kr',
@@ -2838,8 +2905,7 @@ class _GigOfferPageState extends State<GigOfferPage> {
                             .toList(),
                         onChanged: (v) => setLocal(() {
                           memberId = v;
-                          final match = _roster.firstWhere(
-                              (m) => m['id'] == v,
+                          final match = _roster.firstWhere((m) => m['id'] == v,
                               orElse: () => const {});
                           memberName = match['name'] as String?;
                         }),
@@ -2884,8 +2950,8 @@ class _GigOfferPageState extends State<GigOfferPage> {
                     return;
                   }
                   if (needsMember && memberId == null) {
-                    ScaffoldMessenger.of(ctx).showSnackBar(const SnackBar(
-                        content: Text('Velg medlem')));
+                    ScaffoldMessenger.of(ctx).showSnackBar(
+                        const SnackBar(content: Text('Velg medlem')));
                     return;
                   }
                   final mAmt = isSplit
@@ -2938,10 +3004,9 @@ class _GigOfferPageState extends State<GigOfferPage> {
               Expanded(
                 child: TextField(
                   key: ValueKey('show_name_${s.id ?? index}'),
-                  controller:
-                      TextEditingController(text: s.showName)
-                        ..selection = TextSelection.collapsed(
-                            offset: s.showName.length),
+                  controller: TextEditingController(text: s.showName)
+                    ..selection =
+                        TextSelection.collapsed(offset: s.showName.length),
                   style: TextStyle(
                     fontSize: 13,
                     color: s.selected ? cs.onSurface : cs.onSurfaceVariant,
@@ -2983,8 +3048,7 @@ class _GigOfferPageState extends State<GigOfferPage> {
               SizedBox(
                 width: 36,
                 child: IconButton(
-                  icon: Icon(Icons.close,
-                      size: 16, color: cs.onSurfaceVariant),
+                  icon: Icon(Icons.close, size: 16, color: cs.onSurfaceVariant),
                   tooltip: 'Fjern fra gig',
                   onPressed: () {
                     setState(() {
@@ -3046,105 +3110,112 @@ class _GigOfferPageState extends State<GigOfferPage> {
         const Align(
           alignment: Alignment.centerLeft,
           child: Text('Prøver',
-              style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15, letterSpacing: -0.2)),
+              style: TextStyle(
+                  fontWeight: FontWeight.w800,
+                  fontSize: 15,
+                  letterSpacing: -0.2)),
         ),
         const SizedBox(height: 8),
-          Row(
-            children: [
-              SizedBox(
-                width: 140,
-                child: Text('Antall utøvere',
-                    style: TextStyle(fontSize: 13, color: cs.onSurfaceVariant)),
-              ),
-              _NumField(
-                key: const ValueKey('reh_perf'),
-                value: _rehearsalPerformers,
-                nf: _nf,
-                mode: _NumFieldMode.integer,
-                width: 80,
-                onChanged: (v) {
-                  _rehearsalPerformers = v.round();
-                  setState(() => _recalc());
-                },
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Row(
-            children: [
-              SizedBox(
-                width: 140,
-                child: Text('Antall prøver',
-                    style: TextStyle(fontSize: 13, color: cs.onSurfaceVariant)),
-              ),
-              _NumField(
-                key: const ValueKey('reh_count'),
-                value: _rehearsalCount,
-                nf: _nf,
-                mode: _NumFieldMode.integer,
-                width: 80,
-                onChanged: (v) {
-                  _rehearsalCount = v.round();
-                  setState(() => _recalc());
-                },
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Row(
-            children: [
-              SizedBox(
-                width: 140,
-                child: Text('Pris per person/prøve',
-                    style: TextStyle(fontSize: 13, color: cs.onSurfaceVariant)),
-              ),
-              _NumField(
-                key: const ValueKey('reh_price'),
-                value: _rehearsalPricePerPerson,
-                nf: _nf,
-                mode: _NumFieldMode.money,
-                width: 120,
-                onChanged: (v) {
-                  _rehearsalPricePerPerson = v;
-                  setState(() => _recalc());
-                },
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Row(
-            children: [
-              SizedBox(
-                width: 140,
-                child: Text('Transport (prøver)',
-                    style: TextStyle(fontSize: 13, color: cs.onSurfaceVariant)),
-              ),
-              _NumField(
-                key: const ValueKey('reh_transport'),
-                value: _rehearsalTransport,
-                nf: _nf,
-                mode: _NumFieldMode.money,
-                width: 120,
-                onChanged: (v) {
-                  _rehearsalTransport = v;
-                  setState(() => _recalc());
-                },
-              ),
-            ],
-          ),
-          if (_rehearsalTotal > 0) ...[
-            const SizedBox(height: 12),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text('Total prøver',
-                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: cs.onSurfaceVariant)),
-                Text('${_nf.format(_rehearsalTotal)} kr',
-                    style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700)),
-              ],
+        Row(
+          children: [
+            SizedBox(
+              width: 140,
+              child: Text('Antall utøvere',
+                  style: TextStyle(fontSize: 13, color: cs.onSurfaceVariant)),
+            ),
+            _NumField(
+              key: const ValueKey('reh_perf'),
+              value: _rehearsalPerformers,
+              nf: _nf,
+              mode: _NumFieldMode.integer,
+              width: 80,
+              onChanged: (v) {
+                _rehearsalPerformers = v.round();
+                setState(() => _recalc());
+              },
             ),
           ],
+        ),
+        const SizedBox(height: 8),
+        Row(
+          children: [
+            SizedBox(
+              width: 140,
+              child: Text('Antall prøver',
+                  style: TextStyle(fontSize: 13, color: cs.onSurfaceVariant)),
+            ),
+            _NumField(
+              key: const ValueKey('reh_count'),
+              value: _rehearsalCount,
+              nf: _nf,
+              mode: _NumFieldMode.integer,
+              width: 80,
+              onChanged: (v) {
+                _rehearsalCount = v.round();
+                setState(() => _recalc());
+              },
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        Row(
+          children: [
+            SizedBox(
+              width: 140,
+              child: Text('Pris per person/prøve',
+                  style: TextStyle(fontSize: 13, color: cs.onSurfaceVariant)),
+            ),
+            _NumField(
+              key: const ValueKey('reh_price'),
+              value: _rehearsalPricePerPerson,
+              nf: _nf,
+              mode: _NumFieldMode.money,
+              width: 120,
+              onChanged: (v) {
+                _rehearsalPricePerPerson = v;
+                setState(() => _recalc());
+              },
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        Row(
+          children: [
+            SizedBox(
+              width: 140,
+              child: Text('Transport (prøver)',
+                  style: TextStyle(fontSize: 13, color: cs.onSurfaceVariant)),
+            ),
+            _NumField(
+              key: const ValueKey('reh_transport'),
+              value: _rehearsalTransport,
+              nf: _nf,
+              mode: _NumFieldMode.money,
+              width: 120,
+              onChanged: (v) {
+                _rehearsalTransport = v;
+                setState(() => _recalc());
+              },
+            ),
+          ],
+        ),
+        if (_rehearsalTotal > 0) ...[
+          const SizedBox(height: 12),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text('Total prøver',
+                  style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                      color: cs.onSurfaceVariant)),
+              Text('${_nf.format(_rehearsalTotal)} kr',
+                  style: const TextStyle(
+                      fontSize: 13, fontWeight: FontWeight.w700)),
+            ],
+          ),
         ],
+      ],
     );
   }
 
@@ -3172,11 +3243,15 @@ class _GigOfferPageState extends State<GigOfferPage> {
   final _hyreFuelCtrl = TextEditingController(text: '0.70');
   final _hyreDieselCtrl = TextEditingController(text: '25');
 
-  Widget _hyreRateRow(String label, TextEditingController ctrl, ValueChanged<double> onChanged) {
+  Widget _hyreRateRow(String label, TextEditingController ctrl,
+      ValueChanged<double> onChanged) {
     final cs = Theme.of(context).colorScheme;
     return Row(
       children: [
-        SizedBox(width: 120, child: Text(label, style: TextStyle(fontSize: 12, color: cs.onSurfaceVariant))),
+        SizedBox(
+            width: 120,
+            child: Text(label,
+                style: TextStyle(fontSize: 12, color: cs.onSurfaceVariant))),
         SizedBox(
           width: 80,
           child: TextField(
@@ -3184,7 +3259,10 @@ class _GigOfferPageState extends State<GigOfferPage> {
             textAlign: TextAlign.right,
             style: const TextStyle(fontSize: 12),
             keyboardType: const TextInputType.numberWithOptions(decimal: true),
-            decoration: const InputDecoration(isDense: true, contentPadding: EdgeInsets.symmetric(horizontal: 6, vertical: 4)),
+            decoration: const InputDecoration(
+                isDense: true,
+                contentPadding:
+                    EdgeInsets.symmetric(horizontal: 6, vertical: 4)),
             onChanged: (v) {
               final p = double.tryParse(v.replaceAll(',', '.'));
               if (p != null) setState(() => onChanged(p));
@@ -3198,10 +3276,16 @@ class _GigOfferPageState extends State<GigOfferPage> {
   Future<void> _saveHyreRate(String key, double value) async {
     if (_companyId == null) return;
     try {
-      final row = await _sb.from('companies').select('pricing_defaults').eq('id', _companyId!).maybeSingle();
+      final row = await _sb
+          .from('companies')
+          .select('pricing_defaults')
+          .eq('id', _companyId!)
+          .maybeSingle();
       final pd = (row?['pricing_defaults'] as Map<String, dynamic>?) ?? {};
       pd[key] = value;
-      await _sb.from('companies').update({'pricing_defaults': pd}).eq('id', _companyId!);
+      await _sb
+          .from('companies')
+          .update({'pricing_defaults': pd}).eq('id', _companyId!);
     } catch (e) {
       debugPrint('Save hyre rate error: $e');
     }
@@ -3242,13 +3326,16 @@ class _GigOfferPageState extends State<GigOfferPage> {
           // ── Collapsable Prisparametre ──
           GestureDetector(
             behavior: HitTestBehavior.opaque,
-            onTap: () => setState(() => _priceParamsExpanded = !_priceParamsExpanded),
+            onTap: () =>
+                setState(() => _priceParamsExpanded = !_priceParamsExpanded),
             child: Row(
               children: [
                 const Expanded(
                   child: Text('Prisparametre',
                       style: TextStyle(
-                          fontWeight: FontWeight.w800, fontSize: 15, letterSpacing: -0.2)),
+                          fontWeight: FontWeight.w800,
+                          fontSize: 15,
+                          letterSpacing: -0.2)),
                 ),
                 Icon(
                     _priceParamsExpanded
@@ -3305,252 +3392,386 @@ class _GigOfferPageState extends State<GigOfferPage> {
 
           // ── Transport section (inside Prisparametre) ──
           if (_priceParamsExpanded) ...[
-          const Divider(height: 24),
-          const Align(
-            alignment: Alignment.centerLeft,
-            child: Text('Transport',
-                style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15, letterSpacing: -0.2)),
-          ),
-          const SizedBox(height: 8),
-          // Route (always visible)
-          TextField(controller: _transportFromCtrl, decoration: const InputDecoration(labelText: 'Fra', prefixIcon: Icon(Icons.trip_origin, size: 18), isDense: true)),
-          const SizedBox(height: 6),
-          TextField(controller: _transportViaCtrl, decoration: const InputDecoration(labelText: 'Via (kommaseparert)', prefixIcon: Icon(Icons.more_horiz, size: 18), isDense: true)),
-          const SizedBox(height: 6),
-          TextField(controller: _transportToCtrl, decoration: const InputDecoration(labelText: 'Til', prefixIcon: Icon(Icons.location_on, size: 18), isDense: true)),
-          const SizedBox(height: 6),
-          Row(
-            children: [
-              const Text('Antall biler:', style: TextStyle(fontSize: 13)),
-              const SizedBox(width: 8),
-              SizedBox(
-                width: 50,
-                child: TextFormField(
-                  key: const ValueKey('route_persons'),
-                  initialValue: '$_routePersons',
-                  decoration: const InputDecoration(isDense: true),
-                  keyboardType: TextInputType.number,
-                  textAlign: TextAlign.center,
-                  onChanged: (v) { final p = int.tryParse(v); if (p != null && p > 0) _routePersons = p; },
-                ),
-              ),
-              const SizedBox(width: 12),
-              GestureDetector(
-                onTap: () => setState(() => _routeReturn = !_routeReturn),
-                child: Row(mainAxisSize: MainAxisSize.min, children: [
-                  Icon(_routeReturn ? Icons.check_box : Icons.check_box_outline_blank, size: 20),
-                  const SizedBox(width: 4),
-                  const Text('Tur/retur', style: TextStyle(fontSize: 13)),
-                ]),
-              ),
-              const Spacer(),
-              FilledButton.icon(
-                onPressed: _routeLoading ? null : _lookupRoute,
-                icon: _routeLoading
-                    ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                    : const Icon(Icons.route, size: 18),
-                label: const Text('Beregn rute'),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          _paramRow('Km totalt', _transportKm.toDouble(), (v) {
-            _transportKm = v.round();
-            _recalc();
-            if (_transportModes.isNotEmpty) _recalcTransportPrice();
-            setState(() {});
-          }, integer: true),
-          if (_tollStations.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 8),
-              child: Text('Bom: ${_nf.format(_tollCost)} kr (${_tollStations.length} stasjoner)', style: TextStyle(fontSize: 12, color: cs.onSurfaceVariant)),
+            const Divider(height: 24),
+            const Align(
+              alignment: Alignment.centerLeft,
+              child: Text('Transport',
+                  style: TextStyle(
+                      fontWeight: FontWeight.w800,
+                      fontSize: 15,
+                      letterSpacing: -0.2)),
             ),
-          // Transport total — always visible, editable
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 4),
-            child: Row(
+            const SizedBox(height: 8),
+            // Route (always visible)
+            TextField(
+                controller: _transportFromCtrl,
+                decoration: const InputDecoration(
+                    labelText: 'Fra',
+                    prefixIcon: Icon(Icons.trip_origin, size: 18),
+                    isDense: true)),
+            const SizedBox(height: 6),
+            TextField(
+                controller: _transportViaCtrl,
+                decoration: const InputDecoration(
+                    labelText: 'Via (kommaseparert)',
+                    prefixIcon: Icon(Icons.more_horiz, size: 18),
+                    isDense: true)),
+            const SizedBox(height: 6),
+            TextField(
+                controller: _transportToCtrl,
+                decoration: const InputDecoration(
+                    labelText: 'Til',
+                    prefixIcon: Icon(Icons.location_on, size: 18),
+                    isDense: true)),
+            const SizedBox(height: 6),
+            Row(
               children: [
-                SizedBox(width: 140, child: Text('Transportpris', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: cs.onSurface))),
-                _NumField(
-                  key: const ValueKey('num_transportpris'),
-                  value: _transportPrice,
-                  nf: _nf,
-                  mode: _NumFieldMode.money,
-                  width: 120,
-                  style: const TextStyle(
-                      fontSize: 14, fontWeight: FontWeight.w900),
-                  onChanged: (v) {
-                    _transportPrice = v;
-                    setState(() => _recalc());
-                  },
+                const Text('Antall biler:', style: TextStyle(fontSize: 13)),
+                const SizedBox(width: 8),
+                SizedBox(
+                  width: 50,
+                  child: TextFormField(
+                    key: const ValueKey('route_persons'),
+                    initialValue: '$_routePersons',
+                    decoration: const InputDecoration(isDense: true),
+                    keyboardType: TextInputType.number,
+                    textAlign: TextAlign.center,
+                    onChanged: (v) {
+                      final p = int.tryParse(v);
+                      if (p != null && p > 0) _routePersons = p;
+                    },
+                  ),
                 ),
-                const SizedBox(width: 6),
-                Text('kr', style: TextStyle(fontSize: 12, color: cs.onSurfaceVariant)),
+                const SizedBox(width: 12),
+                GestureDetector(
+                  onTap: () => setState(() => _routeReturn = !_routeReturn),
+                  child: Row(mainAxisSize: MainAxisSize.min, children: [
+                    Icon(
+                        _routeReturn
+                            ? Icons.check_box
+                            : Icons.check_box_outline_blank,
+                        size: 20),
+                    const SizedBox(width: 4),
+                    const Text('Tur/retur', style: TextStyle(fontSize: 13)),
+                  ]),
+                ),
+                const Spacer(),
+                FilledButton.icon(
+                  onPressed: _routeLoading ? null : _lookupRoute,
+                  icon: _routeLoading
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(
+                              strokeWidth: 2, color: Colors.white))
+                      : const Icon(Icons.route, size: 18),
+                  label: const Text('Beregn rute'),
+                ),
               ],
             ),
-          ),
-          // Add transport type
-          const SizedBox(height: 8),
-          Row(
-            children: [
-              if (_transportModes.isNotEmpty)
-                Wrap(spacing: 6, children: _transportModes.map((mode) {
-                  final label = const {'privatbil': 'Privatbil', 'hyrebil': 'Hyre varebil'}[mode] ?? mode;
-                  return Chip(
-                    avatar: Icon(const {'privatbil': Icons.directions_car, 'hyrebil': Icons.local_taxi}[mode] ?? Icons.help, size: 16),
-                    label: Text(label, style: const TextStyle(fontSize: 12)),
-                    deleteIcon: const Icon(Icons.close, size: 14),
-                    onDeleted: () { setState(() => _transportModes.remove(mode)); _recalcTransportPrice(); },
-                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap, visualDensity: VisualDensity.compact,
-                  );
-                }).toList()),
-              const SizedBox(width: 8),
-              PopupMenuButton<String>(
-                icon: Icon(Icons.add_circle_outline, size: 20, color: cs.primary),
-                tooltip: 'Legg til',
-                onSelected: (mode) { setState(() => _transportModes.add(mode)); _recalcTransportPrice(); },
-                itemBuilder: (_) => [
-                  if (!_transportModes.contains('privatbil'))
-                    const PopupMenuItem(value: 'privatbil', child: Row(children: [Icon(Icons.directions_car, size: 18), SizedBox(width: 8), Text('Privatbil')])),
-                  if (!_transportModes.contains('hyrebil'))
-                    const PopupMenuItem(value: 'hyrebil', child: Row(children: [Icon(Icons.local_taxi, size: 18), SizedBox(width: 8), Text('Hyre varebil')])),
+            const SizedBox(height: 8),
+            _paramRow('Km totalt', _transportKm.toDouble(), (v) {
+              _transportKm = v.round();
+              _recalc();
+              if (_transportModes.isNotEmpty) _recalcTransportPrice();
+              setState(() {});
+            }, integer: true),
+            if (_tollStations.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Text(
+                    'Bom: ${_nf.format(_tollCost)} kr (${_tollStations.length} stasjoner)',
+                    style: TextStyle(fontSize: 12, color: cs.onSurfaceVariant)),
+              ),
+            // Transport total — always visible, editable
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 4),
+              child: Row(
+                children: [
+                  SizedBox(
+                      width: 140,
+                      child: Text('Transportpris',
+                          style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w700,
+                              color: cs.onSurface))),
+                  _NumField(
+                    key: const ValueKey('num_transportpris'),
+                    value: _transportPrice,
+                    nf: _nf,
+                    mode: _NumFieldMode.money,
+                    width: 120,
+                    style: const TextStyle(
+                        fontSize: 14, fontWeight: FontWeight.w900),
+                    onChanged: (v) {
+                      _transportPrice = v;
+                      setState(() => _recalc());
+                    },
+                  ),
+                  const SizedBox(width: 6),
+                  Text('kr',
+                      style:
+                          TextStyle(fontSize: 12, color: cs.onSurfaceVariant)),
                 ],
               ),
-            ],
-          ),
-
-          // ── Privatbil beregning ──
-          if (_transportModes.contains('privatbil')) ...[
-            const SizedBox(height: 12),
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: cs.surfaceContainerHighest.withValues(alpha: 0.3),
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: cs.outlineVariant),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text('Privatbil', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
-                  const SizedBox(height: 8),
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 8),
-                    child: Row(
-                      children: [
-                        const Expanded(child: Text('Kr/km', style: TextStyle(fontSize: 13))),
-                        _rateChip('3,50', 3.50),
-                        const SizedBox(width: 4),
-                        _rateChip('5,30', 5.30),
-                        const SizedBox(width: 8),
-                        _NumField(
-                          key: const ValueKey('num_krkm'),
-                          value: _transportPricePerKm,
-                          nf: _nf,
-                          mode: _NumFieldMode.rate,
-                          width: 80,
-                          contentPadding: const EdgeInsets.symmetric(
-                              horizontal: 8, vertical: 8),
-                          onChanged: (v) {
-                            _transportPricePerKm = v;
+            ),
+            // Add transport type
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                if (_transportModes.isNotEmpty)
+                  Wrap(
+                      spacing: 6,
+                      children: _transportModes.map((mode) {
+                        final label = const {
+                              'privatbil': 'Privatbil',
+                              'hyrebil': 'Hyre varebil'
+                            }[mode] ??
+                            mode;
+                        return Chip(
+                          avatar: Icon(
+                              const {
+                                    'privatbil': Icons.directions_car,
+                                    'hyrebil': Icons.local_taxi
+                                  }[mode] ??
+                                  Icons.help,
+                              size: 16),
+                          label:
+                              Text(label, style: const TextStyle(fontSize: 12)),
+                          deleteIcon: const Icon(Icons.close, size: 14),
+                          onDeleted: () {
+                            setState(() => _transportModes.remove(mode));
                             _recalcTransportPrice();
                           },
-                        ),
-                      ],
-                    ),
-                  ),
-                  Row(
-                    children: [
-                      Text('${_nf.format(_transportKm)} km × ${_transportPricePerKm.toStringAsFixed(2)} kr',
-                          style: TextStyle(fontSize: 12, color: cs.onSurfaceVariant)),
-                      if (_tollCost > 0) Text(' + ${_nf.format(_tollCost)} bom',
-                          style: TextStyle(fontSize: 12, color: cs.onSurfaceVariant)),
-                      const Spacer(),
-                      Text('${_nf.format(_privatbilTotal)} kr', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700)),
-                    ],
-                  ),
-                ],
-              ),
+                          materialTapTargetSize:
+                              MaterialTapTargetSize.shrinkWrap,
+                          visualDensity: VisualDensity.compact,
+                        );
+                      }).toList()),
+                const SizedBox(width: 8),
+                PopupMenuButton<String>(
+                  icon: Icon(Icons.add_circle_outline,
+                      size: 20, color: cs.primary),
+                  tooltip: 'Legg til',
+                  onSelected: (mode) {
+                    setState(() => _transportModes.add(mode));
+                    _recalcTransportPrice();
+                  },
+                  itemBuilder: (_) => [
+                    if (!_transportModes.contains('privatbil'))
+                      const PopupMenuItem(
+                          value: 'privatbil',
+                          child: Row(children: [
+                            Icon(Icons.directions_car, size: 18),
+                            SizedBox(width: 8),
+                            Text('Privatbil')
+                          ])),
+                    if (!_transportModes.contains('hyrebil'))
+                      const PopupMenuItem(
+                          value: 'hyrebil',
+                          child: Row(children: [
+                            Icon(Icons.local_taxi, size: 18),
+                            SizedBox(width: 8),
+                            Text('Hyre varebil')
+                          ])),
+                  ],
+                ),
+              ],
             ),
-          ],
 
-          // ── Hyre varebil beregning ──
-          if (_transportModes.contains('hyrebil')) ...[
-            const SizedBox(height: 12),
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: cs.surfaceContainerHighest.withValues(alpha: 0.3),
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: cs.outlineVariant),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text('Hyre varebil', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
-                  const SizedBox(height: 8),
-                  Row(
-                    children: [
-                      SizedBox(width: 80, child: Text('Dager', style: TextStyle(fontSize: 13, color: cs.onSurfaceVariant))),
-                      SizedBox(width: 60, child: TextField(
-                        controller: _hyreDaysCtrl, textAlign: TextAlign.center,
-                        keyboardType: TextInputType.number, style: const TextStyle(fontSize: 13),
-                        decoration: const InputDecoration(isDense: true, contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 6)),
-                        onChanged: (v) { final d = int.tryParse(v); if (d != null && d > 0) { _hyreDays = d; _recalcTransportPrice(); } },
-                      )),
-                      const SizedBox(width: 8),
-                      Text('× ${_nf.format(_hyreDayRate)} kr/dag', style: TextStyle(fontSize: 12, color: cs.onSurfaceVariant)),
-                    ],
-                  ),
-                  const SizedBox(height: 6),
-                  Builder(builder: (_) {
-                    final included = (_hyreDays * _hyreIncludedKmPerDay).round();
-                    final extra = (_transportKm - included).clamp(0, 999999);
-                    final extraCost = extra * _hyreExtraKmRate;
-                    return Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+            // ── Privatbil beregning ──
+            if (_transportModes.contains('privatbil')) ...[
+              const SizedBox(height: 12),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: cs.surfaceContainerHighest.withValues(alpha: 0.3),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: cs.outlineVariant),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('Privatbil',
+                        style: TextStyle(
+                            fontWeight: FontWeight.w700, fontSize: 13)),
+                    const SizedBox(height: 8),
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: Row(
+                        children: [
+                          const Expanded(
+                              child: Text('Kr/km',
+                                  style: TextStyle(fontSize: 13))),
+                          _rateChip('3,50', 3.50),
+                          const SizedBox(width: 4),
+                          _rateChip('5,30', 5.30),
+                          const SizedBox(width: 8),
+                          _NumField(
+                            key: const ValueKey('num_krkm'),
+                            value: _transportPricePerKm,
+                            nf: _nf,
+                            mode: _NumFieldMode.rate,
+                            width: 80,
+                            contentPadding: const EdgeInsets.symmetric(
+                                horizontal: 8, vertical: 8),
+                            onChanged: (v) {
+                              _transportPricePerKm = v;
+                              _recalcTransportPrice();
+                            },
+                          ),
+                        ],
+                      ),
+                    ),
+                    Row(
                       children: [
                         Text(
-                          'Inkl: $included km  ·  ${_transportKm > included ? 'Extra: $extra km × ${_hyreExtraKmRate.toStringAsFixed(2)} kr = ${_nf.format(extraCost)} kr' : 'Innenfor inkludert km'}',
-                          style: TextStyle(fontSize: 12, color: cs.onSurfaceVariant),
-                        ),
+                            '${_nf.format(_transportKm)} km × ${_transportPricePerKm.toStringAsFixed(2)} kr',
+                            style: TextStyle(
+                                fontSize: 12, color: cs.onSurfaceVariant)),
+                        if (_tollCost > 0)
+                          Text(' + ${_nf.format(_tollCost)} bom',
+                              style: TextStyle(
+                                  fontSize: 12, color: cs.onSurfaceVariant)),
+                        const Spacer(),
+                        Text('${_nf.format(_privatbilTotal)} kr',
+                            style: const TextStyle(
+                                fontSize: 13, fontWeight: FontWeight.w700)),
                       ],
-                    );
-                  }),
-                  Text('Drivstoff: ${(_transportKm / 10).toStringAsFixed(1)} mil × ${_hyreFuelPerMil.toStringAsFixed(2)} L × ${_nf.format(_hyreDieselPrice)} kr = ${_nf.format(_hyreFuelCost)} kr', style: TextStyle(fontSize: 12, color: cs.onSurfaceVariant)),
-                  if (_tollCost > 0)
-                    Text('Bom: ${_nf.format(_tollCost)} kr', style: TextStyle(fontSize: 12, color: cs.onSurfaceVariant)),
-                  const SizedBox(height: 6),
-                  Text('${_nf.format(_hyreTotal)} kr', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700)),
-                  // Collapsible rate settings
-                  ExpansionTile(
-                    title: Text('Satser', style: TextStyle(fontSize: 12, color: cs.onSurfaceVariant)),
-                    tilePadding: EdgeInsets.zero,
-                    childrenPadding: const EdgeInsets.only(bottom: 8),
-                    children: [
-                      _hyreRateRow('Dagspris', _hyreDayRateCtrl, (v) { _hyreDayRate = v; _saveHyreRate('hyre_day_rate', v); _recalcTransportPrice(); }),
-                      const SizedBox(height: 4),
-                      _hyreRateRow('Inkl. km/dag', _hyreInclKmCtrl, (v) { _hyreIncludedKmPerDay = v; _saveHyreRate('hyre_included_km', v); _recalcTransportPrice(); }),
-                      const SizedBox(height: 4),
-                      _hyreRateRow('Extra kr/km', _hyreExtraKmCtrl, (v) { _hyreExtraKmRate = v; _saveHyreRate('hyre_extra_km_rate', v); _recalcTransportPrice(); }),
-                      const SizedBox(height: 4),
-                      _hyreRateRow('L/mil', _hyreFuelCtrl, (v) { _hyreFuelPerMil = v; _saveHyreRate('hyre_fuel_per_mil', v); _recalcTransportPrice(); }),
-                      const SizedBox(height: 4),
-                      _hyreRateRow('Diesel kr/L', _hyreDieselCtrl, (v) { _hyreDieselPrice = v; _saveHyreRate('hyre_diesel_price', v); _recalcTransportPrice(); }),
-                    ],
-                  ),
-                ],
+                    ),
+                  ],
+                ),
               ),
-            ),
-          ],
+            ],
+
+            // ── Hyre varebil beregning ──
+            if (_transportModes.contains('hyrebil')) ...[
+              const SizedBox(height: 12),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: cs.surfaceContainerHighest.withValues(alpha: 0.3),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: cs.outlineVariant),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('Hyre varebil',
+                        style: TextStyle(
+                            fontWeight: FontWeight.w700, fontSize: 13)),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        SizedBox(
+                            width: 80,
+                            child: Text('Dager',
+                                style: TextStyle(
+                                    fontSize: 13, color: cs.onSurfaceVariant))),
+                        SizedBox(
+                            width: 60,
+                            child: TextField(
+                              controller: _hyreDaysCtrl,
+                              textAlign: TextAlign.center,
+                              keyboardType: TextInputType.number,
+                              style: const TextStyle(fontSize: 13),
+                              decoration: const InputDecoration(
+                                  isDense: true,
+                                  contentPadding: EdgeInsets.symmetric(
+                                      horizontal: 8, vertical: 6)),
+                              onChanged: (v) {
+                                final d = int.tryParse(v);
+                                if (d != null && d > 0) {
+                                  _hyreDays = d;
+                                  _recalcTransportPrice();
+                                }
+                              },
+                            )),
+                        const SizedBox(width: 8),
+                        Text('× ${_nf.format(_hyreDayRate)} kr/dag',
+                            style: TextStyle(
+                                fontSize: 12, color: cs.onSurfaceVariant)),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    Builder(builder: (_) {
+                      final included =
+                          (_hyreDays * _hyreIncludedKmPerDay).round();
+                      final extra = (_transportKm - included).clamp(0, 999999);
+                      final extraCost = extra * _hyreExtraKmRate;
+                      return Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Inkl: $included km  ·  ${_transportKm > included ? 'Extra: $extra km × ${_hyreExtraKmRate.toStringAsFixed(2)} kr = ${_nf.format(extraCost)} kr' : 'Innenfor inkludert km'}',
+                            style: TextStyle(
+                                fontSize: 12, color: cs.onSurfaceVariant),
+                          ),
+                        ],
+                      );
+                    }),
+                    Text(
+                        'Drivstoff: ${(_transportKm / 10).toStringAsFixed(1)} mil × ${_hyreFuelPerMil.toStringAsFixed(2)} L × ${_nf.format(_hyreDieselPrice)} kr = ${_nf.format(_hyreFuelCost)} kr',
+                        style: TextStyle(
+                            fontSize: 12, color: cs.onSurfaceVariant)),
+                    if (_tollCost > 0)
+                      Text('Bom: ${_nf.format(_tollCost)} kr',
+                          style: TextStyle(
+                              fontSize: 12, color: cs.onSurfaceVariant)),
+                    const SizedBox(height: 6),
+                    Text('${_nf.format(_hyreTotal)} kr',
+                        style: const TextStyle(
+                            fontSize: 13, fontWeight: FontWeight.w700)),
+                    // Collapsible rate settings
+                    ExpansionTile(
+                      title: Text('Satser',
+                          style: TextStyle(
+                              fontSize: 12, color: cs.onSurfaceVariant)),
+                      tilePadding: EdgeInsets.zero,
+                      childrenPadding: const EdgeInsets.only(bottom: 8),
+                      children: [
+                        _hyreRateRow('Dagspris', _hyreDayRateCtrl, (v) {
+                          _hyreDayRate = v;
+                          _saveHyreRate('hyre_day_rate', v);
+                          _recalcTransportPrice();
+                        }),
+                        const SizedBox(height: 4),
+                        _hyreRateRow('Inkl. km/dag', _hyreInclKmCtrl, (v) {
+                          _hyreIncludedKmPerDay = v;
+                          _saveHyreRate('hyre_included_km', v);
+                          _recalcTransportPrice();
+                        }),
+                        const SizedBox(height: 4),
+                        _hyreRateRow('Extra kr/km', _hyreExtraKmCtrl, (v) {
+                          _hyreExtraKmRate = v;
+                          _saveHyreRate('hyre_extra_km_rate', v);
+                          _recalcTransportPrice();
+                        }),
+                        const SizedBox(height: 4),
+                        _hyreRateRow('L/mil', _hyreFuelCtrl, (v) {
+                          _hyreFuelPerMil = v;
+                          _saveHyreRate('hyre_fuel_per_mil', v);
+                          _recalcTransportPrice();
+                        }),
+                        const SizedBox(height: 4),
+                        _hyreRateRow('Diesel kr/L', _hyreDieselCtrl, (v) {
+                          _hyreDieselPrice = v;
+                          _saveHyreRate('hyre_diesel_price', v);
+                          _recalcTransportPrice();
+                        }),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ],
           ],
         ],
       ),
     );
   }
-
 
   Widget _rateChip(String label, double rate) {
     final cs = Theme.of(context).colorScheme;
@@ -3565,8 +3786,8 @@ class _GigOfferPageState extends State<GigOfferPage> {
         decoration: BoxDecoration(
           color: selected ? Colors.black : Colors.transparent,
           borderRadius: BorderRadius.circular(999),
-          border: Border.all(
-              color: selected ? Colors.black : cs.outlineVariant),
+          border:
+              Border.all(color: selected ? Colors.black : cs.outlineVariant),
         ),
         child: Text(
           label,
@@ -3580,8 +3801,7 @@ class _GigOfferPageState extends State<GigOfferPage> {
     );
   }
 
-  Widget _paramRow(
-      String label, num value, ValueChanged<double> onChanged,
+  Widget _paramRow(String label, num value, ValueChanged<double> onChanged,
       {bool integer = false}) {
     final cs = Theme.of(context).colorScheme;
     return Padding(
@@ -3616,8 +3836,7 @@ class _GigOfferPageState extends State<GigOfferPage> {
           SizedBox(
             width: 140,
             child: Text(label,
-                style:
-                    TextStyle(fontSize: 13, color: cs.onSurfaceVariant)),
+                style: TextStyle(fontSize: 13, color: cs.onSurfaceVariant)),
           ),
           _NumField(
             key: ValueKey('numpct_$label'),
@@ -3634,8 +3853,7 @@ class _GigOfferPageState extends State<GigOfferPage> {
 
   /// On/off row aligned to the same label column as [_paramRow] — one
   /// consistent control (a switch) for all boolean price parameters.
-  Widget _paramToggle(
-      String label, bool value, ValueChanged<bool> onChanged) {
+  Widget _paramToggle(String label, bool value, ValueChanged<bool> onChanged) {
     final cs = Theme.of(context).colorScheme;
     return Padding(
       padding: const EdgeInsets.only(bottom: 4),
@@ -3684,8 +3902,7 @@ class _GigOfferPageState extends State<GigOfferPage> {
     return _collapsibleCard(
       title: 'Tidsplan',
       expanded: _scheduleExpanded,
-      onToggle: () =>
-          setState(() => _scheduleExpanded = !_scheduleExpanded),
+      onToggle: () => setState(() => _scheduleExpanded = !_scheduleExpanded),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -3698,39 +3915,32 @@ class _GigOfferPageState extends State<GigOfferPage> {
                 children: indexed.map((i) {
                   final entry = _dateEntries[i];
                   final isCurrent = i == _scheduleSelectedIdx;
-                  final dateStr = entry.dateFrom != null
-                      ? df.format(entry.dateFrom!)
-                      : '?';
+                  final dateStr =
+                      entry.dateFrom != null ? df.format(entry.dateFrom!) : '?';
                   final venue = entry.venueCtrl.text.trim();
                   final label = venue.isNotEmpty
                       ? '$dateStr · $venue${entry.isRehearsal ? ' (Prøve)' : ''}'
                       : '$dateStr${entry.isRehearsal ? ' (Prøve)' : ''}';
                   final chip = Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 10, vertical: 6),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                     decoration: BoxDecoration(
-                      color: isCurrent
-                          ? Colors.black
-                          : cs.surfaceContainerHigh,
+                      color: isCurrent ? Colors.black : cs.surfaceContainerHigh,
                       borderRadius: BorderRadius.circular(8),
                     ),
                     child: Text(
                       label,
                       style: TextStyle(
                         fontSize: 12,
-                        fontWeight: isCurrent
-                            ? FontWeight.w700
-                            : FontWeight.w400,
-                        color: isCurrent
-                            ? Colors.white
-                            : cs.onSurfaceVariant,
+                        fontWeight:
+                            isCurrent ? FontWeight.w700 : FontWeight.w400,
+                        color: isCurrent ? Colors.white : cs.onSurfaceVariant,
                       ),
                     ),
                   );
                   return InkWell(
                     borderRadius: BorderRadius.circular(8),
-                    onTap: () =>
-                        setState(() => _scheduleSelectedIdx = i),
+                    onTap: () => setState(() => _scheduleSelectedIdx = i),
                     child: chip,
                   );
                 }).toList(),
@@ -3789,8 +3999,8 @@ class _GigOfferPageState extends State<GigOfferPage> {
             children: [
               TextField(
                 controller: row.titleCtrl,
-                style: const TextStyle(
-                    fontSize: 13, fontWeight: FontWeight.w600),
+                style:
+                    const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
                 decoration: const InputDecoration(
                   labelText: 'Tittel',
                   hintText: 'F.eks. Soundcheck',
@@ -3913,16 +4123,20 @@ class _GigOfferPageState extends State<GigOfferPage> {
 
   /// Build the calc lines for the PDF (mirrors the calc card exactly)
   List<({String label, double amount})> get _pdfCalcLines => [
-    (label: 'Utøverhyrer', amount: _ov('performer_fees', _performerFees)),
-    (label: 'CompleteKonto', amount: _ov('complete_konto', _completeKonto)),
-    (label: 'BookingHonorar', amount: _ov('booking_honorar', _bookingHonorar)),
-    (label: 'In-Ear', amount: _ov('inear', _inearTotal)),
-    (label: 'Transport', amount: _ov('transport', _totalTransport)),
-    (label: 'Prøver', amount: _ov('rehearsal', _rehearsalTotal)),
-    // Ekstrakostnader — each as its own named line (face value, no markup).
-    for (final e in _extras)
-      if (e.name.trim().isNotEmpty) (label: e.name.trim(), amount: e.amount),
-  ];
+        (label: 'Utøverhyrer', amount: _ov('performer_fees', _performerFees)),
+        (label: 'CompleteKonto', amount: _ov('complete_konto', _completeKonto)),
+        (
+          label: 'BookingHonorar',
+          amount: _ov('booking_honorar', _bookingHonorar)
+        ),
+        (label: 'In-Ear', amount: _ov('inear', _inearTotal)),
+        (label: 'Transport', amount: _ov('transport', _totalTransport)),
+        (label: 'Prøver', amount: _ov('rehearsal', _rehearsalTotal)),
+        // Ekstrakostnader — each as its own named line (face value, no markup).
+        for (final e in _extras)
+          if (e.name.trim().isNotEmpty)
+            (label: e.name.trim(), amount: e.amount),
+      ];
 
   /// The final total for the PDF (respects total override)
   double get _pdfTotal =>
@@ -3930,25 +4144,22 @@ class _GigOfferPageState extends State<GigOfferPage> {
 
   /// Date entries formatted for the PDF (fetches per-date times from gigs)
   Future<
-          List<
-              ({
-                String date,
-                String venue,
-                bool isRehearsal,
-                List<String> shows,
-                List<double> showPrices,
-                String getIn,
-                String rehearsalTime,
-                String performance,
-                String getOut,
-              })>>
-      _pdfDateEntries() async {
+      List<
+          ({
+            String date,
+            String venue,
+            bool isRehearsal,
+            List<String> shows,
+            List<double> showPrices,
+            String getIn,
+            String rehearsalTime,
+            String performance,
+            String getOut,
+          })>> _pdfDateEntries() async {
     final df = DateFormat('dd.MM.yyyy');
     final timesByGig = <String, Map<String, dynamic>>{};
-    final gigIds = _dateEntries
-        .map((e) => e.gigId)
-        .whereType<String>()
-        .toList();
+    final gigIds =
+        _dateEntries.map((e) => e.gigId).whereType<String>().toList();
     if (gigIds.isNotEmpty) {
       try {
         final rows = await _sb
@@ -3987,9 +4198,8 @@ class _GigOfferPageState extends State<GigOfferPage> {
       int mainIdx = 0;
       int mainPerf = -1;
       for (int j = 0; j < dateShows.length; j++) {
-        final p = dateShows[j].drummers +
-            dateShows[j].dancers +
-            dateShows[j].others;
+        final p =
+            dateShows[j].drummers + dateShows[j].dancers + dateShows[j].others;
         if (p > mainPerf) {
           mainPerf = p;
           mainIdx = j;
@@ -4040,8 +4250,7 @@ class _GigOfferPageState extends State<GigOfferPage> {
 
   Widget _buildCalcCard() {
     final cs = Theme.of(context).colorScheme;
-    final numPerfDates =
-        _dateEntries.where((e) => !e.isRehearsal).length;
+    final numPerfDates = _dateEntries.where((e) => !e.isRehearsal).length;
     final transportGig = _transportPrice * numPerfDates;
     final transportCombined = transportGig + _rehearsalTransport;
     return Container(
@@ -4069,8 +4278,12 @@ class _GigOfferPageState extends State<GigOfferPage> {
             final ckPct = markupBase > 0 ? ckVal / markupBase : 0.0;
             final bhPct = markupBase > 0 ? bhVal / markupBase : 0.0;
             return Column(children: [
-              _editableCalcRow('complete_konto', 'CompleteKonto', _completeKonto, pct: ckPct),
-              _editableCalcRow('booking_honorar', 'BookingHonorar', _bookingHonorar, pct: bhPct),
+              _editableCalcRow(
+                  'complete_konto', 'CompleteKonto', _completeKonto,
+                  pct: ckPct),
+              _editableCalcRow(
+                  'booking_honorar', 'BookingHonorar', _bookingHonorar,
+                  pct: bhPct),
             ]);
           }(),
           if (_inearIncluded)
@@ -4101,8 +4314,7 @@ class _GigOfferPageState extends State<GigOfferPage> {
                 padding: const EdgeInsets.only(bottom: 4),
                 child: Text(
                   '${_tollStations.length} bom × ${_routePersons * (_routeReturn ? 2 : 1)}',
-                  style: TextStyle(
-                      fontSize: 11, color: cs.onSurfaceVariant),
+                  style: TextStyle(fontSize: 11, color: cs.onSurfaceVariant),
                 ),
               ),
           ],
@@ -4128,7 +4340,8 @@ class _GigOfferPageState extends State<GigOfferPage> {
                           onTap: () => setState(() {
                             _overrides.remove('total');
                           }),
-                          child: Icon(Icons.undo, size: 14, color: Colors.orange),
+                          child:
+                              Icon(Icons.undo, size: 14, color: Colors.orange),
                         ),
                       ),
                     Text(
@@ -4136,7 +4349,9 @@ class _GigOfferPageState extends State<GigOfferPage> {
                       style: TextStyle(
                         fontWeight: FontWeight.w900,
                         fontSize: 18,
-                        color: _overrides.containsKey('total') ? Colors.orange : null,
+                        color: _overrides.containsKey('total')
+                            ? Colors.orange
+                            : null,
                       ),
                     ),
                   ],
@@ -4158,8 +4373,7 @@ class _GigOfferPageState extends State<GigOfferPage> {
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
           Text(label,
-              style:
-                  TextStyle(fontSize: 13, color: cs.onSurfaceVariant)),
+              style: TextStyle(fontSize: 13, color: cs.onSurfaceVariant)),
           Text(value, style: const TextStyle(fontSize: 13)),
         ],
       ),
@@ -4180,8 +4394,7 @@ class _GigOfferPageState extends State<GigOfferPage> {
             children: [
               Expanded(
                 child: Text(e.name.trim(),
-                    style:
-                        TextStyle(fontSize: 13, color: cs.onSurfaceVariant)),
+                    style: TextStyle(fontSize: 13, color: cs.onSurfaceVariant)),
               ),
               const SizedBox(width: 8),
               Text('${_nf.format(e.amount)} kr',
@@ -4217,8 +4430,7 @@ class _GigOfferPageState extends State<GigOfferPage> {
             Row(
               children: [
                 Text(label,
-                    style:
-                        TextStyle(fontSize: 13, color: cs.onSurfaceVariant)),
+                    style: TextStyle(fontSize: 13, color: cs.onSurfaceVariant)),
                 if (pct != null) ...[
                   const SizedBox(width: 6),
                   Text('${(pct * 100).toStringAsFixed(1)}%',
@@ -4229,8 +4441,8 @@ class _GigOfferPageState extends State<GigOfferPage> {
                 ],
                 if (suffix != null)
                   Text(suffix,
-                      style: TextStyle(
-                          fontSize: 11, color: cs.onSurfaceVariant)),
+                      style:
+                          TextStyle(fontSize: 11, color: cs.onSurfaceVariant)),
               ],
             ),
             Row(
@@ -4292,8 +4504,10 @@ class _GigOfferPageState extends State<GigOfferPage> {
               setState(() {
                 _overrides.remove(key);
                 // Also reset the linked field
-                if (key == 'booking_honorar') _overrides.remove('complete_konto');
-                if (key == 'complete_konto') _overrides.remove('booking_honorar');
+                if (key == 'booking_honorar')
+                  _overrides.remove('complete_konto');
+                if (key == 'complete_konto')
+                  _overrides.remove('booking_honorar');
               });
               Navigator.pop(ctx);
             },
@@ -4370,11 +4584,8 @@ class _GigOfferPageState extends State<GigOfferPage> {
 
       // Load gig and shows from database so PDF matches the original exactly
       final firstGigId = _dateEntries.first.gigId ?? _gigId;
-      final gigMap = await _sb
-          .from('gigs')
-          .select('*')
-          .eq('id', firstGigId!)
-          .single();
+      final gigMap =
+          await _sb.from('gigs').select('*').eq('id', firstGigId!).single();
       final showMaps = await _sb
           .from('gig_shows')
           .select('*')
@@ -4416,10 +4627,8 @@ class _GigOfferPageState extends State<GigOfferPage> {
               fileOptions: const FileOptions(
                   contentType: 'application/pdf', upsert: true),
             );
-        await _sb
-            .from('agreement_tokens')
-            .update({'signed_pdf_path': signedPath}).eq(
-                'id', _agreement!['id']);
+        await _sb.from('agreement_tokens').update(
+            {'signed_pdf_path': signedPath}).eq('id', _agreement!['id']);
       } catch (e) {
         debugPrint('Archive signed agreement error: $e');
       }
@@ -4427,7 +4636,9 @@ class _GigOfferPageState extends State<GigOfferPage> {
       // Send signed PDF to customer
       final customerEmail = _agreement!['customer_email'] as String? ?? '';
       final venue = _dateEntries.first.venueCtrl.text;
-      final dateFrom = _dateEntries.first.dateFrom != null ? df.format(_dateEntries.first.dateFrom!) : '';
+      final dateFrom = _dateEntries.first.dateFrom != null
+          ? df.format(_dateEntries.first.dateFrom!)
+          : '';
       if (customerEmail.isNotEmpty) {
         final htmlBody = '''
 <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 600px; margin: 0 auto;">
@@ -4449,7 +4660,11 @@ class _GigOfferPageState extends State<GigOfferPage> {
           subject: 'Signert intensjonsavtale — $venue $dateFrom',
           body: htmlBody,
           attachments: [
-            (filename: 'Signert_Intensjonsavtale_${venue.replaceAll(' ', '_')}.pdf', bytes: signedResult.mainPdf),
+            (
+              filename:
+                  'Signert_Intensjonsavtale_${venue.replaceAll(' ', '_')}.pdf',
+              bytes: signedResult.mainPdf
+            ),
           ],
           isHtml: true,
           companyId: _companyId,
@@ -4469,7 +4684,8 @@ class _GigOfferPageState extends State<GigOfferPage> {
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Avtale godkjent og signert kopi sendt!')),
+          const SnackBar(
+              content: Text('Avtale godkjent og signert kopi sendt!')),
         );
       }
     } catch (e) {
@@ -4528,11 +4744,15 @@ class _GigOfferPageState extends State<GigOfferPage> {
                 decoration: BoxDecoration(
                   color: Colors.orange.withValues(alpha: 0.08),
                   borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.orange.withValues(alpha: 0.2)),
+                  border:
+                      Border.all(color: Colors.orange.withValues(alpha: 0.2)),
                 ),
                 child: const Text(
                   'Sendt — venter på svar fra kunde',
-                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Colors.orange),
+                  style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.orange),
                 ),
               ),
 
@@ -4542,24 +4762,30 @@ class _GigOfferPageState extends State<GigOfferPage> {
                 decoration: BoxDecoration(
                   color: Colors.green.withValues(alpha: 0.08),
                   borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.green.withValues(alpha: 0.2)),
+                  border:
+                      Border.all(color: Colors.green.withValues(alpha: 0.2)),
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     const Text(
                       'Kunde har godtatt!',
-                      style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: Colors.green),
+                      style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                          color: Colors.green),
                     ),
                     const SizedBox(height: 4),
                     Text(
                       'Godtatt av: ${_agreement!['accepted_name'] ?? ''}',
-                      style: TextStyle(fontSize: 12, color: cs.onSurfaceVariant),
+                      style:
+                          TextStyle(fontSize: 12, color: cs.onSurfaceVariant),
                     ),
                     if (_agreement!['accepted_at'] != null)
                       Text(
                         'Dato: ${DateFormat('dd.MM.yyyy HH:mm').format(DateTime.parse(_agreement!['accepted_at']).toLocal())}',
-                        style: TextStyle(fontSize: 11, color: cs.onSurfaceVariant),
+                        style:
+                            TextStyle(fontSize: 11, color: cs.onSurfaceVariant),
                       ),
                   ],
                 ),
@@ -4568,8 +4794,13 @@ class _GigOfferPageState extends State<GigOfferPage> {
               FilledButton.icon(
                 onPressed: _approvingAgreement ? null : _approveAgreement,
                 style: FilledButton.styleFrom(backgroundColor: Colors.green),
-                icon: Icon(_approvingAgreement ? Icons.hourglass_top : Icons.check_circle, size: 18),
-                label: Text(_approvingAgreement ? 'Godkjenner…' : 'Godkjenn og signer'),
+                icon: Icon(
+                    _approvingAgreement
+                        ? Icons.hourglass_top
+                        : Icons.check_circle,
+                    size: 18),
+                label: Text(
+                    _approvingAgreement ? 'Godkjenner…' : 'Godkjenn og signer'),
               ),
               const SizedBox(height: 4),
               Text(
@@ -4767,10 +4998,7 @@ class _CustomerPicker extends StatelessWidget {
         child: Row(
           children: [
             Icon(Icons.search,
-                size: 18,
-                color: loading
-                    ? cs.onSurfaceVariant
-                    : cs.primary),
+                size: 18, color: loading ? cs.onSurfaceVariant : cs.primary),
             const SizedBox(width: 10),
             Expanded(
               child: loading
@@ -4893,16 +5121,21 @@ class _CustomerPickerDialogState extends State<_CustomerPickerDialog> {
         return;
       }
 
-      final inserted = await sb.from('companies').insert({
-        'name': c.name,
-        'org_nr': c.orgNr,
-        'address': c.address,
-        'postal_code': c.postalCode,
-        'city': c.city,
-        'country': c.country,
-        if (widget.ownerCompanyId != null)
-          'owner_company_id': widget.ownerCompanyId,
-      }).select('*, contacts!contacts_company_id_fkey(id, name, phone, email)').single();
+      final inserted = await sb
+          .from('companies')
+          .insert({
+            'name': c.name,
+            'org_nr': c.orgNr,
+            'address': c.address,
+            'postal_code': c.postalCode,
+            'city': c.city,
+            'country': c.country,
+            if (widget.ownerCompanyId != null)
+              'owner_company_id': widget.ownerCompanyId,
+          })
+          .select(
+              '*, contacts!contacts_company_id_fkey(id, name, phone, email)')
+          .single();
 
       if (mounted) Navigator.pop(context, inserted);
     } catch (e) {
@@ -4936,9 +5169,8 @@ class _CustomerPickerDialogState extends State<_CustomerPickerDialog> {
         .map((c) => (c['org_nr'] as String? ?? '').trim())
         .where((o) => o.isNotEmpty)
         .toSet();
-    final brregFiltered = _brregResults
-        .where((b) => !savedOrgNrs.contains(b.orgNr))
-        .toList();
+    final brregFiltered =
+        _brregResults.where((b) => !savedOrgNrs.contains(b.orgNr)).toList();
 
     final hasLocal = localFiltered.isNotEmpty;
     final hasBrreg = brregFiltered.isNotEmpty;
@@ -5005,11 +5237,9 @@ class _CustomerPickerDialogState extends State<_CustomerPickerDialog> {
                             ),
                             ...localFiltered.map((c) => ListTile(
                                   dense: true,
-                                  leading: const Icon(
-                                      Icons.business_outlined,
+                                  leading: const Icon(Icons.business_outlined,
                                       size: 18),
-                                  title: Text(
-                                      c['name'] as String? ?? '',
+                                  title: Text(c['name'] as String? ?? '',
                                       style: const TextStyle(
                                           fontWeight: FontWeight.w700)),
                                   subtitle: Text(
@@ -5048,8 +5278,8 @@ class _CustomerPickerDialogState extends State<_CustomerPickerDialog> {
                                   title: Text(c.name,
                                       style: const TextStyle(
                                           fontWeight: FontWeight.w700)),
-                                  subtitle: Text(
-                                      '${c.orgNr}  ·  ${c.city ?? ''}'),
+                                  subtitle:
+                                      Text('${c.orgNr}  ·  ${c.city ?? ''}'),
                                   trailing: Icon(Icons.add_circle_outline,
                                       size: 18, color: cs.primary),
                                   onTap: () => _selectBrreg(c),
@@ -5308,7 +5538,8 @@ class _OfferShow {
 class _OfferExtra {
   String name;
   double amount;
-  String allocation; // 'group' | 'member' | 'company' | 'split' | 'split_company'
+  String
+      allocation; // 'group' | 'member' | 'company' | 'split' | 'split_company'
   String? memberId;
   String? memberName;
   // Splits only: kr to the member. The rest goes to the group ('split') or
