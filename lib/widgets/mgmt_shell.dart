@@ -473,17 +473,76 @@ class _MgmtSideNavState extends State<_MgmtSideNav> {
     }
   }
 
+  /// Offers waiting for us to countersign: the customer accepted, we have
+  /// not approved yet.
+  ///
+  /// Uses the same rule as the offer list (mgmt_gig_offers_page): gather every
+  /// token across the offer's gigs and let approved win over accepted. Counting
+  /// raw 'accepted' tokens instead left a phantom number whenever an offer had
+  /// been re-sent and signed — the old accepted token was still counted though
+  /// the list showed the offer as signed. Archived offers are excluded, as the
+  /// list excludes them.
   Future<void> _loadPendingAgreements() async {
     try {
       final companyId = activeCompanyNotifier.value?.id;
       if (companyId == null) return;
-      // Count agreements with status 'accepted' (customer accepted, not yet approved)
-      final rows = await _sb
+
+      final offers = List<Map<String, dynamic>>.from(await _sb
+          .from('gig_offers')
+          .select('id, gig_id')
+          .eq('company_id', companyId)
+          .eq('archived', false));
+      if (offers.isEmpty) {
+        if (mounted) setState(() => _pendingAgreements = 0);
+        return;
+      }
+
+      final offerIds = offers.map((o) => o['id'] as String).toList();
+      final junction = List<Map<String, dynamic>>.from(await _sb
+          .from('gig_offer_gigs')
+          .select('offer_id, gig_id')
+          .inFilter('offer_id', offerIds));
+
+      final gigsByOffer = <String, Set<String>>{};
+      for (final o in offers) {
+        final gid = o['gig_id'] as String?;
+        final set = gigsByOffer.putIfAbsent(o['id'] as String, () => {});
+        if (gid != null) set.add(gid);
+      }
+      for (final j in junction) {
+        gigsByOffer
+            .putIfAbsent(j['offer_id'] as String, () => {})
+            .add(j['gig_id'] as String);
+      }
+
+      final allGigIds = gigsByOffer.values.expand((s) => s).toSet().toList();
+      if (allGigIds.isEmpty) {
+        if (mounted) setState(() => _pendingAgreements = 0);
+        return;
+      }
+
+      final tokens = List<Map<String, dynamic>>.from(await _sb
           .from('agreement_tokens')
-          .select('id, gigs!inner(company_id)')
-          .eq('status', 'accepted')
-          .eq('gigs.company_id', companyId);
-      if (mounted) setState(() => _pendingAgreements = (rows as List).length);
+          .select('gig_id, status')
+          .inFilter('gig_id', allGigIds));
+      final statusesByGig = <String, Set<String>>{};
+      for (final t in tokens) {
+        statusesByGig
+            .putIfAbsent(t['gig_id'] as String, () => {})
+            .add(t['status'] as String? ?? '');
+      }
+
+      int pending = 0;
+      for (final gigIds in gigsByOffer.values) {
+        final statuses = <String>{};
+        for (final gid in gigIds) {
+          statuses.addAll(statusesByGig[gid] ?? const {});
+        }
+        if (statuses.contains('approved')) continue;
+        if (statuses.contains('accepted')) pending++;
+      }
+
+      if (mounted) setState(() => _pendingAgreements = pending);
     } catch (e) {
       debugPrint('Pending agreements badge error: $e');
     }
@@ -644,6 +703,13 @@ class _MgmtSideNavState extends State<_MgmtSideNav> {
                       label: 'Tilbud',
                       route: '/m/offers',
                       badge: _pendingAgreements + _invoiceReadyOffers,
+                      badgeTooltip: [
+                        if (_pendingAgreements > 0)
+                          '$_pendingAgreements signert av kunde — venter på '
+                              'din signatur',
+                        if (_invoiceReadyOffers > 0)
+                          '$_invoiceReadyOffers klar for fakturering',
+                      ].join('\n'),
                     ),
                     _MgmtNavItem(
                       icon: Icons.receipt_long_rounded,
@@ -706,12 +772,16 @@ class _MgmtNavItem extends StatelessWidget {
   final String label;
   final String route;
   final int badge;
+  /// Explains what the badge number is made of. Shown on hover, so a number
+  /// that sums several things is never a mystery.
+  final String? badgeTooltip;
 
   const _MgmtNavItem({
     required this.icon,
     required this.label,
     required this.route,
     this.badge = 0,
+    this.badgeTooltip,
   });
 
   @override
@@ -749,19 +819,24 @@ class _MgmtNavItem extends StatelessWidget {
               ),
             ),
             if (badge > 0)
-              Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-                decoration: BoxDecoration(
-                  color: selected ? Colors.white : Colors.red,
-                  borderRadius: BorderRadius.circular(999),
-                ),
-                child: Text(
-                  badge > 99 ? '99+' : '$badge',
-                  style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w800,
-                    color: selected ? Colors.red : Colors.white,
+              Tooltip(
+                message: badgeTooltip ?? '',
+                // An empty message renders nothing, so items without a
+                // breakdown behave exactly as before.
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: selected ? Colors.white : Colors.red,
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                  child: Text(
+                    badge > 99 ? '99+' : '$badge',
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w800,
+                      color: selected ? Colors.red : Colors.white,
+                    ),
                   ),
                 ),
               ),
