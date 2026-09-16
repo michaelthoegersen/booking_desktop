@@ -1004,33 +1004,10 @@ class _GigOfferPageState extends State<GigOfferPage> {
   Future<void> _markInvoiced() async {
     if (_offerId == null || !_isFinance) return;
 
-    final dueDaysCtrl = TextEditingController(text: '30');
     final dueDays = await showDialog<int>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Forfall på vår faktura'),
-        content: TextField(
-          controller: dueDaysCtrl,
-          autofocus: true,
-          keyboardType: TextInputType.number,
-          decoration: const InputDecoration(
-            labelText: 'Antall dager forfall',
-            suffixText: 'dager',
-          ),
-          onSubmitted: (v) => Navigator.pop(ctx, int.tryParse(v)),
-        ),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('Avbryt')),
-          FilledButton(
-              onPressed: () =>
-                  Navigator.pop(ctx, int.tryParse(dueDaysCtrl.text)),
-              child: const Text('OK')),
-        ],
-      ),
+      builder: (_) => const _DueDaysDialog(),
     );
-    dueDaysCtrl.dispose();
     if (dueDays == null || !mounted) return;
 
     setState(() => _markingInvoiceReady = true);
@@ -1707,33 +1684,12 @@ class _GigOfferPageState extends State<GigOfferPage> {
       // Set invoiced_at when status changes to 'invoiced' for the first time
       if (_gigStatus == 'invoiced' && _invoicedAt == null) {
         // Ask for due days
-        final dueDaysCtrl = TextEditingController(text: '30');
+        // The dialog owns its controller; disposing one here right after
+        // showDialog returned is what trips _dependents.isEmpty.
         final dueDays = await showDialog<int>(
           context: context,
-          builder: (ctx) => AlertDialog(
-            title: const Text('Forfall på vår faktura'),
-            content: TextField(
-              controller: dueDaysCtrl,
-              autofocus: true,
-              keyboardType: TextInputType.number,
-              decoration: const InputDecoration(
-                labelText: 'Antall dager forfall',
-                suffixText: 'dager',
-              ),
-              onSubmitted: (v) => Navigator.pop(ctx, int.tryParse(v)),
-            ),
-            actions: [
-              TextButton(
-                  onPressed: () => Navigator.pop(ctx),
-                  child: const Text('Avbryt')),
-              FilledButton(
-                  onPressed: () =>
-                      Navigator.pop(ctx, int.tryParse(dueDaysCtrl.text)),
-                  child: const Text('OK')),
-            ],
-          ),
+          builder: (_) => const _DueDaysDialog(),
         );
-        dueDaysCtrl.dispose();
         if (dueDays == null) {
           if (mounted) setState(() => _saving = false);
           return;
@@ -5883,6 +5839,52 @@ class _NumFieldState extends State<_NumField> {
           widget.onChanged(text.trim().isEmpty ? 0.0 : _parse(text));
         },
       ),
+    );
+  }
+}
+
+/// Due-days prompt for the invoiced transition. Owns its controller so closing
+/// the dialog cannot dispose it while the field is still animating out.
+class _DueDaysDialog extends StatefulWidget {
+  const _DueDaysDialog();
+
+  @override
+  State<_DueDaysDialog> createState() => _DueDaysDialogState();
+}
+
+class _DueDaysDialogState extends State<_DueDaysDialog> {
+  late final TextEditingController _ctrl = TextEditingController(text: '30');
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Forfall på vår faktura'),
+      content: TextField(
+        controller: _ctrl,
+        autofocus: true,
+        keyboardType: TextInputType.number,
+        decoration: const InputDecoration(
+          labelText: 'Antall dager forfall',
+          suffixText: 'dager',
+        ),
+        onSubmitted: (v) => Navigator.pop(context, int.tryParse(v)),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Avbryt'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.pop(context, int.tryParse(_ctrl.text)),
+          child: const Text('OK'),
+        ),
+      ],
     );
   }
 }
