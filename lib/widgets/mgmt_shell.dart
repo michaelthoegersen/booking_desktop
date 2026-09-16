@@ -511,7 +511,9 @@ class _MgmtSideNavState extends State<_MgmtSideNav> {
           .from('gig_offers')
           .select('id')
           .eq('company_id', companyId)
-          .not('invoice_ready_at', 'is', null);
+          .not('invoice_ready_at', 'is', null)
+          // Already invoiced — nothing left for økonomi to do.
+          .neq('status', 'invoiced');
       if (mounted) {
         setState(() => _invoiceReadyOffers = (rows as List).length);
       }

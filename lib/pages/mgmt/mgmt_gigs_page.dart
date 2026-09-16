@@ -2440,7 +2440,9 @@ class _GigRow extends StatelessWidget {
             ],
             // Marked ready for invoicing — shown next to the status badge,
             // not instead of it.
-            if (gig['invoice_locked'] == true) ...[
+            // Gone once invoiced — the job it flagged is done. The lock itself
+            // stays; only the "ready" label goes.
+            if (gig['invoice_locked'] == true && status != 'invoiced') ...[
               Container(
                 padding:
                     const EdgeInsets.symmetric(horizontal: 8, vertical: 4),

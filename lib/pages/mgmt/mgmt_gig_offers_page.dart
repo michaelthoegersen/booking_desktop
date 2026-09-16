@@ -492,7 +492,10 @@ class _MgmtGigOffersPageState extends State<MgmtGigOffersPage> {
                                   ],
                                   // Klar for fakturering — shown in addition
                                   // to the status badge, never instead of it.
-                                  if (o['invoice_ready_at'] != null) ...[
+                                  // Gone once invoiced — the job it flagged
+                                  // is done.
+                                  if (o['invoice_ready_at'] != null &&
+                                      status != 'invoiced') ...[
                                     Container(
                                       padding: const EdgeInsets.symmetric(
                                           horizontal: 10, vertical: 4),

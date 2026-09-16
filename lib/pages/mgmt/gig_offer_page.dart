@@ -996,6 +996,80 @@ class _GigOfferPageState extends State<GigOfferPage> {
     }
   }
 
+  /// Økonomiansvarlig sets the status to Fakturert while the offer stays
+  /// locked. Mirrors the invoiced transition in _save exactly — the due-days
+  /// prompt, invoiced_at and invoice_due_days — because crew payment due dates
+  /// in the mobile gig hire are computed from those. It writes nothing else,
+  /// since every other field is locked.
+  Future<void> _markInvoiced() async {
+    if (_offerId == null || !_isFinance) return;
+
+    final dueDaysCtrl = TextEditingController(text: '30');
+    final dueDays = await showDialog<int>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Forfall på vår faktura'),
+        content: TextField(
+          controller: dueDaysCtrl,
+          autofocus: true,
+          keyboardType: TextInputType.number,
+          decoration: const InputDecoration(
+            labelText: 'Antall dager forfall',
+            suffixText: 'dager',
+          ),
+          onSubmitted: (v) => Navigator.pop(ctx, int.tryParse(v)),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Avbryt')),
+          FilledButton(
+              onPressed: () =>
+                  Navigator.pop(ctx, int.tryParse(dueDaysCtrl.text)),
+              child: const Text('OK')),
+        ],
+      ),
+    );
+    dueDaysCtrl.dispose();
+    if (dueDays == null || !mounted) return;
+
+    setState(() => _markingInvoiceReady = true);
+    try {
+      final now = DateTime.now().toUtc();
+      await _sb.from('gig_offers').update({
+        'status': 'invoiced',
+        // Only the first time, same as _save.
+        if (_invoicedAt == null) 'invoiced_at': now.toIso8601String(),
+        'invoice_due_days': dueDays,
+      }).eq('id', _offerId!);
+
+      final gigIds = await _offerGigIds();
+      if (gigIds.isNotEmpty) {
+        await _sb
+            .from('gigs')
+            .update({'status': 'invoiced'}).inFilter('id', gigIds);
+      }
+
+      if (mounted) {
+        setState(() {
+          _gigStatus = 'invoiced';
+          _invoicedAt ??= now;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Markert som fakturert.')),
+        );
+      }
+    } catch (e) {
+      debugPrint('Mark invoiced error: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Feil: $e'), backgroundColor: Colors.red),
+        );
+      }
+    }
+    if (mounted) setState(() => _markingInvoiceReady = false);
+  }
+
   Future<void> _unlockInvoice() async {
     if (_offerId == null || !_isFinance) return;
     setState(() => _markingInvoiceReady = true);
@@ -4889,6 +4963,54 @@ class _GigOfferPageState extends State<GigOfferPage> {
                     : const Icon(Icons.receipt_long, size: 18),
                 label: const Text('Klar for fakturering'),
               )
+            // Invoiced: the "klar for fakturering" state is done with, so it
+            // gives way to a plain Fakturert box. The lock stays.
+            else if (_gigStatus == 'invoiced') ...[
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: Colors.green.withValues(alpha: 0.08),
+                  borderRadius: BorderRadius.circular(8),
+                  border:
+                      Border.all(color: Colors.green.withValues(alpha: 0.3)),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Row(
+                      children: [
+                        Icon(Icons.check_circle,
+                            size: 16, color: Colors.green),
+                        SizedBox(width: 6),
+                        Text('Fakturert',
+                            style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w700,
+                                color: Colors.green)),
+                      ],
+                    ),
+                    if (_invoicedAt != null)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 4),
+                        child: Text(
+                          DateFormat('dd.MM.yyyy')
+                              .format(_invoicedAt!.toLocal()),
+                          style: TextStyle(
+                              fontSize: 11, color: cs.onSurfaceVariant),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+              if (_isFinance) ...[
+                const SizedBox(height: 10),
+                OutlinedButton.icon(
+                  onPressed: _markingInvoiceReady ? null : _unlockInvoice,
+                  icon: const Icon(Icons.lock_open, size: 16),
+                  label: const Text('Lås opp'),
+                ),
+              ],
+            ]
             else ...[
               Container(
                 padding: const EdgeInsets.all(10),
@@ -4932,6 +5054,13 @@ class _GigOfferPageState extends State<GigOfferPage> {
               ),
               if (_isFinance) ...[
                 const SizedBox(height: 10),
+                // Invoicing while locked — no need to unlock first.
+                FilledButton.icon(
+                  onPressed: _markingInvoiceReady ? null : _markInvoiced,
+                  icon: const Icon(Icons.receipt_long, size: 18),
+                  label: const Text('Marker som fakturert'),
+                ),
+                const SizedBox(height: 8),
                 OutlinedButton.icon(
                   onPressed: _markingInvoiceReady ? null : _unlockInvoice,
                   icon: const Icon(Icons.lock_open, size: 16),
