@@ -30,6 +30,7 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
   Map<String, dynamic>? _company;
   String? get _companyId => activeCompanyNotifier.value?.id;
   List<Map<String, dynamic>> _members = [];
+
   /// Members who asked for a new password from the login screen.
   List<Map<String, dynamic>> _resetRequests = [];
   List<Map<String, dynamic>> _showTypes = [];
@@ -141,8 +142,10 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
         _company = company;
         _showTours = company?['show_tours'] != false;
         _showBusRequests = company?['show_bus_requests_mgmt'] != false;
-        _ttConsumerCtrl.text = company?['tripletex_consumer_token'] as String? ?? '';
-        _ttEmployeeCtrl.text = company?['tripletex_employee_token'] as String? ?? '';
+        _ttConsumerCtrl.text =
+            company?['tripletex_consumer_token'] as String? ?? '';
+        _ttEmployeeCtrl.text =
+            company?['tripletex_employee_token'] as String? ?? '';
         final labels = RoleLabels.fromJson(
           company?['role_labels'] as Map<String, dynamic>?,
         );
@@ -152,11 +155,11 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
 
         // Contract config
         final ctr = company?['contract_config'] as Map<String, dynamic>? ?? {};
-        _ctrContactCtrl.text   = (ctr['header_contact_name'] as String?) ?? '';
-        _ctrPhoneCtrl.text     = (ctr['header_phone']        as String?) ?? '';
-        _ctrEmailCtrl.text     = (ctr['header_email']        as String?) ?? '';
-        _ctrSigLabelCtrl.text  = (ctr['signature_label']     as String?) ?? '';
-        _ctrShowLabelCtrl.text = (ctr['show_label']          as String?) ?? '';
+        _ctrContactCtrl.text = (ctr['header_contact_name'] as String?) ?? '';
+        _ctrPhoneCtrl.text = (ctr['header_phone'] as String?) ?? '';
+        _ctrEmailCtrl.text = (ctr['header_email'] as String?) ?? '';
+        _ctrSigLabelCtrl.text = (ctr['signature_label'] as String?) ?? '';
+        _ctrShowLabelCtrl.text = (ctr['show_label'] as String?) ?? '';
 
         _contractTranslations.clear();
         final rawTrans = ctr['translations'];
@@ -165,7 +168,7 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
             if (k is String && v is Map) {
               _contractTranslations[k] = (
                 title: (v['title'] as String?) ?? '',
-                body:  (v['body']  as String?) ?? '',
+                body: (v['body'] as String?) ?? '',
               );
             }
           });
@@ -176,7 +179,7 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
         }
         final cur = _contractTranslations[_ctrEditingLang]!;
         _ctrTitleCtrl.text = cur.title;
-        _ctrBodyCtrl.text  = cur.body;
+        _ctrBodyCtrl.text = cur.body;
 
         _emitFlags();
 
@@ -217,7 +220,8 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
           _riders = List<Map<String, dynamic>>.from(riders);
         } catch (_) {}
 
-        _smtpAccounts = await EmailService.loadSmtpAccounts(companyId: _companyId);
+        _smtpAccounts =
+            await EmailService.loadSmtpAccounts(companyId: _companyId);
 
         _profileFields = await ProfileFieldService.loadAll(_companyId!);
 
@@ -225,12 +229,14 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
         final pd = company?['pricing_defaults'] as Map<String, dynamic>? ?? {};
         _creoCtrl.text = (pd['creo_fee_minimum'] ?? 5500).toString();
         _extraShowCtrl.text = (pd['extra_show_fee'] ?? 1500).toString();
-        _markupCtrl.text = (((pd['markup_pct'] ?? 0.25) as num) * 100).toString();
+        _markupCtrl.text =
+            (((pd['markup_pct'] ?? 0.25) as num) * 100).toString();
         _inearCtrl.text = (pd['inear_price'] ?? 7000).toString();
         _krKmCtrl.text = (pd['transport_price_per_km'] ?? 3.50).toString();
         _hyreDayRateCtrl.text = (pd['hyre_day_rate'] ?? 399).toString();
         _hyreInclKmCtrl.text = (pd['hyre_included_km'] ?? 150).toString();
-        _hyreExtraKmRateCtrl.text = (pd['hyre_extra_km_rate'] ?? 3.50).toString();
+        _hyreExtraKmRateCtrl.text =
+            (pd['hyre_extra_km_rate'] ?? 3.50).toString();
       }
     } catch (e) {
       debugPrint('MgmtSettings load error: $e');
@@ -248,10 +254,7 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
   Future<void> _toggleFlag(String column, bool value) async {
     if (_companyId == null) return;
     try {
-      await _sb
-          .from('companies')
-          .update({column: value})
-          .eq('id', _companyId!);
+      await _sb.from('companies').update({column: value}).eq('id', _companyId!);
       setState(() {
         if (column == 'show_tours') _showTours = value;
         if (column == 'show_bus_requests_mgmt') _showBusRequests = value;
@@ -313,8 +316,7 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(label,
-                style: const TextStyle(fontWeight: FontWeight.w700)),
+            Text(label, style: const TextStyle(fontWeight: FontWeight.w700)),
             const SizedBox(height: 12),
             TextField(
               controller: ctrl,
@@ -385,12 +387,21 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
   }
 
   void _showEditMemberDialog(
-    String memberId, String name, String email, String role, String? section,
+    String memberId,
+    String name,
+    String email,
+    String role,
+    String? section,
   ) {
     final nameCtrl = TextEditingController(text: name);
     final emailCtrl = TextEditingController(text: email);
     final phoneCtrl = TextEditingController();
-    const validRoles = {'admin', 'gruppeleder_skarp', 'gruppeleder_bass', 'bruker'};
+    const validRoles = {
+      'admin',
+      'gruppeleder_skarp',
+      'gruppeleder_bass',
+      'bruker'
+    };
     String selectedRole = validRoles.contains(role) ? role : 'admin';
     String? selectedSection = section;
     // Økonomiansvarlig is a flag rather than a role, so an admin keeps admin.
@@ -461,9 +472,11 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
                       items: const [
                         DropdownMenuItem(value: 'admin', child: Text('Admin')),
                         DropdownMenuItem(
-                            value: 'gruppeleder_skarp', child: Text('Gruppeleder Skarp')),
+                            value: 'gruppeleder_skarp',
+                            child: Text('Gruppeleder Skarp')),
                         DropdownMenuItem(
-                            value: 'gruppeleder_bass', child: Text('Gruppeleder Bass')),
+                            value: 'gruppeleder_bass',
+                            child: Text('Gruppeleder Bass')),
                         DropdownMenuItem(
                             value: 'bruker', child: Text('Bruker')),
                       ],
@@ -481,7 +494,8 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
                         border: OutlineInputBorder(),
                       ),
                       items: const [
-                        DropdownMenuItem(value: null, child: Text('Ingen seksjon')),
+                        DropdownMenuItem(
+                            value: null, child: Text('Ingen seksjon')),
                         DropdownMenuItem(value: 'skarp', child: Text('Skarp')),
                         DropdownMenuItem(value: 'bass', child: Text('Bass')),
                       ],
@@ -507,6 +521,11 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
                   ],
                 ),
               ),
+              // Puts "Sett nytt passord" on the left and Avbryt/Lagre on the
+              // right. A Spacer cannot do this: actions sit in an OverflowBar,
+              // which is not a Flex, so the Spacer blew the dialog up to fill
+              // the screen.
+              actionsAlignment: MainAxisAlignment.spaceBetween,
               actions: [
                 // Reset without waiting for a request — someone locked out of
                 // an old app version cannot reach "Glemt passord?" at all.
@@ -526,44 +545,48 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
                   icon: const Icon(Icons.lock_reset, size: 18),
                   label: const Text('Sett nytt passord'),
                 ),
-                const Spacer(),
-                TextButton(
-                  onPressed: () => Navigator.pop(ctx),
-                  child: const Text('Avbryt'),
-                ),
-                FilledButton(
-                  onPressed: saving
-                      ? null
-                      : () async {
-                          setDialogState(() => saving = true);
-                          try {
-                            await _sb.from('profiles').update({
-                              'name': nameCtrl.text.trim(),
-                              'email': emailCtrl.text.trim(),
-                              'phone': phoneCtrl.text.trim(),
-                              'role': selectedRole,
-                              'section': selectedSection,
-                              'is_finance': isFinance,
-                            }).eq('id', memberId);
-                            if (ctx.mounted) Navigator.pop(ctx);
-                            _load();
-                          } catch (e) {
-                            setDialogState(() => saving = false);
-                            if (ctx.mounted) {
-                              ScaffoldMessenger.of(ctx).showSnackBar(
-                                SnackBar(content: Text('Feil: $e')),
-                              );
-                            }
-                          }
-                        },
-                  child: saving
-                      ? const SizedBox(
-                          width: 20,
-                          height: 20,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2, color: Colors.white),
-                        )
-                      : const Text('Lagre'),
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(ctx),
+                      child: const Text('Avbryt'),
+                    ),
+                    FilledButton(
+                      onPressed: saving
+                          ? null
+                          : () async {
+                              setDialogState(() => saving = true);
+                              try {
+                                await _sb.from('profiles').update({
+                                  'name': nameCtrl.text.trim(),
+                                  'email': emailCtrl.text.trim(),
+                                  'phone': phoneCtrl.text.trim(),
+                                  'role': selectedRole,
+                                  'section': selectedSection,
+                                  'is_finance': isFinance,
+                                }).eq('id', memberId);
+                                if (ctx.mounted) Navigator.pop(ctx);
+                                _load();
+                              } catch (e) {
+                                setDialogState(() => saving = false);
+                                if (ctx.mounted) {
+                                  ScaffoldMessenger.of(ctx).showSnackBar(
+                                    SnackBar(content: Text('Feil: $e')),
+                                  );
+                                }
+                              }
+                            },
+                      child: saving
+                          ? const SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(
+                                  strokeWidth: 2, color: Colors.white),
+                            )
+                          : const Text('Lagre'),
+                    ),
+                  ],
                 ),
               ],
             );
@@ -595,8 +618,7 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
                     .eq('user_id', memberId);
                 await _sb
                     .from('profiles')
-                    .update({'company_id': null})
-                    .eq('id', memberId);
+                    .update({'company_id': null}).eq('id', memberId);
                 _load();
               } catch (e) {
                 if (mounted) {
@@ -644,9 +666,11 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
                   items: const [
                     DropdownMenuItem(value: 'admin', child: Text('Admin')),
                     DropdownMenuItem(
-                        value: 'gruppeleder_skarp', child: Text('Gruppeleder Skarp')),
+                        value: 'gruppeleder_skarp',
+                        child: Text('Gruppeleder Skarp')),
                     DropdownMenuItem(
-                        value: 'gruppeleder_bass', child: Text('Gruppeleder Bass')),
+                        value: 'gruppeleder_bass',
+                        child: Text('Gruppeleder Bass')),
                     DropdownMenuItem(value: 'bruker', child: Text('Bruker')),
                   ],
                   onChanged: (v) {
@@ -703,8 +727,7 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
 
                   if (mounted) {
                     ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                          content: Text('Bruker invitert')),
+                      const SnackBar(content: Text('Bruker invitert')),
                     );
                   }
                 } catch (e) {
@@ -759,7 +782,7 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
   void _stashCurrentTranslation() {
     _contractTranslations[_ctrEditingLang] = (
       title: _ctrTitleCtrl.text,
-      body:  _ctrBodyCtrl.text,
+      body: _ctrBodyCtrl.text,
     );
   }
 
@@ -784,22 +807,21 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
         if (t.title.trim().isNotEmpty || t.body.trim().isNotEmpty) {
           translationsMap[code] = {
             'title': t.title.trim(),
-            'body':  t.body,
+            'body': t.body,
           };
         }
       });
       final payload = {
         'header_contact_name': _ctrContactCtrl.text.trim(),
-        'header_phone':        _ctrPhoneCtrl.text.trim(),
-        'header_email':        _ctrEmailCtrl.text.trim(),
-        'signature_label':     _ctrSigLabelCtrl.text.trim(),
-        'show_label':          _ctrShowLabelCtrl.text.trim(),
-        'translations':        translationsMap,
+        'header_phone': _ctrPhoneCtrl.text.trim(),
+        'header_email': _ctrEmailCtrl.text.trim(),
+        'signature_label': _ctrSigLabelCtrl.text.trim(),
+        'show_label': _ctrShowLabelCtrl.text.trim(),
+        'translations': translationsMap,
       };
       await _sb
           .from('companies')
-          .update({'contract_config': payload})
-          .eq('id', _companyId!);
+          .update({'contract_config': payload}).eq('id', _companyId!);
       _company?['contract_config'] = payload;
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -833,8 +855,7 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
       final labels = {'role1': r1, 'role2': r2, 'role3': r3};
       await _sb
           .from('companies')
-          .update({'role_labels': labels})
-          .eq('id', _companyId!);
+          .update({'role_labels': labels}).eq('id', _companyId!);
       _company?['role_labels'] = labels;
       await roleLabelsNotifier.refresh();
       if (mounted) {
@@ -853,10 +874,12 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
     }
   }
 
-  Future<void> _savePricingDefault(String key, String value, {bool isPct = false, bool isDecimal = false}) async {
+  Future<void> _savePricingDefault(String key, String value,
+      {bool isPct = false, bool isDecimal = false}) async {
     if (_companyId == null) return;
     try {
-      final current = _company?['pricing_defaults'] as Map<String, dynamic>? ?? {};
+      final current =
+          _company?['pricing_defaults'] as Map<String, dynamic>? ?? {};
       double? numVal;
       if (isPct) {
         numVal = (double.tryParse(value) ?? 0) / 100;
@@ -867,14 +890,17 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
       }
       if (numVal == null) return;
       current[key] = numVal;
-      await _sb.from('companies').update({'pricing_defaults': current}).eq('id', _companyId!);
+      await _sb
+          .from('companies')
+          .update({'pricing_defaults': current}).eq('id', _companyId!);
       _company?['pricing_defaults'] = current;
     } catch (e) {
       debugPrint('Save pricing default error: $e');
     }
   }
 
-  Widget _pricingField(String label, TextEditingController ctrl, String key, {bool isPct = false, bool isDecimal = false}) {
+  Widget _pricingField(String label, TextEditingController ctrl, String key,
+      {bool isPct = false, bool isDecimal = false}) {
     final cs = Theme.of(context).colorScheme;
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
@@ -882,7 +908,8 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
         children: [
           SizedBox(
             width: 200,
-            child: Text(label, style: TextStyle(fontSize: 13, color: cs.onSurfaceVariant)),
+            child: Text(label,
+                style: TextStyle(fontSize: 13, color: cs.onSurfaceVariant)),
           ),
           SizedBox(
             width: 120,
@@ -890,17 +917,22 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
               controller: ctrl,
               style: const TextStyle(fontSize: 13),
               textAlign: TextAlign.right,
-              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              keyboardType:
+                  const TextInputType.numberWithOptions(decimal: true),
               decoration: InputDecoration(
                 isDense: true,
-                contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                contentPadding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
                 suffixText: isPct ? '%' : null,
               ),
               onSubmitted: (v) async {
-                await _savePricingDefault(key, v, isPct: isPct, isDecimal: isDecimal);
+                await _savePricingDefault(key, v,
+                    isPct: isPct, isDecimal: isDecimal);
                 if (mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Lagret'), duration: Duration(seconds: 1)),
+                    const SnackBar(
+                        content: Text('Lagret'),
+                        duration: Duration(seconds: 1)),
                   );
                 }
               },
@@ -947,1099 +979,1252 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-
-                  if (_tabIndex == 0) ...[
-
-                  // Company info
-                  Text(
-                    'Selskap',
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                          fontWeight: FontWeight.w900,
-                        ),
-                  ),
-                  const SizedBox(height: 12),
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(
-                      color: cs.surfaceContainerLowest,
-                      borderRadius: BorderRadius.circular(14),
-                      border: Border.all(color: cs.outlineVariant),
-                    ),
-                    child: _company == null
-                        ? Text(
-                            'Ingen selskap koblet til kontoen din.',
-                            style: TextStyle(color: cs.onSurfaceVariant),
-                          )
-                        : Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                _company!['name'] as String? ?? '',
-                                style: const TextStyle(
+                        if (_tabIndex == 0) ...[
+                          // Company info
+                          Text(
+                            'Selskap',
+                            style: Theme.of(context)
+                                .textTheme
+                                .titleMedium
+                                ?.copyWith(
                                   fontWeight: FontWeight.w900,
-                                  fontSize: 18,
                                 ),
-                              ),
-                              if (_company!['email'] != null)
-                                Text(
-                                  _company!['email'] as String,
-                                  style: TextStyle(
-                                      color: cs.onSurfaceVariant),
-                                ),
-                              if (_company!['phone'] != null)
-                                Text(
-                                  _company!['phone'] as String,
-                                  style: TextStyle(
-                                      color: cs.onSurfaceVariant),
-                                ),
-                            ],
                           ),
-                  ),
-
-                  const SizedBox(height: 24),
-
-                  // Members locked out of the app. Shown above the member list
-                  // because it is the one thing here that needs acting on.
-                  if (_resetRequests.isNotEmpty) ...[
-                    Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.all(14),
-                      decoration: BoxDecoration(
-                        color: Colors.orange.withValues(alpha: 0.08),
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(
-                            color: Colors.orange.withValues(alpha: 0.3)),
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            children: [
-                              const Icon(Icons.lock_reset,
-                                  size: 18, color: Colors.orange),
-                              const SizedBox(width: 6),
-                              Text(
-                                'Ber om nytt passord (${_resetRequests.length})',
-                                style: const TextStyle(
-                                    fontWeight: FontWeight.w900,
-                                    color: Colors.orange),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 8),
-                          ..._resetRequests.map((r) => Padding(
-                                padding: const EdgeInsets.symmetric(vertical: 4),
-                                child: Row(
-                                  children: [
-                                    Expanded(
-                                      child: Column(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.start,
-                                        children: [
-                                          Text(r['email'] as String? ?? '',
-                                              style: const TextStyle(
-                                                  fontWeight:
-                                                      FontWeight.w700)),
-                                          if (r['requested_at'] != null)
-                                            Text(
-                                              DateFormat('dd.MM.yyyy HH:mm')
-                                                  .format(DateTime.parse(
-                                                          r['requested_at']
-                                                              .toString())
-                                                      .toLocal()),
-                                              style: TextStyle(
-                                                  fontSize: 11,
-                                                  color: cs.onSurfaceVariant),
-                                            ),
-                                        ],
-                                      ),
-                                    ),
-                                    TextButton(
-                                      onPressed: () => _dismissResetRequest(r),
-                                      child: const Text('Avvis'),
-                                    ),
-                                    const SizedBox(width: 4),
-                                    FilledButton(
-                                      onPressed: () => _setPasswordFor(r),
-                                      child: const Text('Sett nytt passord'),
-                                    ),
-                                  ],
-                                ),
-                              )),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 24),
-                  ],
-
-                  // Team members
-                  InkWell(
-                    onTap: () => setState(() => _membersExpanded = !_membersExpanded),
-                    borderRadius: BorderRadius.circular(8),
-                    child: Row(
-                      children: [
-                        Icon(
-                          _membersExpanded ? Icons.expand_less : Icons.expand_more,
-                          size: 22,
-                        ),
-                        const SizedBox(width: 4),
-                        Text(
-                          'Teammedlemmer (${_members.length})',
-                          style: Theme.of(context)
-                              .textTheme
-                              .titleMedium
-                              ?.copyWith(fontWeight: FontWeight.w900),
-                        ),
-                        const Spacer(),
-                        if (_membersExpanded)
-                          FilledButton.icon(
-                            onPressed: _openInviteUserDialog,
-                            icon: const Icon(Icons.person_add),
-                            label: const Text('Inviter bruker'),
-                          ),
-                      ],
-                    ),
-                  ),
-                  if (_membersExpanded) ...[
-                  const SizedBox(height: 12),
-                  if (_members.isEmpty)
-                    Container(
-                      padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                        color: cs.surfaceContainerLowest,
-                        borderRadius: BorderRadius.circular(14),
-                        border: Border.all(color: cs.outlineVariant),
-                      ),
-                      child: Text(
-                        'Ingen teammedlemmer ennå.',
-                        style: TextStyle(color: cs.onSurfaceVariant),
-                      ),
-                    )
-                  else
-                    ...(_members.map((m) {
-                      final memberId = m['id'] as String;
-                      final memberName = m['name'] as String? ?? '';
-                      final memberEmail = m['email'] as String? ?? '';
-                      final memberRole = m['role'] as String? ?? 'bruker';
-                      final memberSection = m['section'] as String?;
-
-                      return Container(
-                          margin: const EdgeInsets.only(bottom: 8),
-                          padding: const EdgeInsets.all(14),
-                          decoration: BoxDecoration(
-                            color: cs.surfaceContainerLowest,
-                            borderRadius: BorderRadius.circular(14),
-                            border: Border.all(color: cs.outlineVariant),
-                          ),
-                          child: Row(
-                            children: [
-                              CircleAvatar(
-                                backgroundColor: Colors.black,
-                                child: Text(
-                                  memberName.isNotEmpty
-                                      ? memberName[0].toUpperCase()
-                                      : '?',
-                                  style: const TextStyle(color: Colors.white),
-                                ),
-                              ),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      memberName,
-                                      style: const TextStyle(
-                                          fontWeight: FontWeight.w900),
-                                    ),
-                                    Text(
-                                      memberEmail,
-                                      style: TextStyle(
-                                          color: cs.onSurfaceVariant),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                              if (memberSection != null)
-                                Builder(builder: (_) {
-                                  final isBass = memberSection == 'bass';
-                                  return Container(
-                                    padding: const EdgeInsets.symmetric(
-                                        horizontal: 8, vertical: 3),
-                                    decoration: BoxDecoration(
-                                      color: isBass
-                                          ? Colors.teal.shade50
-                                          : Colors.purple.shade50,
-                                      borderRadius: BorderRadius.circular(999),
-                                    ),
-                                    child: Text(
-                                      isBass ? 'Bass' : 'Skarp',
-                                      style: TextStyle(
-                                        fontSize: 12,
-                                        color: isBass
-                                            ? Colors.teal.shade700
-                                            : Colors.purple.shade700,
-                                        fontWeight: FontWeight.w700,
-                                      ),
-                                    ),
-                                  );
-                                }),
-                              if (memberSection != null)
-                                const SizedBox(width: 6),
-                              Builder(builder: (_) {
-                                final Color bg;
-                                final Color fg;
-                                switch (memberRole) {
-                                  case 'admin':
-                                    bg = Colors.red.shade50;
-                                    fg = Colors.red.shade700;
-                                  case 'gruppeleder_skarp':
-                                  case 'gruppeleder_bass':
-                                    bg = Colors.orange.shade50;
-                                    fg = Colors.orange.shade700;
-                                  default:
-                                    bg = Colors.blue.shade50;
-                                    fg = Colors.blue.shade700;
-                                }
-                                return Container(
-                                  padding: const EdgeInsets.symmetric(
-                                      horizontal: 8, vertical: 3),
-                                  decoration: BoxDecoration(
-                                    color: bg,
-                                    borderRadius: BorderRadius.circular(999),
-                                  ),
-                                  child: Text(
-                                    memberRole,
-                                    style: TextStyle(
-                                      fontSize: 12,
-                                      color: fg,
-                                      fontWeight: FontWeight.w700,
-                                    ),
-                                  ),
-                                );
-                              }),
-                              const SizedBox(width: 8),
-                              IconButton(
-                                tooltip: 'Rediger',
-                                icon: const Icon(Icons.edit_outlined, size: 20),
-                                onPressed: () => _showEditMemberDialog(
-                                  memberId, memberName, memberEmail, memberRole, memberSection,
-                                ),
-                              ),
-                              IconButton(
-                                tooltip: 'Fjern',
-                                icon: const Icon(Icons.delete_outline,
-                                    size: 20, color: Colors.red),
-                                onPressed: () => _confirmRemoveMember(
-                                  memberId, memberName,
-                                ),
-                              ),
-                            ],
-                          ),
-                        );
-                    })),
-                  ], // end _membersExpanded
-
-                  const SizedBox(height: 24),
-
-                  // Roles (labels for the 3 crew slots)
-                  InkWell(
-                    onTap: () => setState(() => _rolesExpanded = !_rolesExpanded),
-                    borderRadius: BorderRadius.circular(8),
-                    child: Row(
-                      children: [
-                        Icon(
-                          _rolesExpanded ? Icons.expand_less : Icons.expand_more,
-                          size: 22,
-                        ),
-                        const SizedBox(width: 4),
-                        Text(
-                          'Roller',
-                          style: Theme.of(context)
-                              .textTheme
-                              .titleMedium
-                              ?.copyWith(fontWeight: FontWeight.w900),
-                        ),
-                      ],
-                    ),
-                  ),
-                  if (_rolesExpanded) ...[
-                    const SizedBox(height: 8),
-                    Text(
-                      'Navngi de tre crew-kategoriene som brukes i show-typer, '
-                      'gigs og tilbud. F.eks. "Musikere", "Teknikere", "Andre".',
-                      style: TextStyle(color: cs.onSurfaceVariant, fontSize: 13),
-                    ),
-                    const SizedBox(height: 12),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: TextField(
-                            controller: _role1Ctrl,
-                            decoration: const InputDecoration(
-                              labelText: 'Rolle 1',
-                              hintText: 'Trommeslagere',
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: TextField(
-                            controller: _role2Ctrl,
-                            decoration: const InputDecoration(
-                              labelText: 'Rolle 2',
-                              hintText: 'Dansere',
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: TextField(
-                            controller: _role3Ctrl,
-                            decoration: const InputDecoration(
-                              labelText: 'Rolle 3',
-                              hintText: 'Andre',
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 10),
-                    Align(
-                      alignment: Alignment.centerRight,
-                      child: FilledButton.icon(
-                        onPressed: _rolesSaving ? null : _saveRoleLabels,
-                        icon: _rolesSaving
-                            ? const SizedBox(
-                                width: 16,
-                                height: 16,
-                                child: CircularProgressIndicator(strokeWidth: 2),
-                              )
-                            : const Icon(Icons.save),
-                        label: const Text('Lagre roller'),
-                      ),
-                    ),
-                    const SizedBox(height: 24),
-                  ],
-                  ], // end Generelt (part 1)
-
-                  if (_tabIndex == 1) ...[
-
-                  // Contract config
-                  InkWell(
-                    onTap: () => setState(() => _contractExpanded = !_contractExpanded),
-                    borderRadius: BorderRadius.circular(8),
-                    child: Row(
-                      children: [
-                        Icon(
-                          _contractExpanded ? Icons.expand_less : Icons.expand_more,
-                          size: 22,
-                        ),
-                        const SizedBox(width: 4),
-                        Text(
-                          'Kontrakt',
-                          style: Theme.of(context)
-                              .textTheme
-                              .titleMedium
-                              ?.copyWith(fontWeight: FontWeight.w900),
-                        ),
-                      ],
-                    ),
-                  ),
-                  if (_contractExpanded) ...[
-                    const SizedBox(height: 8),
-                    Text(
-                      'Tilpass kontraktens tittel, header-info, avtaletekst og '
-                      'signatur-etikett for dette selskapet. I avtaleteksten '
-                      'kan du bruke {us}, {firma}, {kontaktperson} og '
-                      '{spillested} som flettefelt.',
-                      style: TextStyle(color: cs.onSurfaceVariant, fontSize: 13),
-                    ),
-                    const SizedBox(height: 12),
-                    Text(
-                      'Header (vises øverst i kontrakten — selskapsnavn og adresse hentes fra selskapets info)',
-                      style: TextStyle(color: cs.onSurfaceVariant, fontSize: 12),
-                    ),
-                    const SizedBox(height: 8),
-                    TextField(
-                      controller: _ctrContactCtrl,
-                      decoration: const InputDecoration(
-                        labelText: 'Kontaktperson',
-                        prefixIcon: Icon(Icons.person),
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: TextField(
-                            controller: _ctrPhoneCtrl,
-                            decoration: const InputDecoration(
-                              labelText: 'Telefon',
-                              prefixIcon: Icon(Icons.phone),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: TextField(
-                            controller: _ctrEmailCtrl,
-                            decoration: const InputDecoration(
-                              labelText: 'E-post',
-                              prefixIcon: Icon(Icons.email),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 20),
-                    // ── Per-language title + body ───────────────────────
-                    Row(
-                      children: [
-                        Text(
-                          'Tittel og avtaletekst',
-                          style: TextStyle(
-                              fontWeight: FontWeight.w700,
-                              color: cs.onSurface,
-                              fontSize: 14),
-                        ),
-                        const Spacer(),
-                        Text('Språk:',
-                            style: TextStyle(
-                                color: cs.onSurfaceVariant, fontSize: 12)),
-                        const SizedBox(width: 8),
-                        DropdownButton<String>(
-                          value: _ctrEditingLang,
-                          onChanged: (v) {
-                            if (v != null) _switchContractLang(v);
-                          },
-                          items: _kContractLangs.map((l) {
-                            final hasContent = _contractTranslations[l.code] !=
-                                    null &&
-                                ((_contractTranslations[l.code]!.title.isNotEmpty) ||
-                                    (_contractTranslations[l.code]!.body.isNotEmpty));
-                            return DropdownMenuItem(
-                              value: l.code,
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Text(l.label),
-                                  if (hasContent) ...[
-                                    const SizedBox(width: 6),
-                                    Icon(Icons.check_circle,
-                                        size: 14, color: Colors.green.shade600),
-                                  ],
-                                ],
-                              ),
-                            );
-                          }).toList(),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      'La feltene stå tomme for språk du ikke vil støtte. '
-                      'Flettefelt: {us} {firma} {kontaktperson} {spillested}',
-                      style: TextStyle(color: cs.onSurfaceVariant, fontSize: 12),
-                    ),
-                    const SizedBox(height: 10),
-                    TextField(
-                      controller: _ctrTitleCtrl,
-                      decoration: const InputDecoration(
-                        labelText: 'Tittel',
-                        hintText: 'F.eks. KONTRAKT / CONTRACT / KONTRAKT',
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-                    TextField(
-                      controller: _ctrBodyCtrl,
-                      maxLines: 10,
-                      decoration: const InputDecoration(
-                        labelText: 'Avtaletekst',
-                        alignLabelWithHint: true,
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: TextField(
-                            controller: _ctrSigLabelCtrl,
-                            decoration: const InputDecoration(
-                              labelText: 'Signatur-etikett',
-                              hintText: 'F.eks. For Complete Drums',
-                              helperText: 'Tom = "For <selskapsnavn>"',
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: TextField(
-                            controller: _ctrShowLabelCtrl,
-                            decoration: const InputDecoration(
-                              labelText: 'Show-etikett i prisliste',
-                              hintText: 'F.eks. Completeshow',
-                              helperText: 'Tom = selskapsnavn',
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 10),
-                    Align(
-                      alignment: Alignment.centerRight,
-                      child: FilledButton.icon(
-                        onPressed: _contractSaving ? null : _saveContractConfig,
-                        icon: _contractSaving
-                            ? const SizedBox(
-                                width: 16,
-                                height: 16,
-                                child: CircularProgressIndicator(strokeWidth: 2),
-                              )
-                            : const Icon(Icons.save),
-                        label: const Text('Lagre kontrakt-innstillinger'),
-                      ),
-                    ),
-                    const SizedBox(height: 24),
-                  ],
-
-                  // Show Types
-                  InkWell(
-                    onTap: () => setState(() => _showTypesExpanded = !_showTypesExpanded),
-                    borderRadius: BorderRadius.circular(8),
-                    child: Row(
-                      children: [
-                        Icon(
-                          _showTypesExpanded ? Icons.expand_less : Icons.expand_more,
-                          size: 22,
-                        ),
-                        const SizedBox(width: 4),
-                        Text(
-                          'Show-typer (${_showTypes.length})',
-                          style: Theme.of(context)
-                              .textTheme
-                              .titleMedium
-                              ?.copyWith(fontWeight: FontWeight.w900),
-                        ),
-                        const Spacer(),
-                        if (_showTypesExpanded)
-                          FilledButton.icon(
-                            onPressed: _showAddShowTypeDialog,
-                            icon: const Icon(Icons.add),
-                            label: const Text('Legg til show-type'),
-                          ),
-                      ],
-                    ),
-                  ),
-                  if (_showTypesExpanded) ...[
-                  const SizedBox(height: 12),
-                  if (_showTypes.isEmpty)
-                    Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                        color: cs.surfaceContainerLowest,
-                        borderRadius: BorderRadius.circular(14),
-                        border: Border.all(color: cs.outlineVariant),
-                      ),
-                      child: Text(
-                        'Ingen show-typer ennå.',
-                        style: TextStyle(color: cs.onSurfaceVariant),
-                      ),
-                    )
-                  else
-                    ...(_showTypes.map((st) => Container(
-                          margin: const EdgeInsets.only(bottom: 8),
-                          padding: const EdgeInsets.all(14),
-                          decoration: BoxDecoration(
-                            color: cs.surfaceContainerLowest,
-                            borderRadius: BorderRadius.circular(14),
-                            border: Border.all(color: cs.outlineVariant),
-                          ),
-                          child: Row(
-                            children: [
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      st['name'] as String? ?? '',
-                                      style: const TextStyle(
-                                          fontWeight: FontWeight.w900),
-                                    ),
-                                    const SizedBox(height: 4),
-                                    ValueListenableBuilder<RoleLabels>(
-                                      valueListenable: roleLabelsNotifier,
-                                      builder: (_, labels, __) {
-                                        final drummers = (st['drummers'] as num?)?.toInt() ?? 0;
-                                        final dancers = (st['dancers'] as num?)?.toInt() ?? 0;
-                                        final others = (st['others'] as num?)?.toInt() ?? 0;
-                                        final isCustom = st['price_is_custom'] == true;
-                                        final creo = double.tryParse(_creoCtrl.text) ?? 5500;
-                                        final autoPrice = (drummers + dancers + others) * creo;
-                                        final display = isCustom
-                                            ? '${_formatPrice(st['price'])} kr'
-                                            : 'auto · ${_formatPrice(autoPrice)} kr';
-                                        return Text(
-                                          '$drummers ${labels.role1.toLowerCase()} · '
-                                          '$dancers ${labels.role2.toLowerCase()} · '
-                                          '$others ${labels.role3.toLowerCase()}  ·  '
-                                          '$display',
-                                          style: TextStyle(
-                                              color: cs.onSurfaceVariant,
-                                              fontStyle: isCustom
-                                                  ? FontStyle.normal
-                                                  : FontStyle.italic),
-                                        );
-                                      },
-                                    ),
-                                  ],
-                                ),
-                              ),
-                              TextButton.icon(
-                                onPressed: () => showFixedShowEquipmentDialog(
-                                  context,
-                                  showTypeId: st['id'] as String,
-                                  showName: st['name'] as String? ?? '',
-                                ),
-                                icon: const Icon(Icons.inventory_2_outlined,
-                                    size: 16),
-                                label: const Text('Utstyr'),
-                              ),
-                              TextButton(
-                                onPressed: () =>
-                                    _showEditShowTypeDialog(st),
-                                child: const Text('Rediger'),
-                              ),
-                              TextButton(
-                                onPressed: () =>
-                                    _showDeleteShowTypeDialog(st),
-                                style: TextButton.styleFrom(
-                                    foregroundColor: Colors.red),
-                                child: const Text('Slett'),
-                              ),
-                            ],
-                          ),
-                        ))),
-                  ], // end _showTypesExpanded
-
-                  const SizedBox(height: 24),
-
-                  // Riders (PDF-vedlegg for avtaler)
-                  InkWell(
-                    onTap: () => setState(() => _ridersExpanded = !_ridersExpanded),
-                    borderRadius: BorderRadius.circular(8),
-                    child: Row(
-                      children: [
-                        Icon(
-                          _ridersExpanded ? Icons.expand_less : Icons.expand_more,
-                          size: 22,
-                        ),
-                        const SizedBox(width: 4),
-                        Text(
-                          'Riders / vedlegg (${_riders.length})',
-                          style: Theme.of(context)
-                              .textTheme
-                              .titleMedium
-                              ?.copyWith(fontWeight: FontWeight.w900),
-                        ),
-                        const Spacer(),
-                        if (_ridersExpanded) ...[
-                          OutlinedButton.icon(
-                            onPressed: _addTextRider,
-                            icon: const Icon(Icons.text_snippet_outlined),
-                            label: const Text('Ny tekst-rider'),
-                          ),
-                          const SizedBox(width: 8),
-                          FilledButton.icon(
-                            onPressed: _uploadRider,
-                            icon: const Icon(Icons.upload_file),
-                            label: const Text('Last opp PDF'),
-                          ),
-                        ],
-                      ],
-                    ),
-                  ),
-                  if (_ridersExpanded) ...[
-                    const SizedBox(height: 4),
-                    Text(
-                      'PDFer eller tekst-ridere som kan vedlegges intensjonsavtaler. Tekst-ridere genererer en PDF dynamisk basert på antall i showet.',
-                      style: TextStyle(fontSize: 12, color: cs.onSurfaceVariant),
-                    ),
-                    const SizedBox(height: 12),
-                    if (_riders.isEmpty)
-                      Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.all(16),
-                        decoration: BoxDecoration(
-                          color: cs.surfaceContainerLowest,
-                          borderRadius: BorderRadius.circular(14),
-                          border: Border.all(color: cs.outlineVariant),
-                        ),
-                        child: Text(
-                          'Ingen riders lastet opp ennå.',
-                          style: TextStyle(color: cs.onSurfaceVariant),
-                        ),
-                      )
-                    else
-                      ...(_riders.map((r) => Container(
-                            margin: const EdgeInsets.only(bottom: 8),
-                            padding: const EdgeInsets.all(14),
+                          const SizedBox(height: 12),
+                          Container(
+                            width: double.infinity,
+                            padding: const EdgeInsets.all(16),
                             decoration: BoxDecoration(
                               color: cs.surfaceContainerLowest,
                               borderRadius: BorderRadius.circular(14),
                               border: Border.all(color: cs.outlineVariant),
                             ),
+                            child: _company == null
+                                ? Text(
+                                    'Ingen selskap koblet til kontoen din.',
+                                    style:
+                                        TextStyle(color: cs.onSurfaceVariant),
+                                  )
+                                : Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        _company!['name'] as String? ?? '',
+                                        style: const TextStyle(
+                                          fontWeight: FontWeight.w900,
+                                          fontSize: 18,
+                                        ),
+                                      ),
+                                      if (_company!['email'] != null)
+                                        Text(
+                                          _company!['email'] as String,
+                                          style: TextStyle(
+                                              color: cs.onSurfaceVariant),
+                                        ),
+                                      if (_company!['phone'] != null)
+                                        Text(
+                                          _company!['phone'] as String,
+                                          style: TextStyle(
+                                              color: cs.onSurfaceVariant),
+                                        ),
+                                    ],
+                                  ),
+                          ),
+
+                          const SizedBox(height: 24),
+
+                          // Members locked out of the app. Shown above the member list
+                          // because it is the one thing here that needs acting on.
+                          if (_resetRequests.isNotEmpty) ...[
+                            Container(
+                              width: double.infinity,
+                              padding: const EdgeInsets.all(14),
+                              decoration: BoxDecoration(
+                                color: Colors.orange.withValues(alpha: 0.08),
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(
+                                    color:
+                                        Colors.orange.withValues(alpha: 0.3)),
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    children: [
+                                      const Icon(Icons.lock_reset,
+                                          size: 18, color: Colors.orange),
+                                      const SizedBox(width: 6),
+                                      Text(
+                                        'Ber om nytt passord (${_resetRequests.length})',
+                                        style: const TextStyle(
+                                            fontWeight: FontWeight.w900,
+                                            color: Colors.orange),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 8),
+                                  ..._resetRequests.map((r) => Padding(
+                                        padding: const EdgeInsets.symmetric(
+                                            vertical: 4),
+                                        child: Row(
+                                          children: [
+                                            Expanded(
+                                              child: Column(
+                                                crossAxisAlignment:
+                                                    CrossAxisAlignment.start,
+                                                children: [
+                                                  Text(
+                                                      r['email'] as String? ??
+                                                          '',
+                                                      style: const TextStyle(
+                                                          fontWeight:
+                                                              FontWeight.w700)),
+                                                  if (r['requested_at'] != null)
+                                                    Text(
+                                                      DateFormat(
+                                                              'dd.MM.yyyy HH:mm')
+                                                          .format(DateTime.parse(
+                                                                  r['requested_at']
+                                                                      .toString())
+                                                              .toLocal()),
+                                                      style: TextStyle(
+                                                          fontSize: 11,
+                                                          color: cs
+                                                              .onSurfaceVariant),
+                                                    ),
+                                                ],
+                                              ),
+                                            ),
+                                            TextButton(
+                                              onPressed: () =>
+                                                  _dismissResetRequest(r),
+                                              child: const Text('Avvis'),
+                                            ),
+                                            const SizedBox(width: 4),
+                                            FilledButton(
+                                              onPressed: () =>
+                                                  _setPasswordFor(r),
+                                              child: const Text(
+                                                  'Sett nytt passord'),
+                                            ),
+                                          ],
+                                        ),
+                                      )),
+                                ],
+                              ),
+                            ),
+                            const SizedBox(height: 24),
+                          ],
+
+                          // Team members
+                          InkWell(
+                            onTap: () => setState(
+                                () => _membersExpanded = !_membersExpanded),
+                            borderRadius: BorderRadius.circular(8),
                             child: Row(
                               children: [
                                 Icon(
-                                  (r['file_path'] as String? ?? '').isEmpty
-                                      ? Icons.text_snippet_outlined
-                                      : Icons.picture_as_pdf,
-                                  size: 20,
-                                  color: (r['file_path'] as String? ?? '')
-                                          .isEmpty
-                                      ? Colors.blueGrey
-                                      : Colors.red,
+                                  _membersExpanded
+                                      ? Icons.expand_less
+                                      : Icons.expand_more,
+                                  size: 22,
+                                ),
+                                const SizedBox(width: 4),
+                                Text(
+                                  'Teammedlemmer (${_members.length})',
+                                  style: Theme.of(context)
+                                      .textTheme
+                                      .titleMedium
+                                      ?.copyWith(fontWeight: FontWeight.w900),
+                                ),
+                                const Spacer(),
+                                if (_membersExpanded)
+                                  FilledButton.icon(
+                                    onPressed: _openInviteUserDialog,
+                                    icon: const Icon(Icons.person_add),
+                                    label: const Text('Inviter bruker'),
+                                  ),
+                              ],
+                            ),
+                          ),
+                          if (_membersExpanded) ...[
+                            const SizedBox(height: 12),
+                            if (_members.isEmpty)
+                              Container(
+                                padding: const EdgeInsets.all(16),
+                                decoration: BoxDecoration(
+                                  color: cs.surfaceContainerLowest,
+                                  borderRadius: BorderRadius.circular(14),
+                                  border: Border.all(color: cs.outlineVariant),
+                                ),
+                                child: Text(
+                                  'Ingen teammedlemmer ennå.',
+                                  style: TextStyle(color: cs.onSurfaceVariant),
+                                ),
+                              )
+                            else
+                              ...(_members.map((m) {
+                                final memberId = m['id'] as String;
+                                final memberName = m['name'] as String? ?? '';
+                                final memberEmail = m['email'] as String? ?? '';
+                                final memberRole =
+                                    m['role'] as String? ?? 'bruker';
+                                final memberSection = m['section'] as String?;
+
+                                return Container(
+                                  margin: const EdgeInsets.only(bottom: 8),
+                                  padding: const EdgeInsets.all(14),
+                                  decoration: BoxDecoration(
+                                    color: cs.surfaceContainerLowest,
+                                    borderRadius: BorderRadius.circular(14),
+                                    border:
+                                        Border.all(color: cs.outlineVariant),
+                                  ),
+                                  child: Row(
+                                    children: [
+                                      CircleAvatar(
+                                        backgroundColor: Colors.black,
+                                        child: Text(
+                                          memberName.isNotEmpty
+                                              ? memberName[0].toUpperCase()
+                                              : '?',
+                                          style: const TextStyle(
+                                              color: Colors.white),
+                                        ),
+                                      ),
+                                      const SizedBox(width: 12),
+                                      Expanded(
+                                        child: Column(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
+                                          children: [
+                                            Text(
+                                              memberName,
+                                              style: const TextStyle(
+                                                  fontWeight: FontWeight.w900),
+                                            ),
+                                            Text(
+                                              memberEmail,
+                                              style: TextStyle(
+                                                  color: cs.onSurfaceVariant),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                      if (memberSection != null)
+                                        Builder(builder: (_) {
+                                          final isBass =
+                                              memberSection == 'bass';
+                                          return Container(
+                                            padding: const EdgeInsets.symmetric(
+                                                horizontal: 8, vertical: 3),
+                                            decoration: BoxDecoration(
+                                              color: isBass
+                                                  ? Colors.teal.shade50
+                                                  : Colors.purple.shade50,
+                                              borderRadius:
+                                                  BorderRadius.circular(999),
+                                            ),
+                                            child: Text(
+                                              isBass ? 'Bass' : 'Skarp',
+                                              style: TextStyle(
+                                                fontSize: 12,
+                                                color: isBass
+                                                    ? Colors.teal.shade700
+                                                    : Colors.purple.shade700,
+                                                fontWeight: FontWeight.w700,
+                                              ),
+                                            ),
+                                          );
+                                        }),
+                                      if (memberSection != null)
+                                        const SizedBox(width: 6),
+                                      Builder(builder: (_) {
+                                        final Color bg;
+                                        final Color fg;
+                                        switch (memberRole) {
+                                          case 'admin':
+                                            bg = Colors.red.shade50;
+                                            fg = Colors.red.shade700;
+                                          case 'gruppeleder_skarp':
+                                          case 'gruppeleder_bass':
+                                            bg = Colors.orange.shade50;
+                                            fg = Colors.orange.shade700;
+                                          default:
+                                            bg = Colors.blue.shade50;
+                                            fg = Colors.blue.shade700;
+                                        }
+                                        return Container(
+                                          padding: const EdgeInsets.symmetric(
+                                              horizontal: 8, vertical: 3),
+                                          decoration: BoxDecoration(
+                                            color: bg,
+                                            borderRadius:
+                                                BorderRadius.circular(999),
+                                          ),
+                                          child: Text(
+                                            memberRole,
+                                            style: TextStyle(
+                                              fontSize: 12,
+                                              color: fg,
+                                              fontWeight: FontWeight.w700,
+                                            ),
+                                          ),
+                                        );
+                                      }),
+                                      const SizedBox(width: 8),
+                                      IconButton(
+                                        tooltip: 'Rediger',
+                                        icon: const Icon(Icons.edit_outlined,
+                                            size: 20),
+                                        onPressed: () => _showEditMemberDialog(
+                                          memberId,
+                                          memberName,
+                                          memberEmail,
+                                          memberRole,
+                                          memberSection,
+                                        ),
+                                      ),
+                                      IconButton(
+                                        tooltip: 'Fjern',
+                                        icon: const Icon(Icons.delete_outline,
+                                            size: 20, color: Colors.red),
+                                        onPressed: () => _confirmRemoveMember(
+                                          memberId,
+                                          memberName,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                );
+                              })),
+                          ], // end _membersExpanded
+
+                          const SizedBox(height: 24),
+
+                          // Roles (labels for the 3 crew slots)
+                          InkWell(
+                            onTap: () => setState(
+                                () => _rolesExpanded = !_rolesExpanded),
+                            borderRadius: BorderRadius.circular(8),
+                            child: Row(
+                              children: [
+                                Icon(
+                                  _rolesExpanded
+                                      ? Icons.expand_less
+                                      : Icons.expand_more,
+                                  size: 22,
+                                ),
+                                const SizedBox(width: 4),
+                                Text(
+                                  'Roller',
+                                  style: Theme.of(context)
+                                      .textTheme
+                                      .titleMedium
+                                      ?.copyWith(fontWeight: FontWeight.w900),
+                                ),
+                              ],
+                            ),
+                          ),
+                          if (_rolesExpanded) ...[
+                            const SizedBox(height: 8),
+                            Text(
+                              'Navngi de tre crew-kategoriene som brukes i show-typer, '
+                              'gigs og tilbud. F.eks. "Musikere", "Teknikere", "Andre".',
+                              style: TextStyle(
+                                  color: cs.onSurfaceVariant, fontSize: 13),
+                            ),
+                            const SizedBox(height: 12),
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: TextField(
+                                    controller: _role1Ctrl,
+                                    decoration: const InputDecoration(
+                                      labelText: 'Rolle 1',
+                                      hintText: 'Trommeslagere',
+                                    ),
+                                  ),
                                 ),
                                 const SizedBox(width: 10),
                                 Expanded(
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      Text(
-                                        r['name'] as String? ?? '',
-                                        style: const TextStyle(fontWeight: FontWeight.w900),
-                                      ),
-                                      if ((r['show_match'] as String? ?? '').isNotEmpty)
-                                        Text(
-                                          'Auto-vedlegg ved show: ${r['show_match']}',
-                                          style: TextStyle(fontSize: 11, color: cs.onSurfaceVariant),
-                                        ),
-                                      if ((r['quantity_source'] as String? ?? '')
-                                          .isNotEmpty)
-                                        Text(
-                                          'Antall: ${_riderQuantityLabel(r)}',
-                                          style: TextStyle(
-                                              fontSize: 11,
-                                              color: cs.onSurfaceVariant),
-                                        ),
-                                      if (r['always_attach'] == true)
-                                        const Text(
-                                          'Alltid vedlagt',
-                                          style: TextStyle(fontSize: 11, color: Colors.green),
-                                        ),
-                                    ],
+                                  child: TextField(
+                                    controller: _role2Ctrl,
+                                    decoration: const InputDecoration(
+                                      labelText: 'Rolle 2',
+                                      hintText: 'Dansere',
+                                    ),
                                   ),
                                 ),
-                                TextButton(
-                                  onPressed: () => _editRider(r),
-                                  child: const Text('Rediger'),
-                                ),
-                                TextButton(
-                                  onPressed: () => _deleteRider(r),
-                                  style: TextButton.styleFrom(foregroundColor: Colors.red),
-                                  child: const Text('Slett'),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: TextField(
+                                    controller: _role3Ctrl,
+                                    decoration: const InputDecoration(
+                                      labelText: 'Rolle 3',
+                                      hintText: 'Andre',
+                                    ),
+                                  ),
                                 ),
                               ],
                             ),
-                          ))),
-                  ], // end _ridersExpanded
-
-                  const SizedBox(height: 24),
-
-                  // Pricing defaults
-                  InkWell(
-                    onTap: () => setState(() => _pricingExpanded = !_pricingExpanded),
-                    borderRadius: BorderRadius.circular(8),
-                    child: Row(
-                      children: [
-                        Icon(_pricingExpanded ? Icons.expand_less : Icons.expand_more, size: 22),
-                        const SizedBox(width: 4),
-                        Text(
-                          'Prisparametre (standardverdier)',
-                          style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w900),
-                        ),
-                      ],
-                    ),
-                  ),
-                  if (_pricingExpanded) ...[
-                    const SizedBox(height: 12),
-                    Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                        color: cs.surfaceContainerLowest,
-                        borderRadius: BorderRadius.circular(14),
-                        border: Border.all(color: cs.outlineVariant),
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text('Disse verdiene brukes som standard i nye tilbud. De kan overstyres per tilbud.',
-                              style: TextStyle(fontSize: 12, color: cs.onSurfaceVariant)),
-                          const SizedBox(height: 12),
-                          _pricingField('CREO-honorar per utøver', _creoCtrl, 'creo_fee_minimum'),
-                          _pricingField('Tillegg per ekstrashow', _extraShowCtrl, 'extra_show_fee'),
-                          _pricingField('Påslag %', _markupCtrl, 'markup_pct', isPct: true),
-                          _pricingField('In-ear pris', _inearCtrl, 'inear_price'),
-                          _pricingField('Transport kr/km', _krKmCtrl, 'transport_price_per_km', isDecimal: true),
-                          const Divider(height: 16),
-                          Text('Hyre varebil', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: cs.onSurfaceVariant)),
-                          const SizedBox(height: 8),
-                          _pricingField('Dagspris', _hyreDayRateCtrl, 'hyre_day_rate'),
-                          _pricingField('Inkl. km/dag', _hyreInclKmCtrl, 'hyre_included_km'),
-                          _pricingField('Extra kr/km', _hyreExtraKmRateCtrl, 'hyre_extra_km_rate', isDecimal: true),
-                        ],
-                      ),
-                    ),
-                  ],
-                  ], // end Booking & priser
-
-                  if (_tabIndex == 0) ...[
-                  if (Supabase.instance.client.auth.currentUser?.email == 'michael@nttas.com') ...[
-                  const SizedBox(height: 24),
-
-                  // Features
-                  Text(
-                    'Funksjoner',
-                    style: Theme.of(context)
-                        .textTheme
-                        .titleMedium
-                        ?.copyWith(fontWeight: FontWeight.w900),
-                  ),
-                  const SizedBox(height: 12),
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.symmetric(horizontal: 8),
-                    decoration: BoxDecoration(
-                      color: cs.surfaceContainerLowest,
-                      borderRadius: BorderRadius.circular(14),
-                      border: Border.all(color: cs.outlineVariant),
-                    ),
-                    child: Column(
-                      children: [
-                        SwitchListTile(
-                          title: const Text('Turnéer'),
-                          subtitle: const Text('Vis turnéer i sidemenyen'),
-                          value: _showTours,
-                          onChanged: (v) => _toggleFlag('show_tours', v),
-                        ),
-                        SwitchListTile(
-                          title: const Text('Bussforespørsler'),
-                          subtitle:
-                              const Text('Vis bussforespørsler på dashboardet'),
-                          value: _showBusRequests,
-                          onChanged: (v) =>
-                              _toggleFlag('show_bus_requests_mgmt', v),
-                        ),
-                      ],
-                    ),
-                  ),
-                  ],
-                  ], // end Generelt (part 2: Funksjoner)
-
-                  if (_tabIndex == 2) ...[
-                  if (Supabase.instance.client.auth.currentUser?.email == 'michael@nttas.com') ...[
-                  const SizedBox(height: 24),
-
-                  // Tripletex integration
-                  Text(
-                    'Tripletex-integrasjon',
-                    style: Theme.of(context)
-                        .textTheme
-                        .titleMedium
-                        ?.copyWith(fontWeight: FontWeight.w900),
-                  ),
-                  const SizedBox(height: 12),
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(
-                      color: cs.surfaceContainerLowest,
-                      borderRadius: BorderRadius.circular(14),
-                      border: Border.all(color: cs.outlineVariant),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Koble til Tripletex for fakturering og leverandørfakturaer.',
-                          style: TextStyle(color: cs.onSurfaceVariant),
-                        ),
-                        const SizedBox(height: 14),
-                        TextField(
-                          controller: _ttConsumerCtrl,
-                          obscureText: true,
-                          decoration: const InputDecoration(
-                            labelText: 'Consumer Token',
-                            border: OutlineInputBorder(),
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-                        TextField(
-                          controller: _ttEmployeeCtrl,
-                          obscureText: true,
-                          decoration: const InputDecoration(
-                            labelText: 'Employee Token',
-                            border: OutlineInputBorder(),
-                          ),
-                        ),
-                        const SizedBox(height: 14),
-                        FilledButton.icon(
-                          onPressed: _ttSaving ? null : _saveTripletexTokens,
-                          icon: _ttSaving
-                              ? const SizedBox(
-                                  width: 16,
-                                  height: 16,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2, color: Colors.white),
-                                )
-                              : const Icon(Icons.save, size: 18),
-                          label: const Text('Lagre tokens'),
-                        ),
-                      ],
-                    ),
-                  ),
-                  ],
-
-                  const SizedBox(height: 24),
-
-                  // SMTP e-post
-                  InkWell(
-                    onTap: () => setState(() => _smtpExpanded = !_smtpExpanded),
-                    borderRadius: BorderRadius.circular(8),
-                    child: Row(
-                      children: [
-                        Icon(
-                          _smtpExpanded ? Icons.expand_less : Icons.expand_more,
-                          size: 22,
-                        ),
-                        const SizedBox(width: 4),
-                        Text(
-                          'E-postkonto${_smtpAccounts.isNotEmpty ? ' (${_smtpAccounts.length})' : ''}',
-                          style: Theme.of(context)
-                              .textTheme
-                              .titleMedium
-                              ?.copyWith(fontWeight: FontWeight.w900),
-                        ),
-                        const Spacer(),
-                        if (_smtpExpanded)
-                          FilledButton.icon(
-                            onPressed: _showAddSmtpDialog,
-                            icon: const Icon(Icons.add, size: 18),
-                            label: const Text('Legg til'),
-                          ),
-                      ],
-                    ),
-                  ),
-                  if (_smtpExpanded) ...[
-                    const SizedBox(height: 8),
-                    Text(
-                      'E-postkonto brukes til å sende tilbud, avtaler og fakturaer. Uten konto brukes standard Microsoft-avsender.',
-                      style: TextStyle(fontSize: 13, color: cs.onSurfaceVariant),
-                    ),
-                    const SizedBox(height: 12),
-                    if (_smtpAccounts.isEmpty)
-                      Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.all(16),
-                        decoration: BoxDecoration(
-                          color: cs.surfaceContainerLowest,
-                          borderRadius: BorderRadius.circular(14),
-                          border: Border.all(color: cs.outlineVariant),
-                        ),
-                        child: Text(
-                          'Ingen e-postkonto konfigurert.',
-                          style: TextStyle(color: cs.onSurfaceVariant),
-                        ),
-                      )
-                    else
-                      ...(_smtpAccounts.map((account) => Container(
-                            margin: const EdgeInsets.only(bottom: 8),
-                            padding: const EdgeInsets.all(14),
-                            decoration: BoxDecoration(
-                              color: cs.surfaceContainerLowest,
-                              borderRadius: BorderRadius.circular(14),
-                              border: Border.all(color: cs.outlineVariant),
+                            const SizedBox(height: 10),
+                            Align(
+                              alignment: Alignment.centerRight,
+                              child: FilledButton.icon(
+                                onPressed:
+                                    _rolesSaving ? null : _saveRoleLabels,
+                                icon: _rolesSaving
+                                    ? const SizedBox(
+                                        width: 16,
+                                        height: 16,
+                                        child: CircularProgressIndicator(
+                                            strokeWidth: 2),
+                                      )
+                                    : const Icon(Icons.save),
+                                label: const Text('Lagre roller'),
+                              ),
                             ),
+                            const SizedBox(height: 24),
+                          ],
+                        ], // end Generelt (part 1)
+
+                        if (_tabIndex == 1) ...[
+                          // Contract config
+                          InkWell(
+                            onTap: () => setState(
+                                () => _contractExpanded = !_contractExpanded),
+                            borderRadius: BorderRadius.circular(8),
                             child: Row(
                               children: [
-                                Icon(Icons.email_outlined,
-                                    size: 22, color: cs.onSurfaceVariant),
-                                const SizedBox(width: 12),
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      Text(
-                                        account.email,
-                                        style: const TextStyle(
-                                            fontWeight: FontWeight.w900),
-                                      ),
-                                      Text(
-                                        '${account.smtpHost}:${account.smtpPort}'
-                                        '${account.displayName.isNotEmpty ? '  ·  ${account.displayName}' : ''}',
-                                        style: TextStyle(
-                                            fontSize: 12,
-                                            color: cs.onSurfaceVariant),
-                                      ),
-                                    ],
-                                  ),
+                                Icon(
+                                  _contractExpanded
+                                      ? Icons.expand_less
+                                      : Icons.expand_more,
+                                  size: 22,
                                 ),
-                                if (account.isDefault)
-                                  Container(
-                                    margin: const EdgeInsets.only(right: 8),
-                                    padding: const EdgeInsets.symmetric(
-                                        horizontal: 8, vertical: 3),
-                                    decoration: BoxDecoration(
-                                      color: Colors.green.withValues(alpha: 0.12),
-                                      borderRadius: BorderRadius.circular(999),
-                                    ),
-                                    child: const Text(
-                                      'Standard',
-                                      style: TextStyle(
-                                          fontSize: 11,
-                                          fontWeight: FontWeight.w700,
-                                          color: Colors.green),
-                                    ),
-                                  ),
-                                IconButton(
-                                  tooltip: 'Slett',
-                                  icon: Icon(Icons.delete_outline,
-                                      size: 18, color: cs.onSurfaceVariant),
-                                  onPressed: () => _deleteSmtpAccount(account),
+                                const SizedBox(width: 4),
+                                Text(
+                                  'Kontrakt',
+                                  style: Theme.of(context)
+                                      .textTheme
+                                      .titleMedium
+                                      ?.copyWith(fontWeight: FontWeight.w900),
                                 ),
                               ],
                             ),
-                          ))),
-                  ],
-                  ], // end Integrasjoner
+                          ),
+                          if (_contractExpanded) ...[
+                            const SizedBox(height: 8),
+                            Text(
+                              'Tilpass kontraktens tittel, header-info, avtaletekst og '
+                              'signatur-etikett for dette selskapet. I avtaleteksten '
+                              'kan du bruke {us}, {firma}, {kontaktperson} og '
+                              '{spillested} som flettefelt.',
+                              style: TextStyle(
+                                  color: cs.onSurfaceVariant, fontSize: 13),
+                            ),
+                            const SizedBox(height: 12),
+                            Text(
+                              'Header (vises øverst i kontrakten — selskapsnavn og adresse hentes fra selskapets info)',
+                              style: TextStyle(
+                                  color: cs.onSurfaceVariant, fontSize: 12),
+                            ),
+                            const SizedBox(height: 8),
+                            TextField(
+                              controller: _ctrContactCtrl,
+                              decoration: const InputDecoration(
+                                labelText: 'Kontaktperson',
+                                prefixIcon: Icon(Icons.person),
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: TextField(
+                                    controller: _ctrPhoneCtrl,
+                                    decoration: const InputDecoration(
+                                      labelText: 'Telefon',
+                                      prefixIcon: Icon(Icons.phone),
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: TextField(
+                                    controller: _ctrEmailCtrl,
+                                    decoration: const InputDecoration(
+                                      labelText: 'E-post',
+                                      prefixIcon: Icon(Icons.email),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 20),
+                            // ── Per-language title + body ───────────────────────
+                            Row(
+                              children: [
+                                Text(
+                                  'Tittel og avtaletekst',
+                                  style: TextStyle(
+                                      fontWeight: FontWeight.w700,
+                                      color: cs.onSurface,
+                                      fontSize: 14),
+                                ),
+                                const Spacer(),
+                                Text('Språk:',
+                                    style: TextStyle(
+                                        color: cs.onSurfaceVariant,
+                                        fontSize: 12)),
+                                const SizedBox(width: 8),
+                                DropdownButton<String>(
+                                  value: _ctrEditingLang,
+                                  onChanged: (v) {
+                                    if (v != null) _switchContractLang(v);
+                                  },
+                                  items: _kContractLangs.map((l) {
+                                    final hasContent =
+                                        _contractTranslations[l.code] != null &&
+                                            ((_contractTranslations[l.code]!
+                                                    .title
+                                                    .isNotEmpty) ||
+                                                (_contractTranslations[l.code]!
+                                                    .body
+                                                    .isNotEmpty));
+                                    return DropdownMenuItem(
+                                      value: l.code,
+                                      child: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Text(l.label),
+                                          if (hasContent) ...[
+                                            const SizedBox(width: 6),
+                                            Icon(Icons.check_circle,
+                                                size: 14,
+                                                color: Colors.green.shade600),
+                                          ],
+                                        ],
+                                      ),
+                                    );
+                                  }).toList(),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              'La feltene stå tomme for språk du ikke vil støtte. '
+                              'Flettefelt: {us} {firma} {kontaktperson} {spillested}',
+                              style: TextStyle(
+                                  color: cs.onSurfaceVariant, fontSize: 12),
+                            ),
+                            const SizedBox(height: 10),
+                            TextField(
+                              controller: _ctrTitleCtrl,
+                              decoration: const InputDecoration(
+                                labelText: 'Tittel',
+                                hintText:
+                                    'F.eks. KONTRAKT / CONTRACT / KONTRAKT',
+                              ),
+                            ),
+                            const SizedBox(height: 10),
+                            TextField(
+                              controller: _ctrBodyCtrl,
+                              maxLines: 10,
+                              decoration: const InputDecoration(
+                                labelText: 'Avtaletekst',
+                                alignLabelWithHint: true,
+                              ),
+                            ),
+                            const SizedBox(height: 12),
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: TextField(
+                                    controller: _ctrSigLabelCtrl,
+                                    decoration: const InputDecoration(
+                                      labelText: 'Signatur-etikett',
+                                      hintText: 'F.eks. For Complete Drums',
+                                      helperText: 'Tom = "For <selskapsnavn>"',
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: TextField(
+                                    controller: _ctrShowLabelCtrl,
+                                    decoration: const InputDecoration(
+                                      labelText: 'Show-etikett i prisliste',
+                                      hintText: 'F.eks. Completeshow',
+                                      helperText: 'Tom = selskapsnavn',
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 10),
+                            Align(
+                              alignment: Alignment.centerRight,
+                              child: FilledButton.icon(
+                                onPressed: _contractSaving
+                                    ? null
+                                    : _saveContractConfig,
+                                icon: _contractSaving
+                                    ? const SizedBox(
+                                        width: 16,
+                                        height: 16,
+                                        child: CircularProgressIndicator(
+                                            strokeWidth: 2),
+                                      )
+                                    : const Icon(Icons.save),
+                                label:
+                                    const Text('Lagre kontrakt-innstillinger'),
+                              ),
+                            ),
+                            const SizedBox(height: 24),
+                          ],
 
-                  if (_tabIndex == 3) ...[
+                          // Show Types
+                          InkWell(
+                            onTap: () => setState(
+                                () => _showTypesExpanded = !_showTypesExpanded),
+                            borderRadius: BorderRadius.circular(8),
+                            child: Row(
+                              children: [
+                                Icon(
+                                  _showTypesExpanded
+                                      ? Icons.expand_less
+                                      : Icons.expand_more,
+                                  size: 22,
+                                ),
+                                const SizedBox(width: 4),
+                                Text(
+                                  'Show-typer (${_showTypes.length})',
+                                  style: Theme.of(context)
+                                      .textTheme
+                                      .titleMedium
+                                      ?.copyWith(fontWeight: FontWeight.w900),
+                                ),
+                                const Spacer(),
+                                if (_showTypesExpanded)
+                                  FilledButton.icon(
+                                    onPressed: _showAddShowTypeDialog,
+                                    icon: const Icon(Icons.add),
+                                    label: const Text('Legg til show-type'),
+                                  ),
+                              ],
+                            ),
+                          ),
+                          if (_showTypesExpanded) ...[
+                            const SizedBox(height: 12),
+                            if (_showTypes.isEmpty)
+                              Container(
+                                width: double.infinity,
+                                padding: const EdgeInsets.all(16),
+                                decoration: BoxDecoration(
+                                  color: cs.surfaceContainerLowest,
+                                  borderRadius: BorderRadius.circular(14),
+                                  border: Border.all(color: cs.outlineVariant),
+                                ),
+                                child: Text(
+                                  'Ingen show-typer ennå.',
+                                  style: TextStyle(color: cs.onSurfaceVariant),
+                                ),
+                              )
+                            else
+                              ...(_showTypes.map((st) => Container(
+                                    margin: const EdgeInsets.only(bottom: 8),
+                                    padding: const EdgeInsets.all(14),
+                                    decoration: BoxDecoration(
+                                      color: cs.surfaceContainerLowest,
+                                      borderRadius: BorderRadius.circular(14),
+                                      border:
+                                          Border.all(color: cs.outlineVariant),
+                                    ),
+                                    child: Row(
+                                      children: [
+                                        Expanded(
+                                          child: Column(
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.start,
+                                            children: [
+                                              Text(
+                                                st['name'] as String? ?? '',
+                                                style: const TextStyle(
+                                                    fontWeight:
+                                                        FontWeight.w900),
+                                              ),
+                                              const SizedBox(height: 4),
+                                              ValueListenableBuilder<
+                                                  RoleLabels>(
+                                                valueListenable:
+                                                    roleLabelsNotifier,
+                                                builder: (_, labels, __) {
+                                                  final drummers =
+                                                      (st['drummers'] as num?)
+                                                              ?.toInt() ??
+                                                          0;
+                                                  final dancers =
+                                                      (st['dancers'] as num?)
+                                                              ?.toInt() ??
+                                                          0;
+                                                  final others =
+                                                      (st['others'] as num?)
+                                                              ?.toInt() ??
+                                                          0;
+                                                  final isCustom =
+                                                      st['price_is_custom'] ==
+                                                          true;
+                                                  final creo = double.tryParse(
+                                                          _creoCtrl.text) ??
+                                                      5500;
+                                                  final autoPrice = (drummers +
+                                                          dancers +
+                                                          others) *
+                                                      creo;
+                                                  final display = isCustom
+                                                      ? '${_formatPrice(st['price'])} kr'
+                                                      : 'auto · ${_formatPrice(autoPrice)} kr';
+                                                  return Text(
+                                                    '$drummers ${labels.role1.toLowerCase()} · '
+                                                    '$dancers ${labels.role2.toLowerCase()} · '
+                                                    '$others ${labels.role3.toLowerCase()}  ·  '
+                                                    '$display',
+                                                    style: TextStyle(
+                                                        color:
+                                                            cs.onSurfaceVariant,
+                                                        fontStyle: isCustom
+                                                            ? FontStyle.normal
+                                                            : FontStyle.italic),
+                                                  );
+                                                },
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                        TextButton.icon(
+                                          onPressed: () =>
+                                              showFixedShowEquipmentDialog(
+                                            context,
+                                            showTypeId: st['id'] as String,
+                                            showName:
+                                                st['name'] as String? ?? '',
+                                          ),
+                                          icon: const Icon(
+                                              Icons.inventory_2_outlined,
+                                              size: 16),
+                                          label: const Text('Utstyr'),
+                                        ),
+                                        TextButton(
+                                          onPressed: () =>
+                                              _showEditShowTypeDialog(st),
+                                          child: const Text('Rediger'),
+                                        ),
+                                        TextButton(
+                                          onPressed: () =>
+                                              _showDeleteShowTypeDialog(st),
+                                          style: TextButton.styleFrom(
+                                              foregroundColor: Colors.red),
+                                          child: const Text('Slett'),
+                                        ),
+                                      ],
+                                    ),
+                                  ))),
+                          ], // end _showTypesExpanded
 
-                  // Profile fields
-                  _buildProfileFieldsSection(cs),
-                  ], // end Profilfelt
+                          const SizedBox(height: 24),
 
-                  if (_tabIndex == 0) ...[
-                  const SizedBox(height: 24),
+                          // Riders (PDF-vedlegg for avtaler)
+                          InkWell(
+                            onTap: () => setState(
+                                () => _ridersExpanded = !_ridersExpanded),
+                            borderRadius: BorderRadius.circular(8),
+                            child: Row(
+                              children: [
+                                Icon(
+                                  _ridersExpanded
+                                      ? Icons.expand_less
+                                      : Icons.expand_more,
+                                  size: 22,
+                                ),
+                                const SizedBox(width: 4),
+                                Text(
+                                  'Riders / vedlegg (${_riders.length})',
+                                  style: Theme.of(context)
+                                      .textTheme
+                                      .titleMedium
+                                      ?.copyWith(fontWeight: FontWeight.w900),
+                                ),
+                                const Spacer(),
+                                if (_ridersExpanded) ...[
+                                  OutlinedButton.icon(
+                                    onPressed: _addTextRider,
+                                    icon:
+                                        const Icon(Icons.text_snippet_outlined),
+                                    label: const Text('Ny tekst-rider'),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  FilledButton.icon(
+                                    onPressed: _uploadRider,
+                                    icon: const Icon(Icons.upload_file),
+                                    label: const Text('Last opp PDF'),
+                                  ),
+                                ],
+                              ],
+                            ),
+                          ),
+                          if (_ridersExpanded) ...[
+                            const SizedBox(height: 4),
+                            Text(
+                              'PDFer eller tekst-ridere som kan vedlegges intensjonsavtaler. Tekst-ridere genererer en PDF dynamisk basert på antall i showet.',
+                              style: TextStyle(
+                                  fontSize: 12, color: cs.onSurfaceVariant),
+                            ),
+                            const SizedBox(height: 12),
+                            if (_riders.isEmpty)
+                              Container(
+                                width: double.infinity,
+                                padding: const EdgeInsets.all(16),
+                                decoration: BoxDecoration(
+                                  color: cs.surfaceContainerLowest,
+                                  borderRadius: BorderRadius.circular(14),
+                                  border: Border.all(color: cs.outlineVariant),
+                                ),
+                                child: Text(
+                                  'Ingen riders lastet opp ennå.',
+                                  style: TextStyle(color: cs.onSurfaceVariant),
+                                ),
+                              )
+                            else
+                              ...(_riders.map((r) => Container(
+                                    margin: const EdgeInsets.only(bottom: 8),
+                                    padding: const EdgeInsets.all(14),
+                                    decoration: BoxDecoration(
+                                      color: cs.surfaceContainerLowest,
+                                      borderRadius: BorderRadius.circular(14),
+                                      border:
+                                          Border.all(color: cs.outlineVariant),
+                                    ),
+                                    child: Row(
+                                      children: [
+                                        Icon(
+                                          (r['file_path'] as String? ?? '')
+                                                  .isEmpty
+                                              ? Icons.text_snippet_outlined
+                                              : Icons.picture_as_pdf,
+                                          size: 20,
+                                          color:
+                                              (r['file_path'] as String? ?? '')
+                                                      .isEmpty
+                                                  ? Colors.blueGrey
+                                                  : Colors.red,
+                                        ),
+                                        const SizedBox(width: 10),
+                                        Expanded(
+                                          child: Column(
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.start,
+                                            children: [
+                                              Text(
+                                                r['name'] as String? ?? '',
+                                                style: const TextStyle(
+                                                    fontWeight:
+                                                        FontWeight.w900),
+                                              ),
+                                              if ((r['show_match'] as String? ??
+                                                      '')
+                                                  .isNotEmpty)
+                                                Text(
+                                                  'Auto-vedlegg ved show: ${r['show_match']}',
+                                                  style: TextStyle(
+                                                      fontSize: 11,
+                                                      color:
+                                                          cs.onSurfaceVariant),
+                                                ),
+                                              if ((r['quantity_source']
+                                                          as String? ??
+                                                      '')
+                                                  .isNotEmpty)
+                                                Text(
+                                                  'Antall: ${_riderQuantityLabel(r)}',
+                                                  style: TextStyle(
+                                                      fontSize: 11,
+                                                      color:
+                                                          cs.onSurfaceVariant),
+                                                ),
+                                              if (r['always_attach'] == true)
+                                                const Text(
+                                                  'Alltid vedlagt',
+                                                  style: TextStyle(
+                                                      fontSize: 11,
+                                                      color: Colors.green),
+                                                ),
+                                            ],
+                                          ),
+                                        ),
+                                        TextButton(
+                                          onPressed: () => _editRider(r),
+                                          child: const Text('Rediger'),
+                                        ),
+                                        TextButton(
+                                          onPressed: () => _deleteRider(r),
+                                          style: TextButton.styleFrom(
+                                              foregroundColor: Colors.red),
+                                          child: const Text('Slett'),
+                                        ),
+                                      ],
+                                    ),
+                                  ))),
+                          ], // end _ridersExpanded
 
-                  // Change password
-                  Text(
-                    'Konto',
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                          fontWeight: FontWeight.w900,
-                        ),
-                  ),
-                  const SizedBox(height: 12),
-                  OutlinedButton.icon(
-                    onPressed: _openChangePasswordDialog,
-                    icon: const Icon(Icons.lock_reset),
-                    label: const Text('Endre passord'),
-                  ),
-                  ], // end Generelt (part 3: Konto)
+                          const SizedBox(height: 24),
+
+                          // Pricing defaults
+                          InkWell(
+                            onTap: () => setState(
+                                () => _pricingExpanded = !_pricingExpanded),
+                            borderRadius: BorderRadius.circular(8),
+                            child: Row(
+                              children: [
+                                Icon(
+                                    _pricingExpanded
+                                        ? Icons.expand_less
+                                        : Icons.expand_more,
+                                    size: 22),
+                                const SizedBox(width: 4),
+                                Text(
+                                  'Prisparametre (standardverdier)',
+                                  style: Theme.of(context)
+                                      .textTheme
+                                      .titleMedium
+                                      ?.copyWith(fontWeight: FontWeight.w900),
+                                ),
+                              ],
+                            ),
+                          ),
+                          if (_pricingExpanded) ...[
+                            const SizedBox(height: 12),
+                            Container(
+                              width: double.infinity,
+                              padding: const EdgeInsets.all(16),
+                              decoration: BoxDecoration(
+                                color: cs.surfaceContainerLowest,
+                                borderRadius: BorderRadius.circular(14),
+                                border: Border.all(color: cs.outlineVariant),
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                      'Disse verdiene brukes som standard i nye tilbud. De kan overstyres per tilbud.',
+                                      style: TextStyle(
+                                          fontSize: 12,
+                                          color: cs.onSurfaceVariant)),
+                                  const SizedBox(height: 12),
+                                  _pricingField('CREO-honorar per utøver',
+                                      _creoCtrl, 'creo_fee_minimum'),
+                                  _pricingField('Tillegg per ekstrashow',
+                                      _extraShowCtrl, 'extra_show_fee'),
+                                  _pricingField(
+                                      'Påslag %', _markupCtrl, 'markup_pct',
+                                      isPct: true),
+                                  _pricingField(
+                                      'In-ear pris', _inearCtrl, 'inear_price'),
+                                  _pricingField('Transport kr/km', _krKmCtrl,
+                                      'transport_price_per_km',
+                                      isDecimal: true),
+                                  const Divider(height: 16),
+                                  Text('Hyre varebil',
+                                      style: TextStyle(
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w700,
+                                          color: cs.onSurfaceVariant)),
+                                  const SizedBox(height: 8),
+                                  _pricingField('Dagspris', _hyreDayRateCtrl,
+                                      'hyre_day_rate'),
+                                  _pricingField('Inkl. km/dag', _hyreInclKmCtrl,
+                                      'hyre_included_km'),
+                                  _pricingField(
+                                      'Extra kr/km',
+                                      _hyreExtraKmRateCtrl,
+                                      'hyre_extra_km_rate',
+                                      isDecimal: true),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ], // end Booking & priser
+
+                        if (_tabIndex == 0) ...[
+                          if (Supabase
+                                  .instance.client.auth.currentUser?.email ==
+                              'michael@nttas.com') ...[
+                            const SizedBox(height: 24),
+
+                            // Features
+                            Text(
+                              'Funksjoner',
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .titleMedium
+                                  ?.copyWith(fontWeight: FontWeight.w900),
+                            ),
+                            const SizedBox(height: 12),
+                            Container(
+                              width: double.infinity,
+                              padding:
+                                  const EdgeInsets.symmetric(horizontal: 8),
+                              decoration: BoxDecoration(
+                                color: cs.surfaceContainerLowest,
+                                borderRadius: BorderRadius.circular(14),
+                                border: Border.all(color: cs.outlineVariant),
+                              ),
+                              child: Column(
+                                children: [
+                                  SwitchListTile(
+                                    title: const Text('Turnéer'),
+                                    subtitle:
+                                        const Text('Vis turnéer i sidemenyen'),
+                                    value: _showTours,
+                                    onChanged: (v) =>
+                                        _toggleFlag('show_tours', v),
+                                  ),
+                                  SwitchListTile(
+                                    title: const Text('Bussforespørsler'),
+                                    subtitle: const Text(
+                                        'Vis bussforespørsler på dashboardet'),
+                                    value: _showBusRequests,
+                                    onChanged: (v) => _toggleFlag(
+                                        'show_bus_requests_mgmt', v),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ], // end Generelt (part 2: Funksjoner)
+
+                        if (_tabIndex == 2) ...[
+                          if (Supabase
+                                  .instance.client.auth.currentUser?.email ==
+                              'michael@nttas.com') ...[
+                            const SizedBox(height: 24),
+
+                            // Tripletex integration
+                            Text(
+                              'Tripletex-integrasjon',
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .titleMedium
+                                  ?.copyWith(fontWeight: FontWeight.w900),
+                            ),
+                            const SizedBox(height: 12),
+                            Container(
+                              width: double.infinity,
+                              padding: const EdgeInsets.all(16),
+                              decoration: BoxDecoration(
+                                color: cs.surfaceContainerLowest,
+                                borderRadius: BorderRadius.circular(14),
+                                border: Border.all(color: cs.outlineVariant),
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    'Koble til Tripletex for fakturering og leverandørfakturaer.',
+                                    style:
+                                        TextStyle(color: cs.onSurfaceVariant),
+                                  ),
+                                  const SizedBox(height: 14),
+                                  TextField(
+                                    controller: _ttConsumerCtrl,
+                                    obscureText: true,
+                                    decoration: const InputDecoration(
+                                      labelText: 'Consumer Token',
+                                      border: OutlineInputBorder(),
+                                    ),
+                                  ),
+                                  const SizedBox(height: 12),
+                                  TextField(
+                                    controller: _ttEmployeeCtrl,
+                                    obscureText: true,
+                                    decoration: const InputDecoration(
+                                      labelText: 'Employee Token',
+                                      border: OutlineInputBorder(),
+                                    ),
+                                  ),
+                                  const SizedBox(height: 14),
+                                  FilledButton.icon(
+                                    onPressed:
+                                        _ttSaving ? null : _saveTripletexTokens,
+                                    icon: _ttSaving
+                                        ? const SizedBox(
+                                            width: 16,
+                                            height: 16,
+                                            child: CircularProgressIndicator(
+                                                strokeWidth: 2,
+                                                color: Colors.white),
+                                          )
+                                        : const Icon(Icons.save, size: 18),
+                                    label: const Text('Lagre tokens'),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+
+                          const SizedBox(height: 24),
+
+                          // SMTP e-post
+                          InkWell(
+                            onTap: () =>
+                                setState(() => _smtpExpanded = !_smtpExpanded),
+                            borderRadius: BorderRadius.circular(8),
+                            child: Row(
+                              children: [
+                                Icon(
+                                  _smtpExpanded
+                                      ? Icons.expand_less
+                                      : Icons.expand_more,
+                                  size: 22,
+                                ),
+                                const SizedBox(width: 4),
+                                Text(
+                                  'E-postkonto${_smtpAccounts.isNotEmpty ? ' (${_smtpAccounts.length})' : ''}',
+                                  style: Theme.of(context)
+                                      .textTheme
+                                      .titleMedium
+                                      ?.copyWith(fontWeight: FontWeight.w900),
+                                ),
+                                const Spacer(),
+                                if (_smtpExpanded)
+                                  FilledButton.icon(
+                                    onPressed: _showAddSmtpDialog,
+                                    icon: const Icon(Icons.add, size: 18),
+                                    label: const Text('Legg til'),
+                                  ),
+                              ],
+                            ),
+                          ),
+                          if (_smtpExpanded) ...[
+                            const SizedBox(height: 8),
+                            Text(
+                              'E-postkonto brukes til å sende tilbud, avtaler og fakturaer. Uten konto brukes standard Microsoft-avsender.',
+                              style: TextStyle(
+                                  fontSize: 13, color: cs.onSurfaceVariant),
+                            ),
+                            const SizedBox(height: 12),
+                            if (_smtpAccounts.isEmpty)
+                              Container(
+                                width: double.infinity,
+                                padding: const EdgeInsets.all(16),
+                                decoration: BoxDecoration(
+                                  color: cs.surfaceContainerLowest,
+                                  borderRadius: BorderRadius.circular(14),
+                                  border: Border.all(color: cs.outlineVariant),
+                                ),
+                                child: Text(
+                                  'Ingen e-postkonto konfigurert.',
+                                  style: TextStyle(color: cs.onSurfaceVariant),
+                                ),
+                              )
+                            else
+                              ...(_smtpAccounts.map((account) => Container(
+                                    margin: const EdgeInsets.only(bottom: 8),
+                                    padding: const EdgeInsets.all(14),
+                                    decoration: BoxDecoration(
+                                      color: cs.surfaceContainerLowest,
+                                      borderRadius: BorderRadius.circular(14),
+                                      border:
+                                          Border.all(color: cs.outlineVariant),
+                                    ),
+                                    child: Row(
+                                      children: [
+                                        Icon(Icons.email_outlined,
+                                            size: 22,
+                                            color: cs.onSurfaceVariant),
+                                        const SizedBox(width: 12),
+                                        Expanded(
+                                          child: Column(
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.start,
+                                            children: [
+                                              Text(
+                                                account.email,
+                                                style: const TextStyle(
+                                                    fontWeight:
+                                                        FontWeight.w900),
+                                              ),
+                                              Text(
+                                                '${account.smtpHost}:${account.smtpPort}'
+                                                '${account.displayName.isNotEmpty ? '  ·  ${account.displayName}' : ''}',
+                                                style: TextStyle(
+                                                    fontSize: 12,
+                                                    color: cs.onSurfaceVariant),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                        if (account.isDefault)
+                                          Container(
+                                            margin:
+                                                const EdgeInsets.only(right: 8),
+                                            padding: const EdgeInsets.symmetric(
+                                                horizontal: 8, vertical: 3),
+                                            decoration: BoxDecoration(
+                                              color: Colors.green
+                                                  .withValues(alpha: 0.12),
+                                              borderRadius:
+                                                  BorderRadius.circular(999),
+                                            ),
+                                            child: const Text(
+                                              'Standard',
+                                              style: TextStyle(
+                                                  fontSize: 11,
+                                                  fontWeight: FontWeight.w700,
+                                                  color: Colors.green),
+                                            ),
+                                          ),
+                                        IconButton(
+                                          tooltip: 'Slett',
+                                          icon: Icon(Icons.delete_outline,
+                                              size: 18,
+                                              color: cs.onSurfaceVariant),
+                                          onPressed: () =>
+                                              _deleteSmtpAccount(account),
+                                        ),
+                                      ],
+                                    ),
+                                  ))),
+                          ],
+                        ], // end Integrasjoner
+
+                        if (_tabIndex == 3) ...[
+                          // Profile fields
+                          _buildProfileFieldsSection(cs),
+                        ], // end Profilfelt
+
+                        if (_tabIndex == 0) ...[
+                          const SizedBox(height: 24),
+
+                          // Change password
+                          Text(
+                            'Konto',
+                            style: Theme.of(context)
+                                .textTheme
+                                .titleMedium
+                                ?.copyWith(
+                                  fontWeight: FontWeight.w900,
+                                ),
+                          ),
+                          const SizedBox(height: 12),
+                          OutlinedButton.icon(
+                            onPressed: _openChangePasswordDialog,
+                            icon: const Icon(Icons.lock_reset),
+                            label: const Text('Endre passord'),
+                          ),
+                        ], // end Generelt (part 3: Konto)
                       ],
                     ),
                   ),
@@ -2067,15 +2252,13 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         InkWell(
-          onTap: () => setState(
-              () => _profileFieldsExpanded = !_profileFieldsExpanded),
+          onTap: () =>
+              setState(() => _profileFieldsExpanded = !_profileFieldsExpanded),
           borderRadius: BorderRadius.circular(8),
           child: Row(
             children: [
               Icon(
-                _profileFieldsExpanded
-                    ? Icons.expand_less
-                    : Icons.expand_more,
+                _profileFieldsExpanded ? Icons.expand_less : Icons.expand_more,
                 size: 22,
               ),
               const SizedBox(width: 4),
@@ -2148,8 +2331,7 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
               }
             }),
             child: Padding(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
               child: Row(
                 children: [
                   Icon(expanded ? Icons.expand_less : Icons.expand_more),
@@ -2162,8 +2344,7 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
                   ),
                   Text(
                     '${children.length} felt',
-                    style: TextStyle(
-                        fontSize: 12, color: cs.onSurfaceVariant),
+                    style: TextStyle(fontSize: 12, color: cs.onSurfaceVariant),
                   ),
                   IconButton(
                     tooltip: 'Endre',
@@ -2187,8 +2368,7 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
                     const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                 child: Text(
                   'Ingen underbolker.',
-                  style: TextStyle(
-                      color: cs.onSurfaceVariant, fontSize: 13),
+                  style: TextStyle(color: cs.onSurfaceVariant, fontSize: 13),
                 ),
               )
             else
@@ -2220,8 +2400,7 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
                 const SizedBox(height: 2),
                 Text(
                   f.type.label + (f.required ? ' • påkrevd' : ''),
-                  style: TextStyle(
-                      fontSize: 11, color: cs.onSurfaceVariant),
+                  style: TextStyle(fontSize: 11, color: cs.onSurfaceVariant),
                 ),
               ],
             ),
@@ -2286,8 +2465,7 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
     final children = _profileChildrenOf(section.id);
     final nextOrder = children.isEmpty
         ? 0
-        : children.map((c) => c.sortOrder).reduce((a, b) => a > b ? a : b) +
-            1;
+        : children.map((c) => c.sortOrder).reduce((a, b) => a > b ? a : b) + 1;
 
     try {
       final created = await ProfileFieldService.insert(ProfileField(
@@ -2331,8 +2509,7 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
       await ProfileFieldService.update(updated);
       if (mounted) {
         setState(() {
-          final idx =
-              _profileFields.indexWhere((f) => f.id == section.id);
+          final idx = _profileFields.indexWhere((f) => f.id == section.id);
           if (idx >= 0) _profileFields[idx] = updated;
         });
       }
@@ -2362,8 +2539,7 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
       await ProfileFieldService.update(updated);
       if (mounted) {
         setState(() {
-          final idx =
-              _profileFields.indexWhere((f) => f.id == field.id);
+          final idx = _profileFields.indexWhere((f) => f.id == field.id);
           if (idx >= 0) _profileFields[idx] = updated;
         });
       }
@@ -2453,10 +2629,10 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
     final optionsCtrl = TextEditingController(
       text: (initial?.options ?? const <String>[]).join('\n'),
     );
-    ProfileFieldType type = initial?.type == null ||
-            initial!.type == ProfileFieldType.section
-        ? ProfileFieldType.text
-        : initial.type;
+    ProfileFieldType type =
+        initial?.type == null || initial!.type == ProfileFieldType.section
+            ? ProfileFieldType.text
+            : initial.type;
     bool required = initial?.required ?? false;
 
     return showDialog<_MgmtFieldDialogResult>(
@@ -2479,8 +2655,7 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
                   const SizedBox(height: 12),
                   DropdownButtonFormField<ProfileFieldType>(
                     initialValue: type,
-                    decoration:
-                        const InputDecoration(labelText: 'Felt-type'),
+                    decoration: const InputDecoration(labelText: 'Felt-type'),
                     items: ProfileFieldType.values
                         .where((t) => t != ProfileFieldType.section)
                         .map((t) => DropdownMenuItem(
@@ -2509,8 +2684,7 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
                     contentPadding: EdgeInsets.zero,
                     controlAffinity: ListTileControlAffinity.leading,
                     title: const Text('Påkrevd'),
-                    onChanged: (v) =>
-                        setLocal(() => required = v ?? false),
+                    onChanged: (v) => setLocal(() => required = v ?? false),
                   ),
                 ],
               ),
@@ -2585,8 +2759,7 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
                     child: TextField(
                       controller: drummersCtrl,
                       keyboardType: TextInputType.number,
-                      decoration:
-                          InputDecoration(labelText: labels.role1),
+                      decoration: InputDecoration(labelText: labels.role1),
                     ),
                   ),
                   const SizedBox(width: 10),
@@ -2594,8 +2767,7 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
                     child: TextField(
                       controller: dancersCtrl,
                       keyboardType: TextInputType.number,
-                      decoration:
-                          InputDecoration(labelText: labels.role2),
+                      decoration: InputDecoration(labelText: labels.role2),
                     ),
                   ),
                   const SizedBox(width: 10),
@@ -2603,8 +2775,7 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
                     child: TextField(
                       controller: othersCtrl,
                       keyboardType: TextInputType.number,
-                      decoration:
-                          InputDecoration(labelText: labels.role3),
+                      decoration: InputDecoration(labelText: labels.role3),
                     ),
                   ),
                 ],
@@ -2649,8 +2820,7 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
                 if (mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
-                        content: Text('Feil: $e'),
-                        backgroundColor: Colors.red),
+                        content: Text('Feil: $e'), backgroundColor: Colors.red),
                   );
                 }
               }
@@ -2698,8 +2868,7 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
                     child: TextField(
                       controller: drummersCtrl,
                       keyboardType: TextInputType.number,
-                      decoration:
-                          InputDecoration(labelText: labels.role1),
+                      decoration: InputDecoration(labelText: labels.role1),
                     ),
                   ),
                   const SizedBox(width: 10),
@@ -2707,8 +2876,7 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
                     child: TextField(
                       controller: dancersCtrl,
                       keyboardType: TextInputType.number,
-                      decoration:
-                          InputDecoration(labelText: labels.role2),
+                      decoration: InputDecoration(labelText: labels.role2),
                     ),
                   ),
                   const SizedBox(width: 10),
@@ -2716,8 +2884,7 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
                     child: TextField(
                       controller: othersCtrl,
                       keyboardType: TextInputType.number,
-                      decoration:
-                          InputDecoration(labelText: labels.role3),
+                      decoration: InputDecoration(labelText: labels.role3),
                     ),
                   ),
                 ],
@@ -2745,25 +2912,21 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
               try {
                 final priceVal = double.tryParse(priceCtrl.text.trim()) ?? 0;
                 final isCustom = priceVal > 0;
-                await _sb
-                    .from('show_types')
-                    .update({
-                      'name': nameCtrl.text.trim(),
-                      'drummers': int.tryParse(drummersCtrl.text) ?? 0,
-                      'dancers': int.tryParse(dancersCtrl.text) ?? 0,
-                      'others': int.tryParse(othersCtrl.text) ?? 0,
-                      'price': isCustom ? priceVal : 0,
-                      'price_is_custom': isCustom,
-                    })
-                    .eq('id', showType['id']);
+                await _sb.from('show_types').update({
+                  'name': nameCtrl.text.trim(),
+                  'drummers': int.tryParse(drummersCtrl.text) ?? 0,
+                  'dancers': int.tryParse(dancersCtrl.text) ?? 0,
+                  'others': int.tryParse(othersCtrl.text) ?? 0,
+                  'price': isCustom ? priceVal : 0,
+                  'price_is_custom': isCustom,
+                }).eq('id', showType['id']);
                 if (ctx.mounted) Navigator.pop(ctx);
                 await _load();
               } catch (e) {
                 if (mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
-                        content: Text('Feil: $e'),
-                        backgroundColor: Colors.red),
+                        content: Text('Feil: $e'), backgroundColor: Colors.red),
                   );
                 }
               }
@@ -2780,8 +2943,8 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Slett show-type'),
-        content: Text(
-            'Er du sikker på at du vil slette "${showType['name']}"?'),
+        content:
+            Text('Er du sikker på at du vil slette "${showType['name']}"?'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
@@ -2799,8 +2962,7 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
     try {
       await _sb
           .from('show_types')
-          .update({'active': false})
-          .eq('id', showType['id']);
+          .update({'active': false}).eq('id', showType['id']);
       await _load();
     } catch (e) {
       if (mounted) {
@@ -2928,7 +3090,9 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
       if (!authResp.startsWith('235')) {
         throw Exception('Authentication failed: $authResp');
       }
-      try { await conn.sendCmd('QUIT'); } catch (_) {}
+      try {
+        await conn.sendCmd('QUIT');
+      } catch (_) {}
     } finally {
       conn.close();
     }
@@ -3021,10 +3185,13 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
                         ),
                         child: const Row(
                           children: [
-                            Icon(Icons.check_circle, color: Colors.green, size: 18),
+                            Icon(Icons.check_circle,
+                                color: Colors.green, size: 18),
                             SizedBox(width: 8),
                             Text('Tilkobling vellykket!',
-                                style: TextStyle(color: Colors.green, fontWeight: FontWeight.w600)),
+                                style: TextStyle(
+                                    color: Colors.green,
+                                    fontWeight: FontWeight.w600)),
                           ],
                         ),
                       ),
@@ -3039,11 +3206,13 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
                         ),
                         child: Row(
                           children: [
-                            const Icon(Icons.error_outline, color: Colors.red, size: 18),
+                            const Icon(Icons.error_outline,
+                                color: Colors.red, size: 18),
                             const SizedBox(width: 8),
                             Expanded(
                               child: Text(testError!,
-                                  style: const TextStyle(color: Colors.red, fontSize: 12)),
+                                  style: const TextStyle(
+                                      color: Colors.red, fontSize: 12)),
                             ),
                           ],
                         ),
@@ -3089,9 +3258,7 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
                   child: const Text('Test tilkobling'),
                 ),
                 FilledButton(
-                  onPressed: saving
-                      ? null
-                      : () => Navigator.pop(ctx, true),
+                  onPressed: saving ? null : () => Navigator.pop(ctx, true),
                   child: const Text('Lagre'),
                 ),
               ],
@@ -3117,7 +3284,8 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
         'is_default': isFirst,
       });
       EmailService.clearSmtpCache();
-      _smtpAccounts = await EmailService.loadSmtpAccounts(companyId: _companyId);
+      _smtpAccounts =
+          await EmailService.loadSmtpAccounts(companyId: _companyId);
       if (mounted) setState(() {});
     } catch (e) {
       if (mounted) {
@@ -3151,7 +3319,8 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
     try {
       await _sb.from('smtp_accounts').delete().eq('id', account.id);
       EmailService.clearSmtpCache();
-      _smtpAccounts = await EmailService.loadSmtpAccounts(companyId: _companyId);
+      _smtpAccounts =
+          await EmailService.loadSmtpAccounts(companyId: _companyId);
       if (mounted) setState(() {});
     } catch (e) {
       if (mounted) {
@@ -3261,8 +3430,8 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
                           child: TextField(
                             controller: fixedCtrl,
                             keyboardType: TextInputType.number,
-                            decoration: const InputDecoration(
-                                labelText: 'Antall'),
+                            decoration:
+                                const InputDecoration(labelText: 'Antall'),
                           ),
                         ),
                       ],
@@ -3282,8 +3451,7 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
                     contentPadding: EdgeInsets.zero,
                     controlAffinity: ListTileControlAffinity.leading,
                     title: const Text('Alltid vedlagt'),
-                    onChanged: (v) =>
-                        setSt(() => alwaysAttach = v ?? false),
+                    onChanged: (v) => setSt(() => alwaysAttach = v ?? false),
                   ),
                   const SizedBox(height: 6),
                   Text(
@@ -3320,8 +3488,7 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
             : matchCtrl.text.trim().toLowerCase(),
         'always_attach': alwaysAttach,
         'quantity_source': quantitySource,
-        'quantity_fixed':
-            int.tryParse(fixedCtrl.text.trim()) ?? 1,
+        'quantity_fixed': int.tryParse(fixedCtrl.text.trim()) ?? 1,
         'sort_order': _riders.length,
         'active': true,
       });
@@ -3355,7 +3522,8 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
     final bytes = file.bytes;
     if (bytes == null) return;
 
-    final nameCtrl = TextEditingController(text: file.name.replaceAll('.pdf', ''));
+    final nameCtrl =
+        TextEditingController(text: file.name.replaceAll('.pdf', ''));
     final matchCtrl = TextEditingController();
     bool alwaysAttach = false;
 
@@ -3395,8 +3563,12 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
             ),
           ),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Avbryt')),
-            FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Last opp')),
+            TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('Avbryt')),
+            FilledButton(
+                onPressed: () => Navigator.pop(ctx, true),
+                child: const Text('Last opp')),
           ],
         ),
       ),
@@ -3406,11 +3578,14 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
 
     try {
       // Upload to storage
-      final storagePath = '$_companyId/${DateTime.now().millisecondsSinceEpoch}_${file.name}';
+      final storagePath =
+          '$_companyId/${DateTime.now().millisecondsSinceEpoch}_${file.name}';
       await _sb.storage.from('riders').uploadBinary(
-        storagePath, bytes,
-        fileOptions: const FileOptions(contentType: 'application/pdf', upsert: true),
-      );
+            storagePath,
+            bytes,
+            fileOptions:
+                const FileOptions(contentType: 'application/pdf', upsert: true),
+          );
 
       // Insert DB row
       await _sb.from('company_riders').insert({
@@ -3418,7 +3593,9 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
         'name': nameCtrl.text.trim(),
         'file_path': storagePath,
         'file_size': bytes.length,
-        'show_match': matchCtrl.text.trim().isEmpty ? null : matchCtrl.text.trim().toLowerCase(),
+        'show_match': matchCtrl.text.trim().isEmpty
+            ? null
+            : matchCtrl.text.trim().toLowerCase(),
         'always_attach': alwaysAttach,
         'sort_order': _riders.length,
         'active': true,
@@ -3428,7 +3605,8 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Rider lastet opp'), backgroundColor: Colors.green),
+          const SnackBar(
+              content: Text('Rider lastet opp'), backgroundColor: Colors.green),
         );
       }
     } catch (e) {
@@ -3512,8 +3690,8 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
                               DropdownMenuItem(
                                   value: 'fixed', child: Text('Fast antall')),
                             ],
-                            onChanged: (v) => setSt(
-                                () => quantitySource = v ?? 'show_total'),
+                            onChanged: (v) =>
+                                setSt(() => quantitySource = v ?? 'show_total'),
                           ),
                         ),
                         if (quantitySource == 'fixed') ...[
@@ -3523,8 +3701,8 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
                             child: TextField(
                               controller: fixedCtrl,
                               keyboardType: TextInputType.number,
-                              decoration: const InputDecoration(
-                                  labelText: 'Antall'),
+                              decoration:
+                                  const InputDecoration(labelText: 'Antall'),
                             ),
                           ),
                         ],
@@ -3545,8 +3723,7 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
                     contentPadding: EdgeInsets.zero,
                     controlAffinity: ListTileControlAffinity.leading,
                     title: const Text('Alltid vedlagt'),
-                    onChanged: (v) =>
-                        setSt(() => alwaysAttach = v ?? false),
+                    onChanged: (v) => setSt(() => alwaysAttach = v ?? false),
                   ),
                 ],
               ),
@@ -3577,8 +3754,7 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
       if (isTextRider) {
         update['body_text'] = bodyCtrl.text;
         update['quantity_source'] = quantitySource;
-        update['quantity_fixed'] =
-            int.tryParse(fixedCtrl.text.trim()) ?? 1;
+        update['quantity_fixed'] = int.tryParse(fixedCtrl.text.trim()) ?? 1;
       }
       await _sb
           .from('company_riders')
@@ -3601,7 +3777,9 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
         title: const Text('Slett rider'),
         content: Text('Vil du slette "${rider['name']}"?'),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Avbryt')),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Avbryt')),
           FilledButton(
             onPressed: () => Navigator.pop(ctx, true),
             style: FilledButton.styleFrom(backgroundColor: Colors.red),
@@ -3612,7 +3790,9 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
     );
     if (ok != true) return;
     try {
-      await _sb.from('company_riders').update({'active': false}).eq('id', rider['id'] as String);
+      await _sb
+          .from('company_riders')
+          .update({'active': false}).eq('id', rider['id'] as String);
       await _load();
     } catch (e) {
       if (mounted) {
