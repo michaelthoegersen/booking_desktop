@@ -286,11 +286,20 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
   /// Set a new password for a locked-out member and close the request.
   /// The password is shown once so it can be passed on — the app has no way to
   /// email it.
-  Future<void> _setPasswordFor(Map<String, dynamic> req) async {
-    final userId = req['user_id'] as String?;
+  /// Set a new password for a member. [req] is the pending request row when
+  /// this came from the "Ber om nytt passord" list; it is null when an admin
+  /// resets a password directly from the member list, which is the case when
+  /// someone is locked out and cannot reach the login screen to ask.
+  Future<void> _setPasswordFor(
+    Map<String, dynamic>? req, {
+    String? memberId,
+    String? memberEmail,
+  }) async {
+    final userId = (req?['user_id'] as String?) ?? memberId;
+    final label = (req?['email'] as String?) ?? memberEmail ?? '';
     if (userId == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Forespørselen mangler bruker.')),
+        const SnackBar(content: Text('Fant ikke brukeren.')),
       );
       return;
     }
@@ -304,7 +313,7 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(req['email'] as String? ?? '',
+            Text(label,
                 style: const TextStyle(fontWeight: FontWeight.w700)),
             const SizedBox(height: 12),
             TextField(
@@ -349,17 +358,19 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
         throw Exception(data['error']);
       }
 
-      await _sb.from('password_reset_requests').update({
-        'status': 'handled',
-        'handled_at': DateTime.now().toUtc().toIso8601String(),
-        'handled_by': _sb.auth.currentUser?.id,
-      }).eq('id', req['id']);
+      if (req != null) {
+        await _sb.from('password_reset_requests').update({
+          'status': 'handled',
+          'handled_at': DateTime.now().toUtc().toIso8601String(),
+          'handled_by': _sb.auth.currentUser?.id,
+        }).eq('id', req['id']);
+      }
 
       _load();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Passord satt for ${req['email']}. Gi det videre.'),
+            content: Text('Passord satt for $label. Gi det videre.'),
             duration: const Duration(seconds: 6),
           ),
         );
@@ -497,6 +508,25 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
                 ),
               ),
               actions: [
+                // Reset without waiting for a request — someone locked out of
+                // an old app version cannot reach "Glemt passord?" at all.
+                TextButton.icon(
+                  onPressed: saving
+                      ? null
+                      : () {
+                          Navigator.pop(ctx);
+                          _setPasswordFor(
+                            null,
+                            memberId: memberId,
+                            memberEmail: emailCtrl.text.trim().isNotEmpty
+                                ? emailCtrl.text.trim()
+                                : name,
+                          );
+                        },
+                  icon: const Icon(Icons.lock_reset, size: 18),
+                  label: const Text('Sett nytt passord'),
+                ),
+                const Spacer(),
                 TextButton(
                   onPressed: () => Navigator.pop(ctx),
                   child: const Text('Avbryt'),
