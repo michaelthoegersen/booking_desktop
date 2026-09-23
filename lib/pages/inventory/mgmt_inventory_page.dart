@@ -175,19 +175,14 @@ class _MgmtInventoryPageState extends State<MgmtInventoryPage> {
     final id = item['id'] as String;
     final category = (item['category'] as String?)?.trim();
     final ref = (item['ref_number'] as String?)?.trim();
-    final serialUnits = ((item['serials'] as List?) ?? const []).map((e) {
-      if (e is Map) {
-        return (
-          sn: (e['sn'] ?? '').toString(),
-          note: (e['note'] ?? '').toString(),
-        );
-      }
-      return (sn: e.toString(), note: '');
-    }).toList();
+    // Whatever the item records per unit — serial number, size, a field the
+    // user named — rendered from its own definitions rather than assumed.
+    final unitFields = unitFieldsOf(item);
+    final unitValues = unitValuesOf(item);
     final children = _childrenOf(id);
     final qtyInt = ((item['quantity'] as num?) ?? 1).floor();
     final expandable =
-        qtyInt > 1 || serialUnits.isNotEmpty || children.isNotEmpty;
+        qtyInt > 1 || unitValues.isNotEmpty || children.isNotEmpty;
     final expanded = _expanded.contains(id);
     final sub = [
       if (category != null && category.isNotEmpty) category,
@@ -289,14 +284,17 @@ class _MgmtInventoryPageState extends State<MgmtInventoryPage> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: List.generate(
-                    qtyInt > serialUnits.length ? qtyInt : serialUnits.length,
+                    qtyInt > unitValues.length ? qtyInt : unitValues.length,
                     (i) {
-                      final sn =
-                          i < serialUnits.length ? serialUnits[i].sn.trim() : '';
-                      final note = i < serialUnits.length
-                          ? serialUnits[i].note.trim()
-                          : '';
-                      final hasSn = sn.isNotEmpty;
+                      final values =
+                          i < unitValues.length ? unitValues[i] : const <String, String>{};
+                      // Only the fields this item actually keeps, and only
+                      // those with something in them.
+                      final parts = <String>[
+                        for (final f in unitFields)
+                          if ((values[f.key] ?? '').trim().isNotEmpty)
+                            '${f.label} ${values[f.key]!.trim()}',
+                      ];
                       return Padding(
                         padding: const EdgeInsets.only(bottom: 4),
                         child: Row(
@@ -314,31 +312,20 @@ class _MgmtInventoryPageState extends State<MgmtInventoryPage> {
                                       color: cs.onSurfaceVariant)),
                             ),
                             Expanded(
-                              child: Text.rich(
-                                TextSpan(
-                                  children: [
-                                    TextSpan(
-                                      text: hasSn ? sn : 'uten serienr.',
-                                      style: TextStyle(
-                                        fontSize: 13,
-                                        color: hasSn
-                                            ? cs.onSurface
-                                            : cs.onSurfaceVariant,
-                                        fontStyle: hasSn
-                                            ? FontStyle.normal
-                                            : FontStyle.italic,
-                                      ),
-                                    ),
-                                    if (note.isNotEmpty)
-                                      TextSpan(
-                                        text: '  ·  $note',
-                                        style: TextStyle(
-                                          fontSize: 13,
-                                          fontStyle: FontStyle.italic,
-                                          color: cs.primary,
-                                        ),
-                                      ),
-                                  ],
+                              child: Text(
+                                parts.isEmpty
+                                    ? (unitFields.isEmpty
+                                        ? ''
+                                        : 'ikke registrert')
+                                    : parts.join('  ·  '),
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  color: parts.isEmpty
+                                      ? cs.onSurfaceVariant
+                                      : cs.onSurface,
+                                  fontStyle: parts.isEmpty
+                                      ? FontStyle.italic
+                                      : FontStyle.normal,
                                 ),
                               ),
                             ),

@@ -198,6 +198,9 @@ class InventoryService {
           'quantity': moveQty,
           'unit': item['unit'],
           'notes': item['notes'],
+          // The split-off row keeps the same per-unit field definitions,
+          // otherwise its units would read as untitled values.
+          'unit_fields': item['unit_fields'],
           'serials': movedSerials.isEmpty ? null : movedSerials,
           'location_type': toType,
           'location_ref': toRef,

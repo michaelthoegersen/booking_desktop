@@ -256,6 +256,68 @@ class _InventoryItemDialog extends StatefulWidget {
   State<_InventoryItemDialog> createState() => _InventoryItemDialogState();
 }
 
+/// One thing that can be recorded per unit of an item.
+///
+/// An item that keeps no unit fields is tracked by quantity alone — ten
+/// kjeledresser are just ten, with no serial-number boxes to tab past.
+class _UnitFieldDef {
+  final String key;
+  final String label;
+  const _UnitFieldDef(this.key, this.label);
+}
+
+const List<_UnitFieldDef> kStandardUnitFields = [
+  _UnitFieldDef('sn', 'Serienr.'),
+  _UnitFieldDef('size', 'Størrelse'),
+  _UnitFieldDef('note', 'Kommentar'),
+];
+
+/// Key of the one field whose label the user writes themselves.
+const String kCustomUnitFieldKey = 'custom';
+
+/// Reads an item's unit-field definitions.
+///
+/// Items saved before this existed have no unit_fields but may well have
+/// serials, and those were always serial number + comment — so they are read
+/// that way and keep looking exactly as they did.
+List<_UnitFieldDef> unitFieldsOf(Map<String, dynamic>? item) {
+  final raw = item?['unit_fields'];
+  if (raw is List && raw.isNotEmpty) {
+    final out = <_UnitFieldDef>[];
+    for (final e in raw) {
+      if (e is Map) {
+        final key = (e['key'] ?? '').toString();
+        final label = (e['label'] ?? '').toString();
+        if (key.isNotEmpty && label.isNotEmpty) {
+          out.add(_UnitFieldDef(key, label));
+        }
+      }
+    }
+    if (out.isNotEmpty) return out;
+  }
+  final serials = item?['serials'];
+  if (serials is List && serials.isNotEmpty) {
+    return const [_UnitFieldDef('sn', 'Serienr.'), _UnitFieldDef('note', 'Kommentar')];
+  }
+  return const [];
+}
+
+/// Reads an item's per-unit values as one map per unit, keyed by field key.
+/// A legacy entry that is a bare string is that unit's serial number.
+List<Map<String, String>> unitValuesOf(Map<String, dynamic>? item) {
+  final raw = item?['serials'];
+  if (raw is! List) return const [];
+  return raw.map<Map<String, String>>((e) {
+    if (e is Map) {
+      return {
+        for (final entry in e.entries)
+          entry.key.toString(): (entry.value ?? '').toString(),
+      };
+    }
+    return {'sn': e.toString()};
+  }).toList();
+}
+
 class _InventoryItemDialogState extends State<_InventoryItemDialog> {
   late final TextEditingController _name;
   late final TextEditingController _category;
@@ -267,43 +329,77 @@ class _InventoryItemDialogState extends State<_InventoryItemDialog> {
   String? _locRef;
   bool _saving = false;
 
-  /// One serial-number field + one comment field per unit (synced with qty).
-  final List<TextEditingController> _serialCtrls = [];
-  final List<TextEditingController> _serialNoteCtrls = [];
+  /// Whether anything is recorded per unit at all. Off means the item is
+  /// tracked by quantity alone.
+  bool _perUnit = false;
+
+  /// Which fields are kept per unit — standard keys plus [kCustomUnitFieldKey].
+  final Set<String> _activeFieldKeys = {};
+
+  /// Label for the one user-named field.
+  late final TextEditingController _customLabel;
+
+  /// field key -> one controller per unit. Kept in step with the quantity and
+  /// with which fields are switched on.
+  final Map<String, List<TextEditingController>> _unitCtrls = {};
 
   bool get _isEdit => widget.item != null;
+
+  /// The chosen fields, in the order they are shown and saved.
+  List<_UnitFieldDef> get _chosenFields => [
+        for (final f in kStandardUnitFields)
+          if (_activeFieldKeys.contains(f.key)) f,
+        if (_activeFieldKeys.contains(kCustomUnitFieldKey) &&
+            _customLabel.text.trim().isNotEmpty)
+          _UnitFieldDef(kCustomUnitFieldKey, _customLabel.text.trim()),
+      ];
 
   int _qtyInt() {
     final q = num.tryParse(_qty.text.trim().replaceAll(',', '.')) ?? 1;
     final n = q.floor();
     if (n < 0) return 0;
-    if (n > 200) return 200; // sanity cap on serial fields
+    if (n > 200) return 200; // sanity cap on per-unit rows
     return n;
   }
 
-  void _syncSerialCount(int n, List<String> snSeed, List<String> noteSeed) {
-    while (_serialCtrls.length > n) {
-      _serialCtrls.removeLast().dispose();
-      _serialNoteCtrls.removeLast().dispose();
+  /// Brings [_unitCtrls] in line with the quantity and the active fields.
+  /// Values already typed for a field that stays on are preserved; [seed] only
+  /// fills controllers created for the first time.
+  void _syncUnitCtrls({Map<String, List<String>>? seed}) {
+    final n = _perUnit ? _qtyInt() : 0;
+
+    for (final key in _unitCtrls.keys.toList()) {
+      if (n == 0 || !_activeFieldKeys.contains(key)) {
+        for (final c in _unitCtrls.remove(key)!) {
+          c.dispose();
+        }
+      }
     }
-    while (_serialCtrls.length < n) {
-      final i = _serialCtrls.length;
-      _serialCtrls.add(
-          TextEditingController(text: i < snSeed.length ? snSeed[i] : ''));
-      _serialNoteCtrls.add(
-          TextEditingController(text: i < noteSeed.length ? noteSeed[i] : ''));
+
+    if (n == 0) return;
+    for (final key in _activeFieldKeys) {
+      final list = _unitCtrls.putIfAbsent(key, () => []);
+      while (list.length > n) {
+        list.removeLast().dispose();
+      }
+      while (list.length < n) {
+        final i = list.length;
+        final values = seed?[key];
+        list.add(TextEditingController(
+            text: values != null && i < values.length ? values[i] : ''));
+      }
     }
   }
 
+  /// How many per-unit rows actually exist. Reading this rather than the
+  /// quantity field keeps the rows and the controllers in lockstep, so an
+  /// index can never run past the list.
+  int get _unitRowCount =>
+      _unitCtrls.values.isEmpty ? 0 : _unitCtrls.values.first.length;
+
   void _onQtyChanged() {
-    final n = _qtyInt();
-    if (n != _serialCtrls.length) {
-      setState(() => _syncSerialCount(
-            n,
-            _serialCtrls.map((c) => c.text).toList(),
-            _serialNoteCtrls.map((c) => c.text).toList(),
-          ));
-    }
+    if (!_perUnit) return;
+    if (_qtyInt() != _unitRowCount) setState(_syncUnitCtrls);
   }
 
   @override
@@ -323,19 +419,30 @@ class _InventoryItemDialogState extends State<_InventoryItemDialog> {
     } else {
       _locRef = it?['location_ref'] as String?;
     }
-    final rawSerials = (it?['serials'] as List?) ?? const [];
-    final snSeed = <String>[];
-    final noteSeed = <String>[];
-    for (final e in rawSerials) {
-      if (e is Map) {
-        snSeed.add((e['sn'] ?? '').toString());
-        noteSeed.add((e['note'] ?? '').toString());
+
+    // Per-unit registration is off for a new item and on for an existing one
+    // that already records something per unit.
+    final fields = unitFieldsOf(it);
+    _perUnit = fields.isNotEmpty;
+    final standardKeys = kStandardUnitFields.map((f) => f.key).toSet();
+    String customLabel = '';
+    for (final f in fields) {
+      if (standardKeys.contains(f.key)) {
+        _activeFieldKeys.add(f.key);
       } else {
-        snSeed.add(e.toString());
-        noteSeed.add('');
+        // Anything not standard is the user-named field.
+        _activeFieldKeys.add(kCustomUnitFieldKey);
+        customLabel = f.label;
       }
     }
-    _syncSerialCount(_qtyInt(), snSeed, noteSeed);
+    _customLabel = TextEditingController(text: customLabel);
+
+    final values = unitValuesOf(it);
+    final seed = <String, List<String>>{
+      for (final key in _activeFieldKeys)
+        key: [for (final v in values) v[key] ?? ''],
+    };
+    _syncUnitCtrls(seed: seed);
     _qty.addListener(_onQtyChanged);
   }
 
@@ -348,11 +455,11 @@ class _InventoryItemDialogState extends State<_InventoryItemDialog> {
     _qty.dispose();
     _unit.dispose();
     _notes.dispose();
-    for (final c in _serialCtrls) {
-      c.dispose();
-    }
-    for (final c in _serialNoteCtrls) {
-      c.dispose();
+    _customLabel.dispose();
+    for (final list in _unitCtrls.values) {
+      for (final c in list) {
+        c.dispose();
+      }
     }
     super.dispose();
   }
@@ -372,14 +479,30 @@ class _InventoryItemDialogState extends State<_InventoryItemDialog> {
       'notes': _notes.text.trim().isEmpty ? null : _notes.text.trim(),
     };
 
-    final serialEntries = <Map<String, dynamic>>[];
-    for (var i = 0; i < _serialCtrls.length; i++) {
-      final sn = _serialCtrls[i].text.trim();
-      final note = _serialNoteCtrls[i].text.trim();
-      if (sn.isEmpty && note.isEmpty) continue;
-      serialEntries.add({'sn': sn, 'note': note});
+    // Per-unit rows, keyed by the fields the user chose. Switching per-unit
+    // registration off clears both the definitions and the values — the item
+    // goes back to being counted, not listed.
+    final fields = _perUnit ? _chosenFields : const <_UnitFieldDef>[];
+    if (fields.isEmpty) {
+      data['unit_fields'] = null;
+      data['serials'] = null;
+    } else {
+      data['unit_fields'] =
+          fields.map((f) => {'key': f.key, 'label': f.label}).toList();
+
+      final units = <Map<String, dynamic>>[];
+      for (var i = 0; i < _unitRowCount; i++) {
+        final unit = <String, dynamic>{};
+        for (final f in fields) {
+          final ctrls = _unitCtrls[f.key];
+          final value =
+              (ctrls != null && i < ctrls.length) ? ctrls[i].text.trim() : '';
+          if (value.isNotEmpty) unit[f.key] = value;
+        }
+        if (unit.isNotEmpty) units.add(unit);
+      }
+      data['serials'] = units.isEmpty ? null : units;
     }
-    data['serials'] = serialEntries.isEmpty ? null : serialEntries;
 
     try {
       if (_isEdit) {
@@ -456,53 +579,146 @@ class _InventoryItemDialogState extends State<_InventoryItemDialog> {
                   ),
                 ],
               ),
-              if (_serialCtrls.length > 1) ...[
-                const SizedBox(height: 14),
-                const Align(
-                  alignment: Alignment.centerLeft,
-                  child: Text('Serienumre (ett per enhet)',
-                      style: TextStyle(fontWeight: FontWeight.w700)),
-                ),
-                const SizedBox(height: 8),
-                ...List.generate(
-                  _serialCtrls.length,
-                  (i) => Padding(
-                    padding: const EdgeInsets.only(bottom: 8),
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Expanded(
-                          flex: 4,
-                          child: TextField(
-                            controller: _serialCtrls[i],
-                            textCapitalization:
-                                TextCapitalization.characters,
-                            decoration: InputDecoration(
-                              labelText: 'Serienr. #${i + 1}',
-                              border: const OutlineInputBorder(),
-                              isDense: true,
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          flex: 5,
-                          child: TextField(
-                            controller: _serialNoteCtrls[i],
-                            textCapitalization:
-                                TextCapitalization.sentences,
-                            inputFormatters: kCapFirst,
-                            decoration: const InputDecoration(
-                              labelText: 'Kommentar',
-                              border: OutlineInputBorder(),
-                              isDense: true,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
+              const SizedBox(height: 14),
+              // Per-unit registration is a choice, not something the quantity
+              // forces on you. Ten kjeledresser are ten kjeledresser.
+              InkWell(
+                borderRadius: BorderRadius.circular(8),
+                onTap: () => setState(() {
+                  _perUnit = !_perUnit;
+                  if (_perUnit && _activeFieldKeys.isEmpty) {
+                    _activeFieldKeys.add('sn');
+                  }
+                  _syncUnitCtrls();
+                }),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 2),
+                  child: Row(
+                    children: [
+                      Checkbox(
+                        value: _perUnit,
+                        onChanged: (v) => setState(() {
+                          _perUnit = v == true;
+                          if (_perUnit && _activeFieldKeys.isEmpty) {
+                            _activeFieldKeys.add('sn');
+                          }
+                          _syncUnitCtrls();
+                        }),
+                      ),
+                      const Expanded(
+                        child: Text('Registrer hver enhet for seg'),
+                      ),
+                    ],
                   ),
                 ),
+              ),
+              if (_perUnit) ...[
+                const SizedBox(height: 4),
+                const Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text('Hva registreres per enhet?',
+                      style: TextStyle(fontWeight: FontWeight.w700)),
+                ),
+                const SizedBox(height: 6),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: Wrap(
+                    spacing: 8,
+                    runSpacing: 4,
+                    children: [
+                      for (final f in kStandardUnitFields)
+                        FilterChip(
+                          label: Text(f.label),
+                          selected: _activeFieldKeys.contains(f.key),
+                          onSelected: (on) => setState(() {
+                            if (on) {
+                              _activeFieldKeys.add(f.key);
+                            } else {
+                              _activeFieldKeys.remove(f.key);
+                            }
+                            _syncUnitCtrls();
+                          }),
+                        ),
+                      FilterChip(
+                        label: const Text('Egendefinert'),
+                        selected: _activeFieldKeys.contains(kCustomUnitFieldKey),
+                        onSelected: (on) => setState(() {
+                          if (on) {
+                            _activeFieldKeys.add(kCustomUnitFieldKey);
+                          } else {
+                            _activeFieldKeys.remove(kCustomUnitFieldKey);
+                          }
+                          _syncUnitCtrls();
+                        }),
+                      ),
+                    ],
+                  ),
+                ),
+                if (_activeFieldKeys.contains(kCustomUnitFieldKey)) ...[
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: _customLabel,
+                    textCapitalization: TextCapitalization.sentences,
+                    inputFormatters: kCapFirst,
+                    decoration: const InputDecoration(
+                      labelText: 'Navn på eget felt',
+                      hintText: 'F.eks. Farge',
+                      border: OutlineInputBorder(),
+                      isDense: true,
+                    ),
+                    onChanged: (_) => setState(() {}),
+                  ),
+                ],
+                if (_chosenFields.isEmpty)
+                  const Padding(
+                    padding: EdgeInsets.only(top: 8),
+                    child: Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text('Velg minst ett felt.',
+                          style: TextStyle(fontSize: 12, color: Colors.grey)),
+                    ),
+                  )
+                else ...[
+                  const SizedBox(height: 10),
+                  ...List.generate(_unitRowCount, (i) {
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          SizedBox(
+                            width: 28,
+                            child: Padding(
+                              padding: const EdgeInsets.only(top: 12),
+                              child: Text('#${i + 1}',
+                                  style: const TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w700)),
+                            ),
+                          ),
+                          for (final f in _chosenFields) ...[
+                            Expanded(
+                              child: TextField(
+                                controller: _unitCtrls[f.key]?[i],
+                                textCapitalization: f.key == 'sn'
+                                    ? TextCapitalization.characters
+                                    : TextCapitalization.sentences,
+                                inputFormatters:
+                                    f.key == 'sn' ? null : kCapFirst,
+                                decoration: InputDecoration(
+                                  labelText: f.label,
+                                  border: const OutlineInputBorder(),
+                                  isDense: true,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                          ],
+                        ],
+                      ),
+                    );
+                  }),
+                ],
               ],
               const SizedBox(height: 10),
               TextField(
