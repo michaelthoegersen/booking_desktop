@@ -2311,11 +2311,11 @@ class _GigRow extends StatelessWidget {
       }
     }
 
-    // An "Annet" activity leads with its own name; the place follows below.
+    // An "Annet" activity is headed by its own name, with just the place
+    // underneath. The type stays readable from the badge on the right.
     final title = (gig['title'] as String? ?? '').trim();
-    final locationLine = (type == 'other' && title.isNotEmpty)
-        ? [title, venue, city].where((v) => v.isNotEmpty).join(' · ')
-        : [venue, city].where((s) => s.isNotEmpty).join(' · ');
+    final locationLine =
+        [venue, city].where((s) => s.isNotEmpty).join(' · ');
     final customerLine =
         [firma, custName].where((s) => s.isNotEmpty).join(' — ');
 
@@ -2359,14 +2359,17 @@ class _GigRow extends StatelessWidget {
                     Row(
                       children: [
                         Text(
-                          type == 'rehearsal' && gig['_is_offer_part'] == true
-                              ? 'Prøve'
-                              : const {
-                                    'rehearsal': 'Øvelse',
-                                    'meeting': 'Møte',
-                                    'other': 'Annet',
-                                  }[type] ??
-                                  type,
+                          type == 'other' && title.isNotEmpty
+                              ? title
+                              : type == 'rehearsal' &&
+                                      gig['_is_offer_part'] == true
+                                  ? 'Prøve'
+                                  : const {
+                                        'rehearsal': 'Øvelse',
+                                        'meeting': 'Møte',
+                                        'other': 'Annet',
+                                      }[type] ??
+                                      type,
                           style: const TextStyle(
                               fontWeight: FontWeight.w900, fontSize: 15),
                         ),

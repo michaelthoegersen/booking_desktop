@@ -1994,9 +1994,12 @@ class _MgmtGigDetailPageState extends State<MgmtGigDetailPage>
     final gigType = _gig?['type'] as String? ?? 'gig';
     // An "Annet" activity leads with its own name, then the place.
     final activityTitle = (_gig?['title'] as String? ?? '').trim();
+    final placeLine = [venue, city].where((s) => s.isNotEmpty).join(' · ');
+    // An "Annet" activity is headed by its own name; the place goes on its own
+    // line below, like the date.
     final title = (gigType == 'other' && activityTitle.isNotEmpty)
-        ? [activityTitle, venue, city].where((v) => v.isNotEmpty).join(' · ')
-        : [venue, city].where((s) => s.isNotEmpty).join(' · ');
+        ? activityTitle
+        : placeLine;
     final customerLine = [firma, custName].where((s) => s.isNotEmpty).join(' — ');
     final isRehearsalInOffer = gigType == 'rehearsal' && _isMultiDate;
     final treatAsGig = gigType == 'gig' || isRehearsalInOffer;
@@ -2056,6 +2059,14 @@ class _MgmtGigDetailPageState extends State<MgmtGigDetailPage>
                     if (gigType == 'rehearsal' && !isRehearsalInOffer && title.isNotEmpty)
                       Text(
                         title,
+                        style: TextStyle(
+                          color: cs.onSurfaceVariant,
+                          fontSize: 13,
+                        ),
+                      ),
+                    if (gigType == 'other' && placeLine.isNotEmpty)
+                      Text(
+                        placeLine,
                         style: TextStyle(
                           color: cs.onSurfaceVariant,
                           fontSize: 13,
