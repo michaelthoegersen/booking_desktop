@@ -211,7 +211,7 @@ class _MgmtGigDetailPageState extends State<MgmtGigDetailPage>
               await _sb.from('gig_availability').insert(rows);
               avail = await _sb
                   .from('gig_availability')
-                  .select('user_id, status')
+                  .select('user_id, status, plus_one')
                   .eq('gig_id', widget.gigId);
               break;
             }
@@ -219,8 +219,10 @@ class _MgmtGigDetailPageState extends State<MgmtGigDetailPage>
         }
 
         final availMap = <String, String>{};
+        final plusOneIds = <String>{};
         for (final a in (avail as List)) {
           availMap[a['user_id'] as String] = a['status'] as String;
+          if (a['plus_one'] == true) plusOneIds.add(a['user_id'] as String);
         }
 
         _companyMembers = (members as List).map((m) {
@@ -231,6 +233,7 @@ class _MgmtGigDetailPageState extends State<MgmtGigDetailPage>
             'role': m['role'] as String? ?? 'bruker',
             'section': m['section'] as String?,
             'status': availMap[uid] ?? 'pending',
+            'plus_one': plusOneIds.contains(uid),
           };
         }).toList();
         _companyMembers.sort((a, b) =>
@@ -601,10 +604,15 @@ class _MgmtGigDetailPageState extends State<MgmtGigDetailPage>
   // EDIT REHEARSAL
   // -------------------------------------------------------------------------
 
+  /// Edits a standalone rehearsal or an "Annet" activity. Neither belongs in
+  /// the offer editor — they have no customer, shows or pricing.
   Future<void> _editRehearsal() async {
     final g = _gig;
     if (g == null) return;
 
+    final isOther = (g['type'] as String?) == 'other';
+    final titleCtrl = TextEditingController(text: g['title'] ?? '');
+    var allowPlusOne = g['allow_plus_one'] == true;
     final venueCtrl = TextEditingController(text: g['venue_name'] ?? '');
     final cityCtrl = TextEditingController(text: g['city'] ?? '');
     final countryCtrl = TextEditingController(text: g['country'] ?? 'NO');
@@ -628,9 +636,33 @@ class _MgmtGigDetailPageState extends State<MgmtGigDetailPage>
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text('Rediger øvelse',
-                      style: TextStyle(fontSize: 20, fontWeight: FontWeight.w900)),
+                  Text(isOther ? 'Rediger aktivitet' : 'Rediger øvelse',
+                      style: const TextStyle(
+                          fontSize: 20, fontWeight: FontWeight.w900)),
                   const SizedBox(height: 16),
+                  if (isOther) ...[
+                    TextField(
+                      controller: titleCtrl,
+                      decoration: const InputDecoration(
+                        labelText: 'Navn',
+                        border: OutlineInputBorder(),
+                        isDense: true,
+                      ),
+                    ),
+                    CheckboxListTile(
+                      value: allowPlusOne,
+                      onChanged: (v) => setS(() => allowPlusOne = v ?? false),
+                      title: const Text('Tillat +1'),
+                      subtitle: const Text(
+                        'Medlemmene kan svare at de tar med følge.',
+                        style: TextStyle(fontSize: 11),
+                      ),
+                      controlAffinity: ListTileControlAffinity.leading,
+                      contentPadding: EdgeInsets.zero,
+                      dense: true,
+                    ),
+                    const SizedBox(height: 8),
+                  ],
                   Flexible(
                     child: SingleChildScrollView(
                       child: Column(
@@ -710,7 +742,9 @@ class _MgmtGigDetailPageState extends State<MgmtGigDetailPage>
                           // Notes
                           RichTextField(
                             controller: notesCtrl,
-                            label: 'Dette skal vi gjøre på øvelsen',
+                            label: isOther
+                                ? 'Dette skal vi gjøre'
+                                : 'Dette skal vi gjøre på øvelsen',
                             minLines: 3,
                             maxLines: 6,
                           ),
@@ -743,6 +777,8 @@ class _MgmtGigDetailPageState extends State<MgmtGigDetailPage>
     try {
       final n = (String s) => s.trim().isEmpty ? null : s.trim();
       await _sb.from('gigs').update({
+        if (isOther) 'title': n(titleCtrl.text),
+        if (isOther) 'allow_plus_one': allowPlusOne,
         'venue_name': n(venueCtrl.text),
         'city': n(cityCtrl.text),
         'country': n(countryCtrl.text),
@@ -762,8 +798,8 @@ class _MgmtGigDetailPageState extends State<MgmtGigDetailPage>
       }
     }
 
-    for (final c in [venueCtrl, cityCtrl, countryCtrl, responsibleCtrl,
-                      fromTimeCtrl, toTimeCtrl, notesCtrl]) {
+    for (final c in [titleCtrl, venueCtrl, cityCtrl, countryCtrl,
+                      responsibleCtrl, fromTimeCtrl, toTimeCtrl, notesCtrl]) {
       c.dispose();
     }
   }
@@ -2142,7 +2178,10 @@ class _MgmtGigDetailPageState extends State<MgmtGigDetailPage>
                 icon: const Icon(Icons.more_vert),
                 onSelected: (v) {
                   if (v == 'edit') {
-                    if (gigType == 'rehearsal' && !isRehearsalInOffer) {
+                    // An "Annet" activity has no customer, shows or pricing —
+                    // sending it to the offer editor made it look like a gig.
+                    if ((gigType == 'rehearsal' && !isRehearsalInOffer) ||
+                        gigType == 'other') {
                       _editRehearsal();
                     } else if (_linkedOfferId != null) {
                       context.go('/m/offers/$_linkedOfferId');
@@ -2165,7 +2204,9 @@ class _MgmtGigDetailPageState extends State<MgmtGigDetailPage>
                             ? (isRehearsalInOffer
                                 ? 'Rediger tilbud'
                                 : 'Rediger øvelse')
-                            : 'Rediger'),
+                            : gigType == 'other'
+                                ? 'Rediger aktivitet'
+                                : 'Rediger'),
                       ],
                     ),
                   ),
@@ -4731,6 +4772,12 @@ class _AvailabilitySummary extends StatelessWidget {
         companyMembers.where((m) => m['status'] == 'unavailable').length;
     final pendingCount =
         companyMembers.where((m) => m['status'] == 'pending').length;
+    // Guests, when the activity allows them — the number you actually book a
+    // table for.
+    final allowPlusOne = gig['allow_plus_one'] == true;
+    final guestCount = companyMembers
+        .where((m) => m['status'] == 'available' && m['plus_one'] == true)
+        .length;
 
     final myId = Supabase.instance.client.auth.currentUser?.id ?? '';
     Map<String, dynamic>? myMember;
@@ -4804,12 +4851,21 @@ class _AvailabilitySummary extends StatelessWidget {
                   icon: Icons.help_outline,
                   color: Colors.grey,
                   label: '$pendingCount ikke svart'),
+              if (allowPlusOne) ...[
+                const SizedBox(width: 12),
+                _AvailCountBadge(
+                    icon: Icons.group_add,
+                    color: Colors.blue,
+                    label: '$guestCount med følge · '
+                        '${availCount + guestCount} personer'),
+              ],
             ],
           ),
           const SizedBox(height: 12),
           // Per-member list with status pills
           ...companyMembers.map((m) {
             final status = m['status'] as String? ?? 'pending';
+            final plusOne = m['plus_one'] == true;
             final color = status == 'available'
                 ? Colors.green
                 : status == 'unavailable'
@@ -4827,7 +4883,9 @@ class _AvailabilitySummary extends StatelessWidget {
                   Icon(icon, color: color, size: 16),
                   const SizedBox(width: 8),
                   Expanded(
-                    child: Text(m['name'] as String? ?? '',
+                    child: Text(
+                        '${m['name'] as String? ?? ''}'
+                        '${allowPlusOne && plusOne ? '  +1' : ''}',
                         style: const TextStyle(fontSize: 13)),
                   ),
                 ],
