@@ -1313,8 +1313,19 @@ class _NewGigDialogState extends State<_NewGigDialog> {
 
       if (mounted) Navigator.of(context).pop(createdIds.first);
     } catch (e) {
+      // Was debugPrint only, so a failed insert looked exactly like a button
+      // that does nothing. Show what actually went wrong.
       debugPrint('Create gig error: $e');
-      if (mounted) setState(() => _saving = false);
+      if (mounted) {
+        setState(() => _saving = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Kunne ikke opprette: $e'),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 12),
+          ),
+        );
+      }
     }
   }
 
