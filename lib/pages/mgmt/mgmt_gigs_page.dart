@@ -1004,6 +1004,9 @@ class _NewGigDialogState extends State<_NewGigDialog> {
   /// Name of an "Annet" activity. Gigs and rehearsals are identified by venue
   /// and date, but a general activity needs something to call it.
   final _titleCtrl = TextEditingController();
+  /// Lets members say they are bringing someone. Per activity rather than
+  /// guessed from the title, so it works whatever the event is called.
+  bool _allowPlusOne = false;
   final _venueCtrl = TextEditingController();
   final _cityCtrl = TextEditingController();
   final _countryCtrl = TextEditingController(text: 'NO');
@@ -1207,6 +1210,7 @@ class _NewGigDialogState extends State<_NewGigDialog> {
       if (endDate != null) 'date_to': df.format(endDate),
       'status': _status,
       'title': n(_titleCtrl.text),
+      'allow_plus_one': _allowPlusOne,
       'venue_name': n(_venueCtrl.text),
       'city': n(_cityCtrl.text),
       'country': n(_countryCtrl.text),
@@ -1508,6 +1512,19 @@ class _NewGigDialogState extends State<_NewGigDialog> {
                       if (_type == 'other') ...[
                         _sec('Navn'),
                         _tfFull(_titleCtrl, 'Hva er det?'),
+                        CheckboxListTile(
+                          value: _allowPlusOne,
+                          onChanged: (v) =>
+                              setState(() => _allowPlusOne = v ?? false),
+                          title: const Text('Tillat +1'),
+                          subtitle: const Text(
+                            'Medlemmene kan svare at de tar med følge.',
+                            style: TextStyle(fontSize: 11),
+                          ),
+                          controlAffinity: ListTileControlAffinity.leading,
+                          contentPadding: EdgeInsets.zero,
+                          dense: true,
+                        ),
                         const SizedBox(height: 8),
                       ],
 
