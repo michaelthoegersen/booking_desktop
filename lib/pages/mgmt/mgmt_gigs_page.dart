@@ -1001,6 +1001,9 @@ class _NewGigDialogState extends State<_NewGigDialog> {
   bool _playbackFromUs = true;
 
   // ── Text controllers ──────────────────────────────────────────────────────
+  /// Name of an "Annet" activity. Gigs and rehearsals are identified by venue
+  /// and date, but a general activity needs something to call it.
+  final _titleCtrl = TextEditingController();
   final _venueCtrl = TextEditingController();
   final _cityCtrl = TextEditingController();
   final _countryCtrl = TextEditingController(text: 'NO');
@@ -1203,6 +1206,7 @@ class _NewGigDialogState extends State<_NewGigDialog> {
       'date_from': df.format(date),
       if (endDate != null) 'date_to': df.format(endDate),
       'status': _status,
+      'title': n(_titleCtrl.text),
       'venue_name': n(_venueCtrl.text),
       'city': n(_cityCtrl.text),
       'country': n(_countryCtrl.text),
@@ -1239,6 +1243,18 @@ class _NewGigDialogState extends State<_NewGigDialog> {
   }
 
   Future<void> _save() async {
+    if (_dateFrom == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Velg «Dato fra» først.')),
+      );
+      return;
+    }
+    if (_type == 'other' && _titleCtrl.text.trim().isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Gi aktiviteten et navn.')),
+      );
+      return;
+    }
     if (_dateFrom == null) return;
     setState(() => _saving = true);
     try {
@@ -1477,10 +1493,21 @@ class _NewGigDialogState extends State<_NewGigDialog> {
                           ),
                       ],
 
+                      // ── NAME (other only) ───────────────────────────────
+                      if (_type == 'other') ...[
+                        _sec('Navn'),
+                        _tfFull(_titleCtrl, 'Hva er det?'),
+                        const SizedBox(height: 8),
+                      ],
+
                       // ── LOCATION ────────────────────────────────────────
-                      _sec('Spillested'),
+                      // An "Annet" activity is rarely at a venue — it is just
+                      // a place, so it says Sted there.
+                      _sec(_type == 'other' ? 'Sted' : 'Spillested'),
                       _row([
-                        _tf(_venueCtrl, 'Spillested', flex: 2),
+                        _tf(_venueCtrl,
+                            _type == 'other' ? 'Sted' : 'Spillested',
+                            flex: 2),
                         _tf(_cityCtrl, 'By'),
                         _tf(_countryCtrl, 'Land', flex: 0, width: 80),
                       ]),
@@ -1715,9 +1742,10 @@ class _NewGigDialogState extends State<_NewGigDialog> {
                   const SizedBox(width: 12),
                   Expanded(
                     child: FilledButton(
-                      onPressed: (_saving || _dateFrom == null)
-                          ? null
-                          : _save,
+                      // Enabled even without a date: a dead button that says
+                      // nothing reads as "the app is broken". _save explains
+                      // what is missing instead.
+                      onPressed: _saving ? null : _save,
                       child: _saving
                           ? const SizedBox(
                               height: 20,
@@ -2272,8 +2300,11 @@ class _GigRow extends StatelessWidget {
       }
     }
 
-    final locationLine =
-        [venue, city].where((s) => s.isNotEmpty).join(' · ');
+    // An "Annet" activity leads with its own name; the place follows below.
+    final title = (gig['title'] as String? ?? '').trim();
+    final locationLine = (type == 'other' && title.isNotEmpty)
+        ? [title, venue, city].where((v) => v.isNotEmpty).join(' · ')
+        : [venue, city].where((s) => s.isNotEmpty).join(' · ');
     final customerLine =
         [firma, custName].where((s) => s.isNotEmpty).join(' — ');
 

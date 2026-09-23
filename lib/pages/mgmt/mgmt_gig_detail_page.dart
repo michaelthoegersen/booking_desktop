@@ -1991,9 +1991,13 @@ class _MgmtGigDetailPageState extends State<MgmtGigDetailPage>
       }
     }
 
-    final title = [venue, city].where((s) => s.isNotEmpty).join(' · ');
-    final customerLine = [firma, custName].where((s) => s.isNotEmpty).join(' — ');
     final gigType = _gig?['type'] as String? ?? 'gig';
+    // An "Annet" activity leads with its own name, then the place.
+    final activityTitle = (_gig?['title'] as String? ?? '').trim();
+    final title = (gigType == 'other' && activityTitle.isNotEmpty)
+        ? [activityTitle, venue, city].where((v) => v.isNotEmpty).join(' · ')
+        : [venue, city].where((s) => s.isNotEmpty).join(' · ');
+    final customerLine = [firma, custName].where((s) => s.isNotEmpty).join(' — ');
     final isRehearsalInOffer = gigType == 'rehearsal' && _isMultiDate;
     final treatAsGig = gigType == 'gig' || isRehearsalInOffer;
     final rehearsalLabel = isRehearsalInOffer ? 'Prøve' : 'Øvelse';
