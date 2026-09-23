@@ -2469,7 +2469,9 @@ class _GigRow extends StatelessWidget {
               ),
               const SizedBox(width: 8),
             ],
-            if (type != 'gig' && status != 'cancelled') ...[
+            // "Annet" carries no badge — its own name is the heading, so the
+            // label would only repeat what the row already says.
+            if (type != 'gig' && type != 'other' && status != 'cancelled') ...[
               Builder(builder: (_) {
                 final badgeColor = const {
                   'rehearsal': Colors.purple,
