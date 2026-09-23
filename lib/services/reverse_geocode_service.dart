@@ -1,16 +1,13 @@
 import 'dart:convert';
 
-import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:http/http.dart' as http;
+
+import 'app_env.dart';
 
 import '../models/lat_lng.dart';
 
 class ReverseGeocodeService {
-  late final _key = _safeApiKey();
-  static String _safeApiKey() {
-    try { return dotenv.env['GOOGLE_MAPS_API_KEY'] ?? ''; }
-    catch (_) { return ''; }
-  }
+  String get _key => AppEnv.googleMapsApiKey;
 
   Future<String> getCountry(LatLng p) async {
     final url = Uri.parse(

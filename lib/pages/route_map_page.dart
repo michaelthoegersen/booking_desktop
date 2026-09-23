@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:webview_flutter/webview_flutter.dart';
-import 'package:flutter_dotenv/flutter_dotenv.dart';
+
+import '../services/app_env.dart';
 
 class RouteMapPage extends StatefulWidget {
   final String from;
@@ -23,9 +24,8 @@ class _RouteMapPageState extends State<RouteMapPage> {
   void initState() {
     super.initState();
 
-    String? apiKey;
-    try { apiKey = dotenv.env['GOOGLE_MAPS_API_KEY']; } catch (_) {}
-    if (apiKey == null || apiKey.isEmpty) {
+    final apiKey = AppEnv.googleMapsApiKey;
+    if (apiKey.isEmpty) {
       throw Exception("GOOGLE_MAPS_API_KEY mangler");
     }
 

@@ -1,14 +1,11 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
-import 'package:flutter_dotenv/flutter_dotenv.dart';
+
+import 'app_env.dart';
 import 'package:flutter_polyline_points/flutter_polyline_points.dart';
 
 class DirectionsService {
-  static late final String _apiKey = _safeApiKey();
-  static String _safeApiKey() {
-    try { return dotenv.env['GOOGLE_MAPS_API_KEY'] ?? ''; }
-    catch (_) { return ''; }
-  }
+  static String get _apiKey => AppEnv.googleMapsApiKey;
 
   static Future<List<_RouteOption>> getRoutes({
     required String from,

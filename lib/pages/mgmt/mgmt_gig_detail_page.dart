@@ -185,7 +185,7 @@ class _MgmtGigDetailPageState extends State<MgmtGigDetailPage>
 
         var avail = await _sb
             .from('gig_availability')
-            .select('user_id, status')
+            .select('user_id, status, plus_one')
             .eq('gig_id', widget.gigId);
 
         // For multi-date offers: if this gig has no availability entries,

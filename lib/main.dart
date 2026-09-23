@@ -2,8 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:flutter_dotenv/flutter_dotenv.dart';
 
+import 'services/app_env.dart';
 import 'services/presence_service.dart';
 import 'pages/login_page.dart';
 import 'pages/portal_selector_page.dart';
@@ -72,39 +72,30 @@ import 'localization/app_locale.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  String? supabaseUrl;
-  String? supabaseKey;
+  // Load .env once, on every platform and in every build mode. dart-define
+  // still wins per value, but services that read configuration lazily (Google
+  // Maps, Giphy) need the file loaded no matter how Supabase was supplied.
+  // Loading it only in the else-branch below meant that passing --dart-define
+  // for Supabase left dotenv uninitialised and silently disabled those keys.
+  await AppEnv.ensureLoaded();
 
-  // 1. dart-define (Release / DMG)
-  const envUrl = String.fromEnvironment('SUPABASE_URL');
-  const envKey = String.fromEnvironment('SUPABASE_ANON_KEY');
+  // 1. dart-define (Release / DMG)  2. bundled .env  — in that order.
+  String supabaseUrl = AppEnv.supabaseUrl;
+  String supabaseKey = AppEnv.supabaseAnonKey;
 
-  if (envUrl.isNotEmpty && envKey.isNotEmpty) {
-    supabaseUrl = envUrl;
-    supabaseKey = envKey;
-  } else {
-    // 2. .env-fil (VSCode / flutter run desktop)
-    try {
-      await dotenv.load(fileName: ".env");
-      supabaseUrl = dotenv.env['SUPABASE_URL'];
-      supabaseKey = dotenv.env['SUPABASE_ANON_KEY'];
-    } catch (e) {
-      // Chrome dev-server blokkerer .env-filer — bruk inline fallback.
-      // Anon-nøkkelen er offentlig (synlig i nettverksforespørsler).
-      debugPrint("dotenv load failed ($e) — using inline fallback");
-      supabaseUrl = 'https://fqefvgqlrntwgschkugf.supabase.co';
-      supabaseKey =
-          'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9'
-          '.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZxZWZ2Z3Fscm50d2dzY2hrdWdmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjkwNzQxMjAsImV4cCI6MjA4NDY1MDEyMH0'
-          '.ZamQr1qQRuYnQcy-yKfOr0IZrRJxIb4SP8_USn9uMoU';
-    }
+  if (supabaseUrl.isEmpty || supabaseKey.isEmpty) {
+    // Chrome dev-server blokkerer .env-filer — bruk inline fallback.
+    // Anon-nøkkelen er offentlig (synlig i nettverksforespørsler).
+    debugPrint("Supabase config missing — using inline fallback");
+    supabaseUrl = 'https://fqefvgqlrntwgschkugf.supabase.co';
+    supabaseKey =
+        'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9'
+        '.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZxZWZ2Z3Fscm50d2dzY2hrdWdmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjkwNzQxMjAsImV4cCI6MjA4NDY1MDEyMH0'
+        '.ZamQr1qQRuYnQcy-yKfOr0IZrRJxIb4SP8_USn9uMoU';
   }
 
   try {
-    if (supabaseUrl == null ||
-        supabaseKey == null ||
-        supabaseUrl.isEmpty ||
-        supabaseKey.isEmpty) {
+    if (supabaseUrl.isEmpty || supabaseKey.isEmpty) {
       throw Exception("Missing Supabase config");
     }
 

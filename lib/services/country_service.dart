@@ -1,24 +1,12 @@
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
-import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:http/http.dart' as http;
 
+import 'app_env.dart';
+
 class CountryService {
-  static const String _dartDefineKey =
-      String.fromEnvironment('GOOGLE_MAPS_API_KEY');
-
-  late final String _apiKey = _dartDefineKey.isNotEmpty
-      ? _dartDefineKey
-      : _loadApiKey();
-
-  static String _loadApiKey() {
-    try {
-      return dotenv.env['GOOGLE_MAPS_API_KEY'] ?? '';
-    } catch (_) {
-      return '';
-    }
-  }
+  String get _apiKey => AppEnv.googleMapsApiKey;
 
   final Map<String, String> _cache = {};
 

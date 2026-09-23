@@ -1,7 +1,8 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:http/http.dart' as http;
+
+import '../services/app_env.dart';
 
 class GifPicker extends StatefulWidget {
   final void Function(String gifUrl) onGifSelected;
@@ -23,7 +24,7 @@ class _GifPickerState extends State<GifPicker> {
   }
 
   Future<void> _loadTrending() async {
-    final apiKey = dotenv.env['GIPHY_API_KEY'] ?? '';
+    final apiKey = AppEnv.giphyApiKey;
     if (apiKey.isEmpty) return;
     setState(() => _loading = true);
     try {
@@ -42,7 +43,7 @@ class _GifPickerState extends State<GifPicker> {
       _loadTrending();
       return;
     }
-    final apiKey = dotenv.env['GIPHY_API_KEY'] ?? '';
+    final apiKey = AppEnv.giphyApiKey;
     if (apiKey.isEmpty) return;
     setState(() => _loading = true);
     try {

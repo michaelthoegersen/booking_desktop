@@ -21,6 +21,7 @@ class _CrewGigDetailPageState extends State<CrewGigDetailPage> {
   bool _loading = true;
   Map<String, dynamic>? _gig;
   String? _myStatus; // 'pending', 'available', 'unavailable'
+  bool _myPlusOne = false;
   String? _myRole;
   List<_MemberAvailability> _members = [];
 
@@ -75,11 +76,13 @@ class _CrewGigDetailPageState extends State<CrewGigDetailPage> {
       // 3. Availability for this gig
       final avail = await _sb
           .from('gig_availability')
-          .select('user_id, status')
+          .select('user_id, status, plus_one')
           .eq('gig_id', widget.gigId);
       final availMap = <String, String>{};
+      final plusOneIds = <String>{};
       for (final a in (avail as List)) {
         availMap[a['user_id'] as String] = a['status'] as String;
+        if (a['plus_one'] == true) plusOneIds.add(a['user_id'] as String);
       }
 
       // 4. Build member list
@@ -91,12 +94,14 @@ class _CrewGigDetailPageState extends State<CrewGigDetailPage> {
           name: m['name'] as String? ?? '',
           role: m['role'] as String? ?? 'bruker',
           status: availMap[userId] ?? 'pending',
+          plusOne: plusOneIds.contains(userId),
         ));
       }
       memberList.sort((a, b) => a.name.compareTo(b.name));
 
       _members = memberList;
       _myStatus = uid != null ? (availMap[uid] ?? 'pending') : 'pending';
+      _myPlusOne = uid != null && plusOneIds.contains(uid);
 
       // 5. Shows & lineup for crew assignment (admin / gruppeleder)
       final isManager = _myRole == 'admin' ||
@@ -160,6 +165,8 @@ class _CrewGigDetailPageState extends State<CrewGigDetailPage> {
           'gig_id': widget.gigId,
           'user_id': uid,
           'status': status,
+          // Saying "kan ikke" drops the guest with you — nobody is coming.
+          'plus_one': status == 'available' && _myPlusOne,
           'updated_at': DateTime.now().toIso8601String(),
         },
         onConflict: 'gig_id,user_id',
@@ -167,6 +174,31 @@ class _CrewGigDetailPageState extends State<CrewGigDetailPage> {
       await _load();
     } catch (e) {
       debugPrint('Set availability error: $e');
+    }
+  }
+
+  /// Toggles "tar med +1" for the current user. Mirrors the mobile app: the
+  /// flag only counts while you are available.
+  Future<void> _setPlusOne(bool value) async {
+    final uid = _sb.auth.currentUser?.id;
+    if (uid == null) return;
+
+    setState(() => _myPlusOne = value);
+    try {
+      await _sb.from('gig_availability').upsert(
+        {
+          'gig_id': widget.gigId,
+          'user_id': uid,
+          'status': _myStatus ?? 'available',
+          'plus_one': value,
+          'updated_at': DateTime.now().toIso8601String(),
+        },
+        onConflict: 'gig_id,user_id',
+      );
+      await _load();
+    } catch (e) {
+      debugPrint('Set plus_one error: $e');
+      if (mounted) setState(() => _myPlusOne = !value);
     }
   }
 
@@ -499,11 +531,49 @@ class _CrewGigDetailPageState extends State<CrewGigDetailPage> {
                     ],
                   ),
 
+                  // Guests, when the activity allows them (julebord and the
+                  // like). Same wording and rule as the mobile app.
+                  if (_gig!['allow_plus_one'] == true) ...[
+                    const SizedBox(height: 8),
+                    InkWell(
+                      borderRadius: BorderRadius.circular(8),
+                      onTap: () => _setPlusOne(!_myPlusOne),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 4),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Checkbox(
+                              value: _myPlusOne,
+                              onChanged: (v) => _setPlusOne(v == true),
+                            ),
+                            const Text('Tar med +1'),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+
                   const SizedBox(height: 24),
 
                   // All members availability
                   Text('Crew-status',
                       style: Theme.of(context).textTheme.titleMedium),
+                  if (_gig!['allow_plus_one'] == true) ...[
+                    const SizedBox(height: 2),
+                    Builder(builder: (_) {
+                      final coming = _members
+                          .where((m) => m.status == 'available')
+                          .toList();
+                      final guests = coming.where((m) => m.plusOne).length;
+                      return Text(
+                        '${coming.length} kan · $guests med følge · '
+                        '${coming.length + guests} personer',
+                        style: TextStyle(
+                            fontSize: 12, color: cs.onSurfaceVariant),
+                      );
+                    }),
+                  ],
                   const SizedBox(height: 12),
                   if (_members.isEmpty)
                     Text('Ingen crew-medlemmer.',
@@ -564,7 +634,11 @@ class _CrewGigDetailPageState extends State<CrewGigDetailPage> {
                                 const SizedBox(width: 10),
                                 Expanded(
                                   child: Text(
-                                    m.name.isNotEmpty ? m.name : 'Ukjent',
+                                    (m.name.isNotEmpty ? m.name : 'Ukjent') +
+                                        (_gig!['allow_plus_one'] == true &&
+                                                m.plusOne
+                                            ? '  +1'
+                                            : ''),
                                     style: const TextStyle(
                                         fontWeight: FontWeight.w700),
                                   ),
@@ -984,10 +1058,14 @@ class _MemberAvailability {
   final String role;
   final String status;
 
+  /// Bringing a guest. Only meaningful when the activity sets allow_plus_one.
+  final bool plusOne;
+
   const _MemberAvailability({
     required this.userId,
     required this.name,
     required this.role,
     required this.status,
+    this.plusOne = false,
   });
 }
