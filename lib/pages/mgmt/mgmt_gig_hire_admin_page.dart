@@ -127,6 +127,68 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
         offerByGig[o['gig_id'] as String] = o;
       }
 
+      // gig_offers.gig_id only ever points at the offer's FIRST date, and on
+      // an offer with a rehearsal that first date is the rehearsal. Resolving
+      // offers by that column alone therefore put the whole hire on the
+      // rehearsal and left the actual show date without an offer at all — it
+      // was skipped. The junction table is what maps an offer to every one of
+      // its dates, exactly as the mobile app reads it.
+      final missingGigIds =
+          gigIds.where((id) => !offerByGig.containsKey(id)).toList();
+      if (missingGigIds.isNotEmpty) {
+        final junctionRows = List<Map<String, dynamic>>.from(
+          await _sb
+              .from('gig_offer_gigs')
+              .select('offer_id, gig_id')
+              .inFilter('gig_id', missingGigIds),
+        );
+        final junctionOfferIds = junctionRows
+            .map((r) => r['offer_id'] as String)
+            .toSet()
+            .toList();
+        if (junctionOfferIds.isNotEmpty) {
+          final junctionOffers = List<Map<String, dynamic>>.from(
+            await _sb
+                .from('gig_offers')
+                .select(
+                    'id, gig_id, creo_fee_minimum, extra_show_fee, final_calc, '
+                    'markup_pct, inear_included, inear_price, transport_price, '
+                    'rehearsal_performers, rehearsal_count, rehearsal_price_per_person, '
+                    'rehearsal_transport, markup_on_all, extras')
+                .eq('company_id', _companyId!)
+                .inFilter('id', junctionOfferIds),
+          );
+          final byOfferId = {
+            for (final o in junctionOffers) o['id'] as String: o
+          };
+          for (final jr in junctionRows) {
+            final gid = jr['gig_id'] as String;
+            final oid = jr['offer_id'] as String;
+            if (!offerByGig.containsKey(gid) && byOfferId.containsKey(oid)) {
+              offerByGig[gid] = byOfferId[oid]!;
+            }
+          }
+        }
+      }
+
+      // How many dates each offer covers — the booking honorar belongs to the
+      // offer as a whole, so it is split across them rather than charged in
+      // full on every date.
+      final offerDateCount = <String, int>{};
+      final allOfferIds =
+          offerByGig.values.map((o) => o['id'] as String).toSet().toList();
+      if (allOfferIds.isNotEmpty) {
+        for (final r in List<Map<String, dynamic>>.from(
+          await _sb
+              .from('gig_offer_gigs')
+              .select('offer_id')
+              .inFilter('offer_id', allOfferIds),
+        )) {
+          final oid = r['offer_id'] as String;
+          offerDateCount[oid] = (offerDateCount[oid] ?? 0) + 1;
+        }
+      }
+
       // 4. Group lineup by (gig_id, user_id) to count shows & collect lineup ids
       // Key = 'gigId|userId'
       final grouped = <String, Map<String, dynamic>>{};
@@ -217,19 +279,28 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
             (offer['creo_fee_minimum'] as num?)?.toDouble() ?? 0.0;
         final extraShowFee =
             (offer['extra_show_fee'] as num?)?.toDouble() ?? 0.0;
+        final rehearsalFee =
+            (offer['rehearsal_price_per_person'] as num?)?.toDouble() ?? 0.0;
         final numShows = (g['show_ids'] as Set<String>).length;
         final effectiveShows = numShows > 0 ? numShows : 1;
-        double hireFee = creoFee +
-            (effectiveShows > 1
-                ? extraShowFee * (effectiveShows - 1)
-                : 0);
+        // A rehearsal date is paid at the rehearsal rate, not as a show.
+        // Charging creo + extra-show fees on it was both the wrong amount and
+        // double payment, since the offer prices rehearsals separately.
+        final isRehearsal = (gig?['type'] as String?) == 'rehearsal';
+        double hireFee = isRehearsal
+            ? rehearsalFee
+            : creoFee +
+                (effectiveShows > 1
+                    ? extraShowFee * (effectiveShows - 1)
+                    : 0);
         // Base show hire (before BookingHonorar) — used as the weight when an
         // extra cost is distributed to the group "same as show".
         final showHire = hireFee;
 
-        // Add BookingHonorar to Stian's hire
+        // BookingHonorar belongs to the offer, so it is split across its dates.
         if (userId == stianUserId) {
-          hireFee += _getBookingHonorar(offer);
+          final dates = offerDateCount[offer['id'] as String] ?? 1;
+          hireFee += _getBookingHonorar(offer) / (dates > 0 ? dates : 1);
         }
 
         final expenseTotal = expenseMap['$gigId|$userId'] ?? 0.0;
@@ -253,7 +324,8 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
           'customer_firma': gig?['customer_firma'] ?? '',
           'name': nameMap[g['user_id']] ?? '',
           'section': g['section'] ?? '',
-          'num_shows': effectiveShows,
+          'is_rehearsal': isRehearsal,
+          'num_shows': isRehearsal ? 0 : effectiveShows,
           'hire_fee': hireFee,
           'show_hire': showHire,
           'expense_total': expenseTotal,
@@ -271,7 +343,9 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
       for (final gigId in offerByGig.keys) {
         if (stianGigs.contains(gigId)) continue;
         final offer = offerByGig[gigId]!;
-        final bookingHonorar = _getBookingHonorar(offer);
+        final dates = offerDateCount[offer['id'] as String] ?? 1;
+        final bookingHonorar =
+            _getBookingHonorar(offer) / (dates > 0 ? dates : 1);
         if (bookingHonorar <= 0) continue;
         final gig = gigMap[gigId];
         if (gig == null) continue;
@@ -447,6 +521,14 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
           }
         });
       }
+
+      // Nothing to pay out, nothing to show — the same rule the mobile app
+      // applies. A rehearsal the offer does not pay for
+      // (rehearsal_price_per_person = 0) would otherwise fill the list with
+      // 0 kr rows. Extras and expenses are already folded into 'amount', so a
+      // row that only carries an utlegg still counts as money owed and stays.
+      entries.removeWhere(
+          (e) => ((e['amount'] as num?)?.toDouble() ?? 0) <= 0);
 
       // Sort by date descending
       entries.sort((a, b) {
@@ -957,6 +1039,7 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
                 final section = e['section'] as String? ?? '';
                 final amount = (e['amount'] as num?)?.toDouble() ?? 0;
                 final numShows = e['num_shows'] as int? ?? 1;
+                final isRehearsal = e['is_rehearsal'] == true;
                 final invoicedAt = e['crew_invoiced_at'] as String?;
                 final paidAt = e['crew_paid_at'] as String?;
                 final memberExpense = (e['expense_total'] as num?)?.toDouble() ?? 0;
@@ -979,7 +1062,12 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
                       ),
                       SizedBox(
                         width: 50,
-                        child: Text('$numShows show',
+                        // A rehearsal is not shows, and the booking/ekstra
+                        // rows are not either — "0 show" was noise on both.
+                        child: Text(
+                            isRehearsal
+                                ? 'Prøve'
+                                : (numShows > 0 ? '$numShows show' : ''),
                             style: TextStyle(
                                 fontSize: 11, color: cs.onSurfaceVariant),
                             textAlign: TextAlign.center),
