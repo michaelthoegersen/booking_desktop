@@ -542,11 +542,14 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
         });
       }
 
-      // Nothing owed, nothing to show — the same rule the mobile app applies.
-      // Extras and expenses are already folded into 'amount', so a row that
-      // carries only an utlegg is money owed and stays.
-      entries.removeWhere(
-          (e) => ((e['amount'] as num?)?.toDouble() ?? 0) <= 0);
+      // Hide a rehearsal row the offer pays nothing for — and ONLY that. An
+      // earlier version dropped every zero row, which could silently remove a
+      // gig's payout if anything upstream miscalculated it. A filter on money
+      // must never be able to hide money, so this one cannot touch a show row
+      // whatever the amount turns out to be.
+      entries.removeWhere((e) =>
+          e['is_rehearsal'] == true &&
+          ((e['amount'] as num?)?.toDouble() ?? 0) <= 0);
 
       // Sort by date descending
       entries.sort((a, b) {
@@ -554,6 +557,13 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
         final db = b['date_from'] as String? ?? '';
         return db.compareTo(da);
       });
+
+      for (final e in entries) {
+        debugPrint('[GIG_HIRE] ${e['date_from']} ${e['venue_name']} '
+            '${e['name']} seksjon=${e['section']} '
+            'prøve=${e['is_rehearsal']} hyre=${e['hire_fee']} '
+            'beløp=${e['amount']}');
+      }
 
       _entries = entries;
     } catch (e, st) {
