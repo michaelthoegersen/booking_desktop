@@ -83,6 +83,18 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
       final gigIds = gigs.map((g) => g['id'] as String).toList();
       final gigMap = {for (final g in gigs) g['id'] as String: g};
 
+      // Fakturert/betalt for hyre som ikke har en lineup-rad (bookinghonorar
+      // og frittstående ekstra). Nøkkel: gig|bruker|hyretype.
+      final markMap = <String, Map<String, dynamic>>{};
+      for (final m in List<Map<String, dynamic>>.from(
+        await _sb
+            .from('gig_hire_marks')
+            .select('gig_id, user_id, section, crew_invoiced_at, crew_paid_at')
+            .inFilter('gig_id', gigIds),
+      )) {
+        markMap['${m['gig_id']}|${m['user_id']}|${m['section']}'] = m;
+      }
+
       // 2. Lineup entries for these gigs
       final lineup = List<Map<String, dynamic>>.from(
         await _sb
@@ -289,8 +301,10 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
           'extra_total': 0.0,
           'offer_total': offerTotal,
           'offer': offer,
-          'crew_invoiced_at': null,
-          'crew_paid_at': null,
+          'crew_invoiced_at':
+              markMap['$gigId|$stianUserId|booking']?['crew_invoiced_at'],
+          'crew_paid_at':
+              markMap['$gigId|$stianUserId|booking']?['crew_paid_at'],
         });
       }
 
@@ -425,8 +439,10 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
               'offer_total': offerTotal,
               'offer': offer,
               'company_card_total': companyCardMap[firstGigId] ?? 0.0,
-              'crew_invoiced_at': null,
-              'crew_paid_at': null,
+              'crew_invoiced_at':
+                  markMap['$firstGigId|$memberId|ekstra']?['crew_invoiced_at'],
+              'crew_paid_at':
+                  markMap['$firstGigId|$memberId|ekstra']?['crew_paid_at'],
             });
           }
         });
@@ -539,92 +555,6 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
         .fold(0.0, (sum, e) => sum + (e['amount'] as double));
   }
 
-  Future<void> _markInvoiced(List<String> lineupIds) async {
-    final picked = await showDatePicker(
-      context: context,
-      initialDate: DateTime.now(),
-      firstDate: DateTime(2020),
-      lastDate: DateTime(2030),
-      helpText: 'Velg fakturadato',
-    );
-    if (picked == null || !mounted) return;
-    try {
-      final iso = DateTime(picked.year, picked.month, picked.day)
-          .toIso8601String();
-      debugPrint('Mark invoiced: ids=$lineupIds, date=$iso');
-      await _sb
-          .from('gig_lineup')
-          .update({'crew_invoiced_at': iso})
-          .inFilter('id', lineupIds);
-      _updateLocalEntries(lineupIds, 'crew_invoiced_at', iso);
-    } catch (e) {
-      debugPrint('Mark invoiced error: $e');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Feil ved markering som fakturert: $e'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
-    }
-  }
-
-  Future<void> _clearInvoiced(List<String> lineupIds) async {
-    try {
-      await _sb
-          .from('gig_lineup')
-          .update({'crew_invoiced_at': null})
-          .inFilter('id', lineupIds);
-      _updateLocalEntries(lineupIds, 'crew_invoiced_at', null);
-    } catch (e) {
-      debugPrint('Clear invoiced error: $e');
-    }
-  }
-
-  Future<void> _clearPaid(List<String> lineupIds) async {
-    try {
-      await _sb
-          .from('gig_lineup')
-          .update({'crew_paid_at': null})
-          .inFilter('id', lineupIds);
-      _updateLocalEntries(lineupIds, 'crew_paid_at', null);
-    } catch (e) {
-      debugPrint('Clear paid error: $e');
-    }
-  }
-
-  Future<void> _markPaid(List<String> lineupIds) async {
-    final picked = await showDatePicker(
-      context: context,
-      initialDate: DateTime.now(),
-      firstDate: DateTime(2020),
-      lastDate: DateTime(2030),
-      helpText: 'Velg betalingsdato',
-    );
-    if (picked == null || !mounted) return;
-    try {
-      final iso = DateTime(picked.year, picked.month, picked.day)
-          .toIso8601String();
-      debugPrint('Mark paid: ids=$lineupIds, date=$iso');
-      await _sb
-          .from('gig_lineup')
-          .update({'crew_paid_at': iso})
-          .inFilter('id', lineupIds);
-      _updateLocalEntries(lineupIds, 'crew_paid_at', iso);
-    } catch (e) {
-      debugPrint('Mark paid error: $e');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Feil ved markering som betalt: $e'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
-    }
-  }
-
   double _getBookingHonorar(Map<String, dynamic> offer) {
     final rawCalc = offer['final_calc'];
     if (rawCalc is Map) {
@@ -644,6 +574,111 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
       return creo * (markupPct / 2);
     }
     return 0;
+  }
+
+  /// Key identifying a hire row that has no lineup row of its own.
+  static String _markKey(Map<String, dynamic> e) =>
+      '${e['gig_id']}|${e['user_id']}|${e['section']}';
+
+  /// Writes [field] for one hire row.
+  ///
+  /// Someone who stood in the lineup is marked on their gig_lineup row, as
+  /// before. Booking honorar and a standalone ekstra have no lineup row, so
+  /// those are marked in gig_hire_marks instead — otherwise the update matched
+  /// nothing and the button did nothing without saying so.
+  Future<void> _setMark(
+      Map<String, dynamic> entry, String field, String? iso) async {
+    final lineupIds = List<String>.from(entry['lineup_ids'] as List);
+
+    if (lineupIds.isNotEmpty) {
+      await _sb
+          .from('gig_lineup')
+          .update({field: iso})
+          .inFilter('id', lineupIds);
+      _updateLocalEntries(lineupIds, field, iso);
+      return;
+    }
+
+    await _sb.from('gig_hire_marks').upsert({
+      'company_id': _companyId,
+      'gig_id': entry['gig_id'],
+      'user_id': entry['user_id'],
+      'section': entry['section'],
+      field: iso,
+      'updated_at': DateTime.now().toIso8601String(),
+    }, onConflict: 'gig_id,user_id,section');
+    _updateLocalMark(entry, field, iso);
+  }
+
+  Future<void> _applyMark(
+    Map<String, dynamic> entry,
+    String field,
+    String? iso, {
+    required String errorLabel,
+  }) async {
+    try {
+      await _setMark(entry, field, iso);
+    } catch (e) {
+      debugPrint('$errorLabel error: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('$errorLabel: $e'),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 8),
+          ),
+        );
+      }
+    }
+  }
+
+  Future<String?> _pickDate(String helpText) async {
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: DateTime.now(),
+      firstDate: DateTime(2020),
+      lastDate: DateTime(2030),
+      helpText: helpText,
+    );
+    if (picked == null || !mounted) return null;
+    return DateTime(picked.year, picked.month, picked.day).toIso8601String();
+  }
+
+  Future<void> _markInvoiced(Map<String, dynamic> entry) async {
+    final iso = await _pickDate('Velg fakturadato');
+    if (iso == null) return;
+    await _applyMark(entry, 'crew_invoiced_at', iso,
+        errorLabel: 'Feil ved markering som fakturert');
+  }
+
+  Future<void> _clearInvoiced(Map<String, dynamic> entry) async {
+    await _applyMark(entry, 'crew_invoiced_at', null,
+        errorLabel: 'Feil ved fjerning av fakturert');
+  }
+
+  Future<void> _markPaid(Map<String, dynamic> entry) async {
+    final iso = await _pickDate('Velg betalingsdato');
+    if (iso == null) return;
+    await _applyMark(entry, 'crew_paid_at', iso,
+        errorLabel: 'Feil ved markering som betalt');
+  }
+
+  Future<void> _clearPaid(Map<String, dynamic> entry) async {
+    await _applyMark(entry, 'crew_paid_at', null,
+        errorLabel: 'Feil ved fjerning av betalt');
+  }
+
+  /// Updates the one lineup-less entry in place.
+  void _updateLocalMark(
+      Map<String, dynamic> entry, String field, String? value) {
+    final key = _markKey(entry);
+    setState(() {
+      for (final e in _entries) {
+        if ((e['lineup_ids'] as List).isEmpty && _markKey(e) == key) {
+          e[field] = value;
+        }
+      }
+    });
   }
 
   void _updateLocalEntries(List<String> lineupIds, String field, String? value) {
@@ -924,7 +959,6 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
                 final numShows = e['num_shows'] as int? ?? 1;
                 final invoicedAt = e['crew_invoiced_at'] as String?;
                 final paidAt = e['crew_paid_at'] as String?;
-                final lineupIds = List<String>.from(e['lineup_ids'] as List);
                 final memberExpense = (e['expense_total'] as num?)?.toDouble() ?? 0;
                 final extraTotal = (e['extra_total'] as num?)?.toDouble() ?? 0;
 
@@ -986,14 +1020,14 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
                                         overflow: TextOverflow.ellipsis),
                                   ),
                                   InkWell(
-                                    onTap: () => _clearInvoiced(lineupIds),
+                                    onTap: () => _clearInvoiced(e),
                                     child: Icon(Icons.close,
                                         size: 13, color: cs.onSurfaceVariant),
                                   ),
                                 ],
                               )
                             : FilledButton.icon(
-                                onPressed: () => _markInvoiced(lineupIds),
+                                onPressed: () => _markInvoiced(e),
                                 icon: const Icon(Icons.receipt, size: 12),
                                 label: const Text('Fakturert',
                                     style: TextStyle(fontSize: 10)),
@@ -1020,14 +1054,14 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
                                         overflow: TextOverflow.ellipsis),
                                   ),
                                   InkWell(
-                                    onTap: () => _clearPaid(lineupIds),
+                                    onTap: () => _clearPaid(e),
                                     child: Icon(Icons.close,
                                         size: 13, color: cs.onSurfaceVariant),
                                   ),
                                 ],
                               )
                             : FilledButton.icon(
-                                onPressed: () => _markPaid(lineupIds),
+                                onPressed: () => _markPaid(e),
                                 icon: const Icon(Icons.check, size: 14),
                                 label: const Text('Betalt',
                                     style: TextStyle(fontSize: 10)),
