@@ -185,18 +185,39 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
           '${offerByGig.length}');
 
 
-      final offerDateCount = <String, int>{};
+      // How many PERFORMANCE dates each offer covers. The booking honorar is
+      // earned by landing the job, so it belongs on the dates that are shows —
+      // never on a rehearsal. Splitting it across every date put part of it on
+      // the rehearsal, where it has no business being.
+      final offerShowDateCount = <String, int>{};
       final allOfferIds =
           offerByGig.values.map((o) => o['id'] as String).toSet().toList();
       if (allOfferIds.isNotEmpty) {
-        for (final r in List<Map<String, dynamic>>.from(
+        final junction = List<Map<String, dynamic>>.from(
           await _sb
               .from('gig_offer_gigs')
-              .select('offer_id')
+              .select('offer_id, gig_id')
               .inFilter('offer_id', allOfferIds),
-        )) {
+        );
+        // Types for every date in those offers, including dates outside the
+        // window this page loads, so the split adds up to the whole honorar.
+        final junctionGigIds =
+            junction.map((r) => r['gig_id'] as String).toSet().toList();
+        final typeById = <String, String>{};
+        if (junctionGigIds.isNotEmpty) {
+          for (final g in List<Map<String, dynamic>>.from(
+            await _sb
+                .from('gigs')
+                .select('id, type')
+                .inFilter('id', junctionGigIds),
+          )) {
+            typeById[g['id'] as String] = g['type'] as String? ?? 'gig';
+          }
+        }
+        for (final r in junction) {
+          if (typeById[r['gig_id'] as String] == 'rehearsal') continue;
           final oid = r['offer_id'] as String;
-          offerDateCount[oid] = (offerDateCount[oid] ?? 0) + 1;
+          offerShowDateCount[oid] = (offerShowDateCount[oid] ?? 0) + 1;
         }
       }
 
@@ -346,8 +367,10 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
         final showHire = hireFee;
 
         // BookingHonorar belongs to the offer, so it is split across its dates.
-        if (userId == stianUserId) {
-          final dates = offerDateCount[offer['id'] as String] ?? 1;
+        // BookingHonorar goes on the show dates, split between them. A row
+        // paid as a rehearsal never carries any of it.
+        if (userId == stianUserId && !payAsRehearsal) {
+          final dates = offerShowDateCount[offer['id'] as String] ?? 1;
           hireFee += _getBookingHonorar(offer) / (dates > 0 ? dates : 1);
         }
 
@@ -390,13 +413,15 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
       // Add Stian's BookingHonorar for gigs where he's NOT in lineup
       for (final gigId in offerByGig.keys) {
         if (stianGigs.contains(gigId)) continue;
+        final gig = gigMap[gigId];
+        if (gig == null) continue;
+        // A rehearsal date never carries the booking honorar.
+        if ((gig['type'] as String?) == 'rehearsal') continue;
         final offer = offerByGig[gigId]!;
-        final dates = offerDateCount[offer['id'] as String] ?? 1;
+        final dates = offerShowDateCount[offer['id'] as String] ?? 1;
         final bookingHonorar =
             _getBookingHonorar(offer) / (dates > 0 ? dates : 1);
         if (bookingHonorar <= 0) continue;
-        final gig = gigMap[gigId];
-        if (gig == null) continue;
 
         double offerTotal = 0;
         final rawCalc = offer['final_calc'];
