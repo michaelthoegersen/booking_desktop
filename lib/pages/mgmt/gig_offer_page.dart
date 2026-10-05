@@ -1398,11 +1398,85 @@ class _GigOfferPageState extends State<GigOfferPage> {
   // SAVE — both gig and gig_offer
   // ────────────────────────────────────────────────────────────────────────────
 
+  /// Writes the status — and nothing else — while the offer is locked for
+  /// invoicing.
+  ///
+  /// The lock exists so the numbers cannot move after a job has been flagged
+  /// ready. Økonomiansvarlig is the one who then sets Fakturert, so Lagre has
+  /// to work for them without unlocking first. Every other edit on the page is
+  /// deliberately left unsaved, and the snackbar says so rather than letting
+  /// someone believe a price change went through.
+  Future<void> _saveStatusOnly() async {
+    if (_offerId == null) return;
+    setState(() => _saving = true);
+    try {
+      final now = DateTime.now().toUtc();
+      final offerData = <String, dynamic>{
+        'status': _gigStatus,
+        'updated_at': now.toIso8601String(),
+      };
+
+      // Same first-time rule as the full save.
+      if (_gigStatus == 'invoiced' && _invoicedAt == null) {
+        final dueDays = await showDialog<int>(
+          context: context,
+          builder: (_) => const _DueDaysDialog(),
+        );
+        if (dueDays == null) {
+          if (mounted) setState(() => _saving = false);
+          return;
+        }
+        offerData['invoiced_at'] = now.toIso8601String();
+        offerData['invoice_due_days'] = dueDays;
+      }
+
+      await _sb.from('gig_offers').update(offerData).eq('id', _offerId!);
+
+      final gigIds = await _offerGigIds();
+      if (gigIds.isNotEmpty) {
+        await _sb
+            .from('gigs')
+            .update({'status': _gigStatus}).inFilter('id', gigIds);
+      }
+
+      if (!mounted) return;
+      setState(() {
+        if (offerData.containsKey('invoiced_at')) _invoicedAt = now;
+        _saving = false;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Status lagret. Tilbudet er fortsatt låst, så andre '
+              'endringer ble ikke lagret.'),
+        ),
+      );
+    } catch (e) {
+      debugPrint('Status-only save error: $e');
+      if (!mounted) return;
+      setState(() => _saving = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Feil ved lagring av status: $e'),
+          backgroundColor: Colors.red,
+          duration: const Duration(seconds: 8),
+        ),
+      );
+    }
+  }
+
   /// [silent] skips the closing snackbar/navigation so callers can save as a
   /// step inside a larger action.
   Future<void> _save({bool silent = false}) async {
     if (_companyId == null) return;
     if (_invoiceLocked) {
+      // Økonomiansvarlig still has to set the status to Fakturert. Unlocking
+      // to do that would reopen the whole offer, which is the opposite of what
+      // the lock is for — so for them Lagre writes the status alone and the
+      // lock stays on.
+      if (_isFinance) {
+        await _saveStatusOnly();
+        return;
+      }
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Tilbudet er meldt klart for fakturering og låst. '
