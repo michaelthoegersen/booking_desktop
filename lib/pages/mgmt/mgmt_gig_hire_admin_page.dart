@@ -21,6 +21,10 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
 
   bool _loading = true;
   List<Map<String, dynamic>> _entries = [];
+
+  /// Human-readable trace of what the loader actually found, shown in the
+  /// UI so a wrong number can be diagnosed without a browser console.
+  final List<String> _diag = [];
   String _filter = 'outstanding'; // 'outstanding' or 'archive'
 
   // Bank balance
@@ -53,6 +57,7 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
 
   Future<void> _load() async {
     setState(() => _loading = true);
+    _diag.clear();
     try {
       if (_companyId == null) {
         setState(() {
@@ -174,9 +179,11 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
       // How many dates each offer covers — the booking honorar belongs to the
       // offer as a whole, so it is split across them rather than charged in
       // full on every date.
-      debugPrint('[GIG_HIRE] gigs=${gigIds.length} '
-          'direkte tilbud=${offers.length} '
-          'etter junction=${offerByGig.length}');
+      _diag.add('Gigger (t.o.m. i dag): ${gigIds.length}');
+      _diag.add('Tilbud funnet direkte: ${offers.length}');
+      _diag.add('Gigger koblet til tilbud etter junction: '
+          '${offerByGig.length}');
+
 
       final offerDateCount = <String, int>{};
       final allOfferIds =
@@ -271,6 +278,27 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
       // but only when a show date exists to carry the show hire — on an offer
       // where the rehearsal is the only date with a lineup, that row IS the
       // payout and repricing it to the rehearsal rate wipes real money.
+      {
+        final utenTilbud = <String>[];
+        for (final g in grouped.values) {
+          final gid = g['gig_id'] as String;
+          if (offerByGig.containsKey(gid)) continue;
+          final gg = gigMap[gid];
+          final label = '${gg?['date_from'] ?? '?'} '
+              '${gg?['venue_name'] ?? ''} (${gg?['type'] ?? '?'})';
+          if (!utenTilbud.contains(label)) utenTilbud.add(label);
+        }
+        if (utenTilbud.isEmpty) {
+          _diag.add('Gigger med lag, men uten tilbud: ingen');
+        } else {
+          _diag.add('Gigger med lag, men UTEN tilbud '
+              '(hoppes over): ${utenTilbud.length}');
+          for (final l in utenTilbud.take(15)) {
+            _diag.add('   • $l');
+          }
+        }
+      }
+
       final offerHasShowEntry = <String, bool>{};
       for (final g in grouped.values) {
         final gid = g['gig_id'] as String;
@@ -558,11 +586,26 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
         return db.compareTo(da);
       });
 
-      for (final e in entries) {
-        debugPrint('[GIG_HIRE] ${e['date_from']} ${e['venue_name']} '
-            '${e['name']} seksjon=${e['section']} '
-            'prøve=${e['is_rehearsal']} hyre=${e['hire_fee']} '
-            'beløp=${e['amount']}');
+      {
+        final perGig = <String, List<Map<String, dynamic>>>{};
+        for (final e in entries) {
+          (perGig[e['gig_id'] as String] ??= []).add(e);
+        }
+        _diag.add('Rader bygget: ${entries.length} '
+            'fordelt på ${perGig.length} gigger');
+        final lines = <String>[];
+        perGig.forEach((gid, rows) {
+          final f = rows.first;
+          final sum = rows.fold<double>(
+              0, (a, e) => a + ((e['amount'] as num?)?.toDouble() ?? 0));
+          lines.add('${f['date_from']} ${f['venue_name']} — '
+              '${rows.length} rader, ${sum.round()} kr'
+              '${f['is_rehearsal'] == true ? ' [prøve]' : ''}');
+        });
+        lines.sort();
+        for (final l in lines.reversed.take(25)) {
+          _diag.add('   • $l');
+        }
       }
 
       _entries = entries;
@@ -948,7 +991,47 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
                           ],
                         ),
                       )
-                    : _buildGroupedList(_entries, cs),
+                    : Column(
+                        children: [
+                          // Temporary: what the loader actually found, so a
+                          // wrong total can be diagnosed from the page itself.
+                          if (_diag.isNotEmpty)
+                            Padding(
+                              padding: const EdgeInsets.only(bottom: 12),
+                              child: Theme(
+                                data: Theme.of(context).copyWith(
+                                    dividerColor: Colors.transparent),
+                                child: ExpansionTile(
+                                  dense: true,
+                                  tilePadding: const EdgeInsets.symmetric(
+                                      horizontal: 12),
+                                  leading: Icon(Icons.bug_report_outlined,
+                                      size: 18, color: cs.onSurfaceVariant),
+                                  title: Text('Diagnose',
+                                      style: TextStyle(
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w700,
+                                          color: cs.onSurfaceVariant)),
+                                  children: [
+                                    Container(
+                                      width: double.infinity,
+                                      padding: const EdgeInsets.fromLTRB(
+                                          16, 0, 16, 12),
+                                      child: SelectableText(
+                                        _diag.join('\n'),
+                                        style: const TextStyle(
+                                            fontSize: 11,
+                                            fontFamily: 'monospace',
+                                            height: 1.5),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          Expanded(child: _buildGroupedList(_entries, cs)),
+                        ],
+                      ),
           ),
         ],
       ),
