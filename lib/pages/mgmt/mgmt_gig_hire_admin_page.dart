@@ -279,20 +279,16 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
             (offer['creo_fee_minimum'] as num?)?.toDouble() ?? 0.0;
         final extraShowFee =
             (offer['extra_show_fee'] as num?)?.toDouble() ?? 0.0;
-        final rehearsalFee =
-            (offer['rehearsal_price_per_person'] as num?)?.toDouble() ?? 0.0;
         final numShows = (g['show_ids'] as Set<String>).length;
         final effectiveShows = numShows > 0 ? numShows : 1;
-        // A rehearsal date is paid at the rehearsal rate, not as a show.
-        // Charging creo + extra-show fees on it was both the wrong amount and
-        // double payment, since the offer prices rehearsals separately.
         final isRehearsal = (gig?['type'] as String?) == 'rehearsal';
-        double hireFee = isRehearsal
-            ? rehearsalFee
-            : creoFee +
-                (effectiveShows > 1
-                    ? extraShowFee * (effectiveShows - 1)
-                    : 0);
+        // NB: a rehearsal date is NOT repriced at rehearsal_price_per_person
+        // here. On offers where the rehearsal is the only date that carries a
+        // lineup, that row is the whole payout, and repricing it wiped the
+        // amount. Until the data says which shape an offer actually has, the
+        // fee stays as it was.
+        double hireFee = creoFee +
+            (effectiveShows > 1 ? extraShowFee * (effectiveShows - 1) : 0);
         // Base show hire (before BookingHonorar) — used as the weight when an
         // extra cost is distributed to the group "same as show".
         final showHire = hireFee;
@@ -325,7 +321,7 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
           'name': nameMap[g['user_id']] ?? '',
           'section': g['section'] ?? '',
           'is_rehearsal': isRehearsal,
-          'num_shows': isRehearsal ? 0 : effectiveShows,
+          'num_shows': effectiveShows,
           'hire_fee': hireFee,
           'show_hire': showHire,
           'expense_total': expenseTotal,
@@ -521,14 +517,6 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
           }
         });
       }
-
-      // Nothing to pay out, nothing to show — the same rule the mobile app
-      // applies. A rehearsal the offer does not pay for
-      // (rehearsal_price_per_person = 0) would otherwise fill the list with
-      // 0 kr rows. Extras and expenses are already folded into 'amount', so a
-      // row that only carries an utlegg still counts as money owed and stays.
-      entries.removeWhere(
-          (e) => ((e['amount'] as num?)?.toDouble() ?? 0) <= 0);
 
       // Sort by date descending
       entries.sort((a, b) {
