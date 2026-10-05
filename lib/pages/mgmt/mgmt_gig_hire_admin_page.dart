@@ -174,6 +174,10 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
       // How many dates each offer covers — the booking honorar belongs to the
       // offer as a whole, so it is split across them rather than charged in
       // full on every date.
+      debugPrint('[GIG_HIRE] gigs=${gigIds.length} '
+          'direkte tilbud=${offers.length} '
+          'etter junction=${offerByGig.length}');
+
       final offerDateCount = <String, int>{};
       final allOfferIds =
           offerByGig.values.map((o) => o['id'] as String).toSet().toList();
@@ -262,6 +266,21 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
       // Stian Skog always gets BookingHonorar
       const stianUserId = 'b1d06003-e856-4122-a747-301e4b7cd068';
 
+      // Which offers have a non-rehearsal date that will actually produce hire
+      // rows. A rehearsal is paid from the offer's separate Prøver parameters,
+      // but only when a show date exists to carry the show hire — on an offer
+      // where the rehearsal is the only date with a lineup, that row IS the
+      // payout and repricing it to the rehearsal rate wipes real money.
+      final offerHasShowEntry = <String, bool>{};
+      for (final g in grouped.values) {
+        final gid = g['gig_id'] as String;
+        final off = offerByGig[gid];
+        if (off == null) continue;
+        if ((gigMap[gid]?['type'] as String?) != 'rehearsal') {
+          offerHasShowEntry[off['id'] as String] = true;
+        }
+      }
+
       final entries = <Map<String, dynamic>>[];
       // Track which gigs Stian is already in lineup for
       final stianGigs = <String>{};
@@ -281,14 +300,19 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
             (offer['extra_show_fee'] as num?)?.toDouble() ?? 0.0;
         final numShows = (g['show_ids'] as Set<String>).length;
         final effectiveShows = numShows > 0 ? numShows : 1;
+        final rehearsalFee =
+            (offer['rehearsal_price_per_person'] as num?)?.toDouble() ?? 0.0;
         final isRehearsal = (gig?['type'] as String?) == 'rehearsal';
-        // NB: a rehearsal date is NOT repriced at rehearsal_price_per_person
-        // here. On offers where the rehearsal is the only date that carries a
-        // lineup, that row is the whole payout, and repricing it wiped the
-        // amount. Until the data says which shape an offer actually has, the
-        // fee stays as it was.
-        double hireFee = creoFee +
-            (effectiveShows > 1 ? extraShowFee * (effectiveShows - 1) : 0);
+        // Pay the rehearsal rate only when a show date of the same offer is
+        // there to take the show hire. Otherwise this row is the whole job.
+        final payAsRehearsal =
+            isRehearsal && (offerHasShowEntry[offer['id'] as String] ?? false);
+        double hireFee = payAsRehearsal
+            ? rehearsalFee
+            : creoFee +
+                (effectiveShows > 1
+                    ? extraShowFee * (effectiveShows - 1)
+                    : 0);
         // Base show hire (before BookingHonorar) — used as the weight when an
         // extra cost is distributed to the group "same as show".
         final showHire = hireFee;
@@ -320,8 +344,8 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
           'customer_firma': gig?['customer_firma'] ?? '',
           'name': nameMap[g['user_id']] ?? '',
           'section': g['section'] ?? '',
-          'is_rehearsal': isRehearsal,
-          'num_shows': effectiveShows,
+          'is_rehearsal': payAsRehearsal,
+          'num_shows': payAsRehearsal ? 0 : effectiveShows,
           'hire_fee': hireFee,
           'show_hire': showHire,
           'expense_total': expenseTotal,
@@ -517,6 +541,12 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
           }
         });
       }
+
+      // Nothing owed, nothing to show — the same rule the mobile app applies.
+      // Extras and expenses are already folded into 'amount', so a row that
+      // carries only an utlegg is money owed and stays.
+      entries.removeWhere(
+          (e) => ((e['amount'] as num?)?.toDouble() ?? 0) <= 0);
 
       // Sort by date descending
       entries.sort((a, b) {
