@@ -69,7 +69,8 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
 
       // 1. Gigs for this company — only past/today (not future)
       final today = DateTime.now();
-      final todayStr = '${today.year}-${today.month.toString().padLeft(2, '0')}-${today.day.toString().padLeft(2, '0')}';
+      final todayStr =
+          '${today.year}-${today.month.toString().padLeft(2, '0')}-${today.day.toString().padLeft(2, '0')}';
       final gigs = List<Map<String, dynamic>>.from(
         await _sb
             .from('gigs')
@@ -102,10 +103,7 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
 
       // 2. Lineup entries for these gigs
       final lineup = List<Map<String, dynamic>>.from(
-        await _sb
-            .from('gig_lineup')
-            .select('*')
-            .inFilter('gig_id', gigIds),
+        await _sb.from('gig_lineup').select('*').inFilter('gig_id', gigIds),
       );
       if (lineup.isEmpty) {
         setState(() {
@@ -126,7 +124,8 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
             .eq('company_id', _companyId!)
             .inFilter('gig_id', gigIds),
       );
-      debugPrint('[GIG_HIRE] offers found: ${offers.length}, final_calcs: ${offers.where((o) => o['final_calc'] != null).length}');
+      debugPrint(
+          '[GIG_HIRE] offers found: ${offers.length}, final_calcs: ${offers.where((o) => o['final_calc'] != null).length}');
       final offerByGig = <String, Map<String, dynamic>>{};
       for (final o in offers) {
         offerByGig[o['gig_id'] as String] = o;
@@ -147,10 +146,8 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
               .select('offer_id, gig_id')
               .inFilter('gig_id', missingGigIds),
         );
-        final junctionOfferIds = junctionRows
-            .map((r) => r['offer_id'] as String)
-            .toSet()
-            .toList();
+        final junctionOfferIds =
+            junctionRows.map((r) => r['offer_id'] as String).toSet().toList();
         if (junctionOfferIds.isNotEmpty) {
           final junctionOffers = List<Map<String, dynamic>>.from(
             await _sb
@@ -183,7 +180,6 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
       _diag.add('Tilbud funnet direkte: ${offers.length}');
       _diag.add('Gigger koblet til tilbud etter junction: '
           '${offerByGig.length}');
-
 
       // How many PERFORMANCE dates each offer covers. The booking honorar is
       // earned by landing the job, so it belongs on the dates that are shows —
@@ -256,10 +252,7 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
       final userIds =
           lineup.map((l) => l['user_id'] as String).toSet().toList();
       final profiles = List<Map<String, dynamic>>.from(
-        await _sb
-            .from('profiles')
-            .select('id, name')
-            .inFilter('id', userIds),
+        await _sb.from('profiles').select('id, name').inFilter('id', userIds),
       );
       final nameMap = {
         for (final p in profiles) p['id'] as String: p['name'] as String? ?? ''
@@ -285,8 +278,8 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
               ((e['amount'] as num?)?.toDouble() ?? 0);
         } else {
           final key = '${e['gig_id']}|${e['user_id']}';
-          expenseMap[key] = (expenseMap[key] ?? 0) +
-              ((e['amount'] as num?)?.toDouble() ?? 0);
+          expenseMap[key] =
+              (expenseMap[key] ?? 0) + ((e['amount'] as num?)?.toDouble() ?? 0);
         }
       }
 
@@ -343,8 +336,7 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
 
         if (userId == stianUserId) stianGigs.add(gigId);
 
-        final creoFee =
-            (offer['creo_fee_minimum'] as num?)?.toDouble() ?? 0.0;
+        final creoFee = (offer['creo_fee_minimum'] as num?)?.toDouble() ?? 0.0;
         final extraShowFee =
             (offer['extra_show_fee'] as num?)?.toDouble() ?? 0.0;
         final numShows = (g['show_ids'] as Set<String>).length;
@@ -359,9 +351,7 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
         double hireFee = payAsRehearsal
             ? rehearsalFee
             : creoFee +
-                (effectiveShows > 1
-                    ? extraShowFee * (effectiveShows - 1)
-                    : 0);
+                (effectiveShows > 1 ? extraShowFee * (effectiveShows - 1) : 0);
         // Base show hire (before BookingHonorar) — used as the weight when an
         // extra cost is distributed to the group "same as show".
         final showHire = hireFee;
@@ -455,10 +445,10 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
           'extra_items': <Map<String, dynamic>>[],
           'offer_total': offerTotal,
           'offer': offer,
-          'crew_invoiced_at':
-              markMap['$gigId|$stianUserId|booking']?['crew_invoiced_at'],
-          'crew_paid_at':
-              markMap['$gigId|$stianUserId|booking']?['crew_paid_at'],
+          'crew_invoiced_at': markMap['$gigId|$stianUserId|booking']
+              ?['crew_invoiced_at'],
+          'crew_paid_at': markMap['$gigId|$stianUserId|booking']
+              ?['crew_paid_at'],
         });
       }
 
@@ -609,10 +599,10 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
                   'offer_total': offerTotal,
                   'offer': offer,
                   'company_card_total': companyCardMap[firstGigId] ?? 0.0,
-                  'crew_invoiced_at': markMap[
-                      '$firstGigId|$memberId|ekstra']?['crew_invoiced_at'],
-                  'crew_paid_at':
-                      markMap['$firstGigId|$memberId|ekstra']?['crew_paid_at'],
+                  'crew_invoiced_at': markMap['$firstGigId|$memberId|ekstra']
+                      ?['crew_invoiced_at'],
+                  'crew_paid_at': markMap['$firstGigId|$memberId|ekstra']
+                      ?['crew_paid_at'],
                 };
                 entries.add(standalone);
               }
@@ -741,7 +731,9 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Feil ved banktilkobling: $e'), backgroundColor: Colors.red),
+          SnackBar(
+              content: Text('Feil ved banktilkobling: $e'),
+              backgroundColor: Colors.red),
         );
       }
     }
@@ -798,8 +790,7 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
     if (lineupIds.isNotEmpty) {
       await _sb
           .from('gig_lineup')
-          .update({field: iso})
-          .inFilter('id', lineupIds);
+          .update({field: iso}).inFilter('id', lineupIds);
       _updateLocalEntries(lineupIds, field, iso);
       return;
     }
@@ -886,7 +877,8 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
     });
   }
 
-  void _updateLocalEntries(List<String> lineupIds, String field, String? value) {
+  void _updateLocalEntries(
+      List<String> lineupIds, String field, String? value) {
     final idSet = lineupIds.toSet();
     setState(() {
       for (final entry in _entries) {
@@ -918,16 +910,15 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
     final totalOutstanding = _entries
         .where((e) => e['crew_paid_at'] == null)
         .fold(0.0, (sum, e) => sum + ((e['amount'] as num?)?.toDouble() ?? 0));
-    final totalAll = _entries
-        .fold(0.0, (sum, e) => sum + ((e['amount'] as num?)?.toDouble() ?? 0));
+    final totalAll = _entries.fold(
+        0.0, (sum, e) => sum + ((e['amount'] as num?)?.toDouble() ?? 0));
 
     return Padding(
       padding: const EdgeInsets.all(18),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('Gigghyrer',
-              style: Theme.of(context).textTheme.headlineMedium),
+          Text('Gigghyrer', style: Theme.of(context).textTheme.headlineMedium),
           const SizedBox(height: 12),
 
           // Bank balance bar
@@ -943,7 +934,9 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
               borderRadius: BorderRadius.circular(14),
               border: Border.all(
                 color: _bankConnected && _bankBalance != null
-                    ? (_bankBalance! >= 0 ? Colors.green.shade700 : Colors.red.shade700)
+                    ? (_bankBalance! >= 0
+                        ? Colors.green.shade700
+                        : Colors.red.shade700)
                     : cs.outlineVariant,
               ),
             ),
@@ -953,7 +946,8 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
                 const SizedBox(width: 10),
                 if (_bankLoading)
                   const SizedBox(
-                    width: 14, height: 14,
+                    width: 14,
+                    height: 14,
                     child: CircularProgressIndicator(strokeWidth: 2),
                   )
                 else if (_bankConnected && _bankBalance != null) ...[
@@ -962,14 +956,17 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
                     style: TextStyle(
                       fontSize: 15,
                       fontWeight: FontWeight.w900,
-                      color: _bankBalance! >= 0 ? Colors.green.shade300 : Colors.red.shade300,
+                      color: _bankBalance! >= 0
+                          ? Colors.green.shade300
+                          : Colors.red.shade300,
                     ),
                   ),
                   if (_bankUpdatedAt != null) ...[
                     const SizedBox(width: 12),
                     Text(
                       'Oppdatert ${DateFormat('dd.MM HH:mm').format(_bankUpdatedAt!.toLocal())}',
-                      style: TextStyle(fontSize: 11, color: cs.onSurfaceVariant),
+                      style:
+                          TextStyle(fontSize: 11, color: cs.onSurfaceVariant),
                     ),
                   ],
                   const Spacer(),
@@ -989,7 +986,8 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
                   FilledButton.icon(
                     onPressed: _connectBank,
                     icon: const Icon(Icons.link, size: 16),
-                    label: const Text('Koble til DNB', style: TextStyle(fontSize: 12)),
+                    label: const Text('Koble til DNB',
+                        style: TextStyle(fontSize: 12)),
                     style: FilledButton.styleFrom(
                       padding: const EdgeInsets.symmetric(horizontal: 12),
                     ),
@@ -1015,7 +1013,8 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
                   const SizedBox(width: 10),
                   Text(
                     'Utestående: ${_formatAmount(totalOutstanding)}',
-                    style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w900),
+                    style: const TextStyle(
+                        fontSize: 15, fontWeight: FontWeight.w900),
                   ),
                   const SizedBox(width: 20),
                   Text(
@@ -1051,8 +1050,8 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
                             Padding(
                               padding: const EdgeInsets.only(bottom: 12),
                               child: Theme(
-                                data: Theme.of(context).copyWith(
-                                    dividerColor: Colors.transparent),
+                                data: Theme.of(context)
+                                    .copyWith(dividerColor: Colors.transparent),
                                 child: ExpansionTile(
                                   dense: true,
                                   tilePadding: const EdgeInsets.symmetric(
@@ -1123,13 +1122,19 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
             final markupPct = (offer['markup_pct'] as num?)?.toDouble() ?? 0;
             final markupOnAll = offer['markup_on_all'] == true;
             final inear = offer['inear_included'] == true
-                ? ((offer['inear_price'] as num?)?.toDouble() ?? 0) : 0.0;
-            final transport = (offer['transport_price'] as num?)?.toDouble() ?? 0;
-            final rehPerf = (offer['rehearsal_performers'] as num?)?.toInt() ?? 0;
+                ? ((offer['inear_price'] as num?)?.toDouble() ?? 0)
+                : 0.0;
+            final transport =
+                (offer['transport_price'] as num?)?.toDouble() ?? 0;
+            final rehPerf =
+                (offer['rehearsal_performers'] as num?)?.toInt() ?? 0;
             final rehCount = (offer['rehearsal_count'] as num?)?.toInt() ?? 0;
-            final rehPrice = (offer['rehearsal_price_per_person'] as num?)?.toDouble() ?? 0;
-            final rehTransport = (offer['rehearsal_transport'] as num?)?.toDouble() ?? 0;
-            final rehearsalTotal = (rehPerf * rehCount * rehPrice) + rehTransport;
+            final rehPrice =
+                (offer['rehearsal_price_per_person'] as num?)?.toDouble() ?? 0;
+            final rehTransport =
+                (offer['rehearsal_transport'] as num?)?.toDouble() ?? 0;
+            final rehearsalTotal =
+                (rehPerf * rehCount * rehPrice) + rehTransport;
             final subtotal = gigHire + inear + transport + rehearsalTotal;
             final markupBase = markupOnAll ? subtotal : gigHire;
             offerTotal = subtotal + (markupBase * markupPct);
@@ -1139,14 +1144,16 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
         // Totals for this gig
         final hireTotal = members.fold<double>(
             0, (sum, e) => sum + ((e['hire_fee'] as num?)?.toDouble() ?? 0));
-        final expenseTotal = members.fold<double>(
-            0, (sum, e) => sum + ((e['expense_total'] as num?)?.toDouble() ?? 0));
-        final companyCardTotal = (first['company_card_total'] as num?)?.toDouble() ?? 0;
+        final expenseTotal = members.fold<double>(0,
+            (sum, e) => sum + ((e['expense_total'] as num?)?.toDouble() ?? 0));
+        final companyCardTotal =
+            (first['company_card_total'] as num?)?.toDouble() ?? 0;
         final gigTotal = hireTotal + expenseTotal + companyCardTotal;
         final profit = offerTotal - gigTotal;
         final unpaidTotal = members
             .where((e) => e['crew_paid_at'] == null)
-            .fold<double>(0, (sum, e) => sum + ((e['amount'] as num?)?.toDouble() ?? 0));
+            .fold<double>(
+                0, (sum, e) => sum + ((e['amount'] as num?)?.toDouble() ?? 0));
 
         return Container(
           margin: const EdgeInsets.only(bottom: 16),
@@ -1163,12 +1170,14 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
                 padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
                 decoration: BoxDecoration(
                   color: cs.surfaceContainerHighest.withValues(alpha: 0.5),
-                  borderRadius: const BorderRadius.vertical(top: Radius.circular(14)),
+                  borderRadius:
+                      const BorderRadius.vertical(top: Radius.circular(14)),
                 ),
                 child: Row(
                   children: [
                     Text(date,
-                        style: TextStyle(fontSize: 13, color: cs.onSurfaceVariant)),
+                        style: TextStyle(
+                            fontSize: 13, color: cs.onSurfaceVariant)),
                     const SizedBox(width: 12),
                     Expanded(
                       child: Column(
@@ -1188,10 +1197,14 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
                       Text('Tilbud: ${_formatAmount(offerTotal)}',
                           style: TextStyle(
                               fontSize: 12, color: cs.onSurfaceVariant)),
-                    if (offerTotal > 0 && first['offer'] != null && (first['offer'] as Map)['final_calc'] == null)
+                    if (offerTotal > 0 &&
+                        first['offer'] != null &&
+                        (first['offer'] as Map)['final_calc'] == null)
                       Tooltip(
-                        message: 'Estimert — åpne og lagre tilbudet for nøyaktig total',
-                        child: Icon(Icons.warning_amber, size: 16, color: Colors.orange),
+                        message:
+                            'Estimert — åpne og lagre tilbudet for nøyaktig total',
+                        child: Icon(Icons.warning_amber,
+                            size: 16, color: Colors.orange),
                       ),
                   ],
                 ),
@@ -1205,143 +1218,151 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
                 final isRehearsal = e['is_rehearsal'] == true;
                 final invoicedAt = e['crew_invoiced_at'] as String?;
                 final paidAt = e['crew_paid_at'] as String?;
-                final memberExpense = (e['expense_total'] as num?)?.toDouble() ?? 0;
+                final memberExpense =
+                    (e['expense_total'] as num?)?.toDouble() ?? 0;
                 final extraTotal = (e['extra_total'] as num?)?.toDouble() ?? 0;
                 final bookingTotal =
                     (e['booking_total'] as num?)?.toDouble() ?? 0;
                 final extraItems = List<Map<String, dynamic>>.from(
                     (e['extra_items'] as List?) ?? const []);
 
+                // What the sum is made of. On its own line under the name
+                // rather than stacked in the amount column, where a name like
+                // "Nød-MultiTrack avspillingsutstyr" wrapped over three lines
+                // and pushed the row apart.
+                final parts = <String>[
+                  if (bookingTotal > 0)
+                    'booking ${_formatAmount(bookingTotal)}',
+                  for (final it in extraItems)
+                    '${it['label']} '
+                        '${_formatAmount((it['amount'] as num).toDouble())}',
+                  if (extraItems.isEmpty && extraTotal > 0)
+                    'ekstra ${_formatAmount(extraTotal)}',
+                  if (memberExpense > 0)
+                    'utlegg ${_formatAmount(memberExpense)}',
+                ];
+
                 return Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-                  child: Row(
+                  padding: const EdgeInsets.fromLTRB(16, 6, 16, 6),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Expanded(
-                        flex: 3,
-                        child: Text(name,
-                            style: const TextStyle(fontWeight: FontWeight.w700)),
+                      Row(
+                        children: [
+                          Expanded(
+                            flex: 3,
+                            child: Text(name,
+                                style: const TextStyle(
+                                    fontWeight: FontWeight.w700)),
+                          ),
+                          SizedBox(
+                            width: 60,
+                            child: Text(section,
+                                style: TextStyle(
+                                    fontSize: 12, color: cs.onSurfaceVariant)),
+                          ),
+                          SizedBox(
+                            width: 50,
+                            // A rehearsal is not shows, and the booking/ekstra
+                            // rows are not either — "0 show" was noise on both.
+                            child: Text(
+                                isRehearsal
+                                    ? 'Prøve'
+                                    : (numShows > 0 ? '$numShows show' : ''),
+                                style: TextStyle(
+                                    fontSize: 11, color: cs.onSurfaceVariant),
+                                textAlign: TextAlign.center),
+                          ),
+                          SizedBox(
+                            width: 100,
+                            child: Text(_formatAmount(amount),
+                                textAlign: TextAlign.end,
+                                style: const TextStyle(
+                                    fontWeight: FontWeight.w600)),
+                          ),
+                          const SizedBox(width: 8),
+                          SizedBox(
+                            width: 120,
+                            child: invoicedAt != null
+                                ? Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      const Icon(Icons.check_circle,
+                                          size: 13, color: Colors.green),
+                                      const SizedBox(width: 3),
+                                      Flexible(
+                                        child: Text(
+                                            'Fakt. ${_formatDate(invoicedAt)}',
+                                            style: const TextStyle(
+                                                fontSize: 10,
+                                                color: Colors.green),
+                                            overflow: TextOverflow.ellipsis),
+                                      ),
+                                      InkWell(
+                                        onTap: () => _clearInvoiced(e),
+                                        child: Icon(Icons.close,
+                                            size: 13,
+                                            color: cs.onSurfaceVariant),
+                                      ),
+                                    ],
+                                  )
+                                : FilledButton.icon(
+                                    onPressed: () => _markInvoiced(e),
+                                    icon: const Icon(Icons.receipt, size: 12),
+                                    label: const Text('Fakturert',
+                                        style: TextStyle(fontSize: 10)),
+                                    style: FilledButton.styleFrom(
+                                      backgroundColor: Colors.orange,
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 6, vertical: 4),
+                                    ),
+                                  ),
+                          ),
+                          const SizedBox(width: 4),
+                          SizedBox(
+                            width: 110,
+                            child: paidAt != null
+                                ? Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Flexible(
+                                        child: Text(
+                                            'Betalt ${_formatDate(paidAt)}',
+                                            style: TextStyle(
+                                                fontSize: 10,
+                                                color: cs.onSurfaceVariant),
+                                            overflow: TextOverflow.ellipsis),
+                                      ),
+                                      InkWell(
+                                        onTap: () => _clearPaid(e),
+                                        child: Icon(Icons.close,
+                                            size: 13,
+                                            color: cs.onSurfaceVariant),
+                                      ),
+                                    ],
+                                  )
+                                : FilledButton.icon(
+                                    onPressed: () => _markPaid(e),
+                                    icon: const Icon(Icons.check, size: 14),
+                                    label: const Text('Betalt',
+                                        style: TextStyle(fontSize: 10)),
+                                    style: FilledButton.styleFrom(
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 6, vertical: 4),
+                                    ),
+                                  ),
+                          ),
+                        ],
                       ),
-                      SizedBox(
-                        width: 60,
-                        child: Text(section,
-                            style: TextStyle(
-                                fontSize: 12, color: cs.onSurfaceVariant)),
-                      ),
-                      SizedBox(
-                        width: 50,
-                        // A rehearsal is not shows, and the booking/ekstra
-                        // rows are not either — "0 show" was noise on both.
-                        child: Text(
-                            isRehearsal
-                                ? 'Prøve'
-                                : (numShows > 0 ? '$numShows show' : ''),
+                      if (parts.isNotEmpty)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 2),
+                          child: Text(
+                            parts.join('  ·  '),
                             style: TextStyle(
                                 fontSize: 11, color: cs.onSurfaceVariant),
-                            textAlign: TextAlign.center),
-                      ),
-                      SizedBox(
-                        width: 150,
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.end,
-                          children: [
-                            Text(_formatAmount(amount),
-                                style: const TextStyle(fontWeight: FontWeight.w600)),
-                            // What the sum is made of, one line each — booking
-                            // honorar and every ekstra by name, the way utlegg
-                            // has always been broken out.
-                            if (bookingTotal > 0)
-                              Text('booking: ${_formatAmount(bookingTotal)}',
-                                  style: TextStyle(
-                                      fontSize: 10, color: cs.onSurfaceVariant)),
-                            for (final it in extraItems)
-                              Text(
-                                  '${it['label']}: '
-                                  '${_formatAmount((it['amount'] as num).toDouble())}',
-                                  textAlign: TextAlign.end,
-                                  style: TextStyle(
-                                      fontSize: 10, color: cs.onSurfaceVariant)),
-                            // Only fall back to a lump sum if something added
-                            // to the total without naming itself.
-                            if (extraItems.isEmpty && extraTotal > 0)
-                              Text('ekstra: ${_formatAmount(extraTotal)}',
-                                  style: TextStyle(
-                                      fontSize: 10, color: cs.onSurfaceVariant)),
-                            if (memberExpense > 0)
-                              Text('utlegg: ${_formatAmount(memberExpense)}',
-                                  style: TextStyle(
-                                      fontSize: 10, color: cs.onSurfaceVariant)),
-                          ],
+                          ),
                         ),
-                      ),
-                      const SizedBox(width: 8),
-                      SizedBox(
-                        width: 120,
-                        child: invoicedAt != null
-                            ? Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  const Icon(Icons.check_circle,
-                                      size: 13, color: Colors.green),
-                                  const SizedBox(width: 3),
-                                  Flexible(
-                                    child: Text(
-                                        'Fakt. ${_formatDate(invoicedAt)}',
-                                        style: const TextStyle(
-                                            fontSize: 10, color: Colors.green),
-                                        overflow: TextOverflow.ellipsis),
-                                  ),
-                                  InkWell(
-                                    onTap: () => _clearInvoiced(e),
-                                    child: Icon(Icons.close,
-                                        size: 13, color: cs.onSurfaceVariant),
-                                  ),
-                                ],
-                              )
-                            : FilledButton.icon(
-                                onPressed: () => _markInvoiced(e),
-                                icon: const Icon(Icons.receipt, size: 12),
-                                label: const Text('Fakturert',
-                                    style: TextStyle(fontSize: 10)),
-                                style: FilledButton.styleFrom(
-                                  backgroundColor: Colors.orange,
-                                  padding: const EdgeInsets.symmetric(
-                                      horizontal: 6, vertical: 4),
-                                ),
-                              ),
-                      ),
-                      const SizedBox(width: 4),
-                      SizedBox(
-                        width: 110,
-                        child: paidAt != null
-                            ? Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Flexible(
-                                    child: Text(
-                                        'Betalt ${_formatDate(paidAt)}',
-                                        style: TextStyle(
-                                            fontSize: 10,
-                                            color: cs.onSurfaceVariant),
-                                        overflow: TextOverflow.ellipsis),
-                                  ),
-                                  InkWell(
-                                    onTap: () => _clearPaid(e),
-                                    child: Icon(Icons.close,
-                                        size: 13, color: cs.onSurfaceVariant),
-                                  ),
-                                ],
-                              )
-                            : FilledButton.icon(
-                                onPressed: () => _markPaid(e),
-                                icon: const Icon(Icons.check, size: 14),
-                                label: const Text('Betalt',
-                                    style: TextStyle(fontSize: 10)),
-                                style: FilledButton.styleFrom(
-                                  padding: const EdgeInsets.symmetric(
-                                      horizontal: 6, vertical: 4),
-                                ),
-                              ),
-                      ),
                     ],
                   ),
                 );
@@ -1351,7 +1372,8 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
                 padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
                 decoration: BoxDecoration(
                   color: cs.surfaceContainerHighest.withValues(alpha: 0.3),
-                  borderRadius: const BorderRadius.vertical(bottom: Radius.circular(14)),
+                  borderRadius:
+                      const BorderRadius.vertical(bottom: Radius.circular(14)),
                 ),
                 child: Column(
                   children: [
@@ -1373,7 +1395,8 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
                       const SizedBox(height: 4),
                       Container(
                         width: double.infinity,
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 10, vertical: 6),
                         decoration: BoxDecoration(
                           color: Colors.orange.withValues(alpha: 0.12),
                           borderRadius: BorderRadius.circular(8),
