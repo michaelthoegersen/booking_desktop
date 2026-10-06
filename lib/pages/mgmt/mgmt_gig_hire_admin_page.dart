@@ -368,10 +368,13 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
 
         // BookingHonorar belongs to the offer, so it is split across its dates.
         // BookingHonorar goes on the show dates, split between them. A row
-        // paid as a rehearsal never carries any of it.
+        // paid as a rehearsal never carries any of it. Kept as its own figure
+        // so the row can show what the hire is actually made of.
+        double bookingTotal = 0;
         if (userId == stianUserId && !payAsRehearsal) {
           final dates = offerShowDateCount[offer['id'] as String] ?? 1;
-          hireFee += _getBookingHonorar(offer) / (dates > 0 ? dates : 1);
+          bookingTotal = _getBookingHonorar(offer) / (dates > 0 ? dates : 1);
+          hireFee += bookingTotal;
         }
 
         final expenseTotal = expenseMap['$gigId|$userId'] ?? 0.0;
@@ -402,6 +405,8 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
           'expense_total': expenseTotal,
           'amount': amount,
           'extra_total': 0.0,
+          'booking_total': bookingTotal,
+          'extra_items': <Map<String, dynamic>>[],
           'offer_total': offerTotal,
           'offer': offer,
           'company_card_total': companyCardMap[gigId] ?? 0.0,
@@ -446,6 +451,8 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
           'expense_total': 0.0,
           'amount': bookingHonorar,
           'extra_total': 0.0,
+          'booking_total': bookingHonorar,
+          'extra_items': <Map<String, dynamic>>[],
           'offer_total': offerTotal,
           'offer': offer,
           'crew_invoiced_at':
@@ -489,16 +496,28 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
         if (showGigs.isEmpty) continue;
         final firstGigId = showGigs.first['id'] as String;
 
-        // Tally group vs per-member portions across all extras.
-        double groupTotal = 0;
-        final memberExtras = <String, double>{};
-        final memberNames = <String, String>{};
+        // Each extra is allocated on its own so the hire can show what it is
+        // made of — "Komponering 2 000", not one lumped "ekstra".
+        void addItem(Map<String, dynamic> e, String label, double amount) {
+          if (amount <= 0) return;
+          e['hire_fee'] = (e['hire_fee'] as num).toDouble() + amount;
+          e['amount'] = (e['amount'] as num).toDouble() + amount;
+          e['extra_total'] =
+              ((e['extra_total'] as num?)?.toDouble() ?? 0) + amount;
+          (e['extra_items'] as List).add({
+            'label': label.trim().isEmpty ? 'Ekstra' : label.trim(),
+            'amount': amount,
+          });
+        }
+
         for (final raw in extrasRaw) {
           if (raw is! Map) continue;
           final amount = (raw['amount'] as num?)?.toDouble() ?? 0;
           if (amount <= 0) continue;
+          final label = (raw['name'] as String? ?? '').trim();
           final alloc = raw['allocation'] as String? ?? 'group';
           final memberId = raw['member_id'] as String?;
+
           double memberAmount;
           if (alloc == 'member' && memberId != null) {
             memberAmount = amount;
@@ -509,90 +528,98 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
           } else {
             memberAmount = 0;
           }
-          // Whatever belongs to Complete is not distributed to the lineup:
+          // Whatever belongs to Complete is never distributed to the lineup:
           // all of it for 'company', the remainder for 'split_company'.
-          if (alloc != 'split_company' && alloc != 'company') {
-            groupTotal += amount - memberAmount;
+          final groupAmount = (alloc == 'company' || alloc == 'split_company')
+              ? 0.0
+              : amount - memberAmount;
+
+          // Group portion — across the first show date's lineup, weighted by
+          // each member's show hire.
+          if (groupAmount > 0) {
+            final gigEntries =
+                entries.where((e) => e['gig_id'] == firstGigId).toList();
+            if (gigEntries.isNotEmpty) {
+              double totalShowHire = 0;
+              for (final e in gigEntries) {
+                totalShowHire += (e['show_hire'] as num?)?.toDouble() ?? 0;
+              }
+              for (final e in gigEntries) {
+                final w = (e['show_hire'] as num?)?.toDouble() ?? 0;
+                final share = totalShowHire > 0
+                    ? groupAmount * (w / totalShowHire)
+                    : groupAmount / gigEntries.length;
+                addItem(e, label, share);
+              }
+            }
           }
+
+          // Member portion — the whole of it to the chosen member.
           if (memberAmount > 0 && memberId != null) {
-            memberExtras[memberId] =
-                (memberExtras[memberId] ?? 0) + memberAmount;
-            final nm = raw['member_name'] as String?;
-            if (nm != null && nm.isNotEmpty) memberNames[memberId] = nm;
-          }
-        }
-
-        // Member rows on the first show gig.
-        final gigEntries =
-            entries.where((e) => e['gig_id'] == firstGigId).toList();
-
-        // Distribute the group portion, weighted by each member's show hire.
-        if (groupTotal > 0 && gigEntries.isNotEmpty) {
-          double totalShowHire = 0;
-          for (final e in gigEntries) {
-            totalShowHire += (e['show_hire'] as num?)?.toDouble() ?? 0;
-          }
-          for (final e in gigEntries) {
-            final w = (e['show_hire'] as num?)?.toDouble() ?? 0;
-            final share = totalShowHire > 0
-                ? groupTotal * (w / totalShowHire)
-                : groupTotal / gigEntries.length;
-            e['hire_fee'] = (e['hire_fee'] as num).toDouble() + share;
-            e['amount'] = (e['amount'] as num).toDouble() + share;
-            e['extra_total'] =
-                ((e['extra_total'] as num?)?.toDouble() ?? 0) + share;
-          }
-        }
-
-        // Apply per-member portions (added to the chosen member's gigghyre).
-        memberExtras.forEach((memberId, extraAmt) {
-          Map<String, dynamic>? target;
-          for (final e in entries) {
-            if (e['gig_id'] == firstGigId && e['user_id'] == memberId) {
-              target = e;
-              break;
+            Map<String, dynamic>? target;
+            for (final e in entries) {
+              if (e['gig_id'] == firstGigId &&
+                  e['user_id'] == memberId &&
+                  e['section'] != 'ekstra') {
+                target = e;
+                break;
+              }
+            }
+            if (target != null) {
+              addItem(target, label, memberAmount);
+            } else {
+              // Not in that gig's lineup — their own payout row. One row per
+              // member, with each extra listed on it.
+              Map<String, dynamic>? standalone;
+              for (final e in entries) {
+                if (e['gig_id'] == firstGigId &&
+                    e['user_id'] == memberId &&
+                    e['section'] == 'ekstra') {
+                  standalone = e;
+                  break;
+                }
+              }
+              if (standalone == null) {
+                final gig = gigMap[firstGigId];
+                double offerTotal = 0;
+                final rawCalc = offer['final_calc'];
+                if (rawCalc is Map && rawCalc['total'] != null) {
+                  offerTotal = (rawCalc['total'] as num).toDouble();
+                }
+                standalone = {
+                  'lineup_ids': <String>[],
+                  'lineup_id': '',
+                  'gig_id': firstGigId,
+                  'offer_id': offer['id'],
+                  'user_id': memberId,
+                  'date_from': gig?['date_from'],
+                  'venue_name': gig?['venue_name'] ?? '',
+                  'customer_firma': gig?['customer_firma'] ?? '',
+                  'name': nameMap[memberId] ??
+                      (raw['member_name'] as String? ?? ''),
+                  'section': 'ekstra',
+                  'num_shows': 0,
+                  'hire_fee': 0.0,
+                  'show_hire': 0.0,
+                  'expense_total': 0.0,
+                  'amount': 0.0,
+                  'extra_total': 0.0,
+                  'booking_total': 0.0,
+                  'extra_items': <Map<String, dynamic>>[],
+                  'offer_total': offerTotal,
+                  'offer': offer,
+                  'company_card_total': companyCardMap[firstGigId] ?? 0.0,
+                  'crew_invoiced_at': markMap[
+                      '$firstGigId|$memberId|ekstra']?['crew_invoiced_at'],
+                  'crew_paid_at':
+                      markMap['$firstGigId|$memberId|ekstra']?['crew_paid_at'],
+                };
+                entries.add(standalone);
+              }
+              addItem(standalone, label, memberAmount);
             }
           }
-          if (target != null) {
-            target['hire_fee'] = (target['hire_fee'] as num).toDouble() + extraAmt;
-            target['amount'] = (target['amount'] as num).toDouble() + extraAmt;
-            target['extra_total'] =
-                ((target['extra_total'] as num?)?.toDouble() ?? 0) + extraAmt;
-          } else {
-            // Member not in this gig's lineup — add a standalone payout row.
-            final gig = gigMap[firstGigId];
-            double offerTotal = 0;
-            final rawCalc = offer['final_calc'];
-            if (rawCalc is Map && rawCalc['total'] != null) {
-              offerTotal = (rawCalc['total'] as num).toDouble();
-            }
-            entries.add({
-              'lineup_ids': <String>[],
-              'lineup_id': '',
-              'gig_id': firstGigId,
-              'offer_id': offer['id'],
-              'user_id': memberId,
-              'date_from': gig?['date_from'],
-              'venue_name': gig?['venue_name'] ?? '',
-              'customer_firma': gig?['customer_firma'] ?? '',
-              'name': nameMap[memberId] ?? memberNames[memberId] ?? '',
-              'section': 'ekstra',
-              'num_shows': 0,
-              'hire_fee': extraAmt,
-              'show_hire': 0.0,
-              'expense_total': 0.0,
-              'amount': extraAmt,
-              'extra_total': extraAmt,
-              'offer_total': offerTotal,
-              'offer': offer,
-              'company_card_total': companyCardMap[firstGigId] ?? 0.0,
-              'crew_invoiced_at':
-                  markMap['$firstGigId|$memberId|ekstra']?['crew_invoiced_at'],
-              'crew_paid_at':
-                  markMap['$firstGigId|$memberId|ekstra']?['crew_paid_at'],
-            });
-          }
-        });
+        }
       }
 
       // Hide a rehearsal row the offer pays nothing for — and ONLY that. An
@@ -1180,6 +1207,10 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
                 final paidAt = e['crew_paid_at'] as String?;
                 final memberExpense = (e['expense_total'] as num?)?.toDouble() ?? 0;
                 final extraTotal = (e['extra_total'] as num?)?.toDouble() ?? 0;
+                final bookingTotal =
+                    (e['booking_total'] as num?)?.toDouble() ?? 0;
+                final extraItems = List<Map<String, dynamic>>.from(
+                    (e['extra_items'] as List?) ?? const []);
 
                 return Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
@@ -1209,13 +1240,29 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
                             textAlign: TextAlign.center),
                       ),
                       SizedBox(
-                        width: 100,
+                        width: 150,
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.end,
                           children: [
                             Text(_formatAmount(amount),
                                 style: const TextStyle(fontWeight: FontWeight.w600)),
-                            if (extraTotal > 0)
+                            // What the sum is made of, one line each — booking
+                            // honorar and every ekstra by name, the way utlegg
+                            // has always been broken out.
+                            if (bookingTotal > 0)
+                              Text('booking: ${_formatAmount(bookingTotal)}',
+                                  style: TextStyle(
+                                      fontSize: 10, color: cs.onSurfaceVariant)),
+                            for (final it in extraItems)
+                              Text(
+                                  '${it['label']}: '
+                                  '${_formatAmount((it['amount'] as num).toDouble())}',
+                                  textAlign: TextAlign.end,
+                                  style: TextStyle(
+                                      fontSize: 10, color: cs.onSurfaceVariant)),
+                            // Only fall back to a lump sum if something added
+                            // to the total without naming itself.
+                            if (extraItems.isEmpty && extraTotal > 0)
                               Text('ekstra: ${_formatAmount(extraTotal)}',
                                   style: TextStyle(
                                       fontSize: 10, color: cs.onSurfaceVariant)),
