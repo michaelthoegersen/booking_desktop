@@ -21,9 +21,11 @@ bool get _isCssMode => activeCompanyNotifier.value?.isCss == true;
 String _t(String no, String en) => _isCssMode ? en : no;
 
 // Persist chat selection across route changes (GoRouter recreates the widget)
-final _chatSelectionNotifier = ValueNotifier<String?>(null); // "dm:<id>" or "group:<id>"
+final _chatSelectionNotifier =
+    ValueNotifier<String?>(null); // "dm:<id>" or "group:<id>"
 final _gigSelectionNotifier = ValueNotifier<String?>(null);
-final _tourSelectionNotifier = ValueNotifier<String?>(null); // "dato__produksjon"
+final _tourSelectionNotifier =
+    ValueNotifier<String?>(null); // "dato__produksjon"
 final _tabIndexNotifier = ValueNotifier<int>(0);
 
 class MgmtMessagesPage extends StatefulWidget {
@@ -55,37 +57,117 @@ class _MgmtMessagesPageState extends State<MgmtMessagesPage>
   final Map<int, int> _tabUnread = {0: 0, 1: 0};
   bool _unreadOnly = false;
 
+  /// Bumpes for å tvinge listene til å laste på nytt etter
+  /// «Merk alle som lest».
+  int _refreshToken = 0;
+
   void _setTabUnread(int index, int value) {
     if (_tabUnread[index] == value || !mounted) return;
     setState(() => _tabUnread[index] = value);
   }
 
+  /// Markerer alt i ÉN fane som lest. Avgrenset med vilje: DM-fanen rører
+  /// ikke gigchattene, og omvendt.
+  Future<void> _markTabRead(int index) async {
+    final what = index == 0
+        ? _t('direktemeldingene og gruppene', 'direct messages and groups')
+        : _t('gigchattene', 'gig chats');
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(_t('Merk alle som lest', 'Mark all as read')),
+        content: Text(_t(
+            'Merker alle $what som lest. Den andre fanen røres ikke.',
+            'Marks all $what as read. The other tab is left alone.')),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text(_t('Avbryt', 'Cancel')),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text(_t('Merk som lest', 'Mark as read')),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+
+    try {
+      if (index == 0) {
+        await DirectChatService.markAllRead();
+        await GroupChatService.markAllRead();
+      } else {
+        final ids = await _sb
+            .from('gigs')
+            .select('id')
+            .eq('company_id', activeCompanyNotifier.value?.id ?? '');
+        final gigIds = (ids as List).map((r) => r['id'] as String).toList();
+        if (gigIds.isNotEmpty) {
+          final myId = _sb.auth.currentUser?.id;
+          final now = DateTime.now().toUtc().toIso8601String();
+          if (myId != null) {
+            await _sb.from('gig_chat_read_cursors').upsert(
+                  gigIds
+                      .map((gid) => {
+                            'user_id': myId,
+                            'gig_id': gid,
+                            'last_read_at': now,
+                          })
+                      .toList(),
+                );
+          }
+        }
+      }
+      if (!mounted) return;
+      setState(() {
+        _tabUnread[index] = 0;
+        _refreshToken++;
+      });
+    } catch (e) {
+      debugPrint('Mark tab read error: $e');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(_t(
+              'Kunne ikke merke som lest: $e', 'Could not mark as read: $e')),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
   Widget _tabLabel(String text, int index) {
     final count = _tabUnread[index] ?? 0;
+    // Langtrykk for touch, høyreklikk for mus — begge gir samme valg.
     return Tab(
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(text),
-          if (count > 0) ...[
-            const SizedBox(width: 6),
-            Container(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
-              decoration: BoxDecoration(
-                color: Colors.red,
-                borderRadius: BorderRadius.circular(999),
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onLongPress: count > 0 ? () => _markTabRead(index) : null,
+        onSecondaryTap: count > 0 ? () => _markTabRead(index) : null,
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(text),
+            if (count > 0) ...[
+              const SizedBox(width: 6),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                decoration: BoxDecoration(
+                  color: Colors.red,
+                  borderRadius: BorderRadius.circular(999),
+                ),
+                child: Text(
+                  count > 99 ? '99+' : '$count',
+                  style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 10,
+                      fontWeight: FontWeight.w800),
+                ),
               ),
-              child: Text(
-                count > 99 ? '99+' : '$count',
-                style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 10,
-                    fontWeight: FontWeight.w800),
-              ),
-            ),
+            ],
           ],
-        ],
+        ),
       ),
     );
   }
@@ -93,7 +175,8 @@ class _MgmtMessagesPageState extends State<MgmtMessagesPage>
   @override
   void initState() {
     super.initState();
-    _tabCtrl = TabController(length: 2, vsync: this, initialIndex: _tabIndexNotifier.value);
+    _tabCtrl = TabController(
+        length: 2, vsync: this, initialIndex: _tabIndexNotifier.value);
     _tabCtrl.addListener(() {
       _tabIndexNotifier.value = _tabCtrl.index;
       setState(() {});
@@ -163,8 +246,7 @@ class _MgmtMessagesPageState extends State<MgmtMessagesPage>
               // Tab bar
               Container(
                 decoration: BoxDecoration(
-                  border:
-                      Border(bottom: BorderSide(color: cs.outlineVariant)),
+                  border: Border(bottom: BorderSide(color: cs.outlineVariant)),
                 ),
                 child: TabBar(
                   controller: _tabCtrl,
@@ -190,14 +272,10 @@ class _MgmtMessagesPageState extends State<MgmtMessagesPage>
                       padding: const EdgeInsets.symmetric(
                           horizontal: 10, vertical: 5),
                       decoration: BoxDecoration(
-                        color: _unreadOnly
-                            ? Colors.black
-                            : Colors.transparent,
+                        color: _unreadOnly ? Colors.black : Colors.transparent,
                         borderRadius: BorderRadius.circular(999),
                         border: Border.all(
-                            color: _unreadOnly
-                                ? Colors.black
-                                : Colors.black26),
+                            color: _unreadOnly ? Colors.black : Colors.black26),
                       ),
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
@@ -207,9 +285,7 @@ class _MgmtMessagesPageState extends State<MgmtMessagesPage>
                                 ? Icons.filter_alt
                                 : Icons.filter_alt_outlined,
                             size: 14,
-                            color: _unreadOnly
-                                ? Colors.white
-                                : Colors.black54,
+                            color: _unreadOnly ? Colors.white : Colors.black54,
                           ),
                           const SizedBox(width: 5),
                           Text(
@@ -217,9 +293,8 @@ class _MgmtMessagesPageState extends State<MgmtMessagesPage>
                             style: TextStyle(
                               fontSize: 11,
                               fontWeight: FontWeight.w600,
-                              color: _unreadOnly
-                                  ? Colors.white
-                                  : Colors.black54,
+                              color:
+                                  _unreadOnly ? Colors.white : Colors.black54,
                             ),
                           ),
                         ],
@@ -236,11 +311,11 @@ class _MgmtMessagesPageState extends State<MgmtMessagesPage>
                   children: [
                     // Tab 1: DM + Groups
                     _ChatThreadList(
+                      key: ValueKey('chat-$_refreshToken'),
                       selectedKey: _selectedChatKey,
                       unreadOnly: _unreadOnly,
                       onUnreadTotal: (v) => _setTabUnread(0, v),
-                      onSelect: (key) =>
-                          setState(() => _selectedChatKey = key),
+                      onSelect: (key) => setState(() => _selectedChatKey = key),
                       onDeleted: (key) {
                         if (_selectedChatKey == key) {
                           setState(() => _selectedChatKey = null);
@@ -261,6 +336,7 @@ class _MgmtMessagesPageState extends State<MgmtMessagesPage>
                             },
                           )
                         : _GigThreadList(
+                            key: ValueKey('gig-$_refreshToken'),
                             selectedGigId: _selectedGigId,
                             unreadOnly: _unreadOnly,
                             onUnreadTotal: (v) => _setTabUnread(1, v),
@@ -283,7 +359,8 @@ class _MgmtMessagesPageState extends State<MgmtMessagesPage>
           child: _tabCtrl.index == 0
               ? _selectedChatKey == null
                   ? Center(
-                      child: Text(_t('Velg en samtale', 'Select a conversation'),
+                      child: Text(
+                          _t('Velg en samtale', 'Select a conversation'),
                           style: const TextStyle(color: Colors.black45)))
                   : _selectedChatKey!.startsWith('dm:')
                       ? _DmChatView(
@@ -297,7 +374,8 @@ class _MgmtMessagesPageState extends State<MgmtMessagesPage>
               : _isCss
                   ? _selectedTourKey == null
                       ? Center(
-                          child: Text(_t('Velg en samtale', 'Select a conversation'),
+                          child: Text(
+                              _t('Velg en samtale', 'Select a conversation'),
                               style: const TextStyle(color: Colors.black45)))
                       : _TourChatView(
                           key: ValueKey(_selectedTourKey),
@@ -306,7 +384,8 @@ class _MgmtMessagesPageState extends State<MgmtMessagesPage>
                         )
                   : _selectedGigId == null
                       ? Center(
-                          child: Text(_t('Velg en samtale', 'Select a conversation'),
+                          child: Text(
+                              _t('Velg en samtale', 'Select a conversation'),
                               style: const TextStyle(color: Colors.black45)))
                       : _GigChatView(
                           key: ValueKey(_selectedGigId),
@@ -331,6 +410,7 @@ class _ChatThreadList extends StatefulWidget {
   final bool unreadOnly;
 
   const _ChatThreadList({
+    super.key,
     required this.selectedKey,
     required this.onSelect,
     required this.onDeleted,
@@ -352,6 +432,7 @@ class _ChatThreadListState extends State<_ChatThreadList> {
     final groupTotal = _groupUnreads.values.fold<int>(0, (a, b) => a + b);
     widget.onUnreadTotal?.call(_dmUnreadTotal + groupTotal);
   }
+
   String get _myId => _sb.auth.currentUser?.id ?? '';
 
   final Map<String, Map<String, dynamic>> _profileCache = {};
@@ -391,7 +472,8 @@ class _ChatThreadListState extends State<_ChatThreadList> {
       );
       if (mounted) {
         setState(() {
-          _companyMemberIds = (rows as List).map((r) => r['id'] as String).toSet();
+          _companyMemberIds =
+              (rows as List).map((r) => r['id'] as String).toSet();
         });
       }
     } catch (_) {}
@@ -432,9 +514,8 @@ class _ChatThreadListState extends State<_ChatThreadList> {
           .from('group_chat_members')
           .select('group_chat_id')
           .eq('user_id', _myId);
-      final groupIds = (myGroups as List)
-          .map((r) => r['group_chat_id'] as String)
-          .toList();
+      final groupIds =
+          (myGroups as List).map((r) => r['group_chat_id'] as String).toList();
       if (groupIds.isEmpty) {
         _groupUnreads = {};
         return;
@@ -513,8 +594,7 @@ class _ChatThreadListState extends State<_ChatThreadList> {
           .select('id, name, avatar_url')
           .eq('id', peerId)
           .maybeSingle();
-      final p =
-          res ?? {'id': peerId, 'name': 'Unknown', 'avatar_url': null};
+      final p = res ?? {'id': peerId, 'name': 'Unknown', 'avatar_url': null};
       _profileCache[peerId] = p;
       return p;
     } catch (_) {
@@ -564,7 +644,8 @@ class _ChatThreadListState extends State<_ChatThreadList> {
     );
     final contacts = List<Map<String, dynamic>>.from(memberRows as List)
       ..removeWhere((p) => p['id'] == _myId)
-      ..sort((a, b) => ((a['name'] ?? '') as String).compareTo((b['name'] ?? '') as String));
+      ..sort((a, b) =>
+          ((a['name'] ?? '') as String).compareTo((b['name'] ?? '') as String));
 
     if (!mounted) return;
 
@@ -630,7 +711,8 @@ class _ChatThreadListState extends State<_ChatThreadList> {
               ).then((memberRows) {
                 final list = List<Map<String, dynamic>>.from(memberRows as List)
                   ..removeWhere((p) => p['id'] == _myId)
-                  ..sort((a, b) => ((a['name'] ?? '') as String).compareTo((b['name'] ?? '') as String));
+                  ..sort((a, b) => ((a['name'] ?? '') as String)
+                      .compareTo((b['name'] ?? '') as String));
                 setDialogState(() {
                   contacts = list;
                   loading = false;
@@ -749,17 +831,17 @@ class _ChatThreadListState extends State<_ChatThreadList> {
                 context: context,
                 builder: (ctx) => AlertDialog(
                   title: Text(_t('Slett samtale', 'Delete conversation')),
-                  content: Text(
-                      _t('Er du sikker på at du vil slette denne samtalen? Alle meldinger blir slettet permanent.',
-                        'Are you sure you want to delete this conversation? All messages will be permanently deleted.')),
+                  content: Text(_t(
+                      'Er du sikker på at du vil slette denne samtalen? Alle meldinger blir slettet permanent.',
+                      'Are you sure you want to delete this conversation? All messages will be permanently deleted.')),
                   actions: [
                     TextButton(
                       onPressed: () => Navigator.pop(ctx),
                       child: Text(_t('Avbryt', 'Cancel')),
                     ),
                     FilledButton(
-                      style: FilledButton.styleFrom(
-                          backgroundColor: Colors.red),
+                      style:
+                          FilledButton.styleFrom(backgroundColor: Colors.red),
                       onPressed: () async {
                         Navigator.pop(ctx);
                         await DirectChatService.deleteConversation(peerId);
@@ -777,17 +859,17 @@ class _ChatThreadListState extends State<_ChatThreadList> {
                 context: context,
                 builder: (ctx) => AlertDialog(
                   title: Text(_t('Slett gruppe', 'Delete group')),
-                  content: Text(
-                      _t('Er du sikker på at du vil slette denne gruppen? Alle meldinger og medlemmer blir slettet permanent.',
-                        'Are you sure you want to delete this group? All messages and members will be permanently deleted.')),
+                  content: Text(_t(
+                      'Er du sikker på at du vil slette denne gruppen? Alle meldinger og medlemmer blir slettet permanent.',
+                      'Are you sure you want to delete this group? All messages and members will be permanently deleted.')),
                   actions: [
                     TextButton(
                       onPressed: () => Navigator.pop(ctx),
                       child: Text(_t('Avbryt', 'Cancel')),
                     ),
                     FilledButton(
-                      style: FilledButton.styleFrom(
-                          backgroundColor: Colors.red),
+                      style:
+                          FilledButton.styleFrom(backgroundColor: Colors.red),
                       onPressed: () async {
                         Navigator.pop(ctx);
                         await GroupChatService.deleteGroup(groupId);
@@ -808,8 +890,7 @@ class _ChatThreadListState extends State<_ChatThreadList> {
                   getProfile: _getProfile,
                   selectedKey: widget.selectedKey,
                   onSelect: _handleSelect,
-                  onDeleteConversation:
-                      isAdmin ? confirmDeleteDm : null,
+                  onDeleteConversation: isAdmin ? confirmDeleteDm : null,
                   companyMemberIds: _companyMemberIds,
                   dmCursors: _dmCursors,
                   unreadOnly: widget.unreadOnly,
@@ -823,8 +904,7 @@ class _ChatThreadListState extends State<_ChatThreadList> {
                 _GroupList(
                   selectedKey: widget.selectedKey,
                   onSelect: _handleSelect,
-                  onDeleteGroup:
-                      isAdmin ? confirmDeleteGroup : null,
+                  onDeleteGroup: isAdmin ? confirmDeleteGroup : null,
                   groupUnreads: _groupUnreads,
                   unreadOnly: widget.unreadOnly,
                 ),
@@ -878,7 +958,8 @@ class _DmList extends StatelessWidget {
           final receiverId = msg['receiver_id'] as String? ?? '';
           final peerId = senderId == myId ? receiverId : senderId;
           // Only show DMs with members of the active company
-          if (companyMemberIds.isNotEmpty && !companyMemberIds.contains(peerId)) continue;
+          if (companyMemberIds.isNotEmpty && !companyMemberIds.contains(peerId))
+            continue;
           grouped.putIfAbsent(peerId, () => []).add(msg);
         }
 
@@ -894,7 +975,8 @@ class _DmList extends StatelessWidget {
           final unread = msgs.where((m) {
             if (m['sender_id'] == myId) return false;
             if (cursor == null) return true;
-            final createdAt = DateTime.tryParse(m['created_at'] as String? ?? '');
+            final createdAt =
+                DateTime.tryParse(m['created_at'] as String? ?? '');
             return createdAt != null && createdAt.isAfter(cursor);
           }).length;
           return MapEntry(e.key, (msgs.first, unread));
@@ -906,8 +988,7 @@ class _DmList extends StatelessWidget {
           return bTime.compareTo(aTime);
         });
 
-        final total =
-            conversations.fold<int>(0, (a, e) => a + e.value.$2);
+        final total = conversations.fold<int>(0, (a, e) => a + e.value.$2);
         WidgetsBinding.instance.addPostFrameCallback((_) {
           onUnreadTotal?.call(total);
         });
@@ -1022,7 +1103,8 @@ class _DmTileState extends State<_DmTile> {
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
         child: Row(
           children: [
-            Icon(Icons.person, size: 18,
+            Icon(Icons.person,
+                size: 18,
                 color: widget.isSelected ? Colors.white54 : Colors.black38),
             const SizedBox(width: 10),
             Expanded(
@@ -1046,9 +1128,8 @@ class _DmTileState extends State<_DmTile> {
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
                       fontSize: 12,
-                      color: widget.isSelected
-                          ? Colors.white60
-                          : Colors.black45,
+                      color:
+                          widget.isSelected ? Colors.white60 : Colors.black45,
                     ),
                   ),
                 ],
@@ -1067,22 +1148,18 @@ class _DmTileState extends State<_DmTile> {
                 if (widget.unreadCount > 0) ...[
                   const SizedBox(height: 4),
                   Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 7, vertical: 3),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
                     decoration: BoxDecoration(
-                      color:
-                          widget.isSelected ? Colors.white : Colors.red,
+                      color: widget.isSelected ? Colors.white : Colors.red,
                       borderRadius: BorderRadius.circular(999),
                     ),
                     child: Text(
-                      widget.unreadCount > 99
-                          ? '99+'
-                          : '${widget.unreadCount}',
+                      widget.unreadCount > 99 ? '99+' : '${widget.unreadCount}',
                       style: TextStyle(
                         fontSize: 11,
                         fontWeight: FontWeight.w800,
-                        color:
-                            widget.isSelected ? Colors.red : Colors.white,
+                        color: widget.isSelected ? Colors.red : Colors.white,
                       ),
                     ),
                   ),
@@ -1191,7 +1268,8 @@ class _GroupList extends StatelessWidget {
                       const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                   child: Row(
                     children: [
-                      Icon(Icons.group, size: 18,
+                      Icon(Icons.group,
+                          size: 18,
                           color: isSelected ? Colors.white54 : Colors.black38),
                       const SizedBox(width: 10),
                       Expanded(
@@ -1202,8 +1280,7 @@ class _GroupList extends StatelessWidget {
                           style: TextStyle(
                             fontWeight: FontWeight.w700,
                             fontSize: 14,
-                            color:
-                                isSelected ? Colors.white : Colors.black87,
+                            color: isSelected ? Colors.white : Colors.black87,
                           ),
                         ),
                       ),
@@ -1325,7 +1402,10 @@ class _DmChatViewState extends State<_DmChatView> with MentionMixin {
   }
 
   void _cancelEdit() {
-    setState(() { _editingMessageId = null; _controller.clear(); });
+    setState(() {
+      _editingMessageId = null;
+      _controller.clear();
+    });
   }
 
   void _cancelReply() {
@@ -1409,7 +1489,8 @@ class _DmChatViewState extends State<_DmChatView> with MentionMixin {
                       Align(
                         alignment: Alignment.centerLeft,
                         child: Text(_t('Legg til personer:', 'Add members:'),
-                            style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+                            style: const TextStyle(
+                                fontWeight: FontWeight.w600, fontSize: 13)),
                       ),
                       const SizedBox(height: 8),
                       ConstrainedBox(
@@ -1503,7 +1584,8 @@ class _DmChatViewState extends State<_DmChatView> with MentionMixin {
               Expanded(
                 child: Text(
                   _peerName ?? '...',
-                  style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16),
+                  style: const TextStyle(
+                      fontWeight: FontWeight.w800, fontSize: 16),
                 ),
               ),
               IconButton(
@@ -1572,10 +1654,11 @@ class _DmChatViewState extends State<_DmChatView> with MentionMixin {
                       Map<String, dynamic>? replyMsg;
                       final replyToId = msg['reply_to_id'];
                       if (replyToId != null) {
-                        replyMsg = messages.cast<Map<String, dynamic>?>().firstWhere(
-                          (m) => m?['id'] == replyToId,
-                          orElse: () => null,
-                        );
+                        replyMsg =
+                            messages.cast<Map<String, dynamic>?>().firstWhere(
+                                  (m) => m?['id'] == replyToId,
+                                  orElse: () => null,
+                                );
                       }
 
                       return _Bubble(
@@ -1589,8 +1672,10 @@ class _DmChatViewState extends State<_DmChatView> with MentionMixin {
                         replyMsg: replyMsg,
                         reactions: dmReactMap[msgId] ?? [],
                         currentUserId: myId,
-                        onAddReaction: (emoji) => DirectChatService.addReaction(msgId, emoji),
-                        onRemoveReaction: (emoji) => DirectChatService.removeReaction(msgId, emoji),
+                        onAddReaction: (emoji) =>
+                            DirectChatService.addReaction(msgId, emoji),
+                        onRemoveReaction: (emoji) =>
+                            DirectChatService.removeReaction(msgId, emoji),
                         onReply: () => _startReply(msg),
                         onEdit: isMine ? () => _startEdit(msg) : null,
                         onDelete: () async {
@@ -1633,9 +1718,7 @@ class _DmChatViewState extends State<_DmChatView> with MentionMixin {
             final text = _controller.text.trim();
             await DirectChatService.sendMessage(
               peerId: widget.peerId,
-              message: text.isNotEmpty
-                  ? text
-                  : (type == 'file' ? name : ''),
+              message: text.isNotEmpty ? text : (type == 'file' ? name : ''),
               senderName: _senderName ?? 'Admin',
               messageType: type,
               attachmentUrl: url,
@@ -1729,7 +1812,10 @@ class _GroupChatViewState extends State<_GroupChatView> with MentionMixin {
   }
 
   void _cancelEdit() {
-    setState(() { _editingMessageId = null; _controller.clear(); });
+    setState(() {
+      _editingMessageId = null;
+      _controller.clear();
+    });
   }
 
   void _cancelReply() {
@@ -1787,8 +1873,8 @@ class _GroupChatViewState extends State<_GroupChatView> with MentionMixin {
               const SizedBox(width: 8),
               Text(
                 _groupName,
-                style: const TextStyle(
-                    fontWeight: FontWeight.w800, fontSize: 16),
+                style:
+                    const TextStyle(fontWeight: FontWeight.w800, fontSize: 16),
               ),
             ],
           ),
@@ -1834,10 +1920,11 @@ class _GroupChatViewState extends State<_GroupChatView> with MentionMixin {
                       Map<String, dynamic>? replyMsg;
                       final replyToId = msg['reply_to_id'];
                       if (replyToId != null) {
-                        replyMsg = messages.cast<Map<String, dynamic>?>().firstWhere(
-                          (m) => m?['id'] == replyToId,
-                          orElse: () => null,
-                        );
+                        replyMsg =
+                            messages.cast<Map<String, dynamic>?>().firstWhere(
+                                  (m) => m?['id'] == replyToId,
+                                  orElse: () => null,
+                                );
                       }
 
                       return _Bubble(
@@ -1851,8 +1938,10 @@ class _GroupChatViewState extends State<_GroupChatView> with MentionMixin {
                         replyMsg: replyMsg,
                         reactions: grpReactMap[msgId] ?? [],
                         currentUserId: myId,
-                        onAddReaction: (emoji) => GroupChatService.addReaction(msgId, emoji),
-                        onRemoveReaction: (emoji) => GroupChatService.removeReaction(msgId, emoji),
+                        onAddReaction: (emoji) =>
+                            GroupChatService.addReaction(msgId, emoji),
+                        onRemoveReaction: (emoji) =>
+                            GroupChatService.removeReaction(msgId, emoji),
                         onReply: () => _startReply(msg),
                         onEdit: isMine ? () => _startEdit(msg) : null,
                         onDelete: () async {
@@ -1894,9 +1983,7 @@ class _GroupChatViewState extends State<_GroupChatView> with MentionMixin {
             final text = _controller.text.trim();
             await GroupChatService.sendGroupMessage(
               groupId: widget.groupId,
-              message: text.isNotEmpty
-                  ? text
-                  : (type == 'file' ? name : ''),
+              message: text.isNotEmpty ? text : (type == 'file' ? name : ''),
               senderName: _senderName ?? 'Admin',
               messageType: type,
               attachmentUrl: url,
@@ -1921,7 +2008,8 @@ class _ChatInput extends StatefulWidget {
   final Map<String, dynamic>? replyTo;
   final VoidCallback? onCancelEdit;
   final VoidCallback? onCancelReply;
-  final Future<void> Function(String messageType, String attachmentUrl, String fileName)? onAttachment;
+  final Future<void> Function(
+      String messageType, String attachmentUrl, String fileName)? onAttachment;
 
   const _ChatInput({
     required this.controller,
@@ -2016,8 +2104,7 @@ class _ChatInputState extends State<_ChatInput> {
           _pendingContentType = 'image/${file.extension ?? 'png'}';
         });
       } else if (type == 'file') {
-        final result =
-            await FilePicker.platform.pickFiles(withData: true);
+        final result = await FilePicker.platform.pickFiles(withData: true);
         if (result == null || result.files.isEmpty) return;
         final file = result.files.first;
         if (file.bytes == null) return;
@@ -2031,7 +2118,8 @@ class _ChatInputState extends State<_ChatInput> {
         if (!mounted) return;
         final gifUrl = await showDialog<String>(
           context: context,
-          builder: (_) => GifPicker(onGifSelected: (url) => Navigator.pop(context, url)),
+          builder: (_) =>
+              GifPicker(onGifSelected: (url) => Navigator.pop(context, url)),
         );
         if (gifUrl != null) await widget.onAttachment!('gif', gifUrl, '');
       }
@@ -2107,9 +2195,13 @@ class _ChatInputState extends State<_ChatInput> {
             padding: const EdgeInsets.fromLTRB(16, 8, 8, 0),
             child: Row(
               children: [
-                Container(width: 3, height: 36, decoration: BoxDecoration(
-                  color: Colors.black, borderRadius: BorderRadius.circular(2),
-                )),
+                Container(
+                    width: 3,
+                    height: 36,
+                    decoration: BoxDecoration(
+                      color: Colors.black,
+                      borderRadius: BorderRadius.circular(2),
+                    )),
                 const SizedBox(width: 8),
                 Expanded(
                   child: Column(
@@ -2117,15 +2209,21 @@ class _ChatInputState extends State<_ChatInput> {
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       Text(widget.replyTo!['sender_name'] as String? ?? '',
-                        style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 12)),
-                      Text(_truncate(widget.replyTo!['message'] as String? ?? '', 60),
-                        style: const TextStyle(fontSize: 12, color: Colors.black54),
-                        maxLines: 1, overflow: TextOverflow.ellipsis),
+                          style: const TextStyle(
+                              fontWeight: FontWeight.w700, fontSize: 12)),
+                      Text(
+                          _truncate(
+                              widget.replyTo!['message'] as String? ?? '', 60),
+                          style: const TextStyle(
+                              fontSize: 12, color: Colors.black54),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis),
                     ],
                   ),
                 ),
-                IconButton(icon: const Icon(Icons.close, size: 18),
-                  onPressed: widget.onCancelReply),
+                IconButton(
+                    icon: const Icon(Icons.close, size: 18),
+                    onPressed: widget.onCancelReply),
               ],
             ),
           ),
@@ -2139,10 +2237,13 @@ class _ChatInputState extends State<_ChatInput> {
               children: [
                 const Icon(Icons.edit, size: 16, color: Colors.black54),
                 const SizedBox(width: 8),
-                Text(_t('Redigerer melding', 'Editing message'), style: const TextStyle(fontSize: 12, color: Colors.black54)),
+                Text(_t('Redigerer melding', 'Editing message'),
+                    style:
+                        const TextStyle(fontSize: 12, color: Colors.black54)),
                 const Spacer(),
-                IconButton(icon: const Icon(Icons.close, size: 18),
-                  onPressed: widget.onCancelEdit),
+                IconButton(
+                    icon: const Icon(Icons.close, size: 18),
+                    onPressed: widget.onCancelEdit),
               ],
             ),
           ),
@@ -2162,15 +2263,27 @@ class _ChatInputState extends State<_ChatInput> {
                   tooltip: 'Legg til',
                   onSelected: (v) => _handleAttach(v),
                   itemBuilder: (_) => const [
-                    PopupMenuItem(value: 'image', child: Row(children: [
-                      Icon(Icons.image, size: 18), SizedBox(width: 8), Text('Bilde'),
-                    ])),
-                    PopupMenuItem(value: 'file', child: Row(children: [
-                      Icon(Icons.attach_file, size: 18), SizedBox(width: 8), Text('Fil'),
-                    ])),
-                    PopupMenuItem(value: 'gif', child: Row(children: [
-                      Icon(Icons.gif_box, size: 18), SizedBox(width: 8), Text('GIF'),
-                    ])),
+                    PopupMenuItem(
+                        value: 'image',
+                        child: Row(children: [
+                          Icon(Icons.image, size: 18),
+                          SizedBox(width: 8),
+                          Text('Bilde'),
+                        ])),
+                    PopupMenuItem(
+                        value: 'file',
+                        child: Row(children: [
+                          Icon(Icons.attach_file, size: 18),
+                          SizedBox(width: 8),
+                          Text('Fil'),
+                        ])),
+                    PopupMenuItem(
+                        value: 'gif',
+                        child: Row(children: [
+                          Icon(Icons.gif_box, size: 18),
+                          SizedBox(width: 8),
+                          Text('GIF'),
+                        ])),
                   ],
                 ),
               Expanded(
@@ -2197,7 +2310,8 @@ class _ChatInputState extends State<_ChatInput> {
               const SizedBox(width: 10),
               (widget.sending || _uploading)
                   ? const SizedBox(
-                      width: 44, height: 44,
+                      width: 44,
+                      height: 44,
                       child: Padding(
                         padding: EdgeInsets.all(10),
                         child: CircularProgressIndicator(strokeWidth: 2),
@@ -2206,10 +2320,14 @@ class _ChatInputState extends State<_ChatInput> {
                   : FilledButton.icon(
                       onPressed: _handleSend,
                       icon: Icon(
-                        widget.editingMessageId != null ? Icons.check_rounded : Icons.send_rounded,
+                        widget.editingMessageId != null
+                            ? Icons.check_rounded
+                            : Icons.send_rounded,
                         size: 18,
                       ),
-                      label: Text(widget.editingMessageId != null ? _t('Lagre', 'Save') : _t('Send', 'Send')),
+                      label: Text(widget.editingMessageId != null
+                          ? _t('Lagre', 'Save')
+                          : _t('Send', 'Send')),
                       style: FilledButton.styleFrom(
                         backgroundColor: Colors.black,
                         padding: const EdgeInsets.symmetric(
@@ -2241,6 +2359,7 @@ class _GigThreadList extends StatefulWidget {
   final bool unreadOnly;
 
   const _GigThreadList({
+    super.key,
     required this.selectedGigId,
     required this.onSelect,
     this.onUnreadTotal,
@@ -2303,17 +2422,17 @@ class _GigThreadListState extends State<_GigThreadList> {
       final ids = <String>{};
 
       // 1) Gigs directly owned by this company
-      final directGigs = await _sb.from('gigs').select('id').eq('company_id', companyId);
+      final directGigs =
+          await _sb.from('gigs').select('id').eq('company_id', companyId);
       for (final g in (directGigs as List)) {
         ids.add(g['id'] as String);
       }
 
       // 2) Gigs linked via gig_offers → gig_offer_gigs (CSS model)
-      final offerRows = await _sb
-          .from('gig_offers')
-          .select('id')
-          .eq('company_id', companyId);
-      final offerIds = (offerRows as List).map((o) => o['id'] as String).toList();
+      final offerRows =
+          await _sb.from('gig_offers').select('id').eq('company_id', companyId);
+      final offerIds =
+          (offerRows as List).map((o) => o['id'] as String).toList();
       if (offerIds.isNotEmpty) {
         final junctionRows = await _sb
             .from('gig_offer_gigs')
@@ -2388,8 +2507,8 @@ class _GigThreadListState extends State<_GigThreadList> {
         int unreadFor(String gigId, List<Map<String, dynamic>> msgs) =>
             _cursorUnreads[gigId] ??
             msgs
-                .where((r) =>
-                    r['is_admin'] != true && r['read_by_admin'] != true)
+                .where(
+                    (r) => r['is_admin'] != true && r['read_by_admin'] != true)
                 .length;
 
         if (widget.unreadOnly) {
@@ -2476,8 +2595,7 @@ class _GigThreadTile extends StatelessWidget {
           onTap: onTap,
           child: Container(
             color: isSelected ? Colors.black : Colors.transparent,
-            padding:
-                const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -2491,8 +2609,7 @@ class _GigThreadTile extends StatelessWidget {
                         style: TextStyle(
                           fontWeight: FontWeight.w700,
                           fontSize: 14,
-                          color:
-                              isSelected ? Colors.white : Colors.black87,
+                          color: isSelected ? Colors.white : Colors.black87,
                         ),
                       ),
                     ),
@@ -2500,9 +2617,7 @@ class _GigThreadTile extends StatelessWidget {
                       Text(timeStr,
                           style: TextStyle(
                             fontSize: 11,
-                            color: isSelected
-                                ? Colors.white60
-                                : Colors.black38,
+                            color: isSelected ? Colors.white60 : Colors.black38,
                           )),
                   ],
                 ),
@@ -2516,8 +2631,7 @@ class _GigThreadTile extends StatelessWidget {
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
                           fontSize: 13,
-                          color:
-                              isSelected ? Colors.white70 : Colors.black54,
+                          color: isSelected ? Colors.white70 : Colors.black54,
                         ),
                       ),
                     ),
@@ -2615,8 +2729,8 @@ class _GigChatViewState extends State<_GigChatView> with MentionMixin {
           .maybeSingle();
       final name = (p?['name'] as String?)?.trim() ?? '';
       if (mounted) {
-        setState(() => _senderName =
-            name.isNotEmpty ? name : (user.email ?? 'Admin'));
+        setState(() =>
+            _senderName = name.isNotEmpty ? name : (user.email ?? 'Admin'));
       }
     } catch (_) {
       if (mounted) setState(() => _senderName = user.email ?? 'Admin');
@@ -2677,7 +2791,10 @@ class _GigChatViewState extends State<_GigChatView> with MentionMixin {
   }
 
   void _cancelEdit() {
-    setState(() { _editingMessageId = null; _controller.clear(); });
+    setState(() {
+      _editingMessageId = null;
+      _controller.clear();
+    });
   }
 
   void _cancelReply() {
@@ -2699,19 +2816,22 @@ class _GigChatViewState extends State<_GigChatView> with MentionMixin {
         setState(() => _editingMessageId = null);
       } else {
         final user = _sb.auth.currentUser;
-        final name = _senderName.isNotEmpty
-            ? _senderName
-            : (user?.email ?? 'Admin');
+        final name =
+            _senderName.isNotEmpty ? _senderName : (user?.email ?? 'Admin');
         final mentions = List<String>.from(mentionedUserIds);
-        final inserted = await _sb.from('gig_messages').insert({
-          'gig_id': widget.gigId,
-          'user_id': user?.id,
-          'sender_name': name,
-          'message': text,
-          'is_admin': true,
-          if (_replyTo != null) 'reply_to_id': _replyTo!['id'],
-          if (mentions.isNotEmpty) 'mentioned_user_ids': mentions,
-        }).select('id').single();
+        final inserted = await _sb
+            .from('gig_messages')
+            .insert({
+              'gig_id': widget.gigId,
+              'user_id': user?.id,
+              'sender_name': name,
+              'message': text,
+              'is_admin': true,
+              if (_replyTo != null) 'reply_to_id': _replyTo!['id'],
+              if (mentions.isNotEmpty) 'mentioned_user_ids': mentions,
+            })
+            .select('id')
+            .single();
         final newMessageId = inserted['id'] as String;
         clearMentions();
         setState(() => _replyTo = null);
@@ -2843,10 +2963,11 @@ class _GigChatViewState extends State<_GigChatView> with MentionMixin {
                       Map<String, dynamic>? replyMsg;
                       final replyToId = msg['reply_to_id'];
                       if (replyToId != null) {
-                        replyMsg = messages.cast<Map<String, dynamic>?>().firstWhere(
-                          (m) => m?['id'] == replyToId,
-                          orElse: () => null,
-                        );
+                        replyMsg =
+                            messages.cast<Map<String, dynamic>?>().firstWhere(
+                                  (m) => m?['id'] == replyToId,
+                                  orElse: () => null,
+                                );
                       }
 
                       return _Bubble(
@@ -2860,8 +2981,10 @@ class _GigChatViewState extends State<_GigChatView> with MentionMixin {
                         replyMsg: replyMsg,
                         reactions: rMap[msgId] ?? [],
                         currentUserId: myId,
-                        onAddReaction: (emoji) => ChatService.addReaction(msgId, emoji),
-                        onRemoveReaction: (emoji) => ChatService.removeReaction(msgId, emoji),
+                        onAddReaction: (emoji) =>
+                            ChatService.addReaction(msgId, emoji),
+                        onRemoveReaction: (emoji) =>
+                            ChatService.removeReaction(msgId, emoji),
                         onReply: () => _startReply(msg),
                         onEdit: isMine ? () => _startEdit(msg) : null,
                         onDelete: () async {
@@ -2898,17 +3021,14 @@ class _GigChatViewState extends State<_GigChatView> with MentionMixin {
           onCancelReply: _cancelReply,
           onAttachment: (type, url, name) async {
             final user = _sb.auth.currentUser;
-            final senderName = _senderName.isNotEmpty
-                ? _senderName
-                : (user?.email ?? 'Admin');
+            final senderName =
+                _senderName.isNotEmpty ? _senderName : (user?.email ?? 'Admin');
             final text = _controller.text.trim();
             await _sb.from('gig_messages').insert({
               'gig_id': widget.gigId,
               'user_id': user?.id,
               'sender_name': senderName,
-              'message': text.isNotEmpty
-                  ? text
-                  : (type == 'file' ? name : ''),
+              'message': text.isNotEmpty ? text : (type == 'file' ? name : ''),
               'is_admin': true,
               'message_type': type,
               'attachment_url': url,
@@ -2945,7 +3065,21 @@ class _Bubble extends StatelessWidget {
   final String? attachmentUrl;
   final bool showRead;
 
-  static const _emojiOptions = ['✅', '👍', '👎', '❤️', '😂', '😮', '😢', '😡', '🙏', '🔥', '🎉', '💯', '👀'];
+  static const _emojiOptions = [
+    '✅',
+    '👍',
+    '👎',
+    '❤️',
+    '😂',
+    '😮',
+    '😢',
+    '😡',
+    '🙏',
+    '🔥',
+    '🎉',
+    '💯',
+    '👀'
+  ];
 
   const _Bubble({
     this.messageId = '',
@@ -2992,126 +3126,143 @@ class _Bubble extends StatelessWidget {
           crossAxisAlignment:
               isAdmin ? CrossAxisAlignment.end : CrossAxisAlignment.start,
           children: [
-        GestureDetector(
-          onSecondaryTapUp:
-              isDeleted ? null : (details) => _showContextMenu(context),
-          onLongPress: isDeleted ? null : () => _showContextMenu(context),
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-            decoration: BoxDecoration(
-              color: isAdmin ? Colors.black : const Color(0xFFEEEEEE),
-              borderRadius: BorderRadius.only(
-                topLeft: const Radius.circular(16),
-                topRight: const Radius.circular(16),
-                bottomLeft: Radius.circular(isAdmin ? 16 : 4),
-                bottomRight: Radius.circular(isAdmin ? 4 : 16),
-              ),
-            ),
-            child: Column(
-              crossAxisAlignment:
-                  isAdmin ? CrossAxisAlignment.end : CrossAxisAlignment.start,
-              children: [
-                Text(senderName,
-                    style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w700,
-                      color: isAdmin ? Colors.white60 : Colors.black45,
-                    )),
-                const SizedBox(height: 3),
-                if (isDeleted)
-                  Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(Icons.do_not_disturb_alt,
-                          size: 15,
-                          color: isAdmin ? Colors.white54 : Colors.black38),
-                      const SizedBox(width: 4),
-                      Flexible(
-                        child: Text(
-                          '$senderName slettet en melding',
-                          style: TextStyle(
-                            fontSize: 14,
-                            fontStyle: FontStyle.italic,
-                            color: isAdmin ? Colors.white60 : Colors.black45,
-                          ),
-                        ),
-                      ),
-                    ],
-                  )
-                else ...[
-                // Reply quote
-                if (replyMsg != null) ...[
-                  Container(
-                    padding: const EdgeInsets.all(8),
-                    margin: const EdgeInsets.only(bottom: 6),
-                    decoration: BoxDecoration(
-                      color: isAdmin
-                          ? Colors.white.withValues(alpha: 0.12)
-                          : Colors.black.withValues(alpha: 0.06),
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border(
-                        left: BorderSide(
-                          color: isAdmin ? Colors.white54 : Colors.black26,
-                          width: 3,
-                        ),
-                      ),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(replyMsg!['sender_name'] as String? ?? '',
-                          style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700,
-                            color: isAdmin ? Colors.white70 : Colors.black54)),
-                        Text(_truncate(replyMsg!['message'] as String? ?? '', 60),
-                          style: TextStyle(fontSize: 12,
-                            color: isAdmin ? Colors.white54 : Colors.black45),
-                          maxLines: 2, overflow: TextOverflow.ellipsis),
-                      ],
-                    ),
-                  ),
-                ],
-                ChatMediaContent(
-                  messageType: messageType,
-                  message: message,
-                  attachmentUrl: attachmentUrl,
-                  isMine: isAdmin,
-                  textStyle: TextStyle(
-                    fontSize: 14,
-                    color: isAdmin ? Colors.white : Colors.black87,
+            GestureDetector(
+              onSecondaryTapUp:
+                  isDeleted ? null : (details) => _showContextMenu(context),
+              onLongPress: isDeleted ? null : () => _showContextMenu(context),
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                decoration: BoxDecoration(
+                  color: isAdmin ? Colors.black : const Color(0xFFEEEEEE),
+                  borderRadius: BorderRadius.only(
+                    topLeft: const Radius.circular(16),
+                    topRight: const Radius.circular(16),
+                    bottomLeft: Radius.circular(isAdmin ? 16 : 4),
+                    bottomRight: Radius.circular(isAdmin ? 4 : 16),
                   ),
                 ),
-                ],
-                if (timeStr != null) ...[
-                  const SizedBox(height: 3),
-                  Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(timeStr,
-                          style: TextStyle(
-                            fontSize: 11,
-                            color: isAdmin ? Colors.white38 : Colors.black38,
-                          )),
-                      if (editedAt != null && !isDeleted) ...[
-                        const SizedBox(width: 4),
-                        Text('(redigert)',
-                          style: TextStyle(
-                            fontSize: 10,
-                            fontStyle: FontStyle.italic,
-                            color: isAdmin ? Colors.white38 : Colors.black38,
-                          )),
+                child: Column(
+                  crossAxisAlignment: isAdmin
+                      ? CrossAxisAlignment.end
+                      : CrossAxisAlignment.start,
+                  children: [
+                    Text(senderName,
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                          color: isAdmin ? Colors.white60 : Colors.black45,
+                        )),
+                    const SizedBox(height: 3),
+                    if (isDeleted)
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.do_not_disturb_alt,
+                              size: 15,
+                              color: isAdmin ? Colors.white54 : Colors.black38),
+                          const SizedBox(width: 4),
+                          Flexible(
+                            child: Text(
+                              '$senderName slettet en melding',
+                              style: TextStyle(
+                                fontSize: 14,
+                                fontStyle: FontStyle.italic,
+                                color:
+                                    isAdmin ? Colors.white60 : Colors.black45,
+                              ),
+                            ),
+                          ),
+                        ],
+                      )
+                    else ...[
+                      // Reply quote
+                      if (replyMsg != null) ...[
+                        Container(
+                          padding: const EdgeInsets.all(8),
+                          margin: const EdgeInsets.only(bottom: 6),
+                          decoration: BoxDecoration(
+                            color: isAdmin
+                                ? Colors.white.withValues(alpha: 0.12)
+                                : Colors.black.withValues(alpha: 0.06),
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border(
+                              left: BorderSide(
+                                color:
+                                    isAdmin ? Colors.white54 : Colors.black26,
+                                width: 3,
+                              ),
+                            ),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(replyMsg!['sender_name'] as String? ?? '',
+                                  style: TextStyle(
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w700,
+                                      color: isAdmin
+                                          ? Colors.white70
+                                          : Colors.black54)),
+                              Text(
+                                  _truncate(
+                                      replyMsg!['message'] as String? ?? '',
+                                      60),
+                                  style: TextStyle(
+                                      fontSize: 12,
+                                      color: isAdmin
+                                          ? Colors.white54
+                                          : Colors.black45),
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis),
+                            ],
+                          ),
+                        ),
                       ],
-                      if (showRead && isAdmin) ...[
-                        const SizedBox(width: 6),
-                        Icon(Icons.done_all, size: 14,
-                          color: Colors.blue.shade300),
-                      ],
+                      ChatMediaContent(
+                        messageType: messageType,
+                        message: message,
+                        attachmentUrl: attachmentUrl,
+                        isMine: isAdmin,
+                        textStyle: TextStyle(
+                          fontSize: 14,
+                          color: isAdmin ? Colors.white : Colors.black87,
+                        ),
+                      ),
                     ],
-                  ),
-                ],
-              ],
+                    if (timeStr != null) ...[
+                      const SizedBox(height: 3),
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(timeStr,
+                              style: TextStyle(
+                                fontSize: 11,
+                                color:
+                                    isAdmin ? Colors.white38 : Colors.black38,
+                              )),
+                          if (editedAt != null && !isDeleted) ...[
+                            const SizedBox(width: 4),
+                            Text('(redigert)',
+                                style: TextStyle(
+                                  fontSize: 10,
+                                  fontStyle: FontStyle.italic,
+                                  color:
+                                      isAdmin ? Colors.white38 : Colors.black38,
+                                )),
+                          ],
+                          if (showRead && isAdmin) ...[
+                            const SizedBox(width: 6),
+                            Icon(Icons.done_all,
+                                size: 14, color: Colors.blue.shade300),
+                          ],
+                        ],
+                      ),
+                    ],
+                  ],
+                ),
+              ),
             ),
-          ),
-        ),
             // Reaction pills
             if (grouped.isNotEmpty && !isDeleted)
               Padding(
@@ -3123,7 +3274,8 @@ class _Bubble extends StatelessWidget {
                     final emoji = e.key;
                     final info = e.value;
                     return GestureDetector(
-                      onTap: () => showReactionDetailsDialog(context, reactions),
+                      onTap: () =>
+                          showReactionDetailsDialog(context, reactions),
                       onDoubleTap: () {
                         if (info.isMine) {
                           onRemoveReaction?.call(emoji);
@@ -3132,7 +3284,8 @@ class _Bubble extends StatelessWidget {
                         }
                       },
                       child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 6, vertical: 2),
                         decoration: BoxDecoration(
                           color: info.isMine
                               ? Colors.blue.withValues(alpha: 0.15)
@@ -3166,8 +3319,10 @@ class _Bubble extends StatelessWidget {
     showMenu<String>(
       context: context,
       position: RelativeRect.fromLTRB(
-        offset.dx, offset.dy - 50,
-        offset.dx + box.size.width, offset.dy,
+        offset.dx,
+        offset.dy - 50,
+        offset.dx + box.size.width,
+        offset.dy,
       ),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       items: [
@@ -3184,7 +3339,8 @@ class _Bubble extends StatelessWidget {
                     onAddReaction!(emoji);
                   },
                   child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
                     child: Text(emoji, style: const TextStyle(fontSize: 22)),
                   ),
                 );
@@ -3193,29 +3349,47 @@ class _Bubble extends StatelessWidget {
           ),
         const PopupMenuItem<String>(
           value: 'copy',
-          child: Row(children: [Icon(Icons.copy, size: 18), SizedBox(width: 8), Text('Kopier')]),
+          child: Row(children: [
+            Icon(Icons.copy, size: 18),
+            SizedBox(width: 8),
+            Text('Kopier')
+          ]),
         ),
         if (onReply != null)
           const PopupMenuItem<String>(
             value: 'reply',
-            child: Row(children: [Icon(Icons.reply, size: 18), SizedBox(width: 8), Text('Svar')]),
+            child: Row(children: [
+              Icon(Icons.reply, size: 18),
+              SizedBox(width: 8),
+              Text('Svar')
+            ]),
           ),
         if (onEdit != null)
           const PopupMenuItem<String>(
             value: 'edit',
-            child: Row(children: [Icon(Icons.edit, size: 18), SizedBox(width: 8), Text('Rediger')]),
+            child: Row(children: [
+              Icon(Icons.edit, size: 18),
+              SizedBox(width: 8),
+              Text('Rediger')
+            ]),
           ),
         if (onDelete != null)
           PopupMenuItem<String>(
             value: 'delete',
-            child: Row(children: [const Icon(Icons.delete_outline, size: 18, color: Colors.red), const SizedBox(width: 8), Text(_t('Slett', 'Delete'), style: const TextStyle(color: Colors.red))]),
+            child: Row(children: [
+              const Icon(Icons.delete_outline, size: 18, color: Colors.red),
+              const SizedBox(width: 8),
+              Text(_t('Slett', 'Delete'),
+                  style: const TextStyle(color: Colors.red))
+            ]),
           ),
       ],
     ).then((value) {
       if (value == 'copy') {
         Clipboard.setData(ClipboardData(text: message));
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Kopiert'), duration: Duration(seconds: 1)),
+          const SnackBar(
+              content: Text('Kopiert'), duration: Duration(seconds: 1)),
         );
       }
       if (value == 'reply') onReply?.call();
@@ -3285,9 +3459,13 @@ class _TourThreadList extends StatelessWidget {
 
         final threads = grouped.entries.map((e) {
           final msgs = e.value
-            ..sort((a, b) => (a['created_at'] as String).compareTo(b['created_at'] as String));
+            ..sort((a, b) => (a['created_at'] as String)
+                .compareTo(b['created_at'] as String));
           final last = msgs.last;
-          final unread = msgs.where((m) => m['is_admin'] == false && m['read_by_admin'] == false).length;
+          final unread = msgs
+              .where(
+                  (m) => m['is_admin'] == false && m['read_by_admin'] == false)
+              .length;
           return MapEntry(e.key, (last, unread));
         }).toList()
           ..sort((a, b) {
@@ -3320,10 +3498,12 @@ class _TourThreadList extends StatelessWidget {
               onTap: () => onSelect(key),
               child: Container(
                 color: isSelected ? Colors.black : Colors.transparent,
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                 child: Row(
                   children: [
-                    Icon(Icons.directions_bus, size: 18,
+                    Icon(Icons.directions_bus,
+                        size: 18,
                         color: isSelected ? Colors.white54 : Colors.black38),
                     const SizedBox(width: 10),
                     Expanded(
@@ -3335,7 +3515,9 @@ class _TourThreadList extends StatelessWidget {
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: TextStyle(
-                              fontWeight: unread > 0 ? FontWeight.w900 : FontWeight.w600,
+                              fontWeight: unread > 0
+                                  ? FontWeight.w900
+                                  : FontWeight.w600,
                               color: isSelected ? Colors.white : Colors.black,
                             ),
                           ),
@@ -3345,7 +3527,8 @@ class _TourThreadList extends StatelessWidget {
                             overflow: TextOverflow.ellipsis,
                             style: TextStyle(
                               fontSize: 12,
-                              color: isSelected ? Colors.white60 : Colors.black45,
+                              color:
+                                  isSelected ? Colors.white60 : Colors.black45,
                             ),
                           ),
                         ],
@@ -3354,13 +3537,17 @@ class _TourThreadList extends StatelessWidget {
                     if (unread > 0)
                       Container(
                         margin: const EdgeInsets.only(left: 6),
-                        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 7, vertical: 2),
                         decoration: BoxDecoration(
                           color: Colors.red,
                           borderRadius: BorderRadius.circular(10),
                         ),
                         child: Text('$unread',
-                            style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w700)),
+                            style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 11,
+                                fontWeight: FontWeight.w700)),
                       ),
                   ],
                 ),
@@ -3381,7 +3568,8 @@ class _TourChatView extends StatefulWidget {
   final String dato;
   final String produksjon;
 
-  const _TourChatView({super.key, required this.dato, required this.produksjon});
+  const _TourChatView(
+      {super.key, required this.dato, required this.produksjon});
 
   @override
   State<_TourChatView> createState() => _TourChatViewState();
@@ -3406,11 +3594,13 @@ class _TourChatViewState extends State<_TourChatView> with MentionMixin {
     try {
       final companyId = activeCompanyNotifier.value?.id;
       if (companyId == null) return;
-      final rows = await _sb.rpc('get_company_member_profiles', params: {'p_company_id': companyId});
+      final rows = await _sb.rpc('get_company_member_profiles',
+          params: {'p_company_id': companyId});
       final myId = _sb.auth.currentUser?.id;
       final candidates = (rows as List)
           .where((r) => r['id'] != myId)
-          .map((r) => MentionCandidate(id: r['id'] as String, name: r['name'] as String? ?? ''))
+          .map((r) => MentionCandidate(
+              id: r['id'] as String, name: r['name'] as String? ?? ''))
           .where((c) => c.name.isNotEmpty)
           .toList();
       if (mounted) initMentionCandidates(candidates);
@@ -3433,11 +3623,18 @@ class _TourChatViewState extends State<_TourChatView> with MentionMixin {
   }
 
   void _startReply(Map<String, dynamic> msg) {
-    setState(() { _replyTo = msg; _editingMessageId = null; _controller.clear(); });
+    setState(() {
+      _replyTo = msg;
+      _editingMessageId = null;
+      _controller.clear();
+    });
   }
 
   void _cancelEdit() {
-    setState(() { _editingMessageId = null; _controller.clear(); });
+    setState(() {
+      _editingMessageId = null;
+      _controller.clear();
+    });
   }
 
   void _cancelReply() {
@@ -3468,7 +3665,8 @@ class _TourChatViewState extends State<_TourChatView> with MentionMixin {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Feil: $e')));
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('Feil: $e')));
       }
     } finally {
       if (mounted) setState(() => _sending = false);
@@ -3490,13 +3688,18 @@ class _TourChatViewState extends State<_TourChatView> with MentionMixin {
         Container(
           width: double.infinity,
           padding: const EdgeInsets.fromLTRB(20, 12, 12, 12),
-          decoration: BoxDecoration(border: Border(bottom: BorderSide(color: Theme.of(context).colorScheme.outlineVariant))),
+          decoration: BoxDecoration(
+              border: Border(
+                  bottom: BorderSide(
+                      color: Theme.of(context).colorScheme.outlineVariant))),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(widget.produksjon.isEmpty ? '—' : widget.produksjon,
-                  style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),
-              Text(dateStr, style: const TextStyle(color: Colors.black45, fontSize: 13)),
+                  style: const TextStyle(
+                      fontWeight: FontWeight.w800, fontSize: 16)),
+              Text(dateStr,
+                  style: const TextStyle(color: Colors.black45, fontSize: 13)),
             ],
           ),
         ),
@@ -3504,15 +3707,21 @@ class _TourChatViewState extends State<_TourChatView> with MentionMixin {
         // Messages
         Expanded(
           child: StreamBuilder<List<Map<String, dynamic>>>(
-            stream: ChatService.streamMessages(dato: widget.dato, produksjon: widget.produksjon),
+            stream: ChatService.streamMessages(
+                dato: widget.dato, produksjon: widget.produksjon),
             builder: (context, snapshot) {
               final messages = snapshot.data ?? [];
               if (messages.isEmpty) {
-                return Center(child: Text(_t('Ingen meldinger', 'No messages'), style: const TextStyle(color: Colors.black45)));
+                return Center(
+                    child: Text(_t('Ingen meldinger', 'No messages'),
+                        style: const TextStyle(color: Colors.black45)));
               }
 
               final myId = _sb.auth.currentUser?.id ?? '';
-              final messageIds = messages.map((m) => m['id']?.toString()).whereType<String>().toList();
+              final messageIds = messages
+                  .map((m) => m['id']?.toString())
+                  .whereType<String>()
+                  .toList();
 
               return StreamBuilder<List<Map<String, dynamic>>>(
                 stream: ChatService.streamReactions(messageIds),
@@ -3538,8 +3747,10 @@ class _TourChatViewState extends State<_TourChatView> with MentionMixin {
                       Map<String, dynamic>? replyMsg;
                       final replyToId = msg['reply_to_id'];
                       if (replyToId != null) {
-                        replyMsg = messages.cast<Map<String, dynamic>?>().firstWhere(
-                          (m) => m?['id'] == replyToId, orElse: () => null);
+                        replyMsg = messages
+                            .cast<Map<String, dynamic>?>()
+                            .firstWhere((m) => m?['id'] == replyToId,
+                                orElse: () => null);
                       }
 
                       return _Bubble(
@@ -3553,8 +3764,10 @@ class _TourChatViewState extends State<_TourChatView> with MentionMixin {
                         replyMsg: replyMsg,
                         reactions: reactions,
                         currentUserId: myId,
-                        onAddReaction: (emoji) => ChatService.addReaction(msgId, emoji),
-                        onRemoveReaction: (emoji) => ChatService.removeReaction(msgId, emoji),
+                        onAddReaction: (emoji) =>
+                            ChatService.addReaction(msgId, emoji),
+                        onRemoveReaction: (emoji) =>
+                            ChatService.removeReaction(msgId, emoji),
                         onReply: () => _startReply(msg),
                         onEdit: isMine ? () => _startEdit(msg) : null,
                         messageType: msg['message_type'] as String? ?? 'text',
@@ -3569,7 +3782,9 @@ class _TourChatViewState extends State<_TourChatView> with MentionMixin {
         ),
 
         // Mention suggestions
-        MentionOverlay(suggestions: mentionSuggestions, onSelect: (c) => insertMention(_controller, c)),
+        MentionOverlay(
+            suggestions: mentionSuggestions,
+            onSelect: (c) => insertMention(_controller, c)),
 
         // Reply preview
         if (_replyTo != null)
@@ -3577,22 +3792,35 @@ class _TourChatViewState extends State<_TourChatView> with MentionMixin {
             padding: const EdgeInsets.fromLTRB(16, 8, 8, 0),
             child: Row(
               children: [
-                Container(width: 3, height: 36, decoration: BoxDecoration(color: Colors.black, borderRadius: BorderRadius.circular(2))),
+                Container(
+                    width: 3,
+                    height: 36,
+                    decoration: BoxDecoration(
+                        color: Colors.black,
+                        borderRadius: BorderRadius.circular(2))),
                 const SizedBox(width: 8),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Text(_replyTo!['sender_name'] as String? ?? '', style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 12)),
-                      Text((_replyTo!['message'] as String? ?? '').length > 60
-                          ? '${(_replyTo!['message'] as String).substring(0, 60)}…'
-                          : _replyTo!['message'] as String? ?? '',
-                          style: const TextStyle(fontSize: 12, color: Colors.black54), maxLines: 1, overflow: TextOverflow.ellipsis),
+                      Text(_replyTo!['sender_name'] as String? ?? '',
+                          style: const TextStyle(
+                              fontWeight: FontWeight.w700, fontSize: 12)),
+                      Text(
+                          (_replyTo!['message'] as String? ?? '').length > 60
+                              ? '${(_replyTo!['message'] as String).substring(0, 60)}…'
+                              : _replyTo!['message'] as String? ?? '',
+                          style: const TextStyle(
+                              fontSize: 12, color: Colors.black54),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis),
                     ],
                   ),
                 ),
-                IconButton(icon: const Icon(Icons.close, size: 18), onPressed: _cancelReply),
+                IconButton(
+                    icon: const Icon(Icons.close, size: 18),
+                    onPressed: _cancelReply),
               ],
             ),
           ),
@@ -3606,9 +3834,13 @@ class _TourChatViewState extends State<_TourChatView> with MentionMixin {
               children: [
                 const Icon(Icons.edit, size: 16, color: Colors.black54),
                 const SizedBox(width: 8),
-                Text(_t('Redigerer melding', 'Editing message'), style: const TextStyle(fontSize: 12, color: Colors.black54)),
+                Text(_t('Redigerer melding', 'Editing message'),
+                    style:
+                        const TextStyle(fontSize: 12, color: Colors.black54)),
                 const Spacer(),
-                IconButton(icon: const Icon(Icons.close, size: 18), onPressed: _cancelEdit),
+                IconButton(
+                    icon: const Icon(Icons.close, size: 18),
+                    onPressed: _cancelEdit),
               ],
             ),
           ),
@@ -3616,7 +3848,10 @@ class _TourChatViewState extends State<_TourChatView> with MentionMixin {
         // Input
         Container(
           padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(border: Border(top: BorderSide(color: Theme.of(context).colorScheme.outlineVariant))),
+          decoration: BoxDecoration(
+              border: Border(
+                  top: BorderSide(
+                      color: Theme.of(context).colorScheme.outlineVariant))),
           child: Row(
             children: [
               Expanded(
@@ -3638,23 +3873,39 @@ class _TourChatViewState extends State<_TourChatView> with MentionMixin {
                       hintText: _t('Skriv en melding...', 'Write a message...'),
                       filled: true,
                       fillColor: const Color(0xFFF5F5F5),
-                      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+                      contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 16, vertical: 12),
+                      border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide.none),
                     ),
                   ),
                 ),
               ),
               const SizedBox(width: 10),
               _sending
-                  ? const SizedBox(width: 44, height: 44, child: Padding(padding: EdgeInsets.all(10), child: CircularProgressIndicator(strokeWidth: 2)))
+                  ? const SizedBox(
+                      width: 44,
+                      height: 44,
+                      child: Padding(
+                          padding: EdgeInsets.all(10),
+                          child: CircularProgressIndicator(strokeWidth: 2)))
                   : FilledButton.icon(
                       onPressed: _send,
-                      icon: Icon(_editingMessageId != null ? Icons.check_rounded : Icons.send_rounded, size: 18),
-                      label: Text(_editingMessageId != null ? _t('Lagre', 'Save') : _t('Send', 'Send')),
+                      icon: Icon(
+                          _editingMessageId != null
+                              ? Icons.check_rounded
+                              : Icons.send_rounded,
+                          size: 18),
+                      label: Text(_editingMessageId != null
+                          ? _t('Lagre', 'Save')
+                          : _t('Send', 'Send')),
                       style: FilledButton.styleFrom(
                         backgroundColor: Colors.black,
-                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 16, vertical: 12),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12)),
                       ),
                     ),
             ],

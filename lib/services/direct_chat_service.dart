@@ -163,4 +163,33 @@ class DirectChatService {
             .where((r) => messageIds.contains(r['message_id'] as String?))
             .toList());
   }
+
+  /// Setter leseposisjon på ALLE DM-samtalene mine til nå.
+  /// Rører ikke grupper eller gigchat.
+  static Future<void> markAllRead() async {
+    final myId = _sb.auth.currentUser?.id;
+    if (myId == null) return;
+    final rows = await _sb
+        .from('direct_messages')
+        .select('sender_id, receiver_id')
+        .or('sender_id.eq.$myId,receiver_id.eq.$myId');
+    final peers = <String>{};
+    for (final r in (rows as List)) {
+      final sender = r['sender_id'] as String? ?? '';
+      final receiver = r['receiver_id'] as String? ?? '';
+      final peer = sender == myId ? receiver : sender;
+      if (peer.isNotEmpty && peer != myId) peers.add(peer);
+    }
+    if (peers.isEmpty) return;
+    final now = DateTime.now().toUtc().toIso8601String();
+    await _sb.from('dm_read_cursors').upsert(
+          peers
+              .map((pid) => {
+                    'user_id': myId,
+                    'peer_id': pid,
+                    'last_read_at': now,
+                  })
+              .toList(),
+        );
+  }
 }

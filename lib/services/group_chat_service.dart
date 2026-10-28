@@ -217,4 +217,28 @@ class GroupChatService {
         .eq('group_chat_id', groupId)
         .eq('user_id', userId);
   }
+
+  /// Setter leseposisjon på ALLE gruppene mine til nå.
+  /// Brukes av «Merk alle som lest» og rører ikke DM eller gigchat.
+  static Future<void> markAllRead() async {
+    final myId = _sb.auth.currentUser?.id;
+    if (myId == null) return;
+    final myGroups = await _sb
+        .from('group_chat_members')
+        .select('group_chat_id')
+        .eq('user_id', myId);
+    final ids =
+        (myGroups as List).map((r) => r['group_chat_id'] as String).toList();
+    if (ids.isEmpty) return;
+    final now = DateTime.now().toUtc().toIso8601String();
+    await _sb.from('group_read_cursors').upsert(
+          ids
+              .map((gid) => {
+                    'user_id': myId,
+                    'group_chat_id': gid,
+                    'last_read_at': now,
+                  })
+              .toList(),
+        );
+  }
 }
