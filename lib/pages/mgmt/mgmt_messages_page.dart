@@ -50,6 +50,46 @@ class _MgmtMessagesPageState extends State<MgmtMessagesPage>
   String? get _selectedTourKey => _tourSelectionNotifier.value;
   set _selectedTourKey(String? v) => _tourSelectionNotifier.value = v;
 
+  /// Unread totals per tab, and a filter that hides what has nothing new.
+  /// Same two controls as the mobile app's inbox.
+  final Map<int, int> _tabUnread = {0: 0, 1: 0};
+  bool _unreadOnly = false;
+
+  void _setTabUnread(int index, int value) {
+    if (_tabUnread[index] == value || !mounted) return;
+    setState(() => _tabUnread[index] = value);
+  }
+
+  Widget _tabLabel(String text, int index) {
+    final count = _tabUnread[index] ?? 0;
+    return Tab(
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(text),
+          if (count > 0) ...[
+            const SizedBox(width: 6),
+            Container(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+              decoration: BoxDecoration(
+                color: Colors.red,
+                borderRadius: BorderRadius.circular(999),
+              ),
+              child: Text(
+                count > 99 ? '99+' : '$count',
+                style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 10,
+                    fontWeight: FontWeight.w800),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
   @override
   void initState() {
     super.initState();
@@ -132,9 +172,60 @@ class _MgmtMessagesPageState extends State<MgmtMessagesPage>
                   unselectedLabelColor: Colors.black45,
                   indicatorColor: Colors.black,
                   tabs: [
-                    const Tab(text: 'DM'),
-                    Tab(text: _isCss ? 'Gigger' : 'Aktivitet'),
+                    _tabLabel('DM', 0),
+                    _tabLabel(_isCss ? 'Gigger' : 'Aktivitet', 1),
                   ],
+                ),
+              ),
+
+              // Vis kun uleste — gjelder begge fanene.
+              Padding(
+                padding: const EdgeInsets.fromLTRB(10, 6, 10, 0),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(999),
+                    onTap: () => setState(() => _unreadOnly = !_unreadOnly),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 5),
+                      decoration: BoxDecoration(
+                        color: _unreadOnly
+                            ? Colors.black
+                            : Colors.transparent,
+                        borderRadius: BorderRadius.circular(999),
+                        border: Border.all(
+                            color: _unreadOnly
+                                ? Colors.black
+                                : Colors.black26),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            _unreadOnly
+                                ? Icons.filter_alt
+                                : Icons.filter_alt_outlined,
+                            size: 14,
+                            color: _unreadOnly
+                                ? Colors.white
+                                : Colors.black54,
+                          ),
+                          const SizedBox(width: 5),
+                          Text(
+                            _t('Kun uleste', 'Unread only'),
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                              color: _unreadOnly
+                                  ? Colors.white
+                                  : Colors.black54,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
                 ),
               ),
 
@@ -146,6 +237,8 @@ class _MgmtMessagesPageState extends State<MgmtMessagesPage>
                     // Tab 1: DM + Groups
                     _ChatThreadList(
                       selectedKey: _selectedChatKey,
+                      unreadOnly: _unreadOnly,
+                      onUnreadTotal: (v) => _setTabUnread(0, v),
                       onSelect: (key) =>
                           setState(() => _selectedChatKey = key),
                       onDeleted: (key) {
@@ -169,6 +262,8 @@ class _MgmtMessagesPageState extends State<MgmtMessagesPage>
                           )
                         : _GigThreadList(
                             selectedGigId: _selectedGigId,
+                            unreadOnly: _unreadOnly,
+                            onUnreadTotal: (v) => _setTabUnread(1, v),
                             onSelect: (gigId) {
                               setState(() => _selectedGigId = gigId);
                               _markGigAsRead(gigId);
@@ -232,10 +327,15 @@ class _ChatThreadList extends StatefulWidget {
   final void Function(String key) onSelect;
   final void Function(String key) onDeleted;
 
+  final ValueChanged<int>? onUnreadTotal;
+  final bool unreadOnly;
+
   const _ChatThreadList({
     required this.selectedKey,
     required this.onSelect,
     required this.onDeleted,
+    this.onUnreadTotal,
+    this.unreadOnly = false,
   });
 
   @override
@@ -244,6 +344,14 @@ class _ChatThreadList extends StatefulWidget {
 
 class _ChatThreadListState extends State<_ChatThreadList> {
   final _sb = Supabase.instance.client;
+
+  /// DM and groups share one tab, so their totals are added together.
+  int _dmUnreadTotal = 0;
+
+  void _reportUnreadTotal() {
+    final groupTotal = _groupUnreads.values.fold<int>(0, (a, b) => a + b);
+    widget.onUnreadTotal?.call(_dmUnreadTotal + groupTotal);
+  }
   String get _myId => _sb.auth.currentUser?.id ?? '';
 
   final Map<String, Map<String, dynamic>> _profileCache = {};
@@ -349,6 +457,7 @@ class _ChatThreadListState extends State<_ChatThreadList> {
           _groupUnreads[groupId] = (_groupUnreads[groupId] ?? 0) + 1;
         }
       }
+      _reportUnreadTotal();
     } catch (e) {
       debugPrint('Load group unreads error: $e');
     }
@@ -703,6 +812,11 @@ class _ChatThreadListState extends State<_ChatThreadList> {
                       isAdmin ? confirmDeleteDm : null,
                   companyMemberIds: _companyMemberIds,
                   dmCursors: _dmCursors,
+                  unreadOnly: widget.unreadOnly,
+                  onUnreadTotal: (v) {
+                    _dmUnreadTotal = v;
+                    _reportUnreadTotal();
+                  },
                 ),
 
                 // Groups
@@ -712,6 +826,7 @@ class _ChatThreadListState extends State<_ChatThreadList> {
                   onDeleteGroup:
                       isAdmin ? confirmDeleteGroup : null,
                   groupUnreads: _groupUnreads,
+                  unreadOnly: widget.unreadOnly,
                 ),
               ],
             );
@@ -734,12 +849,16 @@ class _DmList extends StatelessWidget {
   final void Function(String peerId)? onDeleteConversation;
   final Map<String, DateTime> dmCursors;
   final Set<String> companyMemberIds;
+  final ValueChanged<int>? onUnreadTotal;
+  final bool unreadOnly;
 
   const _DmList({
     required this.myId,
     required this.getProfile,
     required this.selectedKey,
     required this.onSelect,
+    this.onUnreadTotal,
+    this.unreadOnly = false,
     this.onDeleteConversation,
     this.dmCursors = const {},
     this.companyMemberIds = const {},
@@ -787,6 +906,17 @@ class _DmList extends StatelessWidget {
           return bTime.compareTo(aTime);
         });
 
+        final total =
+            conversations.fold<int>(0, (a, e) => a + e.value.$2);
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          onUnreadTotal?.call(total);
+        });
+
+        final shown = unreadOnly
+            ? conversations.where((e) => e.value.$2 > 0).toList()
+            : conversations;
+        if (shown.isEmpty) return const SizedBox.shrink();
+
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -798,7 +928,7 @@ class _DmList extends StatelessWidget {
                       fontWeight: FontWeight.w700,
                       color: Colors.black38)),
             ),
-            ...conversations.map((entry) {
+            ...shown.map((entry) {
               final key = 'dm:${entry.key}';
               final isSelected = selectedKey == key;
               return _DmTile(
@@ -990,12 +1120,14 @@ class _GroupList extends StatelessWidget {
   final void Function(String) onSelect;
   final void Function(String groupId)? onDeleteGroup;
   final Map<String, int> groupUnreads;
+  final bool unreadOnly;
 
   const _GroupList({
     required this.selectedKey,
     required this.onSelect,
     this.onDeleteGroup,
     this.groupUnreads = const {},
+    this.unreadOnly = false,
   });
 
   @override
@@ -1006,11 +1138,16 @@ class _GroupList extends StatelessWidget {
         final companyId = activeCompanyNotifier.value?.id;
         final allGroups = snapshot.data ?? [];
         // Strict filter: only show groups matching active company
-        final groups = allGroups.where((g) {
+        var groups = allGroups.where((g) {
           final gCompanyId = g['company_id'] as String?;
           if (companyId == null) return true;
           return gCompanyId == companyId;
         }).toList();
+        if (unreadOnly) {
+          groups = groups
+              .where((g) => (groupUnreads[g['id'] as String] ?? 0) > 0)
+              .toList();
+        }
         if (groups.isEmpty) return const SizedBox.shrink();
 
         return Column(
@@ -2097,8 +2234,18 @@ class _GigThreadList extends StatefulWidget {
   final String? selectedGigId;
   final void Function(String gigId) onSelect;
 
-  const _GigThreadList(
-      {required this.selectedGigId, required this.onSelect});
+  /// Reports the tab's unread total so the TabBar can show it.
+  final ValueChanged<int>? onUnreadTotal;
+
+  /// Only show threads with unread messages.
+  final bool unreadOnly;
+
+  const _GigThreadList({
+    required this.selectedGigId,
+    required this.onSelect,
+    this.onUnreadTotal,
+    this.unreadOnly = false,
+  });
 
   @override
   State<_GigThreadList> createState() => _GigThreadListState();
@@ -2108,11 +2255,39 @@ class _GigThreadListState extends State<_GigThreadList> {
   final _sb = Supabase.instance.client;
   Set<String> _companyGigIds = {};
 
+  /// Unread per gig, counted from this user's own read cursor — the same
+  /// figure the mobile app shows. The read_by_admin flag the tile also uses
+  /// is shared between all admins, so it says something different: whether
+  /// anyone in management has looked at it.
+  Map<String, int> _cursorUnreads = {};
+
   @override
   void initState() {
     super.initState();
     _loadCompanyGigs();
     activeCompanyNotifier.addListener(_loadCompanyGigs);
+  }
+
+  /// Unread counts straight from the database, one query for every gig.
+  Future<void> _loadCursorUnreads() async {
+    if (_companyGigIds.isEmpty) return;
+    try {
+      final res = await _sb.rpc('gig_chat_threads', params: {
+        'p_gig_ids': _companyGigIds.toList(),
+      });
+      final counts = <String, int>{};
+      for (final r in List<Map<String, dynamic>>.from(res as List)) {
+        counts[r['gig_id'] as String] =
+            (r['unread_count'] as num?)?.toInt() ?? 0;
+      }
+      if (!mounted) return;
+      setState(() => _cursorUnreads = counts);
+      widget.onUnreadTotal?.call(counts.values.fold<int>(0, (a, b) => a + b));
+    } catch (e) {
+      // Function not deployed yet — the per-thread read_by_admin count below
+      // still works, so the list is never left empty.
+      debugPrint('Gig cursor unreads unavailable: $e');
+    }
   }
 
   @override
@@ -2153,6 +2328,7 @@ class _GigThreadListState extends State<_GigThreadList> {
         setState(() {
           _companyGigIds = ids;
         });
+        _loadCursorUnreads();
       }
     } catch (_) {}
   }
@@ -2200,12 +2376,35 @@ class _GigThreadListState extends State<_GigThreadList> {
               .compareTo(b['created_at'] as String? ?? ''));
         }
 
-        final threads = grouped.entries.toList()
+        var threads = grouped.entries.toList()
           ..sort((a, b) {
             final aLast = a.value.last['created_at'] as String? ?? '';
             final bLast = b.value.last['created_at'] as String? ?? '';
             return bLast.compareTo(aLast);
           });
+
+        // Per-user cursor count when available, otherwise the admin-shared
+        // read_by_admin count this list has always used.
+        int unreadFor(String gigId, List<Map<String, dynamic>> msgs) =>
+            _cursorUnreads[gigId] ??
+            msgs
+                .where((r) =>
+                    r['is_admin'] != true && r['read_by_admin'] != true)
+                .length;
+
+        if (widget.unreadOnly) {
+          threads =
+              threads.where((t) => unreadFor(t.key, t.value) > 0).toList();
+          if (threads.isEmpty) {
+            return Center(
+              child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: Text(_t('Ingen uleste', 'Nothing unread'),
+                    style: const TextStyle(color: Colors.black45)),
+              ),
+            );
+          }
+        }
 
         return ListView.separated(
           itemCount: threads.length,
@@ -2216,10 +2415,7 @@ class _GigThreadListState extends State<_GigThreadList> {
             final msgs = threads[i].value;
             final last = msgs.last;
             final isSelected = widget.selectedGigId == gigId;
-            final unread = msgs
-                .where((r) =>
-                    r['is_admin'] != true && r['read_by_admin'] != true)
-                .length;
+            final unread = unreadFor(gigId, msgs);
 
             return _GigThreadTile(
               gigId: gigId,
