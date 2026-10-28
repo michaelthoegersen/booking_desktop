@@ -936,7 +936,13 @@ class _GigOfferPageState extends State<GigOfferPage> {
             .update({'invoice_locked': true}).inFilter('id', gigIds);
       }
 
-      final notified = await _notifyFinance();
+      // Gi varselet en gigg å åpne. _gigId alene er ikke nok: den er null
+      // for tilbud der gig_offers.gig_id aldri ble satt, og da fikk
+      // økonomiansvarlig et varsel uten noe å trykke seg inn på.
+      final notifyGigId = _dateEntries.first.gigId ??
+          _gigId ??
+          (gigIds.isNotEmpty ? gigIds.first : null);
+      final notified = await _notifyFinance(gigId: notifyGigId);
 
       if (mounted) {
         setState(() => _invoiceReadyAt = DateTime.now().toUtc());
@@ -964,7 +970,7 @@ class _GigOfferPageState extends State<GigOfferPage> {
   /// Returns how many økonomiansvarlige were notified, so the caller can say
   /// something when nobody is configured — a silent no-op here looked exactly
   /// like a delivered notification.
-  Future<int> _notifyFinance() async {
+  Future<int> _notifyFinance({String? gigId}) async {
     if (_companyId == null) return 0;
     try {
       final rows = await _sb
@@ -987,7 +993,7 @@ class _GigOfferPageState extends State<GigOfferPage> {
         'body': [firma, dateLabel].where((v) => v.isNotEmpty).join(' — '),
         'user_ids': ids,
         'type': 'gig',
-        if (_gigId != null) 'gig_id': _gigId,
+        if ((gigId ?? _gigId) != null) 'gig_id': gigId ?? _gigId,
       });
       return ids.length;
     } catch (e) {
