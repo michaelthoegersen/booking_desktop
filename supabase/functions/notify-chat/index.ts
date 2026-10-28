@@ -104,21 +104,69 @@ async function sendPushBatch(
     .from('notifications')
     .insert(baseRows);
 
-  // Fallback: if insert fails (e.g. new columns not yet migrated), retry without extra fields
+  // Fallback når innsettingen feiler, typisk fordi en kolonne mangler.
+  //
+  // Den gamle fallbacken droppet peer_id og group_id sammen med alt annet.
+  // Resultatet var at varselet kom fram, men uten noe å navigere på — et
+  // trykk i bjella gjorde ingenting, uten spor av hvorfor. Den eneste
+  // kolonnen som faktisk manglet var message_id, og den brukes ikke til
+  // noe. Så nå dropper vi ETT felt av gangen og beholder det som bærer
+  // navigasjonen så lenge som mulig.
   if (insertError) {
-    console.error('Insert notifications error (retrying without extra fields):', insertError.message);
-    const fallbackRows = userIds.map(uid => ({
-      user_id: uid,
-      title,
-      body,
-      read: false,
-      type: notificationType,
-      ...(gigId ? { gig_id: gigId } : {}),
-    }));
-    const { error: fallbackError } = await supabase
-      .from('notifications')
-      .insert(fallbackRows);
-    if (fallbackError) console.error('Fallback insert also failed:', fallbackError.message);
+    console.error('Insert notifications error:', insertError.message);
+
+    const attempts: Array<{ label: string; rows: Record<string, unknown>[] }> = [
+      {
+        label: 'uten message_id',
+        rows: userIds.map(uid => ({
+          user_id: uid,
+          title,
+          body,
+          read: false,
+          type: notificationType,
+          ...(gigId ? { gig_id: gigId } : {}),
+          ...(extraFields?.peer_id ? { peer_id: extraFields.peer_id } : {}),
+          ...(extraFields?.group_id ? { group_id: extraFields.group_id } : {}),
+          ...(extraFields?.group_name ? { group_name: extraFields.group_name } : {}),
+        })),
+      },
+      {
+        label: 'uten group_name',
+        rows: userIds.map(uid => ({
+          user_id: uid,
+          title,
+          body,
+          read: false,
+          type: notificationType,
+          ...(gigId ? { gig_id: gigId } : {}),
+          ...(extraFields?.peer_id ? { peer_id: extraFields.peer_id } : {}),
+          ...(extraFields?.group_id ? { group_id: extraFields.group_id } : {}),
+        })),
+      },
+      {
+        // Siste utvei: varselet kommer fram, men uten noe å trykke seg inn
+        // på. Logges som advarsel nettopp fordi det er et tap.
+        label: 'uten navigasjonsfelt (varselet blir ikke trykkbart)',
+        rows: userIds.map(uid => ({
+          user_id: uid,
+          title,
+          body,
+          read: false,
+          type: notificationType,
+          ...(gigId ? { gig_id: gigId } : {}),
+        })),
+      },
+    ];
+
+    for (const attempt of attempts) {
+      const { error } = await supabase.from('notifications').insert(attempt.rows);
+      if (!error) {
+        console.warn(`Notifications satt inn ${attempt.label}. Fiks skjemaet.`);
+        insertError = null;
+        break;
+      }
+      console.error(`Forsøk "${attempt.label}" feilet:`, error.message);
+    }
   }
 
   // 2. Fetch FCM tokens for recipients
