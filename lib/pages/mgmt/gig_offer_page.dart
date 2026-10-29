@@ -3,6 +3,7 @@ import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import '../../services/date_option_service.dart';
 import '../../widgets/resizable_text_field.dart';
 import 'package:printing/printing.dart';
 import 'package:flutter/services.dart';
@@ -83,6 +84,15 @@ class _GigOfferPageState extends State<GigOfferPage> {
 
   // ── Multi-date entries ───────────────────────────────────────────────────
   List<_DateEntry> _dateEntries = [_DateEntry()];
+
+  /// Flere datoer i et tilbud betyr normalt at oppdraget går over flere dager.
+  /// Er de i stedet alternativer kunden skal velge ÉN av, settes denne — da
+  /// knyttes giggene sammen i én datogruppe ved lagring.
+  bool _datesAreOptions = false;
+
+  /// Kunden har allerede valgt. Da skal ikke bryteren kunne skrus av her;
+  /// valget åpnes på nytt fra gig-siden, der man ser hele settet.
+  bool _dateChoiceResolved = false;
   Set<String> _originalGigIds = {}; // track gigs loaded at start for deletion
 
   // Selected index in the Tidsplan card — switches which date's times are
@@ -470,6 +480,13 @@ class _GigOfferPageState extends State<GigOfferPage> {
                 }
               }
 
+              if (gig[DateOptionService.kGroup] != null) {
+                _datesAreOptions = true;
+                if (gig[DateOptionService.kState] == 'chosen') {
+                  _dateChoiceResolved = true;
+                }
+              }
+
               _dateEntries.add(entry);
 
               // Apply shared fields from the first gig
@@ -710,6 +727,70 @@ class _GigOfferPageState extends State<GigOfferPage> {
         ),
       ),
     );
+  }
+
+  /// Knytter (eller løser opp) datoene i tilbudet som alternativer.
+  ///
+  /// Gruppe og tilstand settes alltid sammen — databasen krever at enten
+  /// begge er satt eller ingen av dem, så en gig ikke kan bli halvveis et
+  /// alternativ.
+  Future<void> _applyDateOptionGrouping() async {
+    final gigIds = _dateEntries
+        .where((e) => !e.isRehearsal && e.gigId != null)
+        .map((e) => e.gigId!)
+        .toList();
+    if (gigIds.length < 2 && !_datesAreOptions) return;
+    if (gigIds.isEmpty) return;
+
+    try {
+      if (!_datesAreOptions) {
+        // Slått av: bare uavklarte rader røres, slik at et valg kunden
+        // allerede har tatt ikke forsvinner ved et uhell.
+        await _sb
+            .from('gigs')
+            .update({
+              DateOptionService.kGroup: null,
+              DateOptionService.kState: null,
+            })
+            .inFilter('id', gigIds)
+            .eq(DateOptionService.kState, 'pending');
+        return;
+      }
+
+      // Finnes det allerede en gruppe på en av datoene — f.eks. laget fra
+      // gig-siden, der et alternativ kan være lagt til utenfor tilbudet —
+      // beholdes den. Ellers blir den første datoen anker, så gruppa får en
+      // stabil id. Uten dette ville lagring av tilbudet skilt det tillagte
+      // alternativet ut i sin egen gruppe.
+      final existing = List<Map<String, dynamic>>.from(
+        await _sb
+            .from('gigs')
+            .select('id, ${DateOptionService.kGroup}')
+            .inFilter('id', gigIds)
+            .not(DateOptionService.kGroup, 'is', null)
+            .limit(1),
+      );
+      final anchor = existing.isNotEmpty
+          ? existing.first[DateOptionService.kGroup] as String
+          : gigIds.first;
+      await _sb
+          .from('gigs')
+          .update({
+            DateOptionService.kGroup: anchor,
+            DateOptionService.kState: 'pending',
+          })
+          .inFilter('id', gigIds)
+          .isFilter(DateOptionService.kState, null);
+      // Rader som allerede har en tilstand (valgt/utgått) beholder den.
+      await _sb
+          .from('gigs')
+          .update({DateOptionService.kGroup: anchor})
+          .inFilter('id', gigIds)
+          .not(DateOptionService.kState, 'is', null);
+    } catch (e) {
+      debugPrint('Date option grouping error: $e');
+      rethrow;
+    }
   }
 
   void _applyGigFields(Map<String, dynamic> gig) {
@@ -1897,6 +1978,13 @@ class _GigOfferPageState extends State<GigOfferPage> {
         await _sb.from('gig_offer_shows').insert(showRows);
       }
 
+      // ── 1b. Enten/eller-datoer ────────────────────────────────────────
+      // Flere datoer betyr normalt at oppdraget går over flere dager. Er de i
+      // stedet alternativer kunden skal velge mellom, knyttes de sammen i én
+      // gruppe her. Prøvedager holdes utenfor — de er forberedelse, ikke et
+      // valg kunden tar.
+      await _applyDateOptionGrouping();
+
       // ── 4. Sync gig_offer_gigs junction ─────────────────────────────────
       await _sb.from('gig_offer_gigs').delete().eq('offer_id', _offerId!);
       final junctionRows = _dateEntries.asMap().entries.map((e) {
@@ -2414,6 +2502,78 @@ class _GigOfferPageState extends State<GigOfferPage> {
   // DATO & STED
   // ────────────────────────────────────────────────────────────────────────────
 
+  /// Valget mellom «flere dager» og «enten eller».
+  ///
+  /// Uten dette er flere datoer alltid tolket som ett oppdrag over flere
+  /// dager, og det er riktig i de aller fleste tilfellene — derfor er dette
+  /// av som standard og vises først når det faktisk står flere spilledatoer
+  /// der.
+  Widget _buildEitherOrRow() {
+    final showDates =
+        _dateEntries.where((e) => !e.isRehearsal).length;
+    if (showDates < 2 && !_datesAreOptions) return const SizedBox.shrink();
+
+    final cs = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 4),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+        decoration: BoxDecoration(
+          color: _datesAreOptions ? cs.tertiaryContainer : null,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(
+              color: _datesAreOptions ? cs.tertiary : cs.outlineVariant),
+        ),
+        child: Row(
+          children: [
+            Icon(
+              _datesAreOptions ? Icons.rule : Icons.date_range,
+              size: 18,
+              color: _datesAreOptions
+                  ? cs.onTertiaryContainer
+                  : cs.onSurfaceVariant,
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                _datesAreOptions
+                    ? 'Enten eller: kunden velger ÉN av datoene. '
+                        'Prøvedager holdes utenfor valget.'
+                    : 'Flere dager: oppdraget går over alle datoene.',
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: _datesAreOptions
+                      ? cs.onTertiaryContainer
+                      : cs.onSurfaceVariant,
+                ),
+              ),
+            ),
+            if (_dateChoiceResolved)
+              Padding(
+                padding: const EdgeInsets.only(right: 8),
+                child: Text(
+                  'datoen er satt',
+                  style: TextStyle(
+                      fontSize: 11,
+                      fontStyle: FontStyle.italic,
+                      color: cs.onSurfaceVariant),
+                ),
+              ),
+            Switch(
+              value: _datesAreOptions,
+              // Er valget tatt, åpnes det på nytt fra gig-siden, der man ser
+              // hele settet og hvilken dato som faktisk ble valgt.
+              onChanged: _dateChoiceResolved
+                  ? null
+                  : (v) => setState(() => _datesAreOptions = v),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildDatesCard() {
     final dfmt = DateFormat('dd.MM.yyyy');
     final availableShows =
@@ -2572,6 +2732,7 @@ class _GigOfferPageState extends State<GigOfferPage> {
             );
           }),
           const SizedBox(height: 8),
+          _buildEitherOrRow(),
           Align(
             alignment: Alignment.centerLeft,
             child: TextButton.icon(
