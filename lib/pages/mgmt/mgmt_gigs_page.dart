@@ -152,7 +152,11 @@ class _MgmtGigsPageState extends State<MgmtGigsPage> {
     final groups = <String, List<Map<String, dynamic>>>{};
     for (final g in _gigs) {
       final grp = g[DateOptionService.kGroup] as String?;
-      if (grp != null) (groups[grp] ??= []).add(g);
+      // Prøvedager er forberedelse, ikke et alternativ kunden velger mellom,
+      // så de teller ikke med i «2 av 3».
+      if (grp != null && (g['type'] as String? ?? 'gig') != 'rehearsal') {
+        (groups[grp] ??= []).add(g);
+      }
     }
     final labels = <String, String>{};
     for (final members in groups.values) {
@@ -2599,7 +2603,7 @@ class _GigRow extends StatelessWidget {
                     const SizedBox(height: 4),
                     _testPill(),
                   ],
-                  if (DateOptionService.isOption(gig)) ...[
+                  if (DateOptionService.isOption(gig) && type != 'rehearsal') ...[
                     const SizedBox(height: 4),
                     _optionPill(cs),
                   ],

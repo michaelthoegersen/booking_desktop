@@ -735,6 +735,28 @@ class _GigOfferPageState extends State<GigOfferPage> {
   /// begge er satt eller ingen av dem, så en gig ikke kan bli halvveis et
   /// alternativ.
   Future<void> _applyDateOptionGrouping() async {
+    // En dato merket «Prøve» er forberedelse, ikke et alternativ kunden
+    // velger mellom. Gjøres en dato om til prøve etter at gruppa ble laget,
+    // må den ut av gruppa — ellers blir den stående som «Alternativ 1 av 2».
+    final rehearsalGigIds = _dateEntries
+        .where((e) => e.isRehearsal && e.gigId != null)
+        .map((e) => e.gigId!)
+        .toList();
+    if (rehearsalGigIds.isNotEmpty) {
+      try {
+        await _sb
+            .from('gigs')
+            .update({
+              DateOptionService.kGroup: null,
+              DateOptionService.kState: null,
+            })
+            .inFilter('id', rehearsalGigIds)
+            .not(DateOptionService.kGroup, 'is', null);
+      } catch (e) {
+        debugPrint('Clear rehearsal date option error: $e');
+      }
+    }
+
     final gigIds = _dateEntries
         .where((e) => !e.isRehearsal && e.gigId != null)
         .map((e) => e.gigId!)
