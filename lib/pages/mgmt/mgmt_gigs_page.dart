@@ -26,6 +26,11 @@ class MgmtGigsPage extends StatefulWidget {
 class _MgmtGigsPageState extends State<MgmtGigsPage> {
   final _sb = Supabase.instance.client;
   final _searchCtrl = TextEditingController();
+  final _scrollController = ScrollController();
+
+  /// Marks the first upcoming activity as the scroll origin, so history grows
+  /// upward instead of pushing today's date down below the fold.
+  static const Key _upcomingKey = ValueKey('upcoming-activities');
 
   bool _loading = true;
   String? get _companyId => activeCompanyNotifier.value?.id;
@@ -53,6 +58,7 @@ class _MgmtGigsPageState extends State<MgmtGigsPage> {
   void dispose() {
     activeCompanyNotifier.removeListener(_onCompanyChanged);
     _searchCtrl.dispose();
+    _scrollController.dispose();
     super.dispose();
   }
 
@@ -203,11 +209,12 @@ class _MgmtGigsPageState extends State<MgmtGigsPage> {
 
     if (_statusFilter != 'all') {
       if (_statusFilter == 'upcoming') {
-        final today = DateTime.now();
+        final now = DateTime.now();
+        final todayNorm = DateTime(now.year, now.month, now.day);
         list = list.where((g) {
           final d = g['date_from'] as String?;
           if (d == null) return false;
-          return DateTime.parse(d).isAfter(today);
+          return !DateTime.parse(d).isBefore(todayNorm);
         }).toList();
       } else {
         list = list.where((g) => g['status'] == _statusFilter).toList();
@@ -914,45 +921,86 @@ class _MgmtGigsPageState extends State<MgmtGigsPage> {
                                 ],
                               ),
                             ),
-                          Expanded(
-                            child: ListView.builder(
-                              itemCount: _filtered.length,
-                              itemBuilder: (context, i) {
-                                final gig = _filtered[i];
-                                final gigId = gig['id'] as String;
-                                final isGig = (gig['type'] as String? ?? 'gig') == 'gig';
-                                final isMeetingTable = gig['_is_meeting_table'] == true;
-                                return _GigRow(
-                                  gig: gig,
-                                  hasUnseenUpdate: _isUnseen(gig),
-                                  isStian: _sb.auth.currentUser?.email == 'stian@completedrums.no',
-                                  onTap: _selectionMode && isGig
-                                      ? () => _toggleGigSelection(gigId)
-                                      : () {
-                                          if (!isMeetingTable) {
-                                            _markViewed(gigId);
-                                            setState(() {});
-                                          }
-                                          if (isMeetingTable) {
-                                            context.go('/m/meetings/$gigId');
-                                          } else {
-                                            context.go('/m/gigs/$gigId');
-                                          }
-                                        },
-                                  onCancel: () => _confirmCancel(gig),
-                                  onDelete: () => _confirmDelete(gig),
-                                  selectionMode: _selectionMode,
-                                  selected: _selectedGigIds.contains(gigId),
-                                  onSelect: isGig ? () => _toggleGigSelection(gigId) : null,
-                                );
-                              },
-                            ),
-                          ),
+                          Expanded(child: _buildActivityList()),
                         ],
                       ),
           ),
         ],
       ),
+    );
+  }
+
+  /// The activity list, with the entry closest to today as the scroll origin.
+  /// Past activities are laid out ABOVE that point instead of before it in one
+  /// long list, so picking «Alle» leaves the view on today and you scroll
+  /// upward to walk backwards in time — same as the mobile app.
+  Widget _buildActivityList() {
+    final entries = _filtered;
+    final now = DateTime.now();
+    final todayNorm = DateTime(now.year, now.month, now.day);
+
+    // First entry that is today or later. When every activity is in the past
+    // (e.g. filtered on «Fakturert») the pivot falls on the most recent one,
+    // so the view still opens on the entry nearest today rather than blank.
+    var pivot = entries.indexWhere((e) {
+      final d = DateTime.tryParse(e['date_from'] as String? ?? '');
+      return d == null || !d.isBefore(todayNorm);
+    });
+    if (pivot < 0) pivot = entries.length - 1;
+
+    final past = entries.sublist(0, pivot);
+    final fromToday = entries.sublist(pivot);
+
+    return CustomScrollView(
+      controller: _scrollController,
+      center: _upcomingKey,
+      slivers: [
+        // Sits before the centre, so it grows upward: i = 0 is the most recent
+        // past entry, just above the fold, and the list still reads
+        // chronologically from top to bottom.
+        SliverList(
+          delegate: SliverChildBuilderDelegate(
+            (ctx, i) => _buildActivityRow(ctx, past[past.length - 1 - i]),
+            childCount: past.length,
+          ),
+        ),
+        SliverList(
+          key: _upcomingKey,
+          delegate: SliverChildBuilderDelegate(
+            (ctx, i) => _buildActivityRow(ctx, fromToday[i]),
+            childCount: fromToday.length,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildActivityRow(BuildContext context, Map<String, dynamic> gig) {
+    final gigId = gig['id'] as String;
+    final isGig = (gig['type'] as String? ?? 'gig') == 'gig';
+    final isMeetingTable = gig['_is_meeting_table'] == true;
+    return _GigRow(
+      gig: gig,
+      hasUnseenUpdate: _isUnseen(gig),
+      isStian: _sb.auth.currentUser?.email == 'stian@completedrums.no',
+      onTap: _selectionMode && isGig
+          ? () => _toggleGigSelection(gigId)
+          : () {
+              if (!isMeetingTable) {
+                _markViewed(gigId);
+                setState(() {});
+              }
+              if (isMeetingTable) {
+                context.go('/m/meetings/$gigId');
+              } else {
+                context.go('/m/gigs/$gigId');
+              }
+            },
+      onCancel: () => _confirmCancel(gig),
+      onDelete: () => _confirmDelete(gig),
+      selectionMode: _selectionMode,
+      selected: _selectedGigIds.contains(gigId),
+      onSelect: isGig ? () => _toggleGigSelection(gigId) : null,
     );
   }
 
