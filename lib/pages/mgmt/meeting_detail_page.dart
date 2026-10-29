@@ -2,6 +2,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import '../../widgets/resizable_text_field.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -811,12 +812,9 @@ class _MeetingDetailPageState extends State<MeetingDetailPage> {
                             title: Text('Referat: ${item['title'] ?? ''}'),
                             content: SizedBox(
                               width: 500,
-                              height: 300,
-                              child: TextField(
+                              child: ResizableTextField(
                                 controller: ctrl,
-                                maxLines: null,
-                                expands: true,
-                                textAlignVertical: TextAlignVertical.top,
+                                initialHeight: 300,
                                 decoration: InputDecoration(
                                   hintText: 'Skriv referat...',
                                   border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
@@ -1011,9 +1009,9 @@ class _SendDialogState extends State<_SendDialog> {
             const Text('Kommentar:',
                 style: TextStyle(fontWeight: FontWeight.w700)),
             const SizedBox(height: 8),
-            TextField(
+            ResizableTextField(
               controller: widget.commentCtrl,
-              maxLines: 3,
+              minLines: 2,
               decoration: InputDecoration(
                 hintText: 'Valgfri kommentar...',
                 border: OutlineInputBorder(

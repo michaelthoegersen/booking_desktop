@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import '../widgets/resizable_text_field.dart';
 import 'package:intl/intl.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:go_router/go_router.dart';
@@ -3077,13 +3078,10 @@ Future<void> load() async {
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
 
-      child: TextField(
+      child: ResizableTextField(
         controller: map[id],
 
-        maxLines: null,
         minLines: 3,
-
-        keyboardType: TextInputType.multiline,
 
         decoration: InputDecoration(
           labelText: label,
@@ -3715,10 +3713,9 @@ class _ManualBlockDialogState
             const SizedBox(height: 12),
 
             // ================= PRODUKSJON =================
-            TextField(
+            ResizableTextField(
               controller: noteCtrl,
-              maxLines: 2,
-
+              minLines: 2,
               decoration: InputDecoration(
                 labelText: S.t('production'),
                 border: const OutlineInputBorder(),
@@ -3935,9 +3932,9 @@ class _WaitingListAddDialogState extends State<_WaitingListAddDialog> {
               const SizedBox(height: 12),
 
               // Notes
-              TextField(
+              ResizableTextField(
                 controller: _notesCtrl,
-                maxLines: 2,
+                minLines: 2,
                 decoration: InputDecoration(
                   labelText: S.t('notes'),
                   border: const OutlineInputBorder(),
@@ -4489,9 +4486,9 @@ class _SendRoundSummaryDialogState extends State<_SendRoundSummaryDialog> {
               ),
             ),
             const SizedBox(height: 12),
-            TextField(
+            ResizableTextField(
               controller: messageCtrl,
-              maxLines: 4,
+              minLines: 4,
               decoration: InputDecoration(
                 labelText: S.t('messageOptional'),
                 border: const OutlineInputBorder(),
@@ -5025,9 +5022,9 @@ class _CalendarExportDialogState extends State<_CalendarExportDialog> {
                 ),
               ),
               const SizedBox(height: 12),
-              TextField(
+              ResizableTextField(
                 controller: _messageCtrl,
-                maxLines: 3,
+                minLines: 3,
                 decoration: InputDecoration(
                   labelText: S.t('messageOptional'),
                   border: const OutlineInputBorder(),

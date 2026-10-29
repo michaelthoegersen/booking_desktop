@@ -3,6 +3,7 @@ import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import '../../widgets/resizable_text_field.dart';
 import 'package:printing/printing.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
@@ -2295,17 +2296,26 @@ class _GigOfferPageState extends State<GigOfferPage> {
   }
 
   Widget _tf(TextEditingController ctrl, String label, {int? maxLines = 1}) {
+    final decoration = InputDecoration(
+      labelText: label,
+      isDense: true,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+    );
+    // maxLines == null meant «no cap» here, so it is a free-text box too.
+    if (maxLines == null || maxLines > 1) {
+      return ResizableTextField(
+        controller: ctrl,
+        minLines: 1,
+        maxAutoLines: (maxLines ?? 0) < 20 ? 20 : maxLines!,
+        style: const TextStyle(fontSize: 13),
+        decoration: decoration,
+      );
+    }
     return TextField(
       controller: ctrl,
       maxLines: maxLines,
-      minLines: maxLines == null ? 1 : null,
       style: const TextStyle(fontSize: 13),
-      decoration: InputDecoration(
-        labelText: label,
-        isDense: true,
-        contentPadding:
-            const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
-      ),
+      decoration: decoration,
     );
   }
 

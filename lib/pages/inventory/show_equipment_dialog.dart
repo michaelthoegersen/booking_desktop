@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../widgets/resizable_text_field.dart';
 import 'package:flutter/services.dart';
 
 import '../../services/inventory_service.dart';
@@ -178,10 +179,10 @@ class _ShowEquipmentDialogState extends State<_ShowEquipmentDialog> {
       context: context,
       builder: (_) => AlertDialog(
         title: Text('Kommentar — $itemName'),
-        content: TextField(
+        content: ResizableTextField(
           controller: ctrl,
           autofocus: true,
-          maxLines: 3,
+          minLines: 3,
           textCapitalization: TextCapitalization.sentences,
           inputFormatters: kCapFirst,
           decoration: const InputDecoration(

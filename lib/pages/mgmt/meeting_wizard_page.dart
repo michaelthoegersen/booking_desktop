@@ -3,6 +3,7 @@ import 'dart:typed_data';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import '../../widgets/resizable_text_field.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import '../../services/meeting_service.dart';
@@ -495,10 +496,10 @@ class _MeetingWizardPageState extends State<MeetingWizardPage> {
           ),
           const SizedBox(height: 16),
           _label('Kommentar'),
-          TextField(
+          ResizableTextField(
             controller: _commentCtrl,
             decoration: _dec('Kommentar til møtet'),
-            maxLines: 3,
+            minLines: 3,
           ),
         ],
       ),
@@ -716,10 +717,10 @@ class _MeetingWizardPageState extends State<MeetingWizardPage> {
                       decoration: _dec('Tittel'),
                     ),
                     const SizedBox(height: 8),
-                    TextField(
+                    ResizableTextField(
                       controller: item.descCtrl,
                       decoration: _dec('Beskrivelse (valgfri)'),
-                      maxLines: 2,
+                      minLines: 2,
                     ),
                     const SizedBox(height: 8),
                     DropdownButton<String?>(

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../widgets/resizable_text_field.dart';
 import 'package:flutter/services.dart';
 
 import '../../services/inventory_service.dart';
@@ -721,9 +722,9 @@ class _InventoryItemDialogState extends State<_InventoryItemDialog> {
                 ],
               ],
               const SizedBox(height: 10),
-              TextField(
+              ResizableTextField(
                 controller: _notes,
-                maxLines: 3,
+                minLines: 3,
                 textCapitalization: TextCapitalization.sentences,
                 inputFormatters: kCapFirst,
                 decoration: const InputDecoration(

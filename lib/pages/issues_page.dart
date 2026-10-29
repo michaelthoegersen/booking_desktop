@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../widgets/resizable_text_field.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../localization/s.dart';
@@ -817,9 +818,9 @@ class _IssueDetailState extends State<_IssueDetail> {
           // ── Note ──
           _Label(S.t('noteToDriver')),
           const SizedBox(height: 8),
-          TextField(
+          ResizableTextField(
             controller: _noteCtrl,
-            maxLines: 4,
+            minLines: 4,
             readOnly: widget.isArchive,
             decoration: InputDecoration(
               hintText: S.t('describeWhatWasDone'),

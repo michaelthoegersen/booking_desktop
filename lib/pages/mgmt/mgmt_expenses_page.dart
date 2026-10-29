@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import '../../widgets/resizable_text_field.dart';
 import 'package:intl/intl.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -117,13 +118,13 @@ class _MgmtExpensesPageState extends State<MgmtExpensesPage> {
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Avvis utlegg'),
-        content: TextField(
+        content: ResizableTextField(
           controller: reasonCtrl,
           decoration: const InputDecoration(
             hintText: 'Grunn for avvisning',
             border: OutlineInputBorder(),
           ),
-          maxLines: 3,
+          minLines: 3,
         ),
         actions: [
           TextButton(

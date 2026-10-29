@@ -5,6 +5,7 @@ import 'dart:io';
 import 'dart:async';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import '../widgets/resizable_text_field.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:intl/intl.dart';
 import '../services/calendar_sync_service.dart';
@@ -3176,12 +3177,9 @@ Future<void> _importFromEmail() async {
       title: Text(S.t('importFromEmail')),
       content: SizedBox(
         width: 600,
-        height: 400,
-        child: TextField(
+        child: ResizableTextField(
           controller: ctrl,
-          maxLines: null,
-          expands: true,
-          textAlignVertical: TextAlignVertical.top,
+          initialHeight: 400,
           decoration: InputDecoration(
             hintText: S.t('pasteEmailHint'),
             border: const OutlineInputBorder(),
@@ -8145,9 +8143,9 @@ class _SendOfferDialogState extends State<_SendOfferDialog> {
               ),
             ),
             const SizedBox(height: 12),
-            TextField(
+            ResizableTextField(
               controller: _messageCtrl,
-              maxLines: 4,
+              minLines: 4,
               decoration: InputDecoration(
                 labelText: S.t('messageOptional'),
                 alignLabelWithHint: true,

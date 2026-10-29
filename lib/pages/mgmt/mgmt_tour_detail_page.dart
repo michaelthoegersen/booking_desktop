@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../widgets/resizable_text_field.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -277,9 +278,9 @@ class _MgmtTourDetailPageState extends State<MgmtTourDetailPage>
                   ),
                 ),
                 const SizedBox(height: 10),
-                TextField(
+                ResizableTextField(
                   controller: notesCtrl,
-                  maxLines: 3,
+                  minLines: 3,
                   decoration: const InputDecoration(labelText: 'Notater'),
                 ),
               ],
@@ -619,9 +620,9 @@ class _MgmtTourDetailPageState extends State<MgmtTourDetailPage>
                     ],
                   ),
                   const SizedBox(height: 10),
-                  TextField(
+                  ResizableTextField(
                     controller: notesCtrl,
-                    maxLines: 4,
+                    minLines: 4,
                     decoration: const InputDecoration(labelText: 'Notater'),
                   ),
                 ],

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../widgets/resizable_text_field.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 
@@ -134,12 +135,11 @@ class _RichTextFieldState extends State<RichTextField> {
   }
 
   Widget _buildEditor(ColorScheme cs) {
-    return TextField(
+    return ResizableTextField(
       controller: widget.controller,
       focusNode: _focusNode,
-      maxLines: widget.maxLines,
       minLines: widget.minLines,
-      keyboardType: TextInputType.multiline,
+      maxAutoLines: widget.maxLines < 24 ? 24 : widget.maxLines,
       decoration: const InputDecoration(
         border: InputBorder.none,
         contentPadding: EdgeInsets.all(12),

@@ -3,6 +3,7 @@ import 'dart:typed_data';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import '../../widgets/resizable_text_field.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:printing/printing.dart';
@@ -876,14 +877,14 @@ class _MgmtGigDetailPageState extends State<MgmtGigDetailPage>
         title: const Text('Merk som avlyst'),
         content: SizedBox(
           width: 400,
-          child: TextField(
+          child: ResizableTextField(
             controller: reasonCtrl,
             decoration: const InputDecoration(
               labelText: 'Grunn for avlysning',
               hintText: 'Valgfritt',
               isDense: true,
             ),
-            maxLines: 2,
+            minLines: 2,
             autofocus: true,
           ),
         ),
@@ -2399,6 +2400,16 @@ Widget _tf(
   int maxLines = 1,
   TextInputType keyboardType = TextInputType.text,
 }) {
+  // Anything meant to hold more than one line gets the draggable box, so a
+  // long note is not written through a two-line slot.
+  if (maxLines > 1) {
+    return ResizableTextField(
+      controller: ctrl,
+      minLines: 1,
+      maxAutoLines: maxLines < 20 ? 20 : maxLines,
+      decoration: InputDecoration(labelText: label),
+    );
+  }
   return TextField(
     controller: ctrl,
     maxLines: maxLines,
@@ -2454,16 +2465,27 @@ class _InfoTabState extends State<_InfoTab> {
       context: context,
       builder: (ctx) => AlertDialog(
         title: Text(label),
-        content: TextField(
-          controller: ctrl,
-          autofocus: true,
-          maxLines: multiline ? 8 : 1,
-          decoration: InputDecoration(
-            hintText: label,
-            border: const OutlineInputBorder(),
-          ),
-          onSubmitted: multiline ? null : (v) => Navigator.pop(ctx, v.trim()),
-        ),
+        content: multiline
+            ? ResizableTextField(
+                controller: ctrl,
+                autofocus: true,
+                minLines: 6,
+                maxAutoLines: 24,
+                decoration: InputDecoration(
+                  hintText: label,
+                  border: const OutlineInputBorder(),
+                ),
+              )
+            : TextField(
+                controller: ctrl,
+                autofocus: true,
+                maxLines: 1,
+                decoration: InputDecoration(
+                  hintText: label,
+                  border: const OutlineInputBorder(),
+                ),
+                onSubmitted: (v) => Navigator.pop(ctx, v.trim()),
+              ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Avbryt')),
           TextButton(

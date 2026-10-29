@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import '../widgets/resizable_text_field.dart';
 import 'package:intl/intl.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -612,9 +613,10 @@ class _SendInvoiceDialogState extends State<SendInvoiceDialog> {
 
                       const SizedBox(height: 12),
 
-                      TextField(
+                      ResizableTextField(
                         controller: _bodyCtrl,
-                        maxLines: 14,
+                        minLines: 14,
+                        maxAutoLines: 40,
                         decoration: InputDecoration(
                           labelText: "Melding",
                           alignLabelWithHint: true,

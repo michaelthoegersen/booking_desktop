@@ -1,5 +1,6 @@
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import '../widgets/resizable_text_field.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../models/app_settings.dart';
@@ -839,9 +840,9 @@ class _SettingsPageState extends State<SettingsPage> {
                   ),
                   if (type == ProfileFieldType.dropdown) ...[
                     const SizedBox(height: 12),
-                    TextField(
+                    ResizableTextField(
                       controller: optionsCtrl,
-                      maxLines: 5,
+                      minLines: 5,
                       decoration: const InputDecoration(
                         labelText: 'Valg (én per linje)',
                         border: OutlineInputBorder(),
@@ -1753,10 +1754,11 @@ class _SettingsPageState extends State<SettingsPage> {
               },
             ),
             const SizedBox(height: 8),
-            TextField(
+            ResizableTextField(
               key: ValueKey('terms_$_termsEditingLang'),
               controller: brandTermsCtrls[_termsEditingLang]!,
-              maxLines: 10,
+              minLines: 10,
+              maxAutoLines: 40,
               decoration: InputDecoration(
                 border: const OutlineInputBorder(),
                 hintText: S.t('termsAndConditions'),

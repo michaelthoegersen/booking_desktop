@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
+import '../../widgets/resizable_text_field.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -405,13 +406,10 @@ class _MeetingLivePageState extends State<MeetingLivePage> {
                                 title: const Text('Rediger beskrivelse'),
                                 content: SizedBox(
                                   width: 450,
-                                  height: 200,
-                                  child: TextField(
+                                  child: ResizableTextField(
                                     controller: ctrl,
                                     autofocus: true,
-                                    maxLines: null,
-                                    expands: true,
-                                    textAlignVertical: TextAlignVertical.top,
+                                    initialHeight: 200,
                                     decoration: InputDecoration(
                                       hintText: 'Beskrivelse...',
                                       border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),

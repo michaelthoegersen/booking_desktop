@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:math';
 
 import 'package:flutter/material.dart';
+import '../../widgets/resizable_text_field.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
@@ -567,9 +568,9 @@ class _MgmtGigsPageState extends State<MgmtGigsPage> {
                   dense: true,
                 ),
                 const SizedBox(height: 6),
-                TextField(
+                ResizableTextField(
                   controller: notesCtrl,
-                  maxLines: 3,
+                  minLines: 3,
                   decoration: const InputDecoration(labelText: 'Notater'),
                 ),
               ],
@@ -1868,12 +1869,19 @@ class _NewGigDialogState extends State<_NewGigDialog> {
     int maxLines = 1,
     TextInputType? keyboardType,
   }) {
-    final field = TextField(
-      controller: ctrl,
-      maxLines: maxLines,
-      keyboardType: keyboardType ?? (maxLines > 1 ? TextInputType.multiline : TextInputType.text),
-      decoration: InputDecoration(labelText: label),
-    );
+    final field = maxLines > 1
+        ? ResizableTextField(
+            controller: ctrl,
+            minLines: 1,
+            maxAutoLines: maxLines < 20 ? 20 : maxLines,
+            decoration: InputDecoration(labelText: label),
+          )
+        : TextField(
+            controller: ctrl,
+            maxLines: maxLines,
+            keyboardType: keyboardType ?? TextInputType.text,
+            decoration: InputDecoration(labelText: label),
+          );
     if (width != null) return SizedBox(width: width, child: field);
     return Expanded(flex: flex, child: field);
   }
@@ -1884,10 +1892,18 @@ class _NewGigDialogState extends State<_NewGigDialog> {
     int maxLines = 1,
     TextInputType? keyboardType,
   }) {
+    if (maxLines > 1) {
+      return ResizableTextField(
+        controller: ctrl,
+        minLines: 1,
+        maxAutoLines: maxLines < 20 ? 20 : maxLines,
+        decoration: InputDecoration(labelText: label),
+      );
+    }
     return TextField(
       controller: ctrl,
       maxLines: maxLines,
-      keyboardType: keyboardType ?? (maxLines > 1 ? TextInputType.multiline : TextInputType.text),
+      keyboardType: keyboardType ?? TextInputType.text,
       decoration: InputDecoration(labelText: label),
     );
   }

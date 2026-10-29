@@ -3,6 +3,7 @@ import 'dart:typed_data';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import '../../widgets/resizable_text_field.dart';
 import 'package:intl/intl.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -1530,9 +1531,10 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
                               ),
                             ),
                             const SizedBox(height: 10),
-                            TextField(
+                            ResizableTextField(
                               controller: _ctrBodyCtrl,
-                              maxLines: 10,
+                              minLines: 10,
+                              maxAutoLines: 40,
                               decoration: const InputDecoration(
                                 labelText: 'Avtaletekst',
                                 alignLabelWithHint: true,
@@ -2669,9 +2671,9 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
                   ),
                   if (type == ProfileFieldType.dropdown) ...[
                     const SizedBox(height: 12),
-                    TextField(
+                    ResizableTextField(
                       controller: optionsCtrl,
-                      maxLines: 5,
+                      minLines: 5,
                       decoration: const InputDecoration(
                         labelText: 'Valg (én per linje)',
                         border: OutlineInputBorder(),
@@ -3380,7 +3382,7 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
                         labelText: 'Navn (f.eks. Trommerider)'),
                   ),
                   const SizedBox(height: 10),
-                  TextField(
+                  ResizableTextField(
                     controller: bodyCtrl,
                     decoration: const InputDecoration(
                       labelText: 'Tekst',
@@ -3388,7 +3390,7 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
                       alignLabelWithHint: true,
                     ),
                     minLines: 6,
-                    maxLines: 14,
+                    maxAutoLines: 40,
                   ),
                   const SizedBox(height: 4),
                   Text(
@@ -3650,14 +3652,14 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
                   ),
                   if (isTextRider) ...[
                     const SizedBox(height: 10),
-                    TextField(
+                    ResizableTextField(
                       controller: bodyCtrl,
                       decoration: const InputDecoration(
                         labelText: 'Tekst',
                         alignLabelWithHint: true,
                       ),
                       minLines: 6,
-                      maxLines: 14,
+                      maxAutoLines: 40,
                     ),
                     const SizedBox(height: 4),
                     Text(
