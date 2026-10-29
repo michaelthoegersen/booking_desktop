@@ -40,7 +40,9 @@ Deno.serve(async (req) => {
   // Look up agreement token
   const { data: agreement, error } = await supabase
     .from('agreement_tokens')
-    .select('*, gigs(venue_name, date_from, date_to, customer_name, customer_email)')
+    // gig_id navngis eksplisitt: chosen_gig_id peker også på gigs, og uten
+    // navnet blir embedden tvetydig (PGRST201) og oppslaget feiler.
+    .select('*, gigs!agreement_tokens_gig_id_fkey(venue_name, date_from, date_to, customer_name, customer_email)')
     .eq('token', token)
     .maybeSingle();
 
