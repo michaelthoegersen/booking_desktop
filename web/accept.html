@@ -43,6 +43,15 @@
     .footer { padding: 14px 28px; background: #fafafa; border-top: 1px solid #eee; text-align: center; font-size: 12px; color: #999; }
     .footer strong { color: #333; }
     .hidden { display: none; }
+
+    /* Datovalg — vises bare når avtalen gjelder flere mulige datoer */
+    .date-option { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border: 1px solid #ddd; border-radius: 10px; margin-bottom: 8px; cursor: pointer; transition: border-color .15s, background .15s; }
+    .date-option:hover { border-color: #16a34a; background: #f6fdf8; }
+    .date-option input { width: auto; margin: 0; }
+    .date-option.selected { border-color: #16a34a; background: #f0fdf4; }
+    .date-option .day { font-weight: 700; font-size: 15px; }
+    .date-option .where { color: #777; font-size: 13px; }
+    .choice-help { color: #666; font-size: 14px; margin-bottom: 10px; }
   </style>
 </head>
 <body>
@@ -65,6 +74,11 @@
       <h2>Godta avtalen</h2>
       <p>Ved å skrive inn ditt navn og trykke «Godta avtale» bekrefter du at du har lest og aksepterer betingelsene i intensjonsavtalen.</p>
       <form id="acceptForm">
+        <div class="form-group hidden" id="dateChoice">
+          <label>Velg dato for oppdraget</label>
+          <p class="choice-help">Avtalen gjelder én av datoene under. Velg den som passer — de andre blir frigitt.</p>
+          <div id="dateOptions"></div>
+        </div>
         <div class="form-group">
           <label for="name">Ditt fulle navn</label>
           <input type="text" id="name" required placeholder="Skriv inn navn...">
@@ -153,6 +167,48 @@
           document.getElementById('name').value = data.customer_name;
         }
 
+        // Flere mulige datoer: kunden må velge én før avtalen kan godtas.
+        const dateOptions = data.date_options || [];
+        if (dateOptions.length > 0) {
+          const wrap = document.getElementById('dateOptions');
+          wrap.textContent = '';
+          dateOptions.forEach(function (o) {
+            const row = document.createElement('label');
+            row.className = 'date-option';
+
+            const radio = document.createElement('input');
+            radio.type = 'radio';
+            radio.name = 'gigdate';
+            radio.value = o.id;
+            radio.addEventListener('change', function () {
+              Array.prototype.forEach.call(
+                wrap.querySelectorAll('.date-option'),
+                function (el) { el.classList.remove('selected'); });
+              row.classList.add('selected');
+            });
+
+            const text = document.createElement('div');
+            const day = document.createElement('div');
+            day.className = 'day';
+            day.textContent = formatDate(o.date_from);
+            text.appendChild(day);
+
+            const place = [o.venue_name, o.city].filter(Boolean).join(' · ');
+            if (place) {
+              const where = document.createElement('div');
+              where.className = 'where';
+              where.textContent = place;
+              text.appendChild(where);
+            }
+
+            row.appendChild(radio);
+            row.appendChild(text);
+            wrap.appendChild(row);
+          });
+          document.getElementById('dateChoice').classList.remove('hidden');
+          document.getElementById('submitBtn').textContent = 'Godta avtale og sett dato';
+        }
+
         // Today's date
         document.getElementById('dateInfo').textContent =
           'Dato registreres automatisk: ' + new Date().toLocaleDateString('nb-NO');
@@ -163,16 +219,27 @@
           const name = document.getElementById('name').value.trim();
           if (!name) return;
 
+          const errEl0 = document.getElementById('errorMsg');
+          const picked = document.querySelector('input[name="gigdate"]:checked');
+          if (dateOptions.length > 0 && !picked) {
+            errEl0.textContent = 'Velg én av datoene før du godtar avtalen.';
+            errEl0.classList.remove('hidden');
+            return;
+          }
+
           const btn = document.getElementById('submitBtn');
+          const btnLabel = btn.textContent;
           btn.disabled = true;
           btn.textContent = 'Sender...';
-          document.getElementById('errorMsg').classList.add('hidden');
+          errEl0.classList.add('hidden');
 
           try {
+            const payload = { name: name };
+            if (picked) payload.chosen_gig_id = picked.value;
             const postRes = await fetch(API + '?token=' + encodeURIComponent(token), {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ name }),
+              body: JSON.stringify(payload),
             });
 
             const postData = await postRes.json();
@@ -185,19 +252,32 @@
             document.getElementById('main').classList.add('hidden');
             document.getElementById('success').classList.remove('hidden');
             document.getElementById('success-msg').textContent =
-              'Takk, ' + name + '. Du vil motta en signert kopi når avtalen er godkjent av Complete Drums.';
+              'Takk, ' + name + '. '
+              + (picked ? 'Datoen er satt til ' + formatDate(
+                    dateOptions.filter(function (o) { return o.id === picked.value; })[0].date_from)
+                  + '. ' : '')
+              + 'Du vil motta en signert kopi når avtalen er godkjent av Complete Drums.';
           } catch (err) {
             const errEl = document.getElementById('errorMsg');
             errEl.textContent = err.message;
             errEl.classList.remove('hidden');
             btn.disabled = false;
-            btn.textContent = 'Godta avtale';
+            btn.textContent = btnLabel;
           }
         });
 
       } catch (e) {
         showError('En uventet feil oppstod. Prøv igjen senere.');
       }
+    }
+
+    function formatDate(iso) {
+      if (!iso) return '';
+      const d = new Date(iso + 'T00:00:00');
+      if (isNaN(d.getTime())) return iso;
+      return d.toLocaleDateString('nb-NO', {
+        weekday: 'long', day: 'numeric', month: 'long', year: 'numeric',
+      });
     }
 
     function showError(msg) {

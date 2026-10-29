@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:math';
 
 import 'package:flutter/material.dart';
+import '../../services/date_option_service.dart';
 import '../../widgets/resizable_text_field.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
@@ -41,6 +42,10 @@ class _MgmtGigsPageState extends State<MgmtGigsPage> {
   String _search = '';
   String _statusFilter = 'upcoming';
   String _typeFilter = 'all'; // 'all', 'gig', 'rehearsal', 'meeting'
+
+  /// gigId → «2 av 3» for aktiviteter som er ett av flere datoalternativer.
+  /// Regnes ut fra gigene som allerede er lastet, så det koster ingen spørring.
+  Map<String, String> _optionLabels = {};
 
   // Multi-select for bus booking
   bool _selectionMode = false;
@@ -98,6 +103,7 @@ class _MgmtGigsPageState extends State<MgmtGigsPage> {
 
       _gigs = List<Map<String, dynamic>>.from(gigs);
       _meetings = List<Map<String, dynamic>>.from(meetings);
+      _rebuildOptionLabels();
 
       // Mark gigs that are part of a multi-date offer (used to relabel
       // rehearsals as "Prøve" instead of "Øvelse" in the list).
@@ -138,6 +144,26 @@ class _MgmtGigsPageState extends State<MgmtGigsPage> {
       debugPrint('Gigs load error: $e');
     }
     if (mounted) setState(() => _loading = false);
+  }
+
+  /// Nummererer datoalternativene innenfor hver gruppe, slik at lista kan si
+  /// «Alternativ 2 av 3» uten å slå opp søsknene for hver rad.
+  void _rebuildOptionLabels() {
+    final groups = <String, List<Map<String, dynamic>>>{};
+    for (final g in _gigs) {
+      final grp = g[DateOptionService.kGroup] as String?;
+      if (grp != null) (groups[grp] ??= []).add(g);
+    }
+    final labels = <String, String>{};
+    for (final members in groups.values) {
+      members.sort((a, b) => (a['date_from'] ?? '')
+          .toString()
+          .compareTo((b['date_from'] ?? '').toString()));
+      for (var i = 0; i < members.length; i++) {
+        labels[members[i]['id'] as String] = '${i + 1} av ${members.length}';
+      }
+    }
+    _optionLabels = labels;
   }
 
   /// Mark gig as viewed by current user
@@ -982,6 +1008,7 @@ class _MgmtGigsPageState extends State<MgmtGigsPage> {
     final isMeetingTable = gig['_is_meeting_table'] == true;
     return _GigRow(
       gig: gig,
+      optionLabel: _optionLabels[gigId],
       hasUnseenUpdate: _isUnseen(gig),
       isStian: _sb.auth.currentUser?.email == 'stian@completedrums.no',
       onTap: _selectionMode && isGig
@@ -2326,8 +2353,12 @@ class _GigRow extends StatelessWidget {
   final bool hasUnseenUpdate;
   final bool isStian;
 
+  /// «2 av 3» når aktiviteten er ett av flere mulige datoer, ellers null.
+  final String? optionLabel;
+
   const _GigRow({
     required this.gig,
+    this.optionLabel,
     required this.onTap,
     required this.onCancel,
     required this.onDelete,
@@ -2337,6 +2368,40 @@ class _GigRow extends StatelessWidget {
     this.hasUnseenUpdate = false,
     this.isStian = false,
   });
+
+  /// Liten merkelapp som gjør det synlig at raden er ett av flere
+  /// datoalternativer, og hvordan det gikk med akkurat denne datoen.
+  Widget _optionPill(ColorScheme cs) {
+    final chosen = DateOptionService.isChosen(gig);
+    final expired = DateOptionService.isExpired(gig);
+    final text = chosen
+        ? 'Valgt dato'
+        : expired
+            ? 'Utgått'
+            : 'Alternativ${optionLabel != null ? ' $optionLabel' : ''}';
+    final fg = chosen
+        ? Colors.green.shade800
+        : expired
+            ? cs.onSurfaceVariant
+            : const Color(0xFF8A5A00);
+    final bg = chosen
+        ? Colors.green.withValues(alpha: 0.12)
+        : expired
+            ? cs.onSurfaceVariant.withValues(alpha: 0.10)
+            : const Color(0xFFFFC107).withValues(alpha: 0.22);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Text(
+        text,
+        style: TextStyle(
+            fontSize: 10, fontWeight: FontWeight.w800, color: fg),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -2425,10 +2490,28 @@ class _GigRow extends StatelessWidget {
             ],
             SizedBox(
               width: 120,
-              child: Text(
-                dateLabel,
-                style: const TextStyle(
-                    fontWeight: FontWeight.w700, fontSize: 13),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    dateLabel,
+                    style: TextStyle(
+                      fontWeight: FontWeight.w700,
+                      fontSize: 13,
+                      decoration: DateOptionService.isExpired(gig)
+                          ? TextDecoration.lineThrough
+                          : null,
+                      color: DateOptionService.isExpired(gig)
+                          ? cs.onSurfaceVariant
+                          : null,
+                    ),
+                  ),
+                  if (DateOptionService.isOption(gig)) ...[
+                    const SizedBox(height: 4),
+                    _optionPill(cs),
+                  ],
+                ],
               ),
             ),
             const SizedBox(width: 12),

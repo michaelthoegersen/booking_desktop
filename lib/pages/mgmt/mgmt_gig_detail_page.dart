@@ -11,6 +11,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../state/active_company.dart';
 import '../../state/role_labels.dart';
+import '../../services/date_option_service.dart';
 import '../../services/intensjonsavtale_pdf_service.dart';
 import '../../services/email_service.dart';
 import '../../widgets/contact_profile_dialog.dart';
@@ -1414,10 +1415,20 @@ class _MgmtGigDetailPageState extends State<MgmtGigDetailPage>
 
                 // 1. Create agreement token (on canonical gig). Primary
                 // customer_email keeps the first recipient for back-compat.
+                // Er datoen fortsatt uavklart, følger gruppa med på avtalen.
+                // Da krever accept-siden at kunden velger én dato, og valget
+                // setter datoen her hos oss i samme slengen.
+                final gigNow = _gig;
+                final choiceGroup =
+                    (gigNow != null && DateOptionService.isUnresolved(gigNow))
+                        ? (gigNow[DateOptionService.kGroup] as String?)
+                        : null;
+
                 final tokenRow = await _sb.from('agreement_tokens').insert({
                   'gig_id': canonicalGigId,
                   'customer_email': recipients.join(', '),
                   'status': 'pending',
+                  if (choiceGroup != null) 'date_choice_group': choiceGroup,
                 }).select('id, token').single();
 
                 final token = tokenRow['token'] as String;
@@ -1466,10 +1477,16 @@ class _MgmtGigDetailPageState extends State<MgmtGigDetailPage>
                 final introLine = isEn
                     ? 'Attached you will find the letter of intent $bodyDesc.'
                     : 'Vedlagt finner du intensjonsavtalen $bodyDesc.';
-                final reviewLine = isEn
-                    ? 'Please review the agreement in the attachment, and then accept it by clicking the button below:'
-                    : 'Du kan lese gjennom avtalen i vedlegget, og deretter godta den ved å trykke på knappen under:';
-                final acceptBtnLabel = isEn ? 'Accept agreement' : 'Aksepter avtale';
+                final reviewLine = choiceGroup != null
+                    ? (isEn
+                        ? 'Please review the agreement in the attachment. When you accept, you choose which of the proposed dates the engagement is booked for:'
+                        : 'Du kan lese gjennom avtalen i vedlegget. Når du godtar den, velger du hvilken av de foreslåtte datoene oppdraget settes til:')
+                    : (isEn
+                        ? 'Please review the agreement in the attachment, and then accept it by clicking the button below:'
+                        : 'Du kan lese gjennom avtalen i vedlegget, og deretter godta den ved å trykke på knappen under:');
+                final acceptBtnLabel = choiceGroup != null
+                    ? (isEn ? 'Choose date and accept' : 'Velg dato og godta')
+                    : (isEn ? 'Accept agreement' : 'Aksepter avtale');
                 final acceptDisclaimer = isEn
                     ? 'By accepting you confirm that you have read and agree to the terms of the letter of intent.'
                     : 'Ved å akseptere bekrefter du at du har lest og godtar betingelsene i intensjonsavtalen.';
@@ -2556,6 +2573,22 @@ class _InfoTabState extends State<_InfoTab> {
     final gigType = gig['type'] as String? ?? 'gig';
     final isGig = gigType == 'gig' || widget.treatAsGig;
 
+    // Mulige datoer står øverst uansett fane-innhold: er datoen uavklart, er
+    // det det første man trenger å vite om aktiviteten.
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _DateOptionsCard(
+          gig: gig,
+          onChanged: widget.onUpdated,
+          locked: _invoiceLocked,
+        ),
+        _body(cs, isGig),
+      ],
+    );
+  }
+
+  Widget _body(ColorScheme cs, bool isGig) {
     if (!isGig) {
       return Row(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -5549,5 +5582,325 @@ class _ChatTabState extends State<_ChatTab> with MentionMixin {
     ).then((value) {
       if (value == 'reply') _startReply(msg);
     });
+  }
+}
+
+// ===========================================================================
+// MULIGE DATOER — alternativene som hører til samme forespørsel
+// ===========================================================================
+
+/// Viser hele settet med mulige datoer for en forespørsel, uansett hvilket av
+/// alternativene man står på. Hvert alternativ er sin egen gig — det er det
+/// som gjør at medlemmene ser og kan holde av alle datoene — men de deler
+/// gruppe, så her kan hele settet avklares på ett sted.
+class _DateOptionsCard extends StatefulWidget {
+  const _DateOptionsCard({
+    required this.gig,
+    required this.onChanged,
+    required this.locked,
+  });
+
+  final Map<String, dynamic> gig;
+
+  /// Kalles når gruppa er endret, så gig-siden kan laste på nytt.
+  final VoidCallback onChanged;
+
+  /// Fakturalås: da skal ingenting i gruppa kunne røres.
+  final bool locked;
+
+  @override
+  State<_DateOptionsCard> createState() => _DateOptionsCardState();
+}
+
+class _DateOptionsCardState extends State<_DateOptionsCard> {
+  List<Map<String, dynamic>> _options = const [];
+  bool _busy = false;
+
+  String? get _group =>
+      widget.gig[DateOptionService.kGroup] as String?;
+
+  String get _gigId => widget.gig['id'] as String;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  @override
+  void didUpdateWidget(covariant _DateOptionsCard old) {
+    super.didUpdateWidget(old);
+    if (old.gig[DateOptionService.kGroup] != _group) _load();
+  }
+
+  Future<void> _load() async {
+    final group = _group;
+    if (group == null) {
+      if (mounted) setState(() => _options = const []);
+      return;
+    }
+    try {
+      final rows = await DateOptionService.siblings(group);
+      if (mounted) setState(() => _options = rows);
+    } catch (e) {
+      debugPrint('Load date options error: $e');
+    }
+  }
+
+  Future<void> _run(Future<void> Function() action) async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    try {
+      await action();
+      await _load();
+      widget.onChanged();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('Gikk ikke: $e')));
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _addOption() async {
+    final seed = DateTime.tryParse(
+            widget.gig['date_from']?.toString() ?? '') ??
+        DateTime.now();
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: seed.add(const Duration(days: 7)),
+      firstDate: DateTime(seed.year - 1),
+      lastDate: DateTime(seed.year + 3),
+      helpText: 'Legg til mulig dato',
+    );
+    if (picked == null) return;
+    await _run(() =>
+        DateOptionService.addOption(gigId: _gigId, date: picked));
+  }
+
+  Future<void> _choose(Map<String, dynamic> option) async {
+    final others = _options.where((o) => o['id'] != option['id']).length;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Sett datoen'),
+        content: Text(
+          '${_fmt(option['date_from'])} blir datoen for dette oppdraget.\n\n'
+          '${others == 1 ? 'Det andre alternativet' : 'De $others andre alternativene'} '
+          'merkes som utgått, men slettes ikke.',
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Avbryt')),
+          FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Sett datoen')),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    await _run(() => DateOptionService.choose(option['id'] as String));
+  }
+
+  Future<void> _reopen() async {
+    final group = _group;
+    if (group == null) return;
+    await _run(() => DateOptionService.reopen(group));
+  }
+
+  Future<void> _detach(Map<String, dynamic> option) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Løsne fra gruppa'),
+        content: Text(
+          '${_fmt(option['date_from'])} blir en vanlig aktivitet uten '
+          'alternativer, og påvirkes ikke lenger av valget på de andre.',
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Avbryt')),
+          FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Løsne')),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    await _run(() => DateOptionService.detach(option['id'] as String));
+  }
+
+  String _fmt(dynamic iso) {
+    final d = DateTime.tryParse(iso?.toString() ?? '');
+    if (d == null) return '—';
+    return DateFormat('EEE d. MMMM yyyy', 'nb').format(d);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final group = _group;
+
+    // Ingen alternativer ennå: bare en diskré vei inn.
+    if (group == null) {
+      if (widget.locked) return const SizedBox.shrink();
+      return Align(
+        alignment: Alignment.centerLeft,
+        child: Padding(
+          padding: const EdgeInsets.only(bottom: 12),
+          child: TextButton.icon(
+            onPressed: _busy ? null : _addOption,
+            icon: const Icon(Icons.event_repeat, size: 18),
+            label: const Text('Kunden har foreslått flere datoer'),
+          ),
+        ),
+      );
+    }
+
+    final resolved = _options.any(DateOptionService.isChosen);
+
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: resolved ? cs.surfaceContainerLowest : cs.tertiaryContainer,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+            color: resolved ? cs.outlineVariant : cs.tertiary),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(resolved ? Icons.event_available : Icons.event_repeat,
+                  size: 16,
+                  color: resolved ? cs.onSurfaceVariant : cs.onTertiaryContainer),
+              const SizedBox(width: 8),
+              Text(
+                resolved
+                    ? 'DATOEN ER SATT'
+                    : 'MULIGE DATOER — IKKE AVKLART',
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: 0.8,
+                  color: resolved
+                      ? cs.onSurfaceVariant
+                      : cs.onTertiaryContainer,
+                ),
+              ),
+              const Spacer(),
+              if (_busy)
+                const SizedBox(
+                    width: 14,
+                    height: 14,
+                    child: CircularProgressIndicator(strokeWidth: 2)),
+            ],
+          ),
+          if (!resolved) ...[
+            const SizedBox(height: 6),
+            Text(
+              'Kunden har ikke valgt dato. Alle alternativene er synlige for '
+              'medlemmene, men ingen av dem teller i gigghyre eller fakturering.',
+              style: TextStyle(fontSize: 12, color: cs.onTertiaryContainer),
+            ),
+          ],
+          const SizedBox(height: 12),
+          ..._options.map((o) => _optionRow(cs, o, resolved)),
+          if (!widget.locked) ...[
+            const SizedBox(height: 4),
+            Row(
+              children: [
+                TextButton.icon(
+                  onPressed: _busy ? null : _addOption,
+                  icon: const Icon(Icons.add, size: 16),
+                  label: const Text('Legg til dato'),
+                ),
+                if (resolved)
+                  TextButton.icon(
+                    onPressed: _busy ? null : _reopen,
+                    icon: const Icon(Icons.undo, size: 16),
+                    label: const Text('Åpne valget på nytt'),
+                  ),
+              ],
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _optionRow(
+      ColorScheme cs, Map<String, dynamic> o, bool resolved) {
+    final isThis = o['id'] == _gigId;
+    final chosen = DateOptionService.isChosen(o);
+    final expired = DateOptionService.isExpired(o);
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 6),
+      child: Row(
+        children: [
+          Icon(
+            chosen
+                ? Icons.check_circle
+                : expired
+                    ? Icons.cancel_outlined
+                    : Icons.radio_button_unchecked,
+            size: 18,
+            color: chosen
+                ? Colors.green.shade700
+                : expired
+                    ? cs.onSurfaceVariant.withValues(alpha: 0.5)
+                    : cs.onSurfaceVariant,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              _fmt(o['date_from']),
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: isThis ? FontWeight.w800 : FontWeight.w500,
+                decoration: expired ? TextDecoration.lineThrough : null,
+                color: expired ? cs.onSurfaceVariant : null,
+              ),
+            ),
+          ),
+          if (isThis)
+            Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: Text('du står her',
+                  style: TextStyle(
+                      fontSize: 11,
+                      fontStyle: FontStyle.italic,
+                      color: cs.onSurfaceVariant)),
+            ),
+          if (!isThis)
+            IconButton(
+              tooltip: 'Åpne',
+              icon: const Icon(Icons.open_in_new, size: 16),
+              visualDensity: VisualDensity.compact,
+              onPressed: () => context.go('/m/gigs/${o['id']}'),
+            ),
+          if (!widget.locked && !resolved)
+            TextButton(
+              onPressed: _busy ? null : () => _choose(o),
+              child: const Text('Velg denne'),
+            ),
+          if (!widget.locked && !resolved && _options.length > 2)
+            IconButton(
+              tooltip: 'Løsne fra gruppa',
+              icon: const Icon(Icons.link_off, size: 16),
+              visualDensity: VisualDensity.compact,
+              onPressed: _busy ? null : () => _detach(o),
+            ),
+        ],
+      ),
+    );
   }
 }

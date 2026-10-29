@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
+import '../../widgets/resizable_text_field.dart';
 import 'package:intl/intl.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+
+import '../../services/date_option_service.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../state/active_company.dart';
@@ -71,12 +74,17 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
       final today = DateTime.now();
       final todayStr =
           '${today.year}-${today.month.toString().padLeft(2, '0')}-${today.day.toString().padLeft(2, '0')}';
+      // Uavklarte og utgåtte datoalternativer holdes utenfor: datoen er ikke
+      // solgt, så ingen skal ha hyre for den. Bare den valgte datoen — eller
+      // en helt vanlig gig uten alternativer — teller.
       final gigs = List<Map<String, dynamic>>.from(
         await _sb
             .from('gigs')
             .select('id, date_from, venue_name, customer_firma, type')
             .eq('company_id', _companyId!)
-            .lte('date_from', todayStr),
+            .lte('date_from', todayStr)
+            .or('${DateOptionService.kState}.is.null,'
+                '${DateOptionService.kState}.eq.chosen'),
       );
       if (gigs.isEmpty) {
         setState(() {
@@ -200,18 +208,25 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
         final junctionGigIds =
             junction.map((r) => r['gig_id'] as String).toSet().toList();
         final typeById = <String, String>{};
+        // Datoer som ikke er avklart skal heller ikke telle som showdatoer når
+        // bookinghonoraret fordeles — ellers blir hver enkelt dato for billig.
+        final countsAsDate = <String, bool>{};
         if (junctionGigIds.isNotEmpty) {
           for (final g in List<Map<String, dynamic>>.from(
             await _sb
                 .from('gigs')
-                .select('id, type')
+                .select('id, type, ${DateOptionService.kState}')
                 .inFilter('id', junctionGigIds),
           )) {
             typeById[g['id'] as String] = g['type'] as String? ?? 'gig';
+            final state = g[DateOptionService.kState] as String?;
+            countsAsDate[g['id'] as String] =
+                state == null || state == 'chosen';
           }
         }
         for (final r in junction) {
           if (typeById[r['gig_id'] as String] == 'rehearsal') continue;
+          if (countsAsDate[r['gig_id'] as String] == false) continue;
           final oid = r['offer_id'] as String;
           offerShowDateCount[oid] = (offerShowDateCount[oid] ?? 0) + 1;
         }

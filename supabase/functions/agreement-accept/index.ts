@@ -50,6 +50,25 @@ Deno.serve(async (req) => {
 
   const gig = agreement.gigs;
 
+  // Datoene kunden skal velge mellom, hvis avtalen gjelder en forespørsel med
+  // flere mulige datoer. Utgåtte alternativer tas ikke med — de er allerede
+  // ute av bildet.
+  async function dateOptions() {
+    if (!agreement.date_choice_group) return [];
+    const { data } = await supabase
+      .from('gigs')
+      .select('id, date_from, venue_name, city, date_option_state')
+      .eq('date_option_group', agreement.date_choice_group)
+      .neq('date_option_state', 'expired')
+      .order('date_from');
+    return (data ?? []).map((g: any) => ({
+      id: g.id,
+      date_from: g.date_from,
+      venue_name: g.venue_name ?? '',
+      city: g.city ?? '',
+    }));
+  }
+
   // ── GET: Return agreement data ──
   if (req.method === 'GET') {
     const pdfUrl = agreement.pdf_path
@@ -59,6 +78,8 @@ Deno.serve(async (req) => {
     return json({
       ok: true,
       status: agreement.status,
+      date_options: await dateOptions(),
+      chosen_gig_id: agreement.chosen_gig_id ?? null,
       venue: gig?.venue_name ?? '',
       date_from: gig?.date_from ?? '',
       date_to: gig?.date_to ?? '',
@@ -75,7 +96,7 @@ Deno.serve(async (req) => {
       return json({ error: 'Avtalen er allerede godtatt.' }, 400);
     }
 
-    let body: { name?: string } = {};
+    let body: { name?: string; chosen_gig_id?: string } = {};
     try {
       body = await req.json();
     } catch {
@@ -87,6 +108,44 @@ Deno.serve(async (req) => {
       return json({ error: 'Navn er påkrevd.' }, 400);
     }
 
+    // ── Datovalg ────────────────────────────────────────────────────────────
+    // Gjelder avtalen flere mulige datoer, må kunden velge én. Valget settes
+    // FØR aksepten registreres: feiler datoen, står avtalen fortsatt åpen og
+    // kunden kan prøve igjen, i stedet for at vi sitter med en godtatt avtale
+    // uten dato.
+    let chosenGigId: string | null = null;
+    if (agreement.date_choice_group) {
+      const options = await dateOptions();
+      chosenGigId = (body.chosen_gig_id ?? '').trim() || null;
+
+      if (!chosenGigId) {
+        return json({ error: 'Velg én av datoene.' }, 400);
+      }
+      if (!options.some((o: any) => o.id === chosenGigId)) {
+        return json({ error: 'Ukjent dato valgt.' }, 400);
+      }
+
+      const { error: chooseError } = await supabase
+        .from('gigs')
+        .update({ date_option_state: 'chosen' })
+        .eq('id', chosenGigId);
+      if (chooseError) {
+        console.error('Choose date error:', chooseError);
+        return json({ error: 'Kunne ikke sette datoen.' }, 500);
+      }
+
+      const { error: expireError } = await supabase
+        .from('gigs')
+        .update({ date_option_state: 'expired' })
+        .eq('date_option_group', agreement.date_choice_group)
+        .neq('id', chosenGigId);
+      if (expireError) {
+        // Datoen er satt; resten står igjen som uavklart og er synlig i
+        // webappen. Verdt en logg, ikke verdt å avvise kunden.
+        console.error('Expire siblings error:', expireError);
+      }
+    }
+
     // Update agreement status
     const { error: updateError } = await supabase
       .from('agreement_tokens')
@@ -94,6 +153,7 @@ Deno.serve(async (req) => {
         status: 'accepted',
         accepted_at: new Date().toISOString(),
         accepted_name: acceptedName,
+        ...(chosenGigId ? { chosen_gig_id: chosenGigId } : {}),
       })
       .eq('token', token);
 
@@ -116,12 +176,22 @@ Deno.serve(async (req) => {
         .eq('company_id', gigFull.company_id);
 
       if (members && members.length > 0) {
+        let chosenDate = '';
+        if (chosenGigId) {
+          const { data: chosen } = await supabase
+            .from('gigs')
+            .select('date_from')
+            .eq('id', chosenGigId)
+            .maybeSingle();
+          if (chosen?.date_from) chosenDate = ` — datoen er satt til ${chosen.date_from}`;
+        }
+
         const notifications = members.map((m: any) => ({
           user_id: m.user_id,
           title: 'Intensjonsavtale godtatt',
-          body: `${acceptedName} har godtatt intensjonsavtalen for ${gigFull.venue_name || 'oppdrag'}`,
+          body: `${acceptedName} har godtatt intensjonsavtalen for ${gigFull.venue_name || 'oppdrag'}${chosenDate}`,
           type: 'gig',
-          gig_id: agreement.gig_id,
+          gig_id: chosenGigId ?? agreement.gig_id,
         }));
 
         await supabase.from('notifications').insert(notifications);

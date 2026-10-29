@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:go_router/go_router.dart';
+import 'package:intl/date_symbol_data_local.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'services/app_env.dart';
@@ -78,6 +79,12 @@ Future<void> main() async {
   // Loading it only in the else-branch below meant that passing --dart-define
   // for Supabase left dotenv uninitialised and silently disabled those keys.
   await AppEnv.ensureLoaded();
+
+  // Norske måneds- og ukedagsnavn. Uten dette kaster DateFormat(..., 'nb_NO')
+  // LocaleDataException ved konstruksjon, og datovelgeren for flere datoer og
+  // PDF-eksporten av tilbud faller i gulvet i stedet for å vise noe.
+  await initializeDateFormatting('nb_NO');
+  await initializeDateFormatting('nb');
 
   // 1. dart-define (Release / DMG)  2. bundled .env  — in that order.
   String supabaseUrl = AppEnv.supabaseUrl;
