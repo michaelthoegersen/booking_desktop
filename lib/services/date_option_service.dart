@@ -71,12 +71,15 @@ class DateOptionService {
       'id',
       'created_at',
       'updated_at',
-      'created_by',
       'date_from',
       'date_to',
     ]) {
       source.remove(key);
     }
+    // Den som legger til alternativet eier raden. Uten dette arver kopien
+    // created_by fra originalen, og på et testtilbud ville RLS da gjemt den
+    // for alle — også for den som nettopp lagde den.
+    source['created_by'] = _sb.auth.currentUser?.id;
     source[kGroup] = group;
     source[kState] = 'pending';
     source['date_from'] = iso;

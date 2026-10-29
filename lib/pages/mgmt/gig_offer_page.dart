@@ -89,6 +89,15 @@ class _GigOfferPageState extends State<GigOfferPage> {
   // shown/edited.
   int _scheduleSelectedIdx = 0;
 
+  // ── Testtilbud ───────────────────────────────────────────────────────────
+  // Et testtilbud er usynlig for alle andre enn den som lagde det, og sender
+  // ingen varsler. Håndheves av RLS; flagget her styrer bare hva vi skriver.
+  bool _isTest = false;
+
+  /// Bare plattformeieren får lov til å merke noe som test — både i UI-et og
+  /// i databasen. Avgjøres av is_platform_owner() i Postgres.
+  bool _canMakeTest = false;
+
   // ── Status ──────────────────────────────────────────────────────────────
   String _gigStatus = 'inquiry';
   DateTime? _invoicedAt;
@@ -191,6 +200,7 @@ class _GigOfferPageState extends State<GigOfferPage> {
     super.initState();
     _offerId = widget.offerId;
     _gigId = widget.gigId;
+    _loadTestPermission();
     _load().then((_) {
       if (!mounted) return;
       if (widget.autoApprove &&
@@ -638,6 +648,70 @@ class _GigOfferPageState extends State<GigOfferPage> {
     if (mounted) setState(() => _loading = false);
   }
 
+  /// Spør Postgres om denne brukeren er plattformeieren. Svaret styrer bare
+  /// om valget vises — databasen avviser flagget uansett for andre.
+  Future<void> _loadTestPermission() async {
+    try {
+      final ok = await _sb.rpc('is_platform_owner');
+      if (mounted) setState(() => _canMakeTest = ok == true);
+    } catch (e) {
+      debugPrint('is_platform_owner error: $e');
+    }
+  }
+
+  /// Vises bare for plattformeieren, eller på et tilbud som allerede ER et
+  /// testtilbud — da skal det være tydelig merket uansett hvem som ser det.
+  Widget _buildTestBanner(ColorScheme cs) {
+    if (!_canMakeTest && !_isTest) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 16),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+        decoration: BoxDecoration(
+          color: _isTest ? const Color(0xFFFFE0B2) : cs.surfaceContainerLowest,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+              color: _isTest ? const Color(0xFFE65100) : cs.outlineVariant),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.science_outlined,
+                size: 18,
+                color: _isTest ? const Color(0xFFE65100) : cs.onSurfaceVariant),
+            const SizedBox(width: 8),
+            Text(
+              'Testtilbud',
+              style: TextStyle(
+                fontWeight: FontWeight.w800,
+                fontSize: 13,
+                color:
+                    _isTest ? const Color(0xFFE65100) : cs.onSurfaceVariant,
+              ),
+            ),
+            const SizedBox(width: 10),
+            Switch(
+              value: _isTest,
+              onChanged: _canMakeTest
+                  ? (v) => setState(() => _isTest = v)
+                  : null,
+            ),
+            const SizedBox(width: 6),
+            Flexible(
+              child: Text(
+                _isTest
+                    ? 'Synlig kun for deg. Ingen varsler sendes, og gigger '
+                        'herfra havner ikke i andres lister.'
+                    : 'Skru på for å lage et tilbud ingen andre ser.',
+                style: TextStyle(fontSize: 12, color: cs.onSurfaceVariant),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   void _applyGigFields(Map<String, dynamic> gig) {
     _firmaCtrl.text = gig['customer_firma'] ?? '';
     _nameCtrl.text = gig['customer_name'] ?? '';
@@ -646,6 +720,7 @@ class _GigOfferPageState extends State<GigOfferPage> {
     _orgNrCtrl.text = gig['customer_org_nr'] ?? '';
     _addressCtrl.text = gig['customer_address'] ?? '';
     _invoiceOnEhf = gig['invoice_on_ehf'] == true;
+    _isTest = gig['is_test'] == true;
     _altInvoiceEnabled = gig['alt_invoice_enabled'] == true;
     _altInvFirmaCtrl.text = gig['alt_invoice_firma'] ?? '';
     _altInvNameCtrl.text = gig['alt_invoice_name'] ?? '';
@@ -984,6 +1059,7 @@ class _GigOfferPageState extends State<GigOfferPage> {
         debugPrint('No finance users to notify');
         return 0;
       }
+      if (_isTest) return 0;
       final firma = _firmaCtrl.text.trim();
       final dateFrom = _dateEntries.first.dateFrom;
       final dateLabel =
@@ -1513,6 +1589,7 @@ class _GigOfferPageState extends State<GigOfferPage> {
         final entry = _dateEntries[entryIdx];
         return {
           'company_id': _companyId,
+          'is_test': _isTest,
           'type': entry.isRehearsal ? 'rehearsal' : 'gig',
           'date_from':
               entry.dateFrom != null ? df.format(entry.dateFrom!) : null,
@@ -1622,21 +1699,24 @@ class _GigOfferPageState extends State<GigOfferPage> {
               await _sb.from('gigs').insert(gigData).select('id').single();
           entry.gigId = gigRes['id'] as String;
 
-          // Notify crew about the new gig
-          try {
-            final venue = n(entry.venueCtrl.text) ?? '';
-            final dateStr = entry.dateFrom != null
-                ? DateFormat('dd.MM.yyyy').format(entry.dateFrom!)
-                : '';
-            await _sb.functions.invoke('notify-company', body: {
-              'company_id': _companyId,
-              'title': 'Ny gig: $venue',
-              'body': '$dateStr — $venue',
-              'exclude_user_id': _sb.auth.currentUser?.id,
-              'gig_id': entry.gigId,
-            });
-          } catch (e) {
-            debugPrint('notify-company error: $e');
+          // Notify crew about the new gig. Et testtilbud varsler ingen —
+          // det er hele poenget med det.
+          if (!_isTest) {
+            try {
+              final venue = n(entry.venueCtrl.text) ?? '';
+              final dateStr = entry.dateFrom != null
+                  ? DateFormat('dd.MM.yyyy').format(entry.dateFrom!)
+                  : '';
+              await _sb.functions.invoke('notify-company', body: {
+                'company_id': _companyId,
+                'title': 'Ny gig: $venue',
+                'body': '$dateStr — $venue',
+                'exclude_user_id': _sb.auth.currentUser?.id,
+                'gig_id': entry.gigId,
+              });
+            } catch (e) {
+              debugPrint('notify-company error: $e');
+            }
           }
         }
         activeGigIds.add(entry.gigId!);
@@ -1780,6 +1860,8 @@ class _GigOfferPageState extends State<GigOfferPage> {
         offerData['invoice_due_days'] = dueDays;
         _invoicedAt = DateTime.now().toUtc();
       }
+
+      offerData['is_test'] = _isTest;
 
       if (_offerId != null) {
         await _sb.from('gig_offers').update(offerData).eq('id', _offerId!);
@@ -2135,7 +2217,8 @@ class _GigOfferPageState extends State<GigOfferPage> {
             _offerId != null ? 'Rediger gig / tilbud' : 'Ny gig / tilbud',
             style: Theme.of(context).textTheme.headlineMedium,
           ),
-          const SizedBox(height: 24),
+          const SizedBox(height: 16),
+          _buildTestBanner(cs),
 
           // Two-panel layout
           Expanded(

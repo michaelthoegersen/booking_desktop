@@ -1060,6 +1060,14 @@ class _NewGigDialogState extends State<_NewGigDialog> {
   Map<String, dynamic>? _selectedContact;
   bool _loadingCompanies = true;
 
+  // ── Testaktivitet ─────────────────────────────────────────────────────────
+  // Synlig kun for den som lagde den, og varsler ingen. Databasen håndhever
+  // begge deler; flagget her styrer bare hva vi skriver.
+  bool _isTest = false;
+
+  /// Bare plattformeieren får merke noe som test.
+  bool _canMakeTest = false;
+
   // ── Type ──────────────────────────────────────────────────────────────────
   String _type = 'gig';
 
@@ -1128,6 +1136,18 @@ class _NewGigDialogState extends State<_NewGigDialog> {
     if (widget.forceType != null) _type = widget.forceType!;
     _loadCompanies();
     _loadShowTypes();
+    _loadTestPermission();
+  }
+
+  /// Spør Postgres om denne brukeren er plattformeieren. Svaret styrer bare om
+  /// valget vises — databasen avviser flagget uansett for alle andre.
+  Future<void> _loadTestPermission() async {
+    try {
+      final ok = await _sb.rpc('is_platform_owner');
+      if (mounted) setState(() => _canMakeTest = ok == true);
+    } catch (e) {
+      debugPrint('is_platform_owner error: $e');
+    }
   }
 
   @override
@@ -1319,6 +1339,7 @@ class _NewGigDialogState extends State<_NewGigDialog> {
       'notes_for_contract': n(_notesCtrl.text),
       'info_from_organizer': n(_infoFromOrgCtrl.text),
       'created_by': _sb.auth.currentUser?.id,
+      'is_test': _isTest,
     };
   }
 
@@ -1369,27 +1390,30 @@ class _NewGigDialogState extends State<_NewGigDialog> {
         }
       }
 
-      // Send a single notification covering all created dates
-      try {
-        final venue = n(_venueCtrl.text) ?? '';
-        final dateLabel = dates.length == 1
-            ? df.format(dates.first)
-            : '${dates.length} datoer';
-        final label = const {
-              'gig': 'Ny gig',
-              'rehearsal': 'Ny øvelse',
-              'meeting': 'Nytt møte',
-              'other': 'Ny aktivitet',
-            }[_type] ??
-            'Ny aktivitet';
-        await _sb.functions.invoke('notify-company', body: {
-          'company_id': widget.managementCompanyId,
-          'title': '$label: $venue',
-          'body': '$dateLabel — $venue',
-          'exclude_user_id': _sb.auth.currentUser?.id,
-          if (createdIds.isNotEmpty) 'gig_id': createdIds.first,
-        });
-      } catch (_) {}
+      // Send a single notification covering all created dates. En testaktivitet
+      // varsler ingen — den finnes bare hos den som lagde den.
+      if (!_isTest) {
+        try {
+          final venue = n(_venueCtrl.text) ?? '';
+          final dateLabel = dates.length == 1
+              ? df.format(dates.first)
+              : '${dates.length} datoer';
+          final label = const {
+                'gig': 'Ny gig',
+                'rehearsal': 'Ny øvelse',
+                'meeting': 'Nytt møte',
+                'other': 'Ny aktivitet',
+              }[_type] ??
+              'Ny aktivitet';
+          await _sb.functions.invoke('notify-company', body: {
+            'company_id': widget.managementCompanyId,
+            'title': '$label: $venue',
+            'body': '$dateLabel — $venue',
+            'exclude_user_id': _sb.auth.currentUser?.id,
+            if (createdIds.isNotEmpty) 'gig_id': createdIds.first,
+          });
+        } catch (_) {}
+      }
 
       if (mounted) Navigator.of(context).pop(createdIds.first);
     } catch (e) {
@@ -1431,6 +1455,49 @@ class _NewGigDialogState extends State<_NewGigDialog> {
                 style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w900),
               ),
               const SizedBox(height: 12),
+
+              // Testaktivitet — bare plattformeieren ser dette valget.
+              if (_canMakeTest) ...[
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: _isTest ? const Color(0xFFFFE0B2) : null,
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(
+                      color: _isTest
+                          ? const Color(0xFFE65100)
+                          : Theme.of(context).colorScheme.outlineVariant,
+                    ),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.science_outlined, size: 18),
+                      const SizedBox(width: 8),
+                      const Text('Test',
+                          style: TextStyle(
+                              fontWeight: FontWeight.w800, fontSize: 13)),
+                      Switch(
+                        value: _isTest,
+                        onChanged: (v) => setState(() => _isTest = v),
+                      ),
+                      Expanded(
+                        child: Text(
+                          _isTest
+                              ? 'Kun synlig for deg. Ingen varsler.'
+                              : 'Lag en aktivitet ingen andre ser.',
+                          style: TextStyle(
+                              fontSize: 12,
+                              color: Theme.of(context)
+                                  .colorScheme
+                                  .onSurfaceVariant),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 12),
+              ],
 
               // Type toggle (hidden when type is forced)
               if (widget.forceType == null) ...[
@@ -2369,6 +2436,27 @@ class _GigRow extends StatelessWidget {
     this.isStian = false,
   });
 
+  /// Testaktivitet — bare den som lagde den ser raden i det hele tatt, men
+  /// den skal være umulig å forveksle med en ekte gig.
+  Widget _testPill() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFFE0B2),
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: const Color(0xFFE65100)),
+      ),
+      child: const Text(
+        'TEST',
+        style: TextStyle(
+            fontSize: 10,
+            fontWeight: FontWeight.w900,
+            letterSpacing: 0.5,
+            color: Color(0xFFE65100)),
+      ),
+    );
+  }
+
   /// Liten merkelapp som gjør det synlig at raden er ett av flere
   /// datoalternativer, og hvordan det gikk med akkurat denne datoen.
   Widget _optionPill(ColorScheme cs) {
@@ -2507,6 +2595,10 @@ class _GigRow extends StatelessWidget {
                           : null,
                     ),
                   ),
+                  if (gig['is_test'] == true) ...[
+                    const SizedBox(height: 4),
+                    _testPill(),
+                  ],
                   if (DateOptionService.isOption(gig)) ...[
                     const SizedBox(height: 4),
                     _optionPill(cs),
