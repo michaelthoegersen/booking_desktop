@@ -167,11 +167,13 @@ Deno.serve(async (req) => {
     // Send notification to all company members
     const { data: gigFull } = await supabase
       .from('gigs')
-      .select('company_id, venue_name')
+      .select('company_id, venue_name, is_test')
       .eq('id', agreement.gig_id)
       .single();
 
-    if (gigFull?.company_id) {
+    // Testgig: avtaleflyten skal kunne kjøres gjennom uten at noen andre får
+    // beskjed om en gig de ikke engang kan se.
+    if (gigFull?.company_id && !gigFull.is_test) {
       const { data: members } = await supabase
         .from('company_members')
         .select('user_id')

@@ -1303,7 +1303,21 @@ class _MgmtGigDetailPageState extends State<MgmtGigDetailPage>
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setSt) => AlertDialog(
-        title: const Text('Send Intensjonsavtale'),
+        title: _gig?['is_test'] == true
+            ? const Row(
+                children: [
+                  Icon(Icons.science_outlined,
+                      size: 20, color: Color(0xFFE65100)),
+                  SizedBox(width: 8),
+                  // Hele vitsen med testmodus er å kunne kjøre flyten uten at
+                  // noe ekte skjer. Da må det stå tydelig hvilken modus man er
+                  // i akkurat når man er i ferd med å sende en e-post.
+                  Expanded(
+                      child: Text('Send Intensjonsavtale — TESTGIG',
+                          style: TextStyle(color: Color(0xFFE65100)))),
+                ],
+              )
+            : const Text('Send Intensjonsavtale'),
         content: SizedBox(
           width: 420,
           child: Column(

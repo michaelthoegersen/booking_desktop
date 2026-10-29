@@ -381,9 +381,20 @@ Deno.serve(async (req) => {
       // Check if lineup is locked — if so, only notify locked crew + admins
       const { data: gigInfo } = await supabase
         .from('gigs')
-        .select('lineup_locked_skarp, lineup_locked_bass')
+        .select('lineup_locked_skarp, lineup_locked_bass, is_test')
         .eq('id', gig_id)
         .maybeSingle();
+
+      // Testgig: ingen andre ser verken gigen eller meldingen, så et varsel
+      // ville bare pekt på noe de ikke har tilgang til. Eieren skriver i
+      // chatten som vanlig — meldingen lagres, den varsler bare ingen.
+      if (gigInfo?.is_test) {
+        console.log('notify-chat: skipping gig chat notification for test gig', gig_id);
+        return new Response(
+          JSON.stringify({ ok: true, skipped: 'test_gig' }),
+          { headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' } },
+        );
+      }
 
       const hasLockedLineup = gigInfo?.lineup_locked_skarp || gigInfo?.lineup_locked_bass;
 
