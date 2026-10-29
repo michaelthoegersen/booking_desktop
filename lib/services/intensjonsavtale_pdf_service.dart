@@ -185,6 +185,11 @@ class IntensjonsavtalePdfService {
     final lblVenueDate = isEn ? 'VENUE AND TIME' : 'SPILLESTED OG TIDSPUNKT';
     final lblVenue = isEn ? 'Venue' : 'Spillested';
     final lblDate = isEn ? 'Date' : 'Dato';
+    // Er datoene alternativer kunden velger ÉN av, skal de ikke stå som
+    // «Dato 1/2/3» — det leses som tre spilledager. Prøvedager er ikke
+    // alternativer og beholder sin egen merking.
+    final lblOption = isEn ? 'Option' : 'Alternativ';
+    final lblRehearsalDate = isEn ? 'Rehearsal' : 'Prøve';
     final lblGetIn = isEn ? 'Get-in' : 'Get-in';
     final lblRehearsal = isEn ? 'Rehearsal' : 'Prøver';
     final lblFirstShow = isEn ? 'First performance' : 'Første opptreden';
@@ -394,7 +399,15 @@ class IntensjonsavtalePdfService {
               if (dateEntries != null && dateEntries.length > 1) ...[
                 for (int i = 0; i < dateEntries.length; i++) ...[
                   if (i > 0) pw.SizedBox(height: 6),
-                  _labelValue(regularFont, boldFont, '$lblDate ${i + 1}',
+                  _labelValue(
+                      regularFont,
+                      boldFont,
+                      !datesAreAlternatives
+                          ? '$lblDate ${i + 1}'
+                          : dateEntries[i].isRehearsal
+                              ? lblRehearsalDate
+                              : '$lblOption '
+                                  '${dateEntries.take(i).where((e) => !e.isRehearsal).length + 1}',
                       '${dateEntries[i].date} - ${dateEntries[i].venue}'),
                   // Per-date times — only render lines that have a value
                   if (dateEntries[i].getIn.isNotEmpty)
