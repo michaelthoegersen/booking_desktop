@@ -36,6 +36,11 @@ class _MgmtGigDetailPageState extends State<MgmtGigDetailPage>
   bool _loading = true;
   Map<String, dynamic>? _gig;
 
+  /// Datoene på denne gigen er alternativer kunden velger ÉN av. Da er det
+  /// ett show til full pris på avtalen, ikke ett show per dato.
+  bool get _datesAreAlternatives =>
+      (_gig ?? const <String, dynamic>{})[DateOptionService.kGroup] != null;
+
   List<Map<String, dynamic>> _shows = [];
   List<Map<String, dynamic>> _showTypes = [];
   List<Map<String, dynamic>> _companyMembers = []; // {user_id, name, status, section}
@@ -1382,6 +1387,7 @@ class _MgmtGigDetailPageState extends State<MgmtGigDetailPage>
                   calcTotal: calc?.total,
                   dateEntries: entries,
                   markupOnAll: _offerData?['markup_on_all'] == true,
+                  datesAreAlternatives: _datesAreAlternatives,
                   lang: _intensjonLang,
                   extras: _offerExtras,
                 );
@@ -1766,6 +1772,7 @@ class _MgmtGigDetailPageState extends State<MgmtGigDetailPage>
         calcTotal: calc?.total,
         dateEntries: entries,
         markupOnAll: _offerData?['markup_on_all'] == true,
+        datesAreAlternatives: _datesAreAlternatives,
         lang: _intensjonLang,
         extras: _offerExtras,
       );
@@ -4294,6 +4301,8 @@ class _KontraktTabState extends State<_KontraktTab> {
         calcTotal: calc?.total,
         dateEntries: entries,
         markupOnAll: widget.offerData?['markup_on_all'] == true,
+        datesAreAlternatives:
+            widget.gig[DateOptionService.kGroup] != null,
         extras: widget.offerExtras,
       );
       if (mounted) setState(() => _pdfBytes = result.mainPdf);
@@ -4402,6 +4411,8 @@ class _KontraktTabState extends State<_KontraktTab> {
         calcTotal: calc?.total,
         dateEntries: entries,
         markupOnAll: widget.offerData?['markup_on_all'] == true,
+        datesAreAlternatives:
+            widget.gig[DateOptionService.kGroup] != null,
         extras: widget.offerExtras,
       );
 

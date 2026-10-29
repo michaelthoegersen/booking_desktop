@@ -939,6 +939,7 @@ class _GigOfferPageState extends State<GigOfferPage> {
         calcTotal: _pdfTotal,
         dateEntries: entries,
         markupOnAll: _markupOnAll,
+        datesAreAlternatives: _datesAreOptions,
       );
 
       if (!mounted) return;
@@ -999,6 +1000,17 @@ class _GigOfferPageState extends State<GigOfferPage> {
                             ),
                           ],
                         ),
+                      ),
+                      // Forhåndsvisningen rendres av pdf.js i nettleseren og
+                      // kan bli stående tom. Nedlastingen går rett på bytene,
+                      // så det finnes alltid en vei til dokumentet.
+                      TextButton.icon(
+                        onPressed: () => Printing.sharePdf(
+                          bytes: bytes,
+                          filename: 'Signert_intensjonsavtale.pdf',
+                        ),
+                        icon: const Icon(Icons.download, size: 16),
+                        label: const Text('Last ned'),
                       ),
                       IconButton(
                         icon: const Icon(Icons.close),
@@ -5054,6 +5066,7 @@ class _GigOfferPageState extends State<GigOfferPage> {
         calcTotal: _pdfTotal,
         dateEntries: entries,
         markupOnAll: _markupOnAll,
+        datesAreAlternatives: _datesAreOptions,
       );
 
       // Archive the signed PDF. This exact file is what the customer receives,

@@ -138,6 +138,9 @@ class IntensjonsavtalePdfService {
             })>?
         dateEntries,
     bool markupOnAll = false,
+    /// Datoene i tilbudet er alternativer kunden velger ÉN av. Da er det ett
+    /// show til full pris, ikke ett per dato.
+    bool datesAreAlternatives = false,
     String lang = 'no',
     // Free-text extra cost line items from the offer (Ekstrakostnader). Only
     // used by the legacy (single-date) price summary — for the calc-lines path
@@ -454,6 +457,7 @@ class IntensjonsavtalePdfService {
                   lines: calcLines, total: calcTotal, lang: lang,
                   dateEntries: dateEntries,
                   markupOnAll: markupOnAll,
+                  datesAreAlternatives: datesAreAlternatives,
                   showLabel: config.showLabel.isNotEmpty
                       ? config.showLabel
                       : (tenantName.isNotEmpty ? tenantName : 'Show')),
@@ -1074,6 +1078,9 @@ class IntensjonsavtalePdfService {
             })>?
         dateEntries,
     bool markupOnAll = false,
+    /// Datoene er alternativer kunden velger ÉN av. Da er det ett show til
+    /// full pris — ikke ett show per dato — så prisen skal ikke fordeles.
+    bool datesAreAlternatives = false,
   }) {
     final isEn = lang == 'en';
     double performerFeesRaw = 0;
@@ -1118,7 +1125,15 @@ class IntensjonsavtalePdfService {
     // visible line here.
 
     final entries = dateEntries ?? const [];
-    final perfDates = entries.where((e) => !e.isRehearsal).toList();
+    final allPerfDates = entries.where((e) => !e.isRehearsal).toList();
+    // Alternativer: kun én av datoene blir noe av, så showet prises én gang.
+    final perfDates = datesAreAlternatives && allPerfDates.isNotEmpty
+        ? [allPerfDates.first]
+        : allPerfDates;
+    // Prøvedager står fortsatt oppført med kr 0, som før.
+    final pricedEntries = datesAreAlternatives
+        ? [...entries.where((e) => e.isRehearsal), ...perfDates]
+        : entries;
 
     // Sum of raw show prices across all performance dates — used to spread
     // the per-show portion of performerFeesWithMarkup proportionally to each
@@ -1171,7 +1186,7 @@ class IntensjonsavtalePdfService {
           // Performance dates show their share of the show total; rehearsal
           // dates show kr 0.
           if (entries.isNotEmpty) ...[
-            ...entries.expand<pw.Widget>((e) {
+            ...pricedEntries.expand<pw.Widget>((e) {
               final rows = <pw.Widget>[];
               if (e.isRehearsal) {
                 rows.add(pw.Padding(
@@ -1214,13 +1229,18 @@ class IntensjonsavtalePdfService {
                 return rows;
               }
               // Date header (no amount), then one row per show below it.
-              rows.add(pw.Padding(
-                padding: const pw.EdgeInsets.only(bottom: 2, top: 2),
-                child: pw.Text(
-                  e.date,
-                  style: pw.TextStyle(font: bold, fontSize: 10),
-                ),
-              ));
+              // Er datoene alternativer, er det ikke bestemt hvilken dato
+              // showet havner på, så overskriften utelates — datoene står
+              // oppført under SPILLESTED OG TIDSPUNKT.
+              if (!datesAreAlternatives) {
+                rows.add(pw.Padding(
+                  padding: const pw.EdgeInsets.only(bottom: 2, top: 2),
+                  child: pw.Text(
+                    e.date,
+                    style: pw.TextStyle(font: bold, fontSize: 10),
+                  ),
+                ));
+              }
               // Rule: extras show their raw price (perf × extraShowFee or
               // custom), main show absorbs whatever is left of this date's
               // share of performerFeesWithMarkup. Main = highest raw price,
