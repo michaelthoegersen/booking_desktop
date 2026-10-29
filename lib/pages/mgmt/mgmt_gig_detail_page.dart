@@ -4373,36 +4373,10 @@ class _KontraktTabState extends State<_KontraktTab> {
     try {
       final myId = _sb.auth.currentUser?.id;
 
-      // Update agreement status
-      await _sb.from('agreement_tokens').update({
-        'status': 'approved',
-        'approved_at': DateTime.now().toIso8601String(),
-        'approved_by': myId,
-      }).eq('id', _agreement!['id']);
-
-      // Update ALL gigs + offer status to confirmed
-      if (_isMultiDate) {
-        for (final g in widget.siblingGigs) {
-          await _sb.from('gigs').update({
-            'status': 'confirmed',
-          }).eq('id', g['id']);
-        }
-        if (widget.linkedOfferId != null) {
-          await _sb.from('gig_offers').update({
-            'status': 'confirmed',
-          }).eq('id', widget.linkedOfferId!);
-        }
-      } else {
-        final gigId = widget.gig['id'] as String?;
-        if (gigId != null) {
-          await _sb.from('gigs').update({
-            'status': 'confirmed',
-          }).eq('id', gigId);
-          await _sb.from('gig_offers').update({
-            'status': 'confirmed',
-          }).eq('gig_id', gigId);
-        }
-      }
+      // Rekkefølgen er med vilje: PDF lages, arkiveres og sendes FØR avtalen
+      // merkes godkjent. Settes statusen først, etterlater en feil i
+      // arkivering eller e-post en avtale som står som godkjent mens kunden
+      // ikke har fått noe — og det er usynlig for alle parter.
 
       // Generate signed PDF
       final acceptedName = _agreement!['accepted_name'] as String? ?? '';
@@ -4432,25 +4406,19 @@ class _KontraktTabState extends State<_KontraktTab> {
       );
 
       // Archive the signed PDF. This exact file is what the customer receives,
-      // and it is the only evidence both parties signed — before this it was
-      // generated, mailed and discarded.
-      try {
-        final archiveGigId = widget.gig['id'] as String?;
-        final signedPath =
-            '$archiveGigId/signed_${_agreement!['id']}.pdf';
-        await _sb.storage.from('agreements').uploadBinary(
-              signedPath,
-              signedResult.mainPdf,
-              fileOptions: const FileOptions(
-                  contentType: 'application/pdf', upsert: true),
-            );
-        await _sb
-            .from('agreement_tokens')
-            .update({'signed_pdf_path': signedPath}).eq(
-                'id', _agreement!['id']);
-      } catch (e) {
-        debugPrint('Archive signed agreement error: $e');
-      }
+      // and it is the only evidence both parties signed.
+      //
+      // Feiler dette, stopper godkjenningen. En godkjent avtale uten arkivert
+      // kopi gir bare en tom forhåndsvisning senere, og da er det for sent å
+      // oppdage at noe gikk galt.
+      final archiveGigId = widget.gig['id'] as String?;
+      final signedPath = '$archiveGigId/signed_${_agreement!['id']}.pdf';
+      await _sb.storage.from('agreements').uploadBinary(
+            signedPath,
+            signedResult.mainPdf,
+            fileOptions: const FileOptions(
+                contentType: 'application/pdf', upsert: true),
+          );
 
       // Send signed PDF to customer
       final customerEmail = _agreement!['customer_email'] as String? ?? '';
@@ -4484,7 +4452,12 @@ class _KontraktTabState extends State<_KontraktTab> {
       final subjectLabel = [signedTitle, customerAndDate]
           .where((s) => s.isNotEmpty)
           .join(' — ');
-      if (customerEmail.isNotEmpty) {
+      if (customerEmail.isEmpty) {
+        throw Exception(
+            'Avtalen har ingen e-postadresse å sende den signerte kopien '
+            'til. Godkjenningen er ikke registrert.');
+      }
+      {
         final htmlBody = '''
 <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 600px; margin: 0 auto;">
   <div style="background: #1a1a1a; padding: 24px 32px; border-radius: 8px 8px 0 0;">
@@ -4513,6 +4486,37 @@ class _KontraktTabState extends State<_KontraktTab> {
           isHtml: true,
           companyId: widget.gig['company_id'] as String?,
         );
+      }
+
+      // Alt er i havn: arkivert og sendt. Først nå merkes avtalen godkjent.
+      await _sb.from('agreement_tokens').update({
+        'status': 'approved',
+        'approved_at': DateTime.now().toIso8601String(),
+        'approved_by': myId,
+        'signed_pdf_path': signedPath,
+      }).eq('id', _agreement!['id']);
+
+      if (_isMultiDate) {
+        for (final g in widget.siblingGigs) {
+          await _sb.from('gigs').update({
+            'status': 'confirmed',
+          }).eq('id', g['id']);
+        }
+        if (widget.linkedOfferId != null) {
+          await _sb.from('gig_offers').update({
+            'status': 'confirmed',
+          }).eq('id', widget.linkedOfferId!);
+        }
+      } else {
+        final gigId = widget.gig['id'] as String?;
+        if (gigId != null) {
+          await _sb.from('gigs').update({
+            'status': 'confirmed',
+          }).eq('id', gigId);
+          await _sb.from('gig_offers').update({
+            'status': 'confirmed',
+          }).eq('gig_id', gigId);
+        }
       }
 
       await _loadAgreement();

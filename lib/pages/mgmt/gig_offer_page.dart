@@ -217,7 +217,7 @@ class _GigOfferPageState extends State<GigOfferPage> {
           _agreement != null &&
           _agreement!['status'] == 'accepted' &&
           !_approvingAgreement) {
-        _approveAgreement();
+        _confirmAndApprove();
       }
     });
   }
@@ -4957,6 +4957,59 @@ class _GigOfferPageState extends State<GigOfferPage> {
   // HANDLINGER (RIGHT)
   // ────────────────────────────────────────────────────────────────────────────
 
+  /// «Godkjenn»-knappen i tilbudslista åpner siden med ?approve=1, og da
+  /// fyrte godkjenningen av seg selv idet siden var ferdig lastet. Det er for
+  /// lett å utløse ved et uhell — og en oppfriskning av samme URL ville sendt
+  /// avtalen til kunden på nytt. Derfor spørres det først.
+  Future<void> _confirmAndApprove() async {
+    final to = (_agreement?['customer_email'] as String? ?? '').trim();
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Godkjenn avtalen'),
+        content: Text(
+          'Avtalen signeres fra vår side, og den signerte kopien sendes til '
+          '${to.isNotEmpty ? to : 'kunden'}.',
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Ikke nå')),
+          FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Godkjenn og send')),
+        ],
+      ),
+    );
+    if (ok == true) await _approveAgreement();
+  }
+
+  /// Kjører godkjenningen om igjen for å få den signerte kopien ut til
+  /// kunden. Trygt å gjenta: PDF-en lages på nytt, arkiveres over den gamle
+  /// og sendes, og statusene settes til det de allerede er.
+  Future<void> _confirmResendSigned() async {
+    final to = (_agreement?['customer_email'] as String? ?? '').trim();
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Send signert kopi på nytt'),
+        content: Text(
+          'Den signerte avtalen sendes til ${to.isNotEmpty ? to : 'kunden'} '
+          'en gang til.',
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Avbryt')),
+          FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Send')),
+        ],
+      ),
+    );
+    if (ok == true) await _approveAgreement();
+  }
+
   Future<void> _approveAgreement() async {
     if (_agreement == null || _gigId == null) return;
     setState(() => _approvingAgreement = true);
@@ -4964,30 +5017,10 @@ class _GigOfferPageState extends State<GigOfferPage> {
       final myId = _sb.auth.currentUser?.id;
       final df = DateFormat('dd.MM.yyyy');
 
-      await _sb.from('agreement_tokens').update({
-        'status': 'approved',
-        'approved_at': DateTime.now().toIso8601String(),
-        'approved_by': myId,
-      }).eq('id', _agreement!['id']);
-
-      // Update offer and gig status to confirmed
-      if (_offerId != null) {
-        await _sb.from('gig_offers').update({
-          'status': 'confirmed',
-        }).eq('id', _offerId!);
-      }
-      // Update status on all linked gigs
-      for (final entry in _dateEntries) {
-        if (entry.gigId != null) {
-          await _sb.from('gigs').update({
-            'status': 'confirmed',
-          }).eq('id', entry.gigId!);
-        }
-      }
-
-      // Update local state immediately so UI reflects confirmed status
-      _gigStatus = 'confirmed';
-      if (mounted) setState(() {});
+      // Rekkefølgen er med vilje: PDF lages, arkiveres og sendes FØR avtalen
+      // merkes godkjent. Tidligere ble statusen satt først, så en feil i
+      // arkivering eller e-post etterlot en avtale som sto som godkjent mens
+      // kunden ikke hadde fått noe — og det er usynlig for alle.
 
       // Load gig and shows from database so PDF matches the original exactly
       final firstGigId = _dateEntries.first.gigId ?? _gigId;
@@ -5024,21 +5057,18 @@ class _GigOfferPageState extends State<GigOfferPage> {
       );
 
       // Archive the signed PDF. This exact file is what the customer receives,
-      // and it is the only evidence both parties signed — before this it was
-      // generated, mailed and discarded.
-      try {
-        final signedPath = '$firstGigId/signed_${_agreement!['id']}.pdf';
-        await _sb.storage.from('agreements').uploadBinary(
-              signedPath,
-              signedResult.mainPdf,
-              fileOptions: const FileOptions(
-                  contentType: 'application/pdf', upsert: true),
-            );
-        await _sb.from('agreement_tokens').update(
-            {'signed_pdf_path': signedPath}).eq('id', _agreement!['id']);
-      } catch (e) {
-        debugPrint('Archive signed agreement error: $e');
-      }
+      // and it is the only evidence both parties signed.
+      //
+      // Feiler dette, stopper godkjenningen. En godkjent avtale uten arkivert
+      // kopi gir bare en tom forhåndsvisning senere, og da er det for sent å
+      // oppdage at noe gikk galt.
+      final signedPath = '$firstGigId/signed_${_agreement!['id']}.pdf';
+      await _sb.storage.from('agreements').uploadBinary(
+            signedPath,
+            signedResult.mainPdf,
+            fileOptions: const FileOptions(
+                contentType: 'application/pdf', upsert: true),
+          );
 
       // Send signed PDF to customer
       final customerEmail = _agreement!['customer_email'] as String? ?? '';
@@ -5046,7 +5076,12 @@ class _GigOfferPageState extends State<GigOfferPage> {
       final dateFrom = _dateEntries.first.dateFrom != null
           ? df.format(_dateEntries.first.dateFrom!)
           : '';
-      if (customerEmail.isNotEmpty) {
+      if (customerEmail.isEmpty) {
+        throw Exception(
+            'Avtalen har ingen e-postadresse å sende den signerte kopien '
+            'til. Godkjenningen er ikke registrert.');
+      }
+      {
         final htmlBody = '''
 <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 600px; margin: 0 auto;">
   <div style="background: #1a1a1a; padding: 24px 32px; border-radius: 8px 8px 0 0;">
@@ -5077,6 +5112,30 @@ class _GigOfferPageState extends State<GigOfferPage> {
           companyId: _companyId,
         );
       }
+
+      // Alt er i havn: arkivert og sendt. Først nå merkes avtalen godkjent.
+      await _sb.from('agreement_tokens').update({
+        'status': 'approved',
+        'approved_at': DateTime.now().toIso8601String(),
+        'approved_by': myId,
+        'signed_pdf_path': signedPath,
+      }).eq('id', _agreement!['id']);
+
+      if (_offerId != null) {
+        await _sb.from('gig_offers').update({
+          'status': 'confirmed',
+        }).eq('id', _offerId!);
+      }
+      for (final entry in _dateEntries) {
+        if (entry.gigId != null) {
+          await _sb.from('gigs').update({
+            'status': 'confirmed',
+          }).eq('id', entry.gigId!);
+        }
+      }
+
+      _gigStatus = 'confirmed';
+      if (mounted) setState(() {});
 
       // Reload agreement
       final agrGigId = _dateEntries.first.gigId ?? _gigId;
@@ -5214,6 +5273,20 @@ class _GigOfferPageState extends State<GigOfferPage> {
                 'Sender signert kopi til kunden',
                 style: TextStyle(fontSize: 11, color: cs.onSurfaceVariant),
               ),
+            ],
+
+            // Er avtalen godkjent, men kunden likevel ikke har fått den —
+            // f.eks. fordi e-posten feilet den gangen — skal det gå an å sende
+            // den på nytt uten å gå veien om å avgodkjenne noe.
+            if (agreementStatus == 'approved') ...[
+              OutlinedButton.icon(
+                onPressed: _approvingAgreement ? null : _confirmResendSigned,
+                icon: const Icon(Icons.forward_to_inbox, size: 16),
+                label: Text(_approvingAgreement
+                    ? 'Sender…'
+                    : 'Send signert kopi på nytt'),
+              ),
+              const SizedBox(height: 10),
             ],
 
             // Tap to read the signed agreement — lets you compare it against
