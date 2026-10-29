@@ -1486,6 +1486,12 @@ class _GigOfferPageState extends State<GigOfferPage> {
     _totalPerformers = 0;
     _totalAppearances = 0;
 
+    // Enten/eller: alternativene er samme oppdrag på ulike datoer, så bare
+    // ÉN av dem blir noe av. Prisen skal da gjelde én spilledato, ikke summen
+    // av alternativene. Den første spilledatoen er den som teller.
+    // Er bryteren av, er alt nedenfor nøyaktig som før.
+    var showDateCounted = false;
+
     for (int d = 0; d < _dateEntries.length; d++) {
       final dateShows = _showsForDate(d);
       int mainPerf = 0;
@@ -1501,6 +1507,14 @@ class _GigOfferPageState extends State<GigOfferPage> {
         if (mainPerf > _totalPerformers) _totalPerformers = mainPerf;
         continue;
       }
+      // Et alternativ nummer to og utover legger ikke på pris. Antall utøvere
+      // leses fortsatt av, siden det er samme bemanning uansett hvilken dato
+      // det blir.
+      if (_datesAreOptions && showDateCounted) {
+        if (mainPerf > _totalPerformers) _totalPerformers = mainPerf;
+        continue;
+      }
+      showDateCounted = true;
       _performerFees += _calcPerformerFees(dateShows);
       _totalAppearances += dateApp;
       if (mainPerf > _totalPerformers) _totalPerformers = mainPerf;
@@ -1532,8 +1546,11 @@ class _GigOfferPageState extends State<GigOfferPage> {
     // Subtotal before markup
     // Transport = gig transport × performance dates only + rehearsal transport.
     // Rehearsal dates use the separate rehearsal_transport parameter.
+    // Samme regel for transport: én spilledato blir noe av, ikke alle
+    // alternativene. Prøvetransport ligger i sin egen parameter.
+    final showDates = _dateEntries.where((e) => !e.isRehearsal).length;
     final numPerformanceDates =
-        _dateEntries.where((e) => !e.isRehearsal).length;
+        _datesAreOptions ? (showDates > 0 ? 1 : 0) : showDates;
     final totalTransport =
         (_transportPrice * numPerformanceDates) + _rehearsalTransport;
     final subtotalBeforeMarkup =
@@ -4626,7 +4643,11 @@ class _GigOfferPageState extends State<GigOfferPage> {
         children: [
           _cardTitle('Beregning'),
           if (_dateEntries.length > 1)
-            _calcRowInfo('Antall datoer', '${_dateEntries.length}'),
+            _calcRowInfo(
+                'Antall datoer',
+                _datesAreOptions
+                    ? '1 (av ${_dateEntries.where((e) => !e.isRehearsal).length} alternativer)'
+                    : '${_dateEntries.length}'),
           _calcRowInfo(
               'Antall show', '${_shows.where((s) => s.selected).length}'),
           _calcRowInfo('Utøvere (maks)', '$_totalPerformers'),
