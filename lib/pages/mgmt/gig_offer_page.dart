@@ -882,6 +882,18 @@ class _GigOfferPageState extends State<GigOfferPage> {
   Future<void> _previewSignedAgreement() async {
     if (_agreement == null) return;
 
+    // Spinneren lukkes nøyaktig én gang. Før dette kalte både suksess- og
+    // feilgrenen Navigator.pop() på sidens egen context: kastet PDF-dialogen
+    // en feil ETTER at spinneren var lukket, lukket catch-grenen selve siden
+    // i stedet — og da sto man igjen med et hvitt vindu uten feilmelding,
+    // fordi Scaffold-en som skulle vist den var borte.
+    var spinnerOpen = true;
+    void closeSpinner() {
+      if (!spinnerOpen || !mounted) return;
+      spinnerOpen = false;
+      Navigator.of(context, rootNavigator: true).pop();
+    }
+
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -895,7 +907,7 @@ class _GigOfferPageState extends State<GigOfferPage> {
           final bytes =
               await _sb.storage.from('agreements').download(storedPath);
           if (!mounted) return;
-          Navigator.of(context).pop();
+          closeSpinner();
           await _showSignedPdf(bytes, archived: true);
           return;
         } catch (e) {
@@ -943,11 +955,11 @@ class _GigOfferPageState extends State<GigOfferPage> {
       );
 
       if (!mounted) return;
-      Navigator.of(context).pop(); // close the spinner
+      closeSpinner();
       await _showSignedPdf(result.mainPdf, archived: false);
     } catch (e) {
+      closeSpinner();
       if (mounted) {
-        Navigator.of(context).pop(); // close the spinner
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Kunne ikke hente avtalen: $e')),
         );

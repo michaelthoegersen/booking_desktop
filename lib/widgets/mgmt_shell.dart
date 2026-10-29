@@ -399,7 +399,9 @@ class _MgmtSideNavState extends State<_MgmtSideNav> {
           .from('gig_messages')
           .select('id')
           .eq('is_admin', false)
-          .isFilter('deleted_at', null)
+          // gig_messages har ingen deleted_at — filteret ga 42703, og da falt
+          // HELE tellingen ut: gigchat, DM og grupper. Feilen ble svelget av
+          // catch-en, så merket sto bare tomt.
           .or('read_by_admin.is.null,read_by_admin.eq.false');
       int total = (gigRes as List).length;
 
