@@ -5252,51 +5252,87 @@ return Padding(
 
               const SizedBox(height: 10),
 
-              // ---------- START LOCATION ----------
-              TextField(
-                controller: startLocCtrl,
-                onChanged: (_) async {
-                  setState(() {
-                    offer.rounds[roundIndex].startLocation =
-                        _norm(startLocCtrl.text);
-                  });
-
-                  await _recalcKm();
-                },
-                decoration: InputDecoration(
-                  labelText: S.t('startLocation'),
-                  prefixIcon: const Icon(Icons.flag),
+              // ---------- ROUND SETUP ----------
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: cs.surface,
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: cs.outlineVariant),
                 ),
-              ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
 
-              const SizedBox(height: 10),
+                    // ---------- START LOCATION ----------
+                    TextField(
+                      controller: startLocCtrl,
+                      onChanged: (_) async {
+                        setState(() {
+                          offer.rounds[roundIndex].startLocation =
+                              _norm(startLocCtrl.text);
+                        });
 
-              // ---------- OPTIONS ----------
-Column(
-  crossAxisAlignment: CrossAxisAlignment.start,
-  children: [
+                        await _recalcKm();
+                      },
+                      decoration: InputDecoration(
+                        labelText: S.t('startLocation'),
+                        prefixIcon: const Icon(Icons.flag),
+                      ),
+                    ),
 
-    Row(
-      children: [
-        Checkbox(
-          value: offer.rounds[roundIndex].pickupEveningFirstDay,
-          onChanged: (v) async {
-            setState(() {
-              offer.rounds[roundIndex].pickupEveningFirstDay = v ?? false;
-            });
+                    const SizedBox(height: 10),
 
-            await _recalcKm();
-          },
-        ),
-        Text(S.t('pickupEvening')),
-      ],
-    ),
+                    // ---------- PICKUP EVENING ----------
+                    InkWell(
+                      borderRadius: BorderRadius.circular(8),
+                      onTap: () async {
+                        setState(() {
+                          offer.rounds[roundIndex].pickupEveningFirstDay =
+                              !offer.rounds[roundIndex].pickupEveningFirstDay;
+                        });
 
-    const SizedBox(height: 8),
+                        await _recalcKm();
+                      },
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 4, vertical: 2),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            SizedBox(
+                              width: 22,
+                              height: 22,
+                              child: Checkbox(
+                                value: offer
+                                    .rounds[roundIndex].pickupEveningFirstDay,
+                                visualDensity: VisualDensity.compact,
+                                materialTapTargetSize:
+                                    MaterialTapTargetSize.shrinkWrap,
+                                onChanged: (v) async {
+                                  setState(() {
+                                    offer.rounds[roundIndex]
+                                        .pickupEveningFirstDay = v ?? false;
+                                  });
 
-    Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: List.generate(offer.busCount, (i) {
+                                  await _recalcKm();
+                                },
+                              ),
+                            ),
+                            const SizedBox(width: 10),
+                            Text(
+                              S.t('pickupEvening'),
+                              style: const TextStyle(fontSize: 13),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+
+                    const SizedBox(height: 10),
+
+                    // ---------- VEHICLE SLOTS ----------
+                    ...List.generate(offer.busCount, (i) {
 
         final bus =
     i < offer.rounds[roundIndex].busSlots.length
@@ -5311,10 +5347,10 @@ final trailer =
         return Padding(
           padding: const EdgeInsets.only(bottom: 8),
           child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: cs.outlineVariant),
+              color: cs.surfaceContainerLowest,
             ),
             child: Row(
               children: [
@@ -5384,6 +5420,7 @@ final trailer =
                 Row(
                   children: [
                     Checkbox(
+                      visualDensity: VisualDensity.compact,
                       value: trailer,
                       onChanged: (v) async {
 
@@ -5408,47 +5445,45 @@ final trailer =
             ),
           ),
         );
-      }),
-    ),
+                    }),
+                  ],
+                ),
+              ),
 
-  ],
-),
-
-const SizedBox(height: 12),
+              const SizedBox(height: 10),
 
               // ---------- ENTRY INPUT ----------
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  border: Border.all(color: cs.outlineVariant),
-                  borderRadius: BorderRadius.circular(14),
-                  color: cs.surface,
-                ),
-                child: Column(
-                  children: [
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
 
-                    Row(
-                      children: [
-                        Expanded(
-                          child: OutlinedButton.icon(
-                            icon: const Icon(Icons.calendar_month),
-                            onPressed: _pickDate,
-                            label: Align(
-                              alignment: Alignment.centerLeft,
-                              child: Text(
-                                selectedDate == null
-                                    ? S.t('pickDate')
-                                    : _fmtDate(selectedDate!),
-                              ),
-                            ),
-                          ),
+                  Expanded(
+                    flex: 3,
+                    child: OutlinedButton.icon(
+                      icon: const Icon(Icons.calendar_month, size: 18),
+                      onPressed: _pickDate,
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 14),
+                      ),
+                      label: Align(
+                        alignment: Alignment.centerLeft,
+                        child: Text(
+                          selectedDate == null
+                              ? S.t('pickDate')
+                              : _fmtDate(selectedDate!),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
                         ),
-                      ],
+                      ),
                     ),
+                  ),
 
-                    const SizedBox(height: 10),
+                  const SizedBox(width: 10),
 
-                    _LocationAutoComplete(
+                  Expanded(
+                    flex: 5,
+                    child: _LocationAutoComplete(
                       controller: locationCtrl,
                       focusNode: _locationFocus,
                       suggestions: _locationSuggestions,
@@ -5456,47 +5491,59 @@ const SizedBox(height: 12),
                       onPasteMulti: _pasteManyLines,
                       onQueryChanged: _loadPlaceSuggestions,
                     ),
+                  ),
 
-                    const SizedBox(height: 8),
+                  const SizedBox(width: 10),
 
-                    OutlinedButton.icon(
-                      icon: const Icon(Icons.add_road),
-                      label: Text(S.t('addMissingRoute')),
+                  Expanded(
+                    flex: 4,
+                    child: OutlinedButton.icon(
+                      icon: const Icon(Icons.add_road, size: 18),
                       onPressed: _openRoutePreview,
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 14),
+                      ),
+                      label: Text(
+                        S.t('addMissingRoute'),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ),
-
-                    if (_loadingSuggestions)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 8),
-                        child: Align(
-                          alignment: Alignment.centerLeft,
-                          child: Text(
-                            S.t('searchingRoutes'),
-                            style: const TextStyle(
-                              fontWeight: FontWeight.w800,
-                              fontSize: 12,
-                            ),
-                          ),
-                        ),
-                      ),
-
-                    if (_kmError != null) ...[
-                      const SizedBox(height: 8),
-                      Align(
-                        alignment: Alignment.centerLeft,
-                        child: Text(
-                          _kmError!,
-                          style: const TextStyle(
-                            fontWeight: FontWeight.w900,
-                            color: Colors.red,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ],
-                ),
+                  ),
+                ],
               ),
-const SizedBox(height: 12),
+
+              if (_loadingSuggestions)
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      S.t('searchingRoutes'),
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w800,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ),
+                ),
+
+              if (_kmError != null) ...[
+                const SizedBox(height: 8),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    _kmError!,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w900,
+                      color: Colors.red,
+                    ),
+                  ),
+                ),
+              ],
+
+              const SizedBox(height: 12),
 
 
 
@@ -6863,6 +6910,56 @@ CurrentOfferStore.set(widget.offer);
   }
 
   // --------------------------------------------------
+  // UI HELPERS
+  // --------------------------------------------------
+  Widget _sectionLabel(String text) {
+    final cs = Theme.of(context).colorScheme;
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Text(
+        text.toUpperCase(),
+        style: TextStyle(
+          fontWeight: FontWeight.w900,
+          fontSize: 11,
+          letterSpacing: 0.8,
+          color: cs.onSurfaceVariant,
+        ),
+      ),
+    );
+  }
+
+  Widget _actionBtn({
+    required IconData icon,
+    required String label,
+    required VoidCallback? onPressed,
+    bool filled = false,
+  }) {
+    final text = Text(
+      label,
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w900),
+    );
+
+    const padding = EdgeInsets.symmetric(horizontal: 10, vertical: 13);
+
+    return filled
+        ? FilledButton.icon(
+            onPressed: onPressed,
+            icon: Icon(icon, size: 17),
+            label: text,
+            style: FilledButton.styleFrom(padding: padding),
+          )
+        : OutlinedButton.icon(
+            onPressed: onPressed,
+            icon: Icon(icon, size: 17),
+            label: text,
+            style: OutlinedButton.styleFrom(padding: padding),
+          );
+  }
+
+  // --------------------------------------------------
   // UI
   // --------------------------------------------------
   @override
@@ -6904,12 +7001,7 @@ CurrentOfferStore.set(widget.offer);
                     children: [
 
                       // ================= COMPANY =================
-                      Text(
-                        S.t('company'),
-                        style: const TextStyle(fontWeight: FontWeight.w900),
-                      ),
-
-                      const SizedBox(height: 6),
+                      _sectionLabel(S.t('company')),
 
                       // ================= COMPANY SEARCH =================
                       TextField(
@@ -6962,12 +7054,7 @@ CurrentOfferStore.set(widget.offer);
 const SizedBox(height: 16),
 
 // ================= CONTACT =================
-Text(
-  S.t('contact'),
-  style: const TextStyle(fontWeight: FontWeight.w900),
-),
-
-const SizedBox(height: 6),
+_sectionLabel(S.t('contact')),
 
 DropdownButtonFormField<String>(
   key: ValueKey('contact_$_dropRev'),
@@ -7040,12 +7127,7 @@ const SizedBox(height: 16),
 
                       // ================= PRODUCTION =================
                       // ================= PRODUCTION =================
-Text(
-  S.t('production'),
-  style: const TextStyle(fontWeight: FontWeight.w900),
-),
-
-const SizedBox(height: 6),
+_sectionLabel(S.t('production')),
 
 DropdownButtonFormField<String>(
   key: ValueKey('prod_$_dropRev'),
@@ -7090,9 +7172,8 @@ DropdownButtonFormField<String>(
 ),
 const SizedBox(height: 16),
 
-const SizedBox(height: 12),
-
-// ================= BUS SETTINGS =================
+// ================= VEHICLE =================
+_sectionLabel(S.t('vehicleSettings')),
 _BusSettingsCard(
   offer: widget.offer,
   vehicleCategories: widget.vehicleCategories,
@@ -7100,12 +7181,11 @@ _BusSettingsCard(
     setState(() {});
   },
 ),
+
+const SizedBox(height: 16),
+
 // ================= STATUS =================
-Text(
-  S.t('status'),
-  style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 14),
-),
-const SizedBox(height: 8),
+_sectionLabel(S.t('status')),
 DropdownButtonFormField<String>(
   value: const ['Draft', 'Inquiry', 'Confirmed', 'Invoiced']
           .contains(widget.offer.status)
@@ -7140,72 +7220,83 @@ const SizedBox(height: 12),
 Column(
   children: [
 
-    // -------- SAVE --------
-    SizedBox(
-      width: double.infinity,
-      child: OutlinedButton.icon(
-        onPressed: widget.onSave,
-        icon: const Icon(Icons.save),
-        label: Text(S.t('saveDraft')),
-      ),
+    // -------- SAVE + EXPORT --------
+    Row(
+      children: [
+        Expanded(
+          child: _actionBtn(
+            icon: Icons.save,
+            label: S.t('saveDraft'),
+            onPressed: widget.onSave,
+          ),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: _actionBtn(
+            icon: Icons.download,
+            label: S.t('exportPdf'),
+            onPressed: widget.onExport,
+            filled: true,
+          ),
+        ),
+      ],
     ),
+
+    const SizedBox(height: 8),
+
+    // -------- SEND + INVOICE --------
+    Row(
+      children: [
+        Expanded(
+          child: _actionBtn(
+            icon: Icons.email_outlined,
+            label: S.t('sendOffer'),
+            onPressed: widget.onSendOffer,
+          ),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: _actionBtn(
+            icon: Icons.receipt_long,
+            label: S.t('createInvoice'),
+            onPressed: widget.onCreateInvoice,
+          ),
+        ),
+      ],
+    ),
+
+    const SizedBox(height: 8),
+
+    // -------- IMPORT --------
+    Row(
+      children: [
+        Expanded(
+          child: _actionBtn(
+            icon: Icons.picture_as_pdf,
+            label: S.t('scanPdf'),
+            onPressed: widget.onScanPdf,
+          ),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: _actionBtn(
+            icon: Icons.email_outlined,
+            label: S.t('importFromEmail'),
+            onPressed: widget.onImportEmail,
+          ),
+        ),
+      ],
+    ),
+
+    const SizedBox(height: 8),
 
     // -------- VERSION HISTORY --------
-    const SizedBox(height: 8),
     SizedBox(
       width: double.infinity,
-      child: OutlinedButton.icon(
+      child: _actionBtn(
+        icon: Icons.history,
+        label: S.t('versions'),
         onPressed: widget.draftId != null ? widget.onShowVersions : null,
-        icon: const Icon(Icons.history),
-        label: Text(S.t('versions')),
-      ),
-    ),
-
-    const SizedBox(height: 8),
-
-    // -------- SCAN PDF --------
-SizedBox(
-  width: double.infinity,
-  child: OutlinedButton.icon(
-    onPressed: widget.onScanPdf,
-    icon: const Icon(Icons.picture_as_pdf),
-    label: Text(S.t('scanPdf')),
-  ),
-),
-
-    const SizedBox(height: 8),
-
-    // -------- IMPORT FROM EMAIL --------
-    SizedBox(
-      width: double.infinity,
-      child: OutlinedButton.icon(
-        onPressed: widget.onImportEmail,
-        icon: const Icon(Icons.email_outlined),
-        label: Text(S.t('importFromEmail')),
-      ),
-    ),
-
-    const SizedBox(height: 10),
-
-    // -------- EXPORT --------
-    SizedBox(
-      width: double.infinity,
-      child: FilledButton.icon(
-        onPressed: widget.onExport,
-        icon: const Icon(Icons.download),
-        label: Text(S.t('exportPdf')),
-      ),
-    ),
-
-    const SizedBox(height: 8),
-
-    // -------- SEND OFFER --------
-    SizedBox(
-      width: double.infinity,
-      child: OutlinedButton.icon(
-        onPressed: widget.onSendOffer,
-        icon: const Icon(Icons.email_outlined),
-        label: Text(S.t('sendOffer')),
       ),
     ),
 
@@ -7214,18 +7305,6 @@ SizedBox(
       const SizedBox(height: 12),
       _buildOfferTokenStatus(cs),
     ],
-
-    const SizedBox(height: 8),
-
-    // -------- OPPRETT FAKTURA --------
-    SizedBox(
-      width: double.infinity,
-      child: OutlinedButton.icon(
-        onPressed: widget.onCreateInvoice,
-        icon: const Icon(Icons.receipt_long),
-        label: Text(S.t('createInvoice')),
-      ),
-    ),
   ],
 ),
 
@@ -7717,26 +7796,9 @@ class _BusSettingsCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
 
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: cs.surface,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: cs.outlineVariant),
-      ),
-      child: Column(
+    return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            S.t('vehicleSettings'),
-            style: const TextStyle(
-              fontWeight: FontWeight.w900,
-              fontSize: 13,
-            ),
-          ),
-
-          const SizedBox(height: 10),
-
           // ---------------- BUS COUNT ----------------
           DropdownButtonFormField<int>(
             value: offer.busCount,
@@ -7848,13 +7910,15 @@ class _BusSettingsCard extends StatelessWidget {
             },
           ),
 
-          const Divider(height: 24),
+          const SizedBox(height: 16),
 
           Text(
-            S.t('globalAllocation'),
-            style: const TextStyle(
+            S.t('globalAllocation').toUpperCase(),
+            style: TextStyle(
               fontWeight: FontWeight.w900,
-              fontSize: 13,
+              fontSize: 11,
+              letterSpacing: 0.8,
+              color: cs.onSurfaceVariant,
             ),
           ),
 
@@ -7943,7 +8007,6 @@ class _BusSettingsCard extends StatelessWidget {
             );
           }),
         ],
-      ),
     );
   }
 }
