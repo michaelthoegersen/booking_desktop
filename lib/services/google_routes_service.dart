@@ -4,6 +4,7 @@ import 'dart:math';
 
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'app_env.dart';
 
@@ -17,52 +18,54 @@ class GoogleRoutesService {
   String get _apiKey => AppEnv.googleMapsApiKey;
 
   // ============================================================
-  // WEB: Nominatim geocoding + OSRM routing
-  // Both are open, free, and return proper CORS headers.
-  // No API key required.
+  // Geocoding via the `geocode` edge function + OSRM routing.
+  //
+  // Geocoding used to go straight to Nominatim from the client, but its
+  // 1 req/sec limit is per IP: a few route lookups from one office earn the
+  // whole IP a 429 that sticks, and every route then came back empty
+  // ("Route cached (no map)"). The edge function uses Google Geocoding, which
+  // has no such limit and keeps the key server-side. OSRM is fine from the
+  // client — it is only the geocoding step that was rate-limited.
   // ============================================================
 
-  /// Geocode an address string → [lat, lon] via Nominatim
-  Future<List<double>> _geocode(String address) async {
-    final url = Uri.parse(
-      'https://nominatim.openstreetmap.org/search'
-      '?q=${Uri.encodeComponent(address)}'
-      '&format=json&limit=1',
-    );
+  /// Geocode every place in one round trip → [lat, lon] per place.
+  Future<List<List<double>>> _geocodeAll(List<String> places) async {
+    final res = await Supabase.instance.client.functions
+        .invoke('geocode', body: {'places': places})
+        .timeout(const Duration(seconds: 30));
 
-    final res = await http.get(url, headers: {
-      'Accept': 'application/json',
-      'User-Agent': 'TourFlow/1.0 (tourflow-booking)',
-    }).timeout(const Duration(seconds: 10));
+    final data = res.data;
+    final raw = data is Map ? data['coords'] as List? : null;
 
-    if (res.statusCode != 200) {
-      throw Exception('Nominatim error ${res.statusCode} for "$address"');
+    if (raw == null || raw.length != places.length) {
+      throw Exception('Geocoding failed for ${places.join(", ")}');
     }
 
-    final data = jsonDecode(res.body) as List;
-    if (data.isEmpty) {
-      throw Exception('Could not geocode: "$address"');
+    final coords = <List<double>>[];
+
+    for (int i = 0; i < raw.length; i++) {
+      final c = raw[i];
+      if (c is! List || c.length < 2) {
+        throw Exception('Could not geocode: "${places[i]}"');
+      }
+      coords.add([
+        (c[0] as num).toDouble(),
+        (c[1] as num).toDouble(),
+      ]);
     }
 
-    return [
-      double.parse(data[0]['lat'] as String),
-      double.parse(data[0]['lon'] as String),
-    ];
+    return coords;
   }
 
   Future<Map<String, dynamic>> _getRouteWeb({
     required List<String> places,
   }) async {
-    debugPrint('🌍 WEB ROUTE: Nominatim + OSRM for ${places.length} places');
+    debugPrint('🌍 ROUTE: geocode edge fn + OSRM for ${places.length} places');
 
-    // Geocode every place (rate-limit: 1 req/s for Nominatim)
-    final coords = <List<double>>[];
+    final coords = await _geocodeAll(places);
+
     for (int i = 0; i < places.length; i++) {
-      if (i > 0) {
-        await Future.delayed(const Duration(milliseconds: 1100));
-      }
-      coords.add(await _geocode(places[i]));
-      debugPrint('  📍 ${places[i]} → ${coords.last}');
+      debugPrint('  📍 ${places[i]} → ${coords[i]}');
     }
 
     // OSRM expects lon,lat pairs separated by semicolons
