@@ -451,19 +451,36 @@ class _MgmtSideNavState extends State<_MgmtSideNav> {
     int dmCount = 0;
     int groupCount = 0;
 
-    // 1. Unread gig messages — only this company's gigs
+    // 1. Unread gig messages — this company's gigs, counted from MY read
+    //    cursor via gig_chat_threads, exactly like the gig tab does.
+    //    read_by_admin is shared between all admins, so it answers a
+    //    different question: whether anyone in management has looked. Using
+    //    it here is what made the badge say 4 on a gig the tab showed as
+    //    read. The flag stays as the fallback the tab also falls back to.
     try {
       final gigIds = await _companyGigIds(companyId);
 
       if (gigIds.isNotEmpty) {
-        final gigRes = await _sb
-            .from('gig_messages')
-            .select('id')
-            .inFilter('gig_id', gigIds.toList())
-            .eq('is_admin', false)
-            .isFilter('deleted_at', null)
-            .or('read_by_admin.is.null,read_by_admin.eq.false');
-        gigCount = (gigRes as List).length;
+        try {
+          final res = await _sb.rpc('gig_chat_threads', params: {
+            'p_gig_ids': gigIds.toList(),
+          });
+          for (final r in List<Map<String, dynamic>>.from(res as List)) {
+            gigCount += (r['unread_count'] as num?)?.toInt() ?? 0;
+          }
+        } catch (e) {
+          debugPrint('Mgmt chat badge — gig cursors unavailable, '
+              'falling back to read_by_admin: $e');
+
+          final gigRes = await _sb
+              .from('gig_messages')
+              .select('id')
+              .inFilter('gig_id', gigIds.toList())
+              .eq('is_admin', false)
+              .isFilter('deleted_at', null)
+              .or('read_by_admin.is.null,read_by_admin.eq.false');
+          gigCount = (gigRes as List).length;
+        }
       }
     } catch (e) {
       debugPrint('Mgmt chat badge — gig count failed: $e');
