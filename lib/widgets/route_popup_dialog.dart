@@ -254,6 +254,10 @@ String _buildExtra() {
       );
       crossings.add(crossing);
 
+      debugPrint('🌉 crossing #${crossings.length - 1}: '
+          'ferry=${crossing.hasFerry} bridge=${crossing.hasBridge} '
+          'names=${crossing.crossingNames}');
+
       kms.add(km);
     }
 
