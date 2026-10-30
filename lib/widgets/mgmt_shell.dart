@@ -389,6 +389,54 @@ class _MgmtSideNavState extends State<_MgmtSideNav> {
     _loadPendingExpenses();
   }
 
+  /// Gigger som hører til det aktive selskapet — samme sett som chat-fanen
+  /// lister. Speiler _loadCompanyGigs i mgmt_messages_page.
+  Future<Set<String>> _companyGigIds(String? companyId) async {
+    if (companyId == null) return {};
+
+    final ids = <String>{};
+
+    final directGigs =
+        await _sb.from('gigs').select('id').eq('company_id', companyId);
+    for (final g in (directGigs as List)) {
+      ids.add(g['id'] as String);
+    }
+
+    final offerRows =
+        await _sb.from('gig_offers').select('id').eq('company_id', companyId);
+    final offerIds = (offerRows as List).map((o) => o['id'] as String).toList();
+
+    if (offerIds.isNotEmpty) {
+      final junctionRows = await _sb
+          .from('gig_offer_gigs')
+          .select('gig_id')
+          .inFilter('offer_id', offerIds);
+      for (final j in (junctionRows as List)) {
+        ids.add(j['gig_id'] as String);
+      }
+    }
+
+    return ids;
+  }
+
+  /// Medlemmer i det aktive selskapet — samme sett som DM-lista viser.
+  Future<Set<String>> _companyMemberIds(String? companyId) async {
+    if (companyId == null) return {};
+
+    final rows = await _sb.rpc(
+      'get_company_member_profiles',
+      params: {'p_company_id': companyId},
+    );
+
+    return (rows as List).map((r) => r['id'] as String).toSet();
+  }
+
+  /// Merket må telle NØYAKTIG det chat-siden viser, og den avgrenser alt til
+  /// aktivt selskap: gig-fanen til _companyGigIds, DM-lista til
+  /// _companyMemberIds. Merket gjorde ikke det, så det viste 6 mens chatten
+  /// var tom — 4 gigmeldinger fra en gig utenfor selskapet og 2 DM-er fra en
+  /// avsender utenfor det.
+  ///
   /// De tre tellingene står hver for seg med egen catch. Før gjorde de det
   /// ikke, og da slo én manglende kolonne ut HELE merket — det har skjedd to
   /// ganger nå, først på gig_messages og så på direct_messages. Nå koster en
@@ -397,27 +445,25 @@ class _MgmtSideNavState extends State<_MgmtSideNav> {
     final myId = _sb.auth.currentUser?.id;
     if (myId == null) return;
 
+    final companyId = activeCompanyNotifier.value?.id;
+
     int gigCount = 0;
     int dmCount = 0;
     int groupCount = 0;
 
-    // 1. Unread gig messages
+    // 1. Unread gig messages — only this company's gigs
     try {
-      final gigRes = await _sb
-          .from('gig_messages')
-          .select('id, gig_id, read_by_admin')
-          .eq('is_admin', false)
-          .isFilter('deleted_at', null)
-          .or('read_by_admin.is.null,read_by_admin.eq.false');
-      gigCount = (gigRes as List).length;
+      final gigIds = await _companyGigIds(companyId);
 
-      if (gigCount > 0) {
-        final nulls =
-            gigRes.where((r) => r['read_by_admin'] == null).length;
-        final gigIds =
-            gigRes.map((r) => r['gig_id']).toSet().toList();
-        debugPrint('Mgmt chat badge — gig: $gigCount meldinger '
-            '($nulls med read_by_admin=NULL) i gigger $gigIds');
+      if (gigIds.isNotEmpty) {
+        final gigRes = await _sb
+            .from('gig_messages')
+            .select('id')
+            .inFilter('gig_id', gigIds.toList())
+            .eq('is_admin', false)
+            .isFilter('deleted_at', null)
+            .or('read_by_admin.is.null,read_by_admin.eq.false');
+        gigCount = (gigRes as List).length;
       }
     } catch (e) {
       debugPrint('Mgmt chat badge — gig count failed: $e');
@@ -425,6 +471,8 @@ class _MgmtSideNavState extends State<_MgmtSideNav> {
 
     // 2. Unread DMs (messages to me, after my cursor per peer)
     try {
+      final memberIds = await _companyMemberIds(companyId);
+
       final dmCursors = await _sb
           .from('dm_read_cursors')
           .select('peer_id, last_read_at')
@@ -443,13 +491,14 @@ class _MgmtSideNavState extends State<_MgmtSideNav> {
           .limit(500);
       for (final msg in (dmMessages as List)) {
         final senderId = msg['sender_id'] as String;
+
+        // The DM list only shows members of the active company.
+        if (!memberIds.contains(senderId)) continue;
+
         final createdAt = msg['created_at'] as String;
         final cursor = dmCursorMap[senderId];
         if (cursor == null || createdAt.compareTo(cursor) > 0) {
           dmCount++;
-          if (cursor == null) {
-            debugPrint('Mgmt chat badge — DM uten lesemerke fra $senderId');
-          }
         }
       }
     } catch (e) {
@@ -491,10 +540,6 @@ class _MgmtSideNavState extends State<_MgmtSideNav> {
           final cursor = groupCursorMap[groupId];
           if (cursor == null || createdAt.compareTo(cursor) > 0) {
             groupCount++;
-            if (cursor == null) {
-              debugPrint(
-                  'Mgmt chat badge — gruppe uten lesemerke: $groupId');
-            }
           }
         }
       }
