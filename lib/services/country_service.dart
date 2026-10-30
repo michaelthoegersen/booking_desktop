@@ -1,13 +1,15 @@
-import 'dart:convert';
-
 import 'package:flutter/foundation.dart';
-import 'package:http/http.dart' as http;
+import 'package:supabase_flutter/supabase_flutter.dart';
 
-import 'app_env.dart';
-
+/// Coordinate → country code, via the `geocode` edge function.
+///
+/// This used to call Nominatim straight from the client, one request per
+/// sampled point. Nominatim allows 1 request/sec per IP, so a couple of route
+/// analyses got the whole office IP a 429 that stuck — every lookup then
+/// returned 'Unknown' and country km silently came out empty. The edge
+/// function uses BigDataCloud (free, no key) with Google as fallback, and
+/// takes every point in one round trip.
 class CountryService {
-  String get _apiKey => AppEnv.googleMapsApiKey;
-
   final Map<String, String> _cache = {};
 
   String _key(double lat, double lng) {
@@ -16,94 +18,59 @@ class CountryService {
     return "$la,$ln";
   }
 
-  Future<String> getCountry(
-    double lat,
-    double lng,
-  ) async {
-    final key = _key(lat, lng);
-
-    if (_cache.containsKey(key)) {
-      return _cache[key]!;
-    }
-
-    // On web: BigDataCloud — free, no API key, proper CORS headers
-    if (kIsWeb) {
-      return _getCountryWeb(lat, lng, key);
-    }
-
-    // Desktop: Google Geocoding API
-    if (_apiKey.isEmpty) {
-      throw Exception('Missing GOOGLE_MAPS_API_KEY');
-    }
-
-    final url = Uri.parse(
-      'https://maps.googleapis.com/maps/api/geocode/json'
-      '?latlng=$lat,$lng'
-      '&key=$_apiKey',
-    );
-
-    final res = await http.get(url);
-
-    if (res.statusCode != 200) {
-      throw Exception('Geocode failed');
-    }
-
-    final data = jsonDecode(res.body);
-
-    for (final r in data['results']) {
-      for (final c in r['address_components']) {
-        if (c['types'].contains('country')) {
-          final country = c['short_name'];
-          _cache[key] = country;
-          return country;
-        }
-      }
-    }
-
-    _cache[key] = 'Unknown';
-    return 'Unknown';
+  Future<String> getCountry(double lat, double lng) async {
+    final countries = await getCountries([
+      [lat, lng],
+    ]);
+    return countries.isEmpty ? 'Unknown' : countries.first;
   }
 
-  /// Nominatim reverse geocode (free, CORS OK, 1 req/s)
-  static DateTime _lastNominatim = DateTime(2000);
+  /// Country code per point, in the order given. A point that cannot be
+  /// resolved comes back as 'Unknown' rather than failing the batch.
+  Future<List<String>> getCountries(List<List<double>> points) async {
+    if (points.isEmpty) return [];
 
-  Future<String> _getCountryWeb(
-    double lat,
-    double lng,
-    String cacheKey,
-  ) async {
-    try {
-      // Rate limit: 1 request per second (Nominatim policy)
-      final now = DateTime.now();
-      final diff = now.difference(_lastNominatim).inMilliseconds;
-      if (diff < 1100) {
-        await Future.delayed(Duration(milliseconds: 1100 - diff));
+    final result = List<String>.filled(points.length, 'Unknown');
+    final missing = <int>[];
+
+    for (int i = 0; i < points.length; i++) {
+      final cached = _cache[_key(points[i][0], points[i][1])];
+      if (cached != null) {
+        result[i] = cached;
+      } else {
+        missing.add(i);
       }
-      _lastNominatim = DateTime.now();
-
-      final url = Uri.parse(
-        'https://nominatim.openstreetmap.org/reverse'
-        '?lat=$lat&lon=$lng&format=json&zoom=3',
-      );
-
-      final res = await http.get(url, headers: {
-        'Accept': 'application/json',
-        'User-Agent': 'TourFlow/1.0 (tourflow-booking)',
-      }).timeout(const Duration(seconds: 8));
-
-      if (res.statusCode == 200) {
-        final data = jsonDecode(res.body) as Map<String, dynamic>;
-        final address = data['address'] as Map<String, dynamic>?;
-        final country =
-            (address?['country_code'] as String?)?.toUpperCase() ?? 'Unknown';
-        _cache[cacheKey] = country;
-        return country;
-      }
-    } catch (e) {
-      debugPrint('Country web lookup failed: $e');
     }
 
-    _cache[cacheKey] = 'Unknown';
-    return 'Unknown';
+    if (missing.isEmpty) return result;
+
+    try {
+      final res = await Supabase.instance.client.functions
+          .invoke('geocode', body: {
+            'points': [for (final i in missing) points[i]],
+          })
+          .timeout(const Duration(seconds: 30));
+
+      final data = res.data;
+      final raw = data is Map ? data['countries'] as List? : null;
+
+      if (raw == null) {
+        debugPrint('Country lookup: unexpected response $data');
+        return result;
+      }
+
+      for (int n = 0; n < missing.length && n < raw.length; n++) {
+        final code = raw[n];
+        if (code is! String) continue;
+
+        final i = missing[n];
+        result[i] = code;
+        _cache[_key(points[i][0], points[i][1])] = code;
+      }
+    } catch (e) {
+      debugPrint('Country lookup failed: $e');
+    }
+
+    return result;
   }
 }

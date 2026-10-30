@@ -8,7 +8,15 @@
 // POST { places: ["Berlin", "Alta"] }
 //   → { coords: [[lat, lon], [lat, lon]] }   (null for a place that failed)
 //
-// No country bias: these are international tour routes, not Norwegian legs.
+// POST { points: [[lat, lon], ...] }
+//   → { countries: ["NO", "SE", ...] }       ("Unknown" for one that failed)
+//
+// The reverse direction is batched because the country analyser samples a
+// route every N points and used to fire one client request per sample — which
+// is what made Nominatim 429 the whole IP in the first place.
+//
+// No country bias on forward lookups: these are international tour routes,
+// not Norwegian legs.
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
@@ -45,11 +53,82 @@ async function geocode(place: string): Promise<[number, number] | null> {
   return coord;
 }
 
+// ── reverse: coordinate → country code ──────────────────────────────────────
+// BigDataCloud is free and needs no key, so it carries the volume; Google is
+// only there for the odd failure.
+const countryCache = new Map<string, string>();
+
+function cacheKey(lat: number, lon: number): string {
+  // ~0.02° ≈ 2 km, same rounding the client used, so neighbouring samples on
+  // one route collapse into a single lookup.
+  return `${Math.round(lat * 50) / 50},${Math.round(lon * 50) / 50}`;
+}
+
+async function reverseCountry(lat: number, lon: number): Promise<string> {
+  const key = cacheKey(lat, lon);
+  if (countryCache.has(key)) return countryCache.get(key)!;
+
+  try {
+    const res = await fetch(
+      `https://api.bigdatacloud.net/data/reverse-geocode-client` +
+        `?latitude=${lat}&longitude=${lon}&localityLanguage=en`,
+    );
+    if (res.ok) {
+      const data = await res.json();
+      const code = data?.countryCode;
+      if (typeof code === "string" && code.length === 2) {
+        countryCache.set(key, code);
+        return code;
+      }
+    }
+  } catch (_) {
+    // fall through to Google
+  }
+
+  try {
+    const res = await fetch(
+      `https://maps.googleapis.com/maps/api/geocode/json` +
+        `?latlng=${lat},${lon}&result_type=country&key=${GOOGLE_KEY}`,
+    );
+    if (res.ok) {
+      const data = await res.json();
+      if (data?.status === "OK") {
+        for (const c of data.results?.[0]?.address_components ?? []) {
+          if (c.types?.includes("country")) {
+            countryCache.set(key, c.short_name);
+            return c.short_name;
+          }
+        }
+      }
+    }
+  } catch (_) {
+    // give up below
+  }
+
+  return "Unknown";
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
 
   try {
     const body = await req.json();
+
+    // ---- reverse: points → country codes ----
+    if (Array.isArray(body?.points)) {
+      const points = body.points as unknown[];
+
+      const countries = await Promise.all(
+        points.map((p) => {
+          if (!Array.isArray(p) || p.length < 2) return "Unknown";
+          return reverseCountry(Number(p[0]), Number(p[1]));
+        }),
+      );
+
+      return new Response(JSON.stringify({ countries }), {
+        headers: { ...CORS, "Content-Type": "application/json" },
+      });
+    }
 
     // Accept a single place too, so callers that need one coordinate stay simple.
     const places: string[] = Array.isArray(body?.places)
@@ -70,7 +149,7 @@ Deno.serve(async (req) => {
       headers: { ...CORS, "Content-Type": "application/json" },
     });
   } catch (e) {
-    return new Response(JSON.stringify({ coords: [], error: String(e) }), {
+    return new Response(JSON.stringify({ coords: [], countries: [], error: String(e) }), {
       status: 200,
       headers: { ...CORS, "Content-Type": "application/json" },
     });

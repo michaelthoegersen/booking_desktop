@@ -8,13 +8,10 @@ import 'polyline_decoder.dart';
 class RouteCountryAnalyzer {
   final CountryService _countryService = CountryService();
 
-  /// Hvor ofte vi sampler polyline (jo høyere = raskere, mindre presis)
-  /// Web: larger step because Nominatim is rate-limited to 1 req/s
+  /// Hvor ofte vi sampler polyline (jo høyere = raskere, mindre presis).
+  /// Web sampler grovere enn desktop — uendret fra før, så tallene ikke
+  /// flytter seg av denne fiksen.
   static const int step = kIsWeb ? 500 : 100;
-
-  /// Maks samtidige API-kall (beskytter deg mot rate-limit)
-  /// Web: sequential (Nominatim 1 req/s), desktop: parallel
-  static const int maxParallel = kIsWeb ? 1 : 8;
 
   /// Land vi faktisk bryr oss om
   static const Set<String> vatCountries = {
@@ -79,86 +76,42 @@ class RouteCountryAnalyzer {
   Future<Map<String, double>> _run(List<LatLngPoint> points) async {
     if (points.length < 2) return {};
 
-    final Map<String, double> result = {};
-
-    final futures = <Future<_SegResult>>[];
+    // One sample per segment, then ONE batched country lookup. The old version
+    // fired a request per segment, which is exactly what got rate-limited.
+    final segmentKm = <double>[];
+    final samples = <List<double>>[];
 
     for (int i = 0; i < points.length - 1; i += step) {
-      final start = i;
       final end = min(i + step, points.length - 1);
 
-      futures.add(_processSegment(points, start, end));
-
-      // Batch for ikke å drepe API
-      if (futures.length >= maxParallel) {
-        await _flush(futures, result);
+      // Sum every consecutive haversine in the segment — far more accurate
+      // than a single endpoint-to-endpoint line, which underestimates.
+      double km = 0;
+      for (int j = i; j < end; j++) {
+        km += _distance(
+          points[j].lat,
+          points[j].lng,
+          points[j + 1].lat,
+          points[j + 1].lng,
+        );
       }
+
+      segmentKm.add(km);
+      samples.add([points[i].lat, points[i].lng]);
     }
 
-    // Rest
-    await _flush(futures, result);
+    final countries = await _countryService.getCountries(samples);
+
+    final Map<String, double> result = {};
+
+    for (int i = 0; i < segmentKm.length; i++) {
+      final country = i < countries.length ? countries[i] : 'Unknown';
+
+      final code = vatCountries.contains(country) ? country : 'OTHER';
+
+      result[code] = (result[code] ?? 0) + segmentKm[i];
+    }
 
     return result;
   }
-
-  // =============================================================
-  // HANDLE ONE SEGMENT
-  // Summer alle konsekutive haversines i segmentet — mye mer
-  // nøyaktig enn bare endpoint-haversine (straight-line underestimerer)
-  // =============================================================
-  Future<_SegResult> _processSegment(
-    List<LatLngPoint> points,
-    int start,
-    int end,
-  ) async {
-    double km = 0;
-    for (int j = start; j < end; j++) {
-      km += _distance(
-        points[j].lat,
-        points[j].lng,
-        points[j + 1].lat,
-        points[j + 1].lng,
-      );
-    }
-
-    final country =
-        await _countryService.getCountry(
-      points[start].lat,
-      points[start].lng,
-    );
-
-    final code = vatCountries.contains(country)
-        ? country
-        : 'OTHER';
-
-    return _SegResult(code, km);
-  }
-
-  // =============================================================
-  // FLUSH BATCH
-  // =============================================================
-  Future<void> _flush(
-    List<Future<_SegResult>> futures,
-    Map<String, double> result,
-  ) async {
-    final batch = List.of(futures);
-    futures.clear();
-
-    final values = await Future.wait(batch);
-
-    for (final v in values) {
-      result[v.country] =
-          (result[v.country] ?? 0) + v.km;
-    }
-  }
-}
-
-// =============================================================
-// INTERNAL
-// =============================================================
-class _SegResult {
-  final String country;
-  final double km;
-
-  _SegResult(this.country, this.km);
 }

@@ -52,6 +52,11 @@ class _RoutePopupDialogState extends State<RoutePopupDialog> {
   // ================= MULTI ROUTES =================
   List<List<LatLng>> _allRoutes = [];
 
+  /// Forces the leg onto E6 through Norway when the router would otherwise
+  /// cut across Sweden — the bus cannot leave the country without triggering
+  /// export/import paperwork.
+  bool _keepInsideNorway = false;
+
   // ✅ NYTT: per route data
   List<double> _routeKm = [];
   List<Map<String, double>> _routeCountryKm = [];
@@ -189,6 +194,7 @@ String _buildExtra() {
 
     final res = await _google.getRouteWithVia(
       places: places,
+      keepInsideNorway: _keepInsideNorway,
     );
 
     final routes =
@@ -558,6 +564,24 @@ Future<void> _save() async {
             },
             icon: const Icon(Icons.add),
             label: const Text("Add via"),
+          ),
+
+          const Divider(),
+
+          CheckboxListTile(
+            dense: true,
+            contentPadding: EdgeInsets.zero,
+            controlAffinity: ListTileControlAffinity.leading,
+            title: const Text("Keep route inside Norway"),
+            subtitle: const Text(
+              "Forces E6 instead of the shortcut through Sweden",
+              style: TextStyle(fontSize: 11),
+            ),
+            value: _keepInsideNorway,
+            onChanged: (v) {
+              setState(() => _keepInsideNorway = v ?? false);
+              _loadRoute();
+            },
           ),
 
           const Divider(),
