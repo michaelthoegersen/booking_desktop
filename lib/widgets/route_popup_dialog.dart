@@ -296,6 +296,9 @@ String _buildExtra() {
     _kmCtrl.text = kms.first.toStringAsFixed(0);
     _ferryNameCtrl.text = firstCrossing.combinedName;
 
+    debugPrint('🌉 applied to UI: ferry=$_hasFerry bridge=$_hasBridge '
+        'name="${firstCrossing.combinedName}"');
+
     // 🌍 Country analysis in background — updates UI when done
     _loadCountryData(routeData, lines.length);
 
