@@ -2523,22 +2523,14 @@ Widget _buildEditableTotal({
 // ------------------------------------------------------------
 // Open route preview for first missing leg
 // ------------------------------------------------------------
-Future<void> _openRoutePreview() async {
+// ================================
+// FINN FØRSTE MANGLENDE REELLE LEG (IKKE OFF / TRAVEL, KM == NULL)
+// ================================
+// Brukes både av knappen «add missing route» (som bare vises når denne
+// returnerer noe) og av dialogen den åpner.
+({String from, String to})? _firstMissingLeg() {
   final round = offer.rounds[roundIndex];
 
-  if (round.entries.isEmpty) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(S.t('noRoutesYet'))),
-    );
-    return;
-  }
-
-  String? from;
-  String? to;
-
-  // ================================
-  // FINN FØRSTE MANGLENDE REELLE LEG (IKKE OFF / TRAVEL, KM == NULL)
-  // ================================
   for (int i = 0; i < round.entries.length; i++) {
     final t = _norm(round.entries[i].location);
     final tLower = t.toLowerCase();
@@ -2558,12 +2550,25 @@ Future<void> _openRoutePreview() async {
     // TRAVEL block — these are NOT missing routes.
     if (_travelMergedIndices.contains(i)) continue;
 
-    from = f;
-    to = t;
-    break;
+    return (from: f, to: t);
   }
 
-  if (from == null || to == null) {
+  return null;
+}
+
+Future<void> _openRoutePreview() async {
+  final round = offer.rounds[roundIndex];
+
+  if (round.entries.isEmpty) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(S.t('noRoutesYet'))),
+    );
+    return;
+  }
+
+  final missingLeg = _firstMissingLeg();
+
+  if (missingLeg == null) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(S.t('noMissingRoutes')),
@@ -2571,6 +2576,9 @@ Future<void> _openRoutePreview() async {
     );
     return;
   }
+
+  final from = missingLeg.from;
+  final to = missingLeg.to;
 
   // ================================
   // COLLECT STOPS (VIA)
@@ -2593,8 +2601,8 @@ Future<void> _openRoutePreview() async {
   final updated = await showDialog<bool>(
     context: context,
     builder: (_) => RoutePopupDialog(
-      start: from!,
-      stops: [to!],
+      start: from,
+      stops: [to],
     ),
   );
 
@@ -5164,6 +5172,9 @@ final totalExVat  = allRoundsTotal;                        // excl VAT
 final totalIncVat = allRoundsTotal + _vatTotalForDisplay;  // incl foreign VAT
 
 
+// Styrer om «add missing route» i det hele tatt vises.
+final missingLeg = _firstMissingLeg();
+
           // ============ LEFT ============
 
 return Padding(
@@ -5482,7 +5493,7 @@ final trailer =
                   const SizedBox(width: 10),
 
                   Expanded(
-                    flex: 5,
+                    flex: 7,
                     child: _LocationAutoComplete(
                       controller: locationCtrl,
                       focusNode: _locationFocus,
@@ -5492,27 +5503,31 @@ final trailer =
                       onQueryChanged: _loadPlaceSuggestions,
                     ),
                   ),
-
-                  const SizedBox(width: 10),
-
-                  Expanded(
-                    flex: 4,
-                    child: OutlinedButton.icon(
-                      icon: const Icon(Icons.add_road, size: 18),
-                      onPressed: _openRoutePreview,
-                      style: OutlinedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 12, vertical: 14),
-                      ),
-                      label: Text(
-                        S.t('addMissingRoute'),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                  ),
                 ],
               ),
+
+              // ---------- ADD MISSING ROUTE ----------
+              // Only worth showing when a real leg actually has no km.
+              if (missingLeg != null) ...[
+                const SizedBox(height: 8),
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    icon: const Icon(Icons.add_road, size: 18),
+                    onPressed: _openRoutePreview,
+                    style: OutlinedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 14),
+                    ),
+                    label: Text(
+                      "${S.t('addMissingRoute')}:  "
+                      "${missingLeg.from} → ${missingLeg.to}",
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ),
+              ],
 
               if (_loadingSuggestions)
                 Padding(
