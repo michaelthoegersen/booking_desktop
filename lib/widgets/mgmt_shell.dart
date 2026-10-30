@@ -397,17 +397,28 @@ class _MgmtSideNavState extends State<_MgmtSideNav> {
     final myId = _sb.auth.currentUser?.id;
     if (myId == null) return;
 
-    int total = 0;
+    int gigCount = 0;
+    int dmCount = 0;
+    int groupCount = 0;
 
     // 1. Unread gig messages
     try {
       final gigRes = await _sb
           .from('gig_messages')
-          .select('id')
+          .select('id, gig_id, read_by_admin')
           .eq('is_admin', false)
           .isFilter('deleted_at', null)
           .or('read_by_admin.is.null,read_by_admin.eq.false');
-      total += (gigRes as List).length;
+      gigCount = (gigRes as List).length;
+
+      if (gigCount > 0) {
+        final nulls =
+            gigRes.where((r) => r['read_by_admin'] == null).length;
+        final gigIds =
+            gigRes.map((r) => r['gig_id']).toSet().toList();
+        debugPrint('Mgmt chat badge — gig: $gigCount meldinger '
+            '($nulls med read_by_admin=NULL) i gigger $gigIds');
+      }
     } catch (e) {
       debugPrint('Mgmt chat badge — gig count failed: $e');
     }
@@ -435,7 +446,10 @@ class _MgmtSideNavState extends State<_MgmtSideNav> {
         final createdAt = msg['created_at'] as String;
         final cursor = dmCursorMap[senderId];
         if (cursor == null || createdAt.compareTo(cursor) > 0) {
-          total++;
+          dmCount++;
+          if (cursor == null) {
+            debugPrint('Mgmt chat badge — DM uten lesemerke fra $senderId');
+          }
         }
       }
     } catch (e) {
@@ -476,13 +490,22 @@ class _MgmtSideNavState extends State<_MgmtSideNav> {
           final createdAt = msg['created_at'] as String;
           final cursor = groupCursorMap[groupId];
           if (cursor == null || createdAt.compareTo(cursor) > 0) {
-            total++;
+            groupCount++;
+            if (cursor == null) {
+              debugPrint(
+                  'Mgmt chat badge — gruppe uten lesemerke: $groupId');
+            }
           }
         }
       }
     } catch (e) {
       debugPrint('Mgmt chat badge — group count failed: $e');
     }
+
+    final total = gigCount + dmCount + groupCount;
+
+    debugPrint('Mgmt chat badge = $total '
+        '(gig=$gigCount dm=$dmCount gruppe=$groupCount)');
 
     if (mounted) setState(() => _unreadMessages = total);
   }
