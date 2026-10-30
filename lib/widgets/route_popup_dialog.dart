@@ -185,10 +185,14 @@ String _buildExtra() {
         _allRoutes = [];
         _routeKm = [];
         _routeCountryKm = [];
+        _routeCrossings = [];
         _distanceKm = null;
         _countryKm = {};
+        _hasFerry = false;
+        _hasBridge = false;
         _loading = false;
       });
+      _ferryNameCtrl.clear();
       return;
     }
 
@@ -259,10 +263,14 @@ String _buildExtra() {
         _allRoutes = [];
         _routeKm = [];
         _routeCountryKm = [];
+        _routeCrossings = [];
         _distanceKm = null;
         _countryKm = {};
+        _hasFerry = false;
+        _hasBridge = false;
         _loading = false;
       });
+      _ferryNameCtrl.clear();
       return;
     }
 
@@ -295,10 +303,14 @@ String _buildExtra() {
       _allRoutes = [];
       _routeKm = [];
       _routeCountryKm = [];
+      _routeCrossings = [];
       _distanceKm = null;
       _countryKm = {};
+      _hasFerry = false;
+      _hasBridge = false;
       _loading = false;
     });
+    _ferryNameCtrl.clear();
   }
 }
 
@@ -607,9 +619,8 @@ Future<void> _save() async {
                 onChanged: (v) {
                   if (v == null) return;
 
-                  final crossing = _routeCrossings.isNotEmpty
-                      ? _routeCrossings[v]
-                      : null;
+                  final crossing =
+                      v < _routeCrossings.length ? _routeCrossings[v] : null;
 
                   setState(() {
                     _activeRouteIndex = v;
@@ -618,17 +629,12 @@ Future<void> _save() async {
                     _distanceKm = _routeKm[v];
                     _countryKm = _routeCountryKm[v];
 
-                    if (crossing != null) {
-                      _hasFerry = crossing.hasFerry;
-                      _hasBridge = crossing.hasBridge;
-                    }
+                    _hasFerry = crossing?.hasFerry ?? false;
+                    _hasBridge = crossing?.hasBridge ?? false;
                   });
 
                   _kmCtrl.text = _routeKm[v].toStringAsFixed(0);
-
-                  if (crossing != null) {
-                    _ferryNameCtrl.text = crossing.combinedName;
-                  }
+                  _ferryNameCtrl.text = crossing?.combinedName ?? '';
                 },
               ),
 
