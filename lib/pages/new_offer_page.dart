@@ -5468,23 +5468,29 @@ final trailer =
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
 
+                  // Rendered as a field, not a button, so it lines up with
+                  // the location input beside it.
                   Expanded(
                     flex: 3,
-                    child: OutlinedButton.icon(
-                      icon: const Icon(Icons.calendar_month, size: 18),
-                      onPressed: _pickDate,
-                      style: OutlinedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 12, vertical: 14),
-                      ),
-                      label: Align(
-                        alignment: Alignment.centerLeft,
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(16),
+                      onTap: _pickDate,
+                      child: InputDecorator(
+                        decoration: InputDecoration(
+                          labelText: S.t('date'),
+                          prefixIcon: const Icon(Icons.calendar_month),
+                        ),
                         child: Text(
                           selectedDate == null
                               ? S.t('pickDate')
                               : _fmtDate(selectedDate!),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: selectedDate == null
+                                ? cs.onSurfaceVariant
+                                : cs.onSurface,
+                          ),
                         ),
                       ),
                     ),
