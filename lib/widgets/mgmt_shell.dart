@@ -389,23 +389,31 @@ class _MgmtSideNavState extends State<_MgmtSideNav> {
     _loadPendingExpenses();
   }
 
+  /// De tre tellingene står hver for seg med egen catch. Før gjorde de det
+  /// ikke, og da slo én manglende kolonne ut HELE merket — det har skjedd to
+  /// ganger nå, først på gig_messages og så på direct_messages. Nå koster en
+  /// ødelagt tabell bare sin egen del av tallet, og loggen sier hvilken.
   Future<void> _loadUnreadMessages() async {
-    try {
-      final myId = _sb.auth.currentUser?.id;
-      if (myId == null) return;
+    final myId = _sb.auth.currentUser?.id;
+    if (myId == null) return;
 
-      // 1. Unread gig messages
+    int total = 0;
+
+    // 1. Unread gig messages
+    try {
       final gigRes = await _sb
           .from('gig_messages')
           .select('id')
           .eq('is_admin', false)
-          // gig_messages har ingen deleted_at — filteret ga 42703, og da falt
-          // HELE tellingen ut: gigchat, DM og grupper. Feilen ble svelget av
-          // catch-en, så merket sto bare tomt.
+          .isFilter('deleted_at', null)
           .or('read_by_admin.is.null,read_by_admin.eq.false');
-      int total = (gigRes as List).length;
+      total += (gigRes as List).length;
+    } catch (e) {
+      debugPrint('Mgmt chat badge — gig count failed: $e');
+    }
 
-      // 2. Unread DMs (messages to me, after my cursor per peer)
+    // 2. Unread DMs (messages to me, after my cursor per peer)
+    try {
       final dmCursors = await _sb
           .from('dm_read_cursors')
           .select('peer_id, last_read_at')
@@ -430,8 +438,12 @@ class _MgmtSideNavState extends State<_MgmtSideNav> {
           total++;
         }
       }
+    } catch (e) {
+      debugPrint('Mgmt chat badge — DM count failed: $e');
+    }
 
-      // 3. Unread group messages
+    // 3. Unread group messages
+    try {
       final myGroups = await _sb
           .from('group_chat_members')
           .select('group_chat_id')
@@ -468,11 +480,11 @@ class _MgmtSideNavState extends State<_MgmtSideNav> {
           }
         }
       }
-
-      if (mounted) setState(() => _unreadMessages = total);
     } catch (e) {
-      debugPrint('Mgmt chat badge error: $e');
+      debugPrint('Mgmt chat badge — group count failed: $e');
     }
+
+    if (mounted) setState(() => _unreadMessages = total);
   }
 
   /// Offers waiting for us to countersign: the customer accepted, we have
