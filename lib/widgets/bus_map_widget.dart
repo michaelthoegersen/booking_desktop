@@ -232,9 +232,7 @@ class _BusMapWidgetState extends State<BusMapWidget> {
 
             TileLayer(
               urlTemplate:
-                  'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
-              subdomains: const ['a', 'b', 'c', 'd'],
-              retinaMode: true,
+                  'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
               maxZoom: 19,
               userAgentPackageName: 'com.tourflow.app',
               errorTileCallback: (tile, error, stackTrace) {},
