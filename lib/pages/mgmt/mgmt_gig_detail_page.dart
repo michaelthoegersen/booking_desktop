@@ -859,8 +859,28 @@ class _MgmtGigDetailPageState extends State<MgmtGigDetailPage>
     if (confirmed != true || !mounted) return;
 
     try {
-      await _sb.from('gigs').delete().eq('id', widget.gigId);
-      if (mounted) context.go('/m/gigs');
+      // .select() gir radene som faktisk ble slettet. Uten den ser en DELETE
+      // som RLS blokkerer helt vellykket ut — ingen feil, null rader — og vi
+      // navigerte bort som om giggen var borte mens den sto igjen.
+      final deleted = await _sb
+          .from('gigs')
+          .delete()
+          .eq('id', widget.gigId)
+          .select('id');
+
+      if (!mounted) return;
+
+      if ((deleted as List).isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Giggen ble ikke slettet — du har ikke tilgang '
+                'til å slette den.'),
+          ),
+        );
+        return;
+      }
+
+      context.go('/m/gigs');
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(

@@ -82,6 +82,10 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
             .from('gigs')
             .select('id, date_from, venue_name, customer_firma, type')
             .eq('company_id', _companyId!)
+            // Ingen skal ha hyre for en testgig. Gigglista, tilbudssiden og
+            // detaljsiden filtrerte allerede; denne var den siste som ikke
+            // gjorde det, så testgigger dukket opp her.
+            .eq('is_test', false)
             .lte('date_from', todayStr)
             .or('${DateOptionService.kState}.is.null,'
                 '${DateOptionService.kState}.eq.chosen'),
