@@ -175,6 +175,10 @@ class _GigOfferPageState extends State<GigOfferPage> {
 
   // ── Calculated ────────────────────────────────────────────────────────────
   double _performerFees = 0;
+  /// Grunnlaget påslaget regnes av. Settes i _recalc og leses av kalkylekortet
+  /// og fordelingsboksen, så formelen finnes ett sted.
+  double _markupBase = 0;
+
   double _completeKonto = 0;
   double _completePct = 0;
   double _bookingHonorar = 0;
@@ -1612,9 +1616,9 @@ class _GigOfferPageState extends State<GigOfferPage> {
     // fikk ulikt påslag avhengig av hvilken flate du så på. De to er nå like.
     _completePct = _markupPct / 2;
     _bookingPct = _markupPct / 2;
-    final markupBase = _markupOnAll ? subtotalBeforeMarkup : _performerFees;
-    _completeKonto = markupBase * _completePct;
-    _bookingHonorar = markupBase * _bookingPct;
+    _markupBase = _markupOnAll ? subtotalBeforeMarkup : _performerFees;
+    _completeKonto = _markupBase * _completePct;
+    _bookingHonorar = _markupBase * _bookingPct;
   }
 
   /// Update _transportPrice from privatbil calculator values
@@ -4702,20 +4706,17 @@ class _GigOfferPageState extends State<GigOfferPage> {
           const Divider(height: 24),
           _editableCalcRow('performer_fees', 'Utøverhyrer', _performerFees),
           () {
-            final markupBase = _markupOnAll
-                ? (_performerFees + _rehearsalTotal)
-                : (_performerFees + transportCombined + _rehearsalTotal);
             final ckVal = _ov('complete_konto', _completeKonto);
             final bhVal = _ov('booking_honorar', _bookingHonorar);
-            final ckPct = markupBase > 0 ? ckVal / markupBase : 0.0;
-            final bhPct = markupBase > 0 ? bhVal / markupBase : 0.0;
+            final ckPct = _markupBase > 0 ? ckVal / _markupBase : 0.0;
+            final bhPct = _markupBase > 0 ? bhVal / _markupBase : 0.0;
             return Column(children: [
               _editableCalcRow(
                   'complete_konto', 'CompleteKonto', _completeKonto,
-                  pct: ckPct),
+                  pct: ckPct, onEdit: _editMarkupSplit),
               _editableCalcRow(
                   'booking_honorar', 'BookingHonorar', _bookingHonorar,
-                  pct: bhPct),
+                  pct: bhPct, onEdit: _editMarkupSplit),
             ]);
           }(),
           if (_inearIncluded)
@@ -4847,7 +4848,7 @@ class _GigOfferPageState extends State<GigOfferPage> {
 
   /// Editable calc row — double-tap value to override manually
   Widget _editableCalcRow(String key, String label, double calculated,
-      {double? pct, String? suffix}) {
+      {double? pct, String? suffix, VoidCallback? onEdit}) {
     final cs = Theme.of(context).colorScheme;
     final hasOverride = _overrides.containsKey(key);
     final displayVal = hasOverride ? _overrides[key]! : calculated;
@@ -4855,7 +4856,11 @@ class _GigOfferPageState extends State<GigOfferPage> {
     return Padding(
       padding: const EdgeInsets.only(bottom: 6),
       child: GestureDetector(
-        onDoubleTap: () => _editOverride(key, displayVal),
+        // Påslagsparet åpner fordelingsboksen på ett trykk; de øvrige radene
+        // beholder dobbelttrykk for enkel overstyring.
+        onTap: onEdit,
+        onDoubleTap:
+            onEdit == null ? () => _editOverride(key, displayVal) : null,
         child: Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
@@ -4955,6 +4960,31 @@ class _GigOfferPageState extends State<GigOfferPage> {
         ],
       ),
     );
+  }
+
+  /// Åpner fordelingsboksen for CompleteKonto + BookingHonorar.
+  Future<void> _editMarkupSplit() async {
+    final result = await showDialog<_MarkupSplit>(
+      context: context,
+      builder: (_) => _MarkupSplitDialog(
+        base: _markupBase,
+        totalMarkup: _completeKonto + _bookingHonorar,
+        complete: _ov('complete_konto', _completeKonto),
+        format: _nf.format,
+      ),
+    );
+
+    if (!mounted || result == null) return;
+
+    setState(() {
+      if (result.reset) {
+        _overrides.remove('complete_konto');
+        _overrides.remove('booking_honorar');
+      } else {
+        _overrides['complete_konto'] = result.complete;
+        _overrides['booking_honorar'] = result.booking;
+      }
+    });
   }
 
   void _applyOverride(String key, String rawText) {
@@ -6358,6 +6388,212 @@ class _DueDaysDialogState extends State<_DueDaysDialog> {
         ),
         FilledButton(
           onPressed: () => Navigator.pop(context, int.tryParse(_ctrl.text)),
+          child: const Text('OK'),
+        ),
+      ],
+    );
+  }
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// MARKUP SPLIT DIALOG
+// ────────────────────────────────────────────────────────────────────────────
+
+/// Resultatet av å redigere påslagsfordelingen.
+class _MarkupSplit {
+  final bool reset;
+  final double complete;
+  final double booking;
+
+  const _MarkupSplit(this.complete, this.booking) : reset = false;
+  const _MarkupSplit.reset()
+      : reset = true,
+        complete = 0,
+        booking = 0;
+}
+
+/// CompleteKonto og BookingHonorar i én boks.
+///
+/// De to summerer alltid til det beregnede påslaget (påslagsprosent ×
+/// utøverhyrer), så de kan ikke drive fra hverandre slik to frie
+/// overstyringer kan. Å redigere det ene beløpet flytter det andre, og
+/// slideren flytter begge. Selve påslagsprosenten endres i parameterfeltet
+/// over kalkylen, ikke her — denne boksen fordeler.
+///
+/// Egen State, så controllerne lever like lenge som dialogruta. Opprettes de
+/// utenfor og disposes når showDialog returnerer, river vi dem ned mens ruta
+/// fortsatt animerer ut, og da treffer `_dependents.isEmpty`-assert-en.
+class _MarkupSplitDialog extends StatefulWidget {
+  /// Grunnlaget påslaget regnes av — utøverhyrer.
+  final double base;
+
+  /// Totalt påslag som skal fordeles.
+  final double totalMarkup;
+
+  /// CompleteKonto slik den står nå (overstyrt eller beregnet).
+  final double complete;
+
+  final String Function(double) format;
+
+  const _MarkupSplitDialog({
+    required this.base,
+    required this.totalMarkup,
+    required this.complete,
+    required this.format,
+  });
+
+  @override
+  State<_MarkupSplitDialog> createState() => _MarkupSplitDialogState();
+}
+
+class _MarkupSplitDialogState extends State<_MarkupSplitDialog> {
+  late double _complete;
+
+  late final TextEditingController _completeCtrl;
+  late final TextEditingController _bookingCtrl;
+
+  double get _total => widget.totalMarkup;
+  double get _booking => _total - _complete;
+
+  @override
+  void initState() {
+    super.initState();
+
+    // Klem inn i [0, total]. Var de lagrede verdiene ute av takt med det
+    // beregnede påslaget — som er nettopp feilen denne boksen skal hindre —
+    // forsoner vi dem her, og totalen under viser hva de faktisk blir.
+    _complete = _total > 0 ? widget.complete.clamp(0.0, _total) : 0.0;
+
+    _completeCtrl = TextEditingController(text: widget.format(_complete));
+    _bookingCtrl = TextEditingController(text: widget.format(_booking));
+  }
+
+  @override
+  void dispose() {
+    _completeCtrl.dispose();
+    _bookingCtrl.dispose();
+    super.dispose();
+  }
+
+  double? _parse(String raw) =>
+      double.tryParse(raw.replaceAll(RegExp(r'[^0-9.]'), ''));
+
+  /// Setter CompleteKonto og speiler resten over i Booking.
+  void _setComplete(double v, {required bool fromCompleteField}) {
+    setState(() {
+      _complete = v.clamp(0.0, _total > 0 ? _total : v);
+
+      // Bare feltet brukeren IKKE skriver i oppdateres, ellers hopper
+      // markøren mens de taster.
+      if (fromCompleteField) {
+        _bookingCtrl.text = widget.format(_booking);
+      } else {
+        _completeCtrl.text = widget.format(_complete);
+      }
+    });
+  }
+
+  String _pctOfBase(double amount) {
+    if (widget.base <= 0) return '–';
+    return '${(amount / widget.base * 100).toStringAsFixed(1)} %';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final bookingShare = _total > 0 ? (_booking / _total).clamp(0.0, 1.0) : 0.5;
+
+    return AlertDialog(
+      title: const Text('Påslag'),
+      content: SizedBox(
+        width: 340,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Grunnlag: utøverhyrer ${widget.format(widget.base)} kr',
+              style: TextStyle(fontSize: 12, color: cs.onSurfaceVariant),
+            ),
+            const SizedBox(height: 16),
+
+            // ── CompleteKonto ──
+            TextField(
+              controller: _completeCtrl,
+              keyboardType: TextInputType.number,
+              decoration: InputDecoration(
+                labelText: 'CompleteKonto',
+                suffixText: 'kr',
+                helperText: _pctOfBase(_complete),
+              ),
+              onChanged: (v) {
+                final parsed = _parse(v);
+                if (parsed == null) return;
+                _setComplete(parsed, fromCompleteField: true);
+              },
+            ),
+            const SizedBox(height: 12),
+
+            // ── BookingHonorar ──
+            TextField(
+              controller: _bookingCtrl,
+              keyboardType: TextInputType.number,
+              decoration: InputDecoration(
+                labelText: 'BookingHonorar',
+                suffixText: 'kr',
+                helperText: _pctOfBase(_booking),
+              ),
+              onChanged: (v) {
+                final parsed = _parse(v);
+                if (parsed == null) return;
+                _setComplete(_total - parsed, fromCompleteField: false);
+              },
+            ),
+
+            // ── Fordeling ──
+            Slider(
+              value: bookingShare,
+              onChanged: _total <= 0
+                  ? null
+                  : (v) => _setComplete(_total * (1 - v),
+                      fromCompleteField: false),
+            ),
+            Center(
+              child: Text(
+                'Booking ${(bookingShare * 100).round()} % '
+                '· Complete ${((1 - bookingShare) * 100).round()} %',
+                style: TextStyle(fontSize: 11, color: cs.onSurfaceVariant),
+              ),
+            ),
+
+            const Divider(height: 24),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text('Til sammen',
+                    style: TextStyle(fontWeight: FontWeight.w700)),
+                Text(
+                  '${widget.format(_total)} kr  ·  ${_pctOfBase(_total)}',
+                  style: const TextStyle(fontWeight: FontWeight.w700),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () =>
+              Navigator.pop(context, const _MarkupSplit.reset()),
+          child: const Text('Tilbakestill'),
+        ),
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Avbryt'),
+        ),
+        FilledButton(
+          onPressed: () =>
+              Navigator.pop(context, _MarkupSplit(_complete, _booking)),
           child: const Text('OK'),
         ),
       ],
