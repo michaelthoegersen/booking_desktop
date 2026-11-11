@@ -1603,15 +1603,16 @@ class _GigOfferPageState extends State<GigOfferPage> {
         _performerFees + _inearTotal + totalTransport + _rehearsalTotal;
 
     // Markup
-    // Default: markup on everything except in-ear
-    // _markupOnAll checked: markup only on performer fees (shows + rehearsals)
+    // Påslag ligger KUN på utøverhyrer med mindre noe annet er spesifisert;
+    // markup_on_all slår det på for hele summen.
+    //
+    // Denne siden regnet motsatt vei: standard var hyrer + transport + prøver,
+    // og flagget skrudde transport AV. mgmt_gig_detail_page — som bygger
+    // kalkylen og PDF-en — har hele tiden brukt regelen under, så samme tilbud
+    // fikk ulikt påslag avhengig av hvilken flate du så på. De to er nå like.
     _completePct = _markupPct / 2;
     _bookingPct = _markupPct / 2;
-    final markupBase = _markupOnAll
-        ? (_performerFees + _rehearsalTotal) // only show/rehearsal fees
-        : (_performerFees +
-            totalTransport +
-            _rehearsalTotal); // everything except in-ear
+    final markupBase = _markupOnAll ? subtotalBeforeMarkup : _performerFees;
     _completeKonto = markupBase * _completePct;
     _bookingHonorar = markupBase * _bookingPct;
   }
@@ -3786,7 +3787,7 @@ class _GigOfferPageState extends State<GigOfferPage> {
               _markupPct = v;
               setState(() => _recalc());
             }),
-            _paramToggle('Påslag kun på hyrer', _markupOnAll, (v) {
+            _paramToggle('Påslag på alt', _markupOnAll, (v) {
               setState(() {
                 _markupOnAll = v;
                 _recalc();
