@@ -8,7 +8,7 @@
 -- (matvalg og liknende), ellers stemmer ikke hodetellingen.
 --
 -- chat_poll_votes hadde UNIQUE (poll_id, user_id), som gir nøyaktig
--- en stemme per bruker. Nøkkelen utvides med is_guest, så samme bruker
+-- én stemme per bruker. Nøkkelen utvides med is_guest, så samme bruker
 -- kan ha én stemme for seg selv og én for følget -- men fortsatt bare
 -- én av hver.
 --
@@ -65,4 +65,4 @@ END
 $$;
 
 -- RLS er uendret: policyene går på user_id = auth.uid(), og en
--- folge-stemme eies av den som tok folget med.
+-- følge-stemme eies av den som tok følget med.
