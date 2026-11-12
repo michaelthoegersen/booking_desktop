@@ -91,3 +91,64 @@ ORDER BY cmd;
 --   ALTER TABLE companies   DISABLE ROW LEVEL SECURITY;
 --   ALTER TABLE contacts    DISABLE ROW LEVEL SECURITY;
 --   ALTER TABLE productions DISABLE ROW LEVEL SECURITY;
+
+
+-- ============================================================
+-- Sjekker rundt 20261112_scope_contacts_productions.sql
+-- ============================================================
+
+-- ------------------------------------------------------------
+-- FØR: rader som ville blitt usynlige for ALLE
+-- ------------------------------------------------------------
+-- Scopingen går via company_id. En rad uten company_id, eller med en
+-- company_id som ikke finnes i companies, treffes av ingen policy og blir
+-- borte for alle utenom platform owner. Begge tallene bør være 0.
+SELECT 'contacts' AS tabell, count(*) AS foreldrelose
+FROM contacts t
+WHERE t.company_id IS NULL
+   OR NOT EXISTS (SELECT 1 FROM companies c WHERE c.id = t.company_id)
+UNION ALL
+SELECT 'productions', count(*)
+FROM productions t
+WHERE t.company_id IS NULL
+   OR NOT EXISTS (SELECT 1 FROM companies c WHERE c.id = t.company_id);
+
+-- ------------------------------------------------------------
+-- FØR: hvem eier radene?
+-- ------------------------------------------------------------
+-- Viser fordelingen per eierselskap. Rader med eier NULL tilhører et
+-- tenant-selskap direkte og er synlige for medlemmene der.
+SELECT COALESCE(eier.name, '(ingen eier - tenant selv)') AS eierselskap,
+       count(*) FILTER (WHERE kilde = 'contacts')    AS kontakter,
+       count(*) FILTER (WHERE kilde = 'productions') AS produksjoner
+FROM (
+  SELECT 'contacts' AS kilde, company_id FROM contacts
+  UNION ALL
+  SELECT 'productions', company_id FROM productions
+) t
+JOIN companies c ON c.id = t.company_id
+LEFT JOIN companies eier ON eier.id = c.owner_company_id
+GROUP BY 1
+ORDER BY 1;
+
+-- ------------------------------------------------------------
+-- ETTER: nøyaktig én policy per tabell, og den dekker ALL
+-- ------------------------------------------------------------
+SELECT tablename, policyname, permissive, cmd
+FROM pg_policies
+WHERE schemaname = 'public' AND tablename IN ('contacts','productions')
+ORDER BY tablename, policyname;
+
+-- Tilbakerulling til det åpne settet (lesing på tvers av selskaper):
+--
+--   DROP POLICY IF EXISTS "contacts_company_scope" ON contacts;
+--   CREATE POLICY "contacts_select" ON contacts
+--     FOR SELECT TO authenticated USING (true);
+--   CREATE POLICY "contacts_modify" ON contacts
+--     FOR ALL TO authenticated USING (is_any_admin());
+--
+--   DROP POLICY IF EXISTS "productions_company_scope" ON productions;
+--   CREATE POLICY "productions_select" ON productions
+--     FOR SELECT TO authenticated USING (true);
+--   CREATE POLICY "productions_modify" ON productions
+--     FOR ALL TO authenticated USING (is_any_admin());
