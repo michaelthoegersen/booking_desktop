@@ -15,6 +15,7 @@ class _PollCreateDialogState extends State<PollCreateDialog> {
     TextEditingController(),
   ];
   bool _creating = false;
+  String? _error;
 
   void _addOption() {
     if (_optionControllers.length >= 6) return;
@@ -36,13 +37,29 @@ class _PollCreateDialogState extends State<PollCreateDialog> {
 
   Future<void> _create() async {
     if (!_isValid || _creating) return;
-    setState(() => _creating = true);
+    setState(() {
+      _creating = true;
+      _error = null;
+    });
     final options = _optionControllers
         .map((c) => c.text.trim())
         .where((t) => t.isNotEmpty)
         .toList();
-    await widget.onCreate(_questionController.text.trim(), options);
-    if (mounted) Navigator.of(context).pop();
+    // Denne await-en lå naken før. Kastet onCreate - og den gjorde det
+    // hver gang, fordi poll-tabellene ikke fantes i databasen - sto
+    // _creating igjen som true, og knappen spant videre uten å si et ord
+    // om hva som gikk galt. Nullstillingen hører hjemme i finally, slik at den
+    // også holder hvis det legges til flere tidlige returer her senere.
+    try {
+      await widget.onCreate(_questionController.text.trim(), options);
+      if (mounted) Navigator.of(context).pop();
+    } catch (e) {
+      if (mounted) {
+        setState(() => _error = 'Fikk ikke opprettet avstemmingen: $e');
+      }
+    } finally {
+      if (mounted) setState(() => _creating = false);
+    }
   }
 
   @override
@@ -67,8 +84,8 @@ class _PollCreateDialogState extends State<PollCreateDialog> {
             TextField(
               controller: _questionController,
               decoration: const InputDecoration(
-                labelText: 'Sporsmal',
-                hintText: 'Hva vil du sporre om?',
+                labelText: 'Spørsmål',
+                hintText: 'Hva vil du spørre om?',
               ),
               onChanged: (_) => setState(() {}),
             ),
@@ -104,6 +121,17 @@ class _PollCreateDialogState extends State<PollCreateDialog> {
                 onPressed: _addOption,
                 icon: const Icon(Icons.add, size: 18),
                 label: const Text('Legg til alternativ'),
+              ),
+            if (_error != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Text(
+                  _error!,
+                  style: const TextStyle(
+                    color: Color(0xFFB3261E),
+                    fontSize: 12,
+                  ),
+                ),
               ),
           ],
         ),
