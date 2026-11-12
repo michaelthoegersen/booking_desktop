@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:math';
 
 import 'package:flutter/material.dart';
 import '../../services/date_option_service.dart';
@@ -689,23 +688,26 @@ class _MgmtGigsPageState extends State<MgmtGigsPage> {
     if (_companyId == null) return;
     final cs = Theme.of(context).colorScheme;
 
-    // Check if calendar_token already exists
-    final company = await _sb
-        .from('companies')
-        .select('calendar_token')
-        .eq('id', _companyId!)
-        .maybeSingle();
-
-    String? token = company?['calendar_token'] as String?;
-
-    // Generate token if missing
-    if (token == null || token.isEmpty) {
-      final rng = Random.secure();
-      token = List.generate(32, (_) => rng.nextInt(256).toRadixString(16).padLeft(2, '0')).join();
-      await _sb
-          .from('companies')
-          .update({'calendar_token': token})
-          .eq('id', _companyId!);
+    // Tokenet hentes og lages av RPC-en ensure_calendar_token. Den direkte
+    // skrivingen herfra tvang RLS-policyen companies_update_mine til å
+    // gjelde alle roller, siden kalenderknappen i mobilappen ikke er
+    // rollestyrt. RPC-en rører bare den ene kolonnen.
+    final String token;
+    try {
+      token = await _sb.rpc(
+        'ensure_calendar_token',
+        params: {'p_company_id': _companyId},
+      ) as String;
+    } catch (e) {
+      // Før gikk dette gjennom en UPDATE som RLS kunne blokkere uten
+      // feil - da ble tokenet null og lenken ubrukelig. RPC-en kaster i
+      // stedet, så her sier vi fra i stedet for å åpne en
+      // dialog med en død lenke.
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Fikk ikke hentet kalenderlenke: $e')),
+      );
+      return;
     }
 
     final calUrl =

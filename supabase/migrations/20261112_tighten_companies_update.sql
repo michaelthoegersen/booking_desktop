@@ -1,0 +1,39 @@
+-- ============================================================
+-- IKKE KJØR DENNE FØR EN NY MOBILBYGG ER UTE
+-- ============================================================
+-- Denne strammer companies UPDATE til admin igjen. Den utplasserte
+-- mobilappen skriver fortsatt companies.calendar_token direkte fra
+-- klienten, og vil brekke på kalenderknappen i det denne kjøres.
+--
+-- Rekkefølge:
+--   1. 20261112_ensure_calendar_token.sql   (RPC-en finnes)
+--   2. Ny mobilbygg ute hos brukerne        (appen kaller RPC-en)
+--   3. Denne                                (policyen strammes)
+--
+-- Desktop er allerede lagt om i samme commit som RPC-en, og deployes med
+-- en gang, så den er ikke til hinder.
+--
+-- ------------------------------------------------------------
+-- HVA DEN GJØR
+-- ------------------------------------------------------------
+-- companies_update_mine ble laget uten rollekrav nettopp for
+-- kalendertokenet. Når ingen klient lenger trenger det, er den overflødig:
+-- companies_update dekker allerede admin i selskapet og admin i
+-- eierselskapet, og companies_update_platform_owner dekker platform owner.
+--
+-- Etter at den er droppet skal UPDATE-settet på companies være:
+--   companies_update                   is_admin_in(id) OR is_admin_in(owner)
+--   companies_update_platform_owner    is_platform_owner()
+--   "Members can update customer companies"   (laget i dashbordet, ikke i
+--      noen migrasjonsfil - sjekk definisjonen. Gir den skrivetilgang til
+--      menige medlemmer, er jobben ikke ferdig før den også er strammet.)
+-- ============================================================
+
+DROP POLICY IF EXISTS "companies_update_mine" ON companies;
+
+-- Verifiser etterpå:
+--
+--   SELECT policyname, permissive, qual
+--   FROM pg_policies
+--   WHERE schemaname = 'public' AND tablename = 'companies' AND cmd = 'UPDATE'
+--   ORDER BY policyname;
