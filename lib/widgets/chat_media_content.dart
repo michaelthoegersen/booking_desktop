@@ -349,7 +349,13 @@ class _PollBubbleContentState extends State<_PollBubbleContent> {
       builder: (context, snap) {
         final votes = snap.data ?? (_poll!['votes'] as List?)?.cast<Map<String, dynamic>>() ?? [];
         final currentUserId = Supabase.instance.client.auth.currentUser?.id;
-        final myVote = votes.where((v) => v['user_id'] == currentUserId).firstOrNull;
+        // is_guest skiller en +1-stemme fra brukerens egen. Avstemminger i
+        // aktiviteter kan ha begge fra samme bruker; uten filteret her kunne
+        // følgets rad bli plukket som "min stemme".
+        final myVote = votes
+            .where((v) =>
+                v['user_id'] == currentUserId && v['is_guest'] != true)
+            .firstOrNull;
         final totalVotes = votes.length;
 
         return SizedBox(

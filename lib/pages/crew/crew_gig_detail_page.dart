@@ -3,6 +3,7 @@ import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../../services/poll_service.dart';
 import '../../widgets/contact_profile_dialog.dart';
 import '../../widgets/rich_text_field.dart';
 
@@ -195,6 +196,15 @@ class _CrewGigDetailPageState extends State<CrewGigDetailPage> {
         },
         onConflict: 'gig_id,user_id',
       );
+      // Samme opprydding som i mobilappen: ingen følge, ingen følgestemme
+      // liggende igjen i avstemmingene.
+      if (!value) {
+        try {
+          await PollService.removeGuestVotesForGig(widget.gigId);
+        } catch (e) {
+          debugPrint('Rydde +1-stemmer: $e');
+        }
+      }
       await _load();
     } catch (e) {
       debugPrint('Set plus_one error: $e');

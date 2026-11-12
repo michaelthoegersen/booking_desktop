@@ -31,21 +31,62 @@ class PollService {
   }
 
   /// Vote on a poll option. Replaces any previous vote (UNIQUE constraint).
-  static Future<void> vote(String pollId, String optionId) async {
+  ///
+  /// [isGuest] gir stemmen til følget til den som er logget inn. Nøkkelen i
+  /// basen er (poll_id, user_id, is_guest), så en bruker som tar med +1 kan
+  /// ha én stemme for seg selv og én for følget -- men fortsatt bare én av
+  /// hver.
+  static Future<void> vote(
+    String pollId,
+    String optionId, {
+    bool isGuest = false,
+  }) async {
     await _sb.from('chat_poll_votes').upsert({
       'poll_id': pollId,
       'option_id': optionId,
       'user_id': _sb.auth.currentUser!.id,
-    }, onConflict: 'poll_id,user_id');
+      'is_guest': isGuest,
+    }, onConflict: 'poll_id,user_id,is_guest');
   }
 
-  /// Remove own vote from a poll.
-  static Future<void> removeVote(String pollId) async {
+  /// Remove own vote from a poll. [isGuest] fjerner følgets stemme i stedet.
+  static Future<void> removeVote(String pollId, {bool isGuest = false}) async {
     await _sb
         .from('chat_poll_votes')
         .delete()
         .eq('poll_id', pollId)
-        .eq('user_id', _sb.auth.currentUser!.id);
+        .eq('user_id', _sb.auth.currentUser!.id)
+        .eq('is_guest', isGuest);
+  }
+
+  /// Fjern alle +1-stemmene mine i avstemmingene som hører til en gig.
+  ///
+  /// Kalles når noen huker av "Tar med +1" igjen. Uten dette ville følgets
+  /// stemme ligge igjen og telle med, og hodetellingen i aktiviteten ville
+  /// vist en person som ikke kommer. Avstemmingene har ingen gig-kolonne --
+  /// koblingen er meldingen de ligger i.
+  static Future<void> removeGuestVotesForGig(String gigId) async {
+    final uid = _sb.auth.currentUser?.id;
+    if (uid == null) return;
+
+    final msgs = await _sb
+        .from('gig_messages')
+        .select('attachment_url')
+        .eq('gig_id', gigId)
+        .eq('message_type', 'poll');
+
+    final pollIds = msgs
+        .map((m) => m['attachment_url'] as String?)
+        .whereType<String>()
+        .toList();
+    if (pollIds.isEmpty) return;
+
+    await _sb
+        .from('chat_poll_votes')
+        .delete()
+        .inFilter('poll_id', pollIds)
+        .eq('user_id', uid)
+        .eq('is_guest', true);
   }
 
   /// Fetch poll with options.
@@ -61,7 +102,7 @@ class PollService {
 
     final votes = await _sb
         .from('chat_poll_votes')
-        .select('option_id, user_id')
+        .select('option_id, user_id, is_guest')
         .eq('poll_id', pollId);
 
     return {
