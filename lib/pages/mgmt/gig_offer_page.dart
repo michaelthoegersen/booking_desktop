@@ -3805,7 +3805,9 @@ class _GigOfferPageState extends State<GigOfferPage> {
               _extraShowFee = v;
               setState(() => _recalc());
             }),
-            _paramRowPct('Påslag', _markupPct, (v) {
+            // «Påslag hyrer»: påslaget ligger på utøverhyrene med mindre
+            // «Påslag på alt» er huket av. Navnet sier nå hva grunnlaget er.
+            _paramRowPct('Påslag hyrer', _markupPct, (v) {
               _markupPct = v;
               setState(() => _recalc());
             }),

@@ -67,36 +67,73 @@ class _MgmtGigsPageState extends State<MgmtGigsPage> {
     super.initState();
     activeCompanyNotifier.addListener(_onCompanyChanged);
     _searchCtrl.text = _ListMemory.search;
+    _scrollController.addListener(_onScroll);
     _load();
   }
 
-  /// Hopper tilbake til der man sto. Kjøres etter at lista har fått høyde —
-  /// før det har ScrollController ingen posisjon å sette.
-  bool _offsetRestored = false;
+  /// Hopper tilbake til der man sto. Lista bygges i flere omganger — først
+  /// uten data, så med rader som måles etter hvert — så posisjonen vi vil ha
+  /// er ofte utenfor rekkevidde på første forsøk. Derfor prøver den igjen
+  /// til hoppet faktisk tar.
+  bool _restoreDone = false;
+  bool _restorePending = false;
 
   void _restoreOffset() {
-    final target = _ListMemory.offset;
-    // Én gang per besøk: ellers river den brukeren tilbake hit for hver
-    // eneste rebuild, og da kan man ikke scrolle i det hele tatt.
-    if (target == null || _offsetRestored) return;
-    _offsetRestored = true;
+    if (_restoreDone || _restorePending || _ListMemory.offset == null) return;
+    _restorePending = true;
+    _tryRestore(0);
+  }
+
+  void _tryRestore(int attempt) {
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted || !_scrollController.hasClients) return;
+      if (!mounted) return;
+      final target = _ListMemory.offset;
+      if (target == null) {
+        _restorePending = false;
+        return;
+      }
+      if (!_scrollController.hasClients) {
+        if (attempt < 20) {
+          _tryRestore(attempt + 1);
+        } else {
+          _restorePending = false;
+        }
+        return;
+      }
       final pos = _scrollController.position;
-      _scrollController.jumpTo(
-          target.clamp(pos.minScrollExtent, pos.maxScrollExtent));
+      final clamped = target.clamp(pos.minScrollExtent, pos.maxScrollExtent);
+      _scrollController.jumpTo(clamped);
+      if ((clamped - target).abs() > 1 && attempt < 20) {
+        _tryRestore(attempt + 1);
+      } else {
+        _restoreDone = true;
+        _restorePending = false;
+      }
     });
   }
 
-  @override
-  void dispose() {
-    activeCompanyNotifier.removeListener(_onCompanyChanged);
+  /// Lagres løpende mens man scroller, så posisjonen finnes uansett hvordan
+  /// man forlater siden.
+  void _onScroll() {
+    if (_restoreDone && _scrollController.hasClients) {
+      _ListMemory.offset = _scrollController.offset;
+    }
+  }
+
+  void _rememberPosition() {
     _ListMemory.search = _search;
     _ListMemory.statusFilter = _statusFilter;
     _ListMemory.typeFilter = _typeFilter;
     if (_scrollController.hasClients) {
       _ListMemory.offset = _scrollController.offset;
     }
+  }
+
+  @override
+  void dispose() {
+    activeCompanyNotifier.removeListener(_onCompanyChanged);
+    _rememberPosition();
+    _scrollController.removeListener(_onScroll);
     _searchCtrl.dispose();
     _scrollController.dispose();
     super.dispose();
@@ -1058,6 +1095,9 @@ class _MgmtGigsPageState extends State<MgmtGigsPage> {
       onTap: _selectionMode && isGig
           ? () => _toggleGigSelection(gigId)
           : () {
+              // Lagres her og ikke bare i dispose: ruten kan bli stående i
+              // live, og da kjører dispose aldri.
+              _rememberPosition();
               if (!isMeetingTable) {
                 _markViewed(gigId);
                 setState(() {});
