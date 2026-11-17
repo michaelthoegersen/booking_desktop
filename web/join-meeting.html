@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="no">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Videomøte — TourFlow</title>
+  <script src="https://download.agora.io/sdk/release/AgoraRTC_N-4.22.0.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #111; color: #fff; height: 100vh; overflow: hidden; }
+
+    .header { background: #1a1a1a; color: #fff; padding: 14px 24px; display: flex; align-items: center; justify-content: space-between; }
+    .header h1 { font-size: 14px; font-weight: 700; letter-spacing: 0.5px; }
+    .header .sub { font-size: 12px; color: #999; }
+
+    /* ---- Lobby ---- */
+    .lobby-wrap { display: flex; align-items: center; justify-content: center; height: calc(100vh - 50px); padding: 16px; }
+    .card { background: #fff; color: #1a1a1a; border-radius: 14px; padding: 28px; width: 100%; max-width: 420px; box-shadow: 0 8px 30px rgba(0,0,0,0.4); }
+    .card h2 { font-size: 19px; margin-bottom: 6px; }
+    .card p { font-size: 14px; color: #666; line-height: 1.5; margin-bottom: 18px; }
+    label { display: block; font-size: 13px; font-weight: 600; color: #444; margin-bottom: 6px; }
+    input[type=text] { width: 100%; padding: 11px 14px; border: 1px solid #ccc; border-radius: 9px; font-size: 15px; outline: none; }
+    input[type=text]:focus { border-color: #1a1a1a; }
+    .btn { display: block; width: 100%; padding: 14px; border: none; border-radius: 10px; font-size: 15px; font-weight: 700; cursor: pointer; margin-top: 18px; background: #1a1a1a; color: #fff; }
+    .btn:hover { background: #333; }
+    .btn:disabled { background: #bbb; cursor: not-allowed; }
+    .error { color: #dc2626; font-size: 13px; margin-top: 12px; line-height: 1.4; }
+    .hint { font-size: 12px; color: #999; margin-top: 14px; text-align: center; }
+
+    /* ---- Call ---- */
+    #call { display: none; height: calc(100vh - 50px); flex-direction: column; }
+    #grid { flex: 1; display: grid; gap: 8px; padding: 10px; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); align-content: center; overflow: auto; }
+    .tile { position: relative; background: #000; border-radius: 12px; overflow: hidden; aspect-ratio: 16 / 9; border: 1px solid #2a2a2a; }
+    .tile > div { width: 100%; height: 100%; }
+    .tile .label { position: absolute; left: 8px; bottom: 8px; background: rgba(0,0,0,0.6); padding: 3px 9px; border-radius: 6px; font-size: 12px; font-weight: 600; }
+    .tile .placeholder { display: flex; align-items: center; justify-content: center; height: 100%; color: #666; font-size: 13px; }
+
+    #bar { display: flex; gap: 10px; justify-content: center; padding: 12px; background: #1a1a1a; border-top: 1px solid #2a2a2a; }
+    .ctl { width: 52px; height: 52px; border-radius: 50%; border: none; cursor: pointer; background: #333; color: #fff; font-size: 19px; }
+    .ctl:hover { background: #444; }
+    .ctl.off { background: #dc2626; }
+    .ctl.leave { background: #dc2626; width: auto; padding: 0 22px; border-radius: 26px; font-size: 14px; font-weight: 700; }
+
+    #status { text-align: center; padding: 10px; font-size: 13px; color: #999; }
+    .hidden { display: none !important; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>TOURFLOW</h1>
+    <div class="sub" id="hdrTitle"></div>
+  </div>
+
+  <!-- Lobby -->
+  <div id="lobby" class="lobby-wrap">
+    <div class="card">
+      <h2 id="lobbyTitle">Videomøte</h2>
+      <p>Skriv inn navnet ditt og bli med i møtet. Nettleseren vil be om tilgang til kamera og mikrofon.</p>
+      <label for="name">Ditt navn</label>
+      <input type="text" id="name" placeholder="Fornavn Etternavn" autocomplete="name">
+      <button class="btn" id="joinBtn">Bli med i møtet</button>
+      <div class="error hidden" id="lobbyError"></div>
+      <p class="hint">Du trenger ikke konto for å delta.</p>
+    </div>
+  </div>
+
+  <!-- Call -->
+  <div id="call">
+    <div id="grid"></div>
+    <div id="status"></div>
+    <div id="bar">
+      <button class="ctl" id="micBtn" title="Mikrofon">🎤</button>
+      <button class="ctl" id="camBtn" title="Kamera">🎥</button>
+      <button class="ctl leave" id="leaveBtn">Forlat møtet</button>
+    </div>
+  </div>
+
+<script>
+  const APP_ID = '4fe1ae5ea7454ba9adc19030d559ce74';
+  const TOKEN_URL = 'https://fqefvgqlrntwgschkugf.supabase.co/functions/v1/agora-token';
+
+  const params = new URLSearchParams(location.search);
+  const meetingId = params.get('meeting_id') || params.get('meetingId') || '';
+  const meetingTitle = params.get('title') || '';
+  // Must match _buildVideoWidget() in lib/pages/mgmt/meeting_live_page.dart
+  const channel = 'tourflow-' + meetingId;
+
+  if (meetingTitle) {
+    document.getElementById('lobbyTitle').textContent = meetingTitle;
+    document.getElementById('hdrTitle').textContent = meetingTitle;
+  }
+
+  const savedName = localStorage.getItem('tf_display_name') || '';
+  if (savedName) document.getElementById('name').value = savedName;
+
+  let client = null, localAudio = null, localVideo = null;
+  let micOn = true, camOn = true;
+  const remoteNames = {};
+
+  function showError(msg) {
+    const el = document.getElementById('lobbyError');
+    el.textContent = msg;
+    el.classList.remove('hidden');
+  }
+
+  function setStatus(msg) {
+    document.getElementById('status').textContent = msg;
+  }
+
+  function tile(id, label) {
+    let t = document.getElementById('tile-' + id);
+    if (t) return t;
+    t = document.createElement('div');
+    t.className = 'tile';
+    t.id = 'tile-' + id;
+    const video = document.createElement('div');
+    video.id = 'video-' + id;
+    const lbl = document.createElement('div');
+    lbl.className = 'label';
+    lbl.textContent = label;
+    t.appendChild(video);
+    t.appendChild(lbl);
+    document.getElementById('grid').appendChild(t);
+    return t;
+  }
+
+  function removeTile(id) {
+    const t = document.getElementById('tile-' + id);
+    if (t) t.remove();
+  }
+
+  function updateStatus() {
+    const n = client ? client.remoteUsers.length : 0;
+    setStatus(n === 0 ? 'Venter på at andre skal bli med…' : (n + (n === 1 ? ' annen deltaker' : ' andre deltakere') + ' i møtet'));
+  }
+
+  async function join() {
+    const name = document.getElementById('name').value.trim() || 'Deltaker';
+    if (!meetingId) { showError('Lenken mangler møte-ID. Be avsenderen sende lenken på nytt.'); return; }
+    localStorage.setItem('tf_display_name', name);
+
+    const btn = document.getElementById('joinBtn');
+    btn.disabled = true;
+    btn.textContent = 'Kobler til…';
+    document.getElementById('lobbyError').classList.add('hidden');
+
+    try {
+      // uid 0 gives a wildcard token — any uid may join this channel
+      const res = await fetch(TOKEN_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ channelName: channel, uid: 0 }),
+      });
+      if (!res.ok) throw new Error('Kunne ikke hente tilgang til møtet (' + res.status + ')');
+      const { token, error } = await res.json();
+      if (error) throw new Error(error);
+
+      client = AgoraRTC.createClient({ mode: 'rtc', codec: 'vp8' });
+
+      client.on('user-published', async (user, mediaType) => {
+        await client.subscribe(user, mediaType);
+        if (mediaType === 'video') {
+          tile(user.uid, remoteNames[user.uid] || 'Deltaker');
+          user.videoTrack.play(document.getElementById('video-' + user.uid));
+        }
+        if (mediaType === 'audio') user.audioTrack.play();
+        updateStatus();
+      });
+
+      client.on('user-unpublished', (user, mediaType) => {
+        if (mediaType === 'video') {
+          const v = document.getElementById('video-' + user.uid);
+          if (v) v.innerHTML = '<div class="placeholder">Kamera av</div>';
+        }
+      });
+
+      client.on('user-left', (user) => { removeTile(user.uid); updateStatus(); });
+
+      await client.join(APP_ID, channel, token, null);
+
+      try {
+        [localAudio, localVideo] = await AgoraRTC.createMicrophoneAndCameraTracks();
+        await client.publish([localAudio, localVideo]);
+      } catch (mediaErr) {
+        // No camera (or access denied) — try audio only so the user can still take part
+        console.warn('Media error:', mediaErr);
+        try {
+          localAudio = await AgoraRTC.createMicrophoneAudioTrack();
+          await client.publish([localAudio]);
+          camOn = false;
+          document.getElementById('camBtn').classList.add('off');
+        } catch (audioErr) {
+          throw new Error('Fikk ikke tilgang til mikrofon eller kamera. Tillat tilgang i nettleseren og prøv igjen.');
+        }
+      }
+
+      document.getElementById('lobby').style.display = 'none';
+      document.getElementById('call').style.display = 'flex';
+
+      tile('local', name + ' (deg)');
+      if (localVideo) {
+        localVideo.play(document.getElementById('video-local'));
+      } else {
+        document.getElementById('video-local').innerHTML = '<div class="placeholder">Kamera av</div>';
+      }
+      updateStatus();
+    } catch (e) {
+      console.error(e);
+      showError(e.message || String(e));
+      btn.disabled = false;
+      btn.textContent = 'Bli med i møtet';
+      try { if (client) await client.leave(); } catch (_) {}
+      client = null;
+    }
+  }
+
+  async function leave() {
+    try {
+      if (localAudio) { localAudio.close(); localAudio = null; }
+      if (localVideo) { localVideo.close(); localVideo = null; }
+      if (client) { await client.leave(); client = null; }
+    } catch (e) { console.error(e); }
+    document.getElementById('grid').innerHTML = '';
+    document.getElementById('call').style.display = 'none';
+    document.getElementById('lobby').style.display = 'flex';
+    const btn = document.getElementById('joinBtn');
+    btn.disabled = false;
+    btn.textContent = 'Bli med i møtet';
+  }
+
+  document.getElementById('joinBtn').addEventListener('click', join);
+  document.getElementById('name').addEventListener('keydown', (e) => { if (e.key === 'Enter') join(); });
+  document.getElementById('leaveBtn').addEventListener('click', leave);
+
+  document.getElementById('micBtn').addEventListener('click', () => {
+    if (!localAudio) return;
+    micOn = !micOn;
+    localAudio.setEnabled(micOn);
+    document.getElementById('micBtn').classList.toggle('off', !micOn);
+  });
+
+  document.getElementById('camBtn').addEventListener('click', () => {
+    if (!localVideo) return;
+    camOn = !camOn;
+    localVideo.setEnabled(camOn);
+    document.getElementById('camBtn').classList.toggle('off', !camOn);
+    const v = document.getElementById('video-local');
+    if (v && !camOn) v.innerHTML = '<div class="placeholder">Kamera av</div>';
+    if (v && camOn) localVideo.play(v);
+  });
+
+  window.addEventListener('beforeunload', () => {
+    try { if (localAudio) localAudio.close(); } catch (_) {}
+    try { if (localVideo) localVideo.close(); } catch (_) {}
+    try { if (client) client.leave(); } catch (_) {}
+  });
+</script>
+</body>
+</html>

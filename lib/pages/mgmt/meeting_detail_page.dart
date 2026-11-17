@@ -147,6 +147,9 @@ class _MeetingDetailPageState extends State<MeetingDetailPage> {
         if (endTime.toString().isNotEmpty) '– ${endTime.toString().substring(0, 5)}',
       ].join(' ');
 
+      final joinUrl = MeetingService.videoJoinUrl(
+          meetingId: widget.meetingId, title: title);
+
       final commentHtml = result.comment.isNotEmpty
           ? '<p style="color:#555;margin:12px 0;">${_escapeHtml(result.comment)}</p>'
           : '';
@@ -219,7 +222,7 @@ class _MeetingDetailPageState extends State<MeetingDetailPage> {
       <div style="margin:16px 0 20px;padding:16px;background:#f0f7ff;border-radius:10px;border:1px solid #d0e3ff;">
         <p style="margin:0 0 8px;font-size:13px;font-weight:600;color:#1a56db;">Videomøte</p>
         <p style="margin:0;font-size:13px;color:#555;">Hvis videomøte startes, kan du bli med her:</p>
-        <a href="https://meet.jit.si/tourflow-${widget.meetingId}" style="display:inline-block;margin-top:8px;padding:8px 16px;background:#1a56db;color:#fff;font-size:13px;font-weight:600;text-decoration:none;border-radius:6px;">Bli med i videomøte</a>
+        <a href="$joinUrl" style="display:inline-block;margin-top:8px;padding:8px 16px;background:#1a56db;color:#fff;font-size:13px;font-weight:600;text-decoration:none;border-radius:6px;">Bli med i videomøte</a>
       </div>
 
       <p style="margin:0;font-size:13px;color:#999;">Vedlagt finner du innkallingen med full agenda.</p>

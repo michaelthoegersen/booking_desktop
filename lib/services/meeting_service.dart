@@ -275,4 +275,20 @@ class MeetingService {
     return 'https://tourflow-60890.web.app/rsvp.html'
         '?meeting_id=$meetingId&user_id=$userId&response=$response';
   }
+
+  // ---------------------------------------------------------------
+  // VIDEO MEETING
+  // ---------------------------------------------------------------
+
+  /// Agora channel for a meeting. Must match web/join-meeting.html.
+  static String videoChannel(String meetingId) => 'tourflow-$meetingId';
+
+  /// Public join page for participants who get the link by email.
+  /// Joins the same Agora channel the web app uses in MeetingLivePage.
+  static String videoJoinUrl({required String meetingId, String? title}) {
+    final t = (title ?? '').trim();
+    return 'https://tourflow-60890.web.app/join-meeting.html'
+        '?meeting_id=$meetingId'
+        '${t.isEmpty ? '' : '&title=${Uri.encodeComponent(t)}'}';
+  }
 }

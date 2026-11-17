@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 import '../../widgets/resizable_text_field.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -132,8 +133,23 @@ class _MeetingLivePageState extends State<MeetingLivePage> {
     setState(() => _videoActive = true);
   }
 
+  Future<void> _copyJoinLink() async {
+    final url = MeetingService.videoJoinUrl(
+      meetingId: widget.meetingId,
+      title: _meeting?['title'] as String?,
+    );
+    await Clipboard.setData(ClipboardData(text: url));
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+            content: Text(
+                'Videolenke kopiert — deltakere kan bli med uten konto')),
+      );
+    }
+  }
+
   Widget _buildVideoWidget({required VoidCallback onLeave}) {
-    final channel = 'tourflow-${widget.meetingId}';
+    final channel = MeetingService.videoChannel(widget.meetingId);
     final name = _myName.isNotEmpty ? _myName : 'Deltaker';
     if (kIsWeb) {
       return AgoraMeetingViewWeb(
@@ -220,6 +236,12 @@ class _MeetingLivePageState extends State<MeetingLivePage> {
                   icon: Icon(_videoFullscreen ? Icons.fullscreen_exit : Icons.fullscreen, size: 18),
                   label: Text(_videoFullscreen ? 'Minimer' : 'Fullskjerm'),
                   style: FilledButton.styleFrom(backgroundColor: Colors.grey.shade700),
+                ),
+                const SizedBox(width: 8),
+                OutlinedButton.icon(
+                  onPressed: _copyJoinLink,
+                  icon: const Icon(Icons.link, size: 18),
+                  label: const Text('Kopier lenke'),
                 ),
                 const SizedBox(width: 8),
                 FilledButton.icon(
