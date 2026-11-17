@@ -173,6 +173,11 @@ class _GigOfferPageState extends State<GigOfferPage> {
   double _rehearsalPricePerPerson = 0;
   double _rehearsalTransport = 0;
 
+  /// Prosenten som var satt da påslaget sist var på, så bryteren kan slå det
+  /// tilbake på uten at man må skrive inn satsen igjen. Påslaget er «på» når
+  /// prosenten er over null — da trengs ingen egen kolonne i basen.
+  double _lastMarkupPct = SettingsStore.current.markupPct;
+
   // ── Markup scope ────────────────────────────────────────────────────────
   bool _markupOnAll =
       false; // false = only performer fees, true = entire subtotal
@@ -354,6 +359,7 @@ class _GigOfferPageState extends State<GigOfferPage> {
         _creoFeeMinimum = _dbl(offer['creo_fee_minimum'], _s.creoFeeMinimum);
         _extraShowFee = _dbl(offer['extra_show_fee'], _s.extraShowFee);
         _markupPct = _dbl(offer['markup_pct'], _s.markupPct);
+        if (_markupPct > 0) _lastMarkupPct = _markupPct;
         _inearIncluded = offer['inear_included'] == true;
         _inearPrice = _dbl(offer['inear_price'], _s.inearPrice);
         _transportKm = (offer['transport_km'] as num?)?.toInt() ?? 0;
@@ -3805,18 +3811,35 @@ class _GigOfferPageState extends State<GigOfferPage> {
               _extraShowFee = v;
               setState(() => _recalc());
             }),
-            // «Påslag hyrer»: påslaget ligger på utøverhyrene med mindre
-            // «Påslag på alt» er huket av. Navnet sier nå hva grunnlaget er.
-            _paramRowPct('Påslag hyrer', _markupPct, (v) {
-              _markupPct = v;
-              setState(() => _recalc());
-            }),
-            _paramToggle('Påslag på alt', _markupOnAll, (v) {
+            // Påslaget ligger på utøverhyrene med mindre «Påslag på alt» er
+            // huket av. Bryteren står på som standard — det er sjelden en gig
+            // kjøres uten påslag — og husker satsen når den slås av.
+            _paramToggle('Påslag hyrer', _markupPct > 0, (v) {
               setState(() {
-                _markupOnAll = v;
+                if (v) {
+                  _markupPct = _lastMarkupPct > 0
+                      ? _lastMarkupPct
+                      : SettingsStore.current.markupPct;
+                } else {
+                  _lastMarkupPct = _markupPct;
+                  _markupPct = 0;
+                }
                 _recalc();
               });
             }),
+            if (_markupPct > 0)
+              _paramRowPct('Påslag %', _markupPct, (v) {
+                _markupPct = v;
+                if (v > 0) _lastMarkupPct = v;
+                setState(() => _recalc());
+              }),
+            if (_markupPct > 0)
+              _paramToggle('Påslag på alt', _markupOnAll, (v) {
+                setState(() {
+                  _markupOnAll = v;
+                  _recalc();
+                });
+              }),
             _paramToggle('In-Ear fra oss', _inearIncluded, (v) {
               setState(() {
                 _inearIncluded = v;
