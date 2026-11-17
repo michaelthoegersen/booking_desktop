@@ -230,11 +230,16 @@ class _MgmtGigsPageState extends State<MgmtGigsPage> {
       }
     }
 
-    // Sort by date
+    // Sort by date. «Kommende» teller nedover mot neste aktivitet, så der er
+    // nærmeste dato øverst. På «Alle» (og de andre statusfiltrene) er det
+    // motsatt behov: det man skal finne igjen er gigen man nettopp hadde, så
+    // nyeste ligger øverst og det eldste nederst — ellers må man scrolle
+    // gjennom alle år for å komme til i går.
+    final newestFirst = _statusFilter != 'upcoming';
     list.sort((a, b) {
       final da = a['date_from'] as String? ?? '';
       final db = b['date_from'] as String? ?? '';
-      return da.compareTo(db);
+      return newestFirst ? db.compareTo(da) : da.compareTo(db);
     });
 
     if (_statusFilter != 'all') {
