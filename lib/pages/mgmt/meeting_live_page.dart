@@ -3,11 +3,11 @@ import 'dart:async';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show Clipboard, ClipboardData;
-import '../../widgets/resizable_text_field.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../services/meeting_service.dart';
+import '../../widgets/text_input_dialog.dart';
 import '../../widgets/agora_meeting_view.dart';
 import '../../widgets/agora_meeting_stub.dart'
     if (dart.library.js_interop) '../../widgets/agora_meeting_view_web.dart';
@@ -357,19 +357,12 @@ class _MeetingLivePageState extends State<MeetingLivePage> {
                             Expanded(
                               child: GestureDetector(
                                 onTap: () async {
-                                  final ctrl = TextEditingController(text: itemTitle);
-                                  final result = await showDialog<String>(
-                                    context: context,
-                                    builder: (ctx) => AlertDialog(
-                                      title: const Text('Rediger tittel'),
-                                      content: TextField(controller: ctrl, autofocus: true, onSubmitted: (v) => Navigator.pop(ctx, v.trim())),
-                                      actions: [
-                                        TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Avbryt')),
-                                        FilledButton(onPressed: () => Navigator.pop(ctx, ctrl.text.trim()), child: const Text('Lagre')),
-                                      ],
-                                    ),
+                                  final result = await showTextInputDialog(
+                                    context,
+                                    title: 'Rediger tittel',
+                                    initial: itemTitle,
                                   );
-                                  ctrl.dispose();
+                                  if (!mounted) return;
                                   if (result != null && result != itemTitle) {
                                     await Supabase.instance.client.from('meeting_agenda_items').update({'title': result}).eq('id', currentItem['id']);
                                     _load();
@@ -421,30 +414,15 @@ class _MeetingLivePageState extends State<MeetingLivePage> {
                         const SizedBox(height: 12),
                         GestureDetector(
                           onTap: () async {
-                            final ctrl = TextEditingController(text: description);
-                            final result = await showDialog<String>(
-                              context: context,
-                              builder: (ctx) => AlertDialog(
-                                title: const Text('Rediger beskrivelse'),
-                                content: SizedBox(
-                                  width: 450,
-                                  child: ResizableTextField(
-                                    controller: ctrl,
-                                    autofocus: true,
-                                    initialHeight: 200,
-                                    decoration: InputDecoration(
-                                      hintText: 'Beskrivelse...',
-                                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                                    ),
-                                  ),
-                                ),
-                                actions: [
-                                  TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Avbryt')),
-                                  FilledButton(onPressed: () => Navigator.pop(ctx, ctrl.text), child: const Text('Lagre')),
-                                ],
-                              ),
+                            final result = await showTextInputDialog(
+                              context,
+                              title: 'Rediger beskrivelse',
+                              initial: description,
+                              hint: 'Beskrivelse...',
+                              multiline: true,
+                              initialHeight: 200,
                             );
-                            ctrl.dispose();
+                            if (!mounted) return;
                             if (result != null && result != description) {
                               await Supabase.instance.client.from('meeting_agenda_items').update({'description': result}).eq('id', currentItem['id']);
                               _load();

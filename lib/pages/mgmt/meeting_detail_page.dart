@@ -12,6 +12,7 @@ import '../../services/meeting_pdf_service.dart';
 import '../../services/email_service.dart';
 import '../../state/active_company.dart';
 import '../../platform/pdf_opener.dart';
+import '../../widgets/text_input_dialog.dart';
 class MeetingDetailPage extends StatefulWidget {
   final String meetingId;
   const MeetingDetailPage({super.key, required this.meetingId});
@@ -109,16 +110,12 @@ class _MeetingDetailPageState extends State<MeetingDetailPage> {
     // Show dialog for recipients + comment
     final result = await showDialog<({String recipients, String comment})>(
       context: context,
-      builder: (ctx) {
-        final commentCtrl = TextEditingController();
-
-        return _SendDialog(
-          title: 'Send innkalling',
-          participantUserIds: _participants.map((p) => p['user_id'] as String).toList(),
-          userNames: _userNames,
-          commentCtrl: commentCtrl,
-        );
-      },
+      builder: (ctx) => _SendDialog(
+        title: 'Send innkalling',
+        participantUserIds:
+            _participants.map((p) => p['user_id'] as String).toList(),
+        userNames: _userNames,
+      ),
     );
 
     if (result == null || !mounted) return;
@@ -408,15 +405,12 @@ class _MeetingDetailPageState extends State<MeetingDetailPage> {
 
     final result = await showDialog<({String recipients, String comment})>(
       context: context,
-      builder: (ctx) {
-        final commentCtrl = TextEditingController();
-        return _SendDialog(
-          title: 'Send referat',
-          participantUserIds: _participants.map((p) => p['user_id'] as String).toList(),
-          userNames: _userNames,
-          commentCtrl: commentCtrl,
-        );
-      },
+      builder: (ctx) => _SendDialog(
+        title: 'Send referat',
+        participantUserIds:
+            _participants.map((p) => p['user_id'] as String).toList(),
+        userNames: _userNames,
+      ),
     );
 
     if (result == null || !mounted) return;
@@ -808,29 +802,16 @@ class _MeetingDetailPageState extends State<MeetingDetailPage> {
                     const SizedBox(height: 8),
                     GestureDetector(
                       onTap: status == 'completed' ? () async {
-                        final ctrl = TextEditingController(text: notes);
-                        final result = await showDialog<String>(
-                          context: context,
-                          builder: (ctx) => AlertDialog(
-                            title: Text('Referat: ${item['title'] ?? ''}'),
-                            content: SizedBox(
-                              width: 500,
-                              child: ResizableTextField(
-                                controller: ctrl,
-                                initialHeight: 300,
-                                decoration: InputDecoration(
-                                  hintText: 'Skriv referat...',
-                                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                                ),
-                              ),
-                            ),
-                            actions: [
-                              TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Avbryt')),
-                              FilledButton(onPressed: () => Navigator.pop(ctx, ctrl.text), child: const Text('Lagre')),
-                            ],
-                          ),
+                        final result = await showTextInputDialog(
+                          context,
+                          title: 'Referat: ${item['title'] ?? ''}',
+                          initial: notes,
+                          hint: 'Skriv referat...',
+                          multiline: true,
+                          width: 500,
+                          initialHeight: 300,
                         );
-                        ctrl.dispose();
+                        if (!mounted) return;
                         if (result != null) {
                           await MeetingService.updateAgendaNotes(item['id'] as String, result);
                           _load();
@@ -952,13 +933,11 @@ class _SendDialog extends StatefulWidget {
   final String title;
   final List<String> participantUserIds;
   final Map<String, String> userNames;
-  final TextEditingController commentCtrl;
 
   const _SendDialog({
     required this.title,
     required this.participantUserIds,
     required this.userNames,
-    required this.commentCtrl,
   });
 
   @override
@@ -968,10 +947,21 @@ class _SendDialog extends StatefulWidget {
 class _SendDialogState extends State<_SendDialog> {
   late Set<String> _selectedIds;
 
+  // Owned here, not passed in: a controller created inside showDialog's
+  // builder is replaced on every rebuild, so whatever was typed is gone by
+  // the time «Send» reads it.
+  final _commentCtrl = TextEditingController();
+
   @override
   void initState() {
     super.initState();
     _selectedIds = widget.participantUserIds.toSet();
+  }
+
+  @override
+  void dispose() {
+    _commentCtrl.dispose();
+    super.dispose();
   }
 
   @override
@@ -1009,7 +999,7 @@ class _SendDialogState extends State<_SendDialog> {
                 style: TextStyle(fontWeight: FontWeight.w700)),
             const SizedBox(height: 8),
             ResizableTextField(
-              controller: widget.commentCtrl,
+              controller: _commentCtrl,
               minLines: 2,
               decoration: InputDecoration(
                 hintText: 'Valgfri kommentar...',
@@ -1028,7 +1018,7 @@ class _SendDialogState extends State<_SendDialog> {
         FilledButton(
           onPressed: () => Navigator.pop(context, (
             recipients: _selectedIds.join(','),
-            comment: widget.commentCtrl.text,
+            comment: _commentCtrl.text,
           )),
           child: const Text('Send'),
         ),
