@@ -847,7 +847,7 @@ class _MgmtGigsPageState extends State<MgmtGigsPage> {
               // Type filters
               ...const [
                 ('all', 'Alle'),
-                ('gig', 'Gigs'),
+                ('gig', 'Giger'),
                 ('rehearsal', 'Øvelser'),
                 ('meeting', 'Møter'),
                 ('other', 'Annet'),

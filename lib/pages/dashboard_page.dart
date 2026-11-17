@@ -1485,7 +1485,7 @@ class _PdfVersionsDialogState extends State<_PdfVersionsDialog> {
                           final acceptedName = token['accepted_name'] as String?;
                           final createdAt = token['created_at'] as String?;
                           final date = createdAt != null
-                              ? DateFormat('dd.MM.yyyy').format(DateTime.parse(createdAt))
+                              ? DateFormat('dd.MM.yyyy').format(DateTime.parse(createdAt).toLocal())
                               : '';
 
                           final isApproved = status == 'approved';

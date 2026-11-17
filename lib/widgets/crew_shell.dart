@@ -222,7 +222,7 @@ class _CrewSideNav extends StatelessWidget {
             ),
             _CrewNavItem(
               icon: Icons.music_note_rounded,
-              label: 'Gigs',
+              label: 'Aktiviteter',
               route: '/c',
             ),
             _CrewNavItem(

@@ -422,7 +422,7 @@ class _CrewGigDetailPageState extends State<CrewGigDetailPage> {
                     size: 13, color: cs.onSurfaceVariant),
                 const SizedBox(width: 2),
                 Text(
-                  'Gigs',
+                  'Aktiviteter',
                   style: TextStyle(
                     color: cs.onSurfaceVariant,
                     fontWeight: FontWeight.w700,

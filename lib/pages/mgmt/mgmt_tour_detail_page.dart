@@ -1309,7 +1309,7 @@ class _InfoTab extends StatelessWidget {
                 if (createdAt != null) ...[
                   const Divider(height: 24),
                   Text(
-                    'Opprettet ${DateFormat('dd.MM.yyyy').format(DateTime.parse(createdAt))}',
+                    'Opprettet ${DateFormat('dd.MM.yyyy').format(DateTime.parse(createdAt).toLocal())}',
                     style: TextStyle(
                       fontSize: 12,
                       color: cs.onSurfaceVariant,
