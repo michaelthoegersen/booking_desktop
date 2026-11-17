@@ -15,14 +15,24 @@ class MgmtGigOffersPage extends StatefulWidget {
   State<MgmtGigOffersPage> createState() => _MgmtGigOffersPageState();
 }
 
+/// Hvor man sto i tilbudslista sist. Samme grunn som i aktivitetslista:
+/// siden går ut av treet når man åpner et tilbud, så uten dette er man
+/// tilbake på toppen med nullstilt filter hver gang man går tilbake.
+class _OfferListMemory {
+  static String statusFilter = 'all';
+  static bool showArchived = false;
+  static double? offset;
+}
+
 class _MgmtGigOffersPageState extends State<MgmtGigOffersPage> {
   final _sb = Supabase.instance.client;
   final _df = DateFormat('dd.MM.yyyy');
 
   bool _loading = true;
   List<Map<String, dynamic>> _offers = [];
-  String _statusFilter = 'all';
-  bool _showArchived = false;
+  String _statusFilter = _OfferListMemory.statusFilter;
+  bool _showArchived = _OfferListMemory.showArchived;
+  final _scrollController = ScrollController();
 
   // Agreement status per offer_id (best of: approved > accepted > newest).
   // Tokens can live on any sibling gig in a multi-date offer, so we resolve
@@ -37,13 +47,73 @@ class _MgmtGigOffersPageState extends State<MgmtGigOffersPage> {
   void initState() {
     super.initState();
     activeCompanyNotifier.addListener(_onCompanyChanged);
+    _scrollController.addListener(_onScroll);
     _load();
   }
 
   @override
   void dispose() {
     activeCompanyNotifier.removeListener(_onCompanyChanged);
+    _rememberPosition();
+    _scrollController.removeListener(_onScroll);
+    _scrollController.dispose();
     super.dispose();
+  }
+
+  /// Lista bygges først uten data, så med rader som måles etter hvert, så
+  /// posisjonen er ofte utenfor rekkevidde på første forsøk. Prøver på nytt
+  /// til hoppet faktisk tar.
+  bool _restoreDone = false;
+  bool _restorePending = false;
+
+  void _restoreOffset() {
+    if (_restoreDone || _restorePending || _OfferListMemory.offset == null) {
+      return;
+    }
+    _restorePending = true;
+    _tryRestore(0);
+  }
+
+  void _tryRestore(int attempt) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final target = _OfferListMemory.offset;
+      if (target == null) {
+        _restorePending = false;
+        return;
+      }
+      if (!_scrollController.hasClients) {
+        if (attempt < 20) {
+          _tryRestore(attempt + 1);
+        } else {
+          _restorePending = false;
+        }
+        return;
+      }
+      final pos = _scrollController.position;
+      final clamped = target.clamp(pos.minScrollExtent, pos.maxScrollExtent);
+      _scrollController.jumpTo(clamped);
+      if ((clamped - target).abs() > 1 && attempt < 20) {
+        _tryRestore(attempt + 1);
+      } else {
+        _restoreDone = true;
+        _restorePending = false;
+      }
+    });
+  }
+
+  void _onScroll() {
+    if (_restoreDone && _scrollController.hasClients) {
+      _OfferListMemory.offset = _scrollController.offset;
+    }
+  }
+
+  void _rememberPosition() {
+    _OfferListMemory.statusFilter = _statusFilter;
+    _OfferListMemory.showArchived = _showArchived;
+    if (_scrollController.hasClients) {
+      _OfferListMemory.offset = _scrollController.offset;
+    }
   }
 
   void _onCompanyChanged() => _load();
@@ -242,6 +312,7 @@ class _MgmtGigOffersPageState extends State<MgmtGigOffersPage> {
 
   @override
   Widget build(BuildContext context) {
+    _restoreOffset();
     final cs = Theme.of(context).colorScheme;
     return Padding(
       padding: const EdgeInsets.all(18),
@@ -323,6 +394,7 @@ class _MgmtGigOffersPageState extends State<MgmtGigOffersPage> {
                         ),
                       )
                     : ListView.builder(
+                        controller: _scrollController,
                         itemCount: _filtered.length,
                         itemBuilder: (context, i) {
                           final o = _filtered[i];
@@ -373,8 +445,12 @@ class _MgmtGigOffersPageState extends State<MgmtGigOffersPage> {
                               : '';
 
                           return GestureDetector(
-                            onTap: () =>
-                                context.go('/m/offers/${o['id']}'),
+                            onTap: () {
+                              // Lagres her òg: ruten kan bli stående i live,
+                              // og da kjører dispose aldri.
+                              _rememberPosition();
+                              context.go('/m/offers/${o['id']}');
+                            },
                             child: Container(
                               margin: const EdgeInsets.only(bottom: 8),
                               padding: const EdgeInsets.all(16),
