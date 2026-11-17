@@ -1,11 +1,13 @@
 import 'dart:io';
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:http/http.dart' as http;
 import 'package:open_filex/open_filex.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../state/active_company.dart';
 
@@ -89,6 +91,12 @@ class _CrewFolderBrowserPageState extends State<CrewFolderBrowserPage> {
       final data = res.data as Map<String, dynamic>?;
       final link = data?['link'] as String?;
       if (link == null) throw Exception('No link received');
+
+      if (kIsWeb) {
+        // No dart:io / temp dir on web — let the browser open the link.
+        await launchUrl(Uri.parse(link), mode: LaunchMode.externalApplication);
+        return;
+      }
 
       // Download to temp directory and open
       final tempDir = await getTemporaryDirectory();

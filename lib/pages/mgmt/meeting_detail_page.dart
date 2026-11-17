@@ -1,4 +1,3 @@
-import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -12,6 +11,7 @@ import '../../services/meeting_service.dart';
 import '../../services/meeting_pdf_service.dart';
 import '../../services/email_service.dart';
 import '../../state/active_company.dart';
+import '../../platform/pdf_opener.dart';
 class MeetingDetailPage extends StatefulWidget {
   final String meetingId;
   const MeetingDetailPage({super.key, required this.meetingId});
@@ -923,12 +923,8 @@ class _MeetingDetailPageState extends State<MeetingDetailPage> {
     return OutlinedButton.icon(
       onPressed: bytes != null
           ? () async {
-              // Save to temp file and open
               try {
-                final dir = await Directory.systemTemp.createTemp('meeting_pdf');
-                final file = File('${dir.path}/$label.pdf');
-                await file.writeAsBytes(bytes);
-                await launchUrl(Uri.file(file.path));
+                await openPdf(bytes, label);
               } catch (e) {
                 if (mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
