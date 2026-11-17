@@ -3,6 +3,7 @@ import 'dart:typed_data';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import '../../widgets/text_input_dialog.dart';
 import '../../widgets/resizable_text_field.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
@@ -895,46 +896,25 @@ class _MgmtGigDetailPageState extends State<MgmtGigDetailPage>
   // -------------------------------------------------------------------------
 
   Future<void> _cancelRehearsal() async {
-    final reasonCtrl = TextEditingController();
-
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Merk som avlyst'),
-        content: SizedBox(
-          width: 400,
-          child: ResizableTextField(
-            controller: reasonCtrl,
-            decoration: const InputDecoration(
-              labelText: 'Grunn for avlysning',
-              hintText: 'Valgfritt',
-              isDense: true,
-            ),
-            minLines: 2,
-            autofocus: true,
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Avbryt'),
-          ),
-          FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: Colors.red),
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Merk som avlyst'),
-          ),
-        ],
-      ),
+    // Null = avbrutt. Tom streng = bekreftet uten grunn.
+    final reasonText = await showTextInputDialog(
+      context,
+      title: 'Merk som avlyst',
+      label: 'Grunn for avlysning',
+      hint: 'Valgfritt',
+      multiline: true,
+      trim: true,
+      width: 400,
+      initialHeight: 120,
+      confirmLabel: 'Merk som avlyst',
+      destructive: true,
     );
-
-    if (confirmed != true || !mounted) return;
+    if (reasonText == null || !mounted) return;
 
     try {
-      final reason = reasonCtrl.text.trim().isEmpty ? null : reasonCtrl.text.trim();
       await _sb.from('gigs').update({
         'status': 'cancelled',
-        'cancellation_reason': reason,
+        'cancellation_reason': reasonText.isEmpty ? null : reasonText,
       }).eq('id', widget.gigId);
       _load();
     } catch (e) {
@@ -944,7 +924,6 @@ class _MgmtGigDetailPageState extends State<MgmtGigDetailPage>
         );
       }
     }
-    reasonCtrl.dispose();
   }
 
   Future<void> _reopenRehearsal() async {
@@ -2518,42 +2497,16 @@ class _InfoTabState extends State<_InfoTab> {
   Future<void> _editField(String label, String dbField, {bool multiline = false}) async {
     if (_blockedByInvoiceLock()) return;
     final current = gig[dbField]?.toString() ?? '';
-    final ctrl = TextEditingController(text: current);
-    final result = await showDialog<String>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text(label),
-        content: multiline
-            ? ResizableTextField(
-                controller: ctrl,
-                autofocus: true,
-                minLines: 6,
-                maxAutoLines: 24,
-                decoration: InputDecoration(
-                  hintText: label,
-                  border: const OutlineInputBorder(),
-                ),
-              )
-            : TextField(
-                controller: ctrl,
-                autofocus: true,
-                maxLines: 1,
-                decoration: InputDecoration(
-                  hintText: label,
-                  border: const OutlineInputBorder(),
-                ),
-                onSubmitted: (v) => Navigator.pop(ctx, v.trim()),
-              ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Avbryt')),
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
-            child: const Text('Lagre'),
-          ),
-        ],
-      ),
+    final result = await showTextInputDialog(
+      context,
+      title: label,
+      initial: current,
+      hint: label,
+      multiline: multiline,
+      trim: true,
+      initialHeight: 200,
     );
-    ctrl.dispose();
+    if (!mounted) return;
     if (result != null && result != current) {
       await _sb.from('gigs').update({
         dbField: result.isEmpty ? null : result,
@@ -2578,25 +2531,14 @@ class _InfoTabState extends State<_InfoTab> {
   Future<void> _editNumber(String label, String dbField) async {
     if (_blockedByInvoiceLock()) return;
     final current = gig[dbField]?.toString() ?? '';
-    final ctrl = TextEditingController(text: current);
-    final result = await showDialog<String>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text(label),
-        content: TextField(
-          controller: ctrl,
-          autofocus: true,
-          keyboardType: const TextInputType.numberWithOptions(decimal: true),
-          decoration: InputDecoration(hintText: label, border: const OutlineInputBorder()),
-          onSubmitted: (v) => Navigator.pop(ctx, v.trim()),
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Avbryt')),
-          TextButton(onPressed: () => Navigator.pop(ctx, ctrl.text.trim()), child: const Text('Lagre')),
-        ],
-      ),
+    final result = await showTextInputDialog(
+      context,
+      title: label,
+      initial: current,
+      hint: label,
+      keyboardType: const TextInputType.numberWithOptions(decimal: true),
     );
-    ctrl.dispose();
+    if (!mounted) return;
     if (result != null && result != current) {
       final numVal = num.tryParse(result);
       await _sb.from('gigs').update({

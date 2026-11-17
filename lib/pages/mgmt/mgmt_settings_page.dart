@@ -3,6 +3,7 @@ import 'dart:typed_data';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import '../../widgets/text_input_dialog.dart';
 import '../../widgets/resizable_text_field.dart';
 import 'package:intl/intl.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -308,41 +309,14 @@ class _MgmtSettingsPageState extends State<MgmtSettingsPage> {
       return;
     }
 
-    final ctrl = TextEditingController();
-    final pw = await showDialog<String>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Sett nytt passord'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(label, style: const TextStyle(fontWeight: FontWeight.w700)),
-            const SizedBox(height: 12),
-            TextField(
-              controller: ctrl,
-              autofocus: true,
-              decoration: const InputDecoration(
-                labelText: 'Nytt passord',
-                helperText: 'Minst 8 tegn. Gi det videre til medlemmet.',
-                border: OutlineInputBorder(),
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Avbryt'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
-            child: const Text('Sett passord'),
-          ),
-        ],
-      ),
+    final pw = await showTextInputDialog(
+      context,
+      title: 'Sett nytt passord',
+      description: label,
+      label: 'Nytt passord',
+      hint: 'Minst 8 tegn. Gi det videre til medlemmet.',
+      confirmLabel: 'Sett passord',
     );
-    ctrl.dispose();
     if (pw == null || pw.isEmpty || !mounted) return;
     if (pw.length < 8) {
       ScaffoldMessenger.of(context).showSnackBar(

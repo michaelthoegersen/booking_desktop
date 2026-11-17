@@ -17,11 +17,16 @@ Future<String?> showTextInputDialog(
   required String title,
   String initial = '',
   String? hint,
+  String? label,
+  String? description,
   bool multiline = false,
+  bool? trim,
+  TextInputType? keyboardType,
   double width = 450,
   double initialHeight = 220,
   String confirmLabel = 'Lagre',
   String cancelLabel = 'Avbryt',
+  bool destructive = false,
 }) {
   return showDialog<String>(
     context: context,
@@ -29,11 +34,16 @@ Future<String?> showTextInputDialog(
       title: title,
       initial: initial,
       hint: hint,
+      label: label,
+      description: description,
       multiline: multiline,
+      trim: trim ?? !multiline,
+      keyboardType: keyboardType,
       width: width,
       initialHeight: initialHeight,
       confirmLabel: confirmLabel,
       cancelLabel: cancelLabel,
+      destructive: destructive,
     ),
   );
 }
@@ -43,21 +53,31 @@ class _TextInputDialog extends StatefulWidget {
     required this.title,
     required this.initial,
     required this.hint,
+    required this.label,
+    required this.description,
     required this.multiline,
+    required this.trim,
+    required this.keyboardType,
     required this.width,
     required this.initialHeight,
     required this.confirmLabel,
     required this.cancelLabel,
+    required this.destructive,
   });
 
   final String title;
   final String initial;
   final String? hint;
+  final String? label;
+  final String? description;
   final bool multiline;
+  final bool trim;
+  final TextInputType? keyboardType;
   final double width;
   final double initialHeight;
   final String confirmLabel;
   final String cancelLabel;
+  final bool destructive;
 
   @override
   State<_TextInputDialog> createState() => _TextInputDialogState();
@@ -72,30 +92,47 @@ class _TextInputDialogState extends State<_TextInputDialog> {
     super.dispose();
   }
 
+  void _submit() =>
+      Navigator.pop(context, widget.trim ? _ctrl.text.trim() : _ctrl.text);
+
   @override
   Widget build(BuildContext context) {
     final decoration = InputDecoration(
       hintText: widget.hint,
+      labelText: widget.label,
       border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
     );
+
+    final field = widget.multiline
+        ? ResizableTextField(
+            controller: _ctrl,
+            autofocus: true,
+            initialHeight: widget.initialHeight,
+            decoration: decoration,
+          )
+        : TextField(
+            controller: _ctrl,
+            autofocus: true,
+            keyboardType: widget.keyboardType,
+            decoration: decoration,
+            onSubmitted: (_) => _submit(),
+          );
 
     return AlertDialog(
       title: Text(widget.title),
       content: SizedBox(
         width: widget.width,
-        child: widget.multiline
-            ? ResizableTextField(
-                controller: _ctrl,
-                autofocus: true,
-                initialHeight: widget.initialHeight,
-                decoration: decoration,
-              )
-            : TextField(
-                controller: _ctrl,
-                autofocus: true,
-                decoration: decoration,
-                onSubmitted: (v) => Navigator.pop(context, v.trim()),
-              ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (widget.description != null) ...[
+              Text(widget.description!, style: const TextStyle(fontSize: 13)),
+              const SizedBox(height: 12),
+            ],
+            field,
+          ],
+        ),
       ),
       actions: [
         TextButton(
@@ -103,8 +140,10 @@ class _TextInputDialogState extends State<_TextInputDialog> {
           child: Text(widget.cancelLabel),
         ),
         FilledButton(
-          onPressed: () => Navigator.pop(
-              context, widget.multiline ? _ctrl.text : _ctrl.text.trim()),
+          onPressed: _submit,
+          style: widget.destructive
+              ? FilledButton.styleFrom(backgroundColor: Colors.red)
+              : null,
           child: Text(widget.confirmLabel),
         ),
       ],

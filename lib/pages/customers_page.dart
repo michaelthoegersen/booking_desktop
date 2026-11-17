@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import '../widgets/text_input_dialog.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../localization/s.dart';
@@ -751,28 +752,17 @@ Future<Map<String, dynamic>> _loadAllForPdf() async {
                 visualDensity: VisualDensity.compact,
                 tooltip: S.t('editInvoiceEmail'),
                 onPressed: () async {
-                  final ctrl = TextEditingController(text: c['invoice_email'] ?? '');
-                  final result = await showDialog<String>(
-                    context: context,
-                    builder: (ctx) => AlertDialog(
-                      title: Text(S.t('invoiceEmail')),
-                      content: TextField(
-                        controller: ctrl,
-                        autofocus: true,
-                        keyboardType: TextInputType.emailAddress,
-                        decoration: const InputDecoration(
-                          labelText: 'E-postadresse for faktura',
-                          hintText: 'faktura@firma.no',
-                        ),
-                        onSubmitted: (v) => Navigator.pop(ctx, v.trim()),
-                      ),
-                      actions: [
-                        TextButton(onPressed: () => Navigator.pop(ctx), child: Text(S.t('cancel'))),
-                        TextButton(onPressed: () => Navigator.pop(ctx, ctrl.text.trim()), child: Text(S.t('save'))),
-                      ],
-                    ),
+                  final result = await showTextInputDialog(
+                    context,
+                    title: S.t('invoiceEmail'),
+                    initial: c['invoice_email'] ?? '',
+                    label: 'E-postadresse for faktura',
+                    hint: 'faktura@firma.no',
+                    keyboardType: TextInputType.emailAddress,
+                    confirmLabel: S.t('save'),
+                    cancelLabel: S.t('cancel'),
                   );
-                  ctrl.dispose();
+                  if (!mounted) return;
                   if (result != null) {
                     await _client.from('companies').update({'invoice_email': result}).eq('id', c['id']);
                     final updated = await _client.from('companies').select().eq('id', c['id']).single();

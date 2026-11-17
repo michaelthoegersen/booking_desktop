@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../widgets/text_input_dialog.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../ui/css_theme.dart';
@@ -25,45 +26,16 @@ class _LoginPageState extends State<LoginPage> {
   /// Auth's email. Instead the request goes to the company's admins, who set a
   /// new password from Innstillinger → Medlemmer.
   Future<void> _requestPasswordReset() async {
-    final ctrl = TextEditingController(text: _emailCtrl.text.trim());
-    final email = await showDialog<String>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Glemt passord'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'Skriv inn e-postadressen din, så gir vi beskjed til '
-              'administrator. Du får et nytt passord av dem.',
-              style: TextStyle(fontSize: 13),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: ctrl,
-              autofocus: true,
-              keyboardType: TextInputType.emailAddress,
-              decoration: const InputDecoration(
-                labelText: 'E-post',
-                border: OutlineInputBorder(),
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Avbryt'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
-            child: const Text('Send forespørsel'),
-          ),
-        ],
-      ),
+    final email = await showTextInputDialog(
+      context,
+      title: 'Glemt passord',
+      initial: _emailCtrl.text.trim(),
+      description: 'Skriv inn e-postadressen din, så gir vi beskjed til '
+          'administrator. Du får et nytt passord av dem.',
+      label: 'E-post',
+      keyboardType: TextInputType.emailAddress,
+      confirmLabel: 'Send forespørsel',
     );
-    ctrl.dispose();
     if (email == null || email.isEmpty || !mounted) return;
 
     try {
