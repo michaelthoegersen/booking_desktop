@@ -767,7 +767,10 @@ class _BusRequestCard extends StatelessWidget {
     final id = request['id'] as String;
     await Supabase.instance.client
         .from('bus_requests')
-        .update({'status': 'cancelled'}).eq('id', id);
+        .update({
+      'status': 'cancelled',
+      'cancelled_at': DateTime.now().toUtc().toIso8601String(),
+    }).eq('id', id);
     if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Forespørsel avlyst')),

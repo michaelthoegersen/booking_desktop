@@ -914,6 +914,7 @@ class _MgmtGigDetailPageState extends State<MgmtGigDetailPage>
     try {
       await _sb.from('gigs').update({
         'status': 'cancelled',
+        'cancelled_at': DateTime.now().toUtc().toIso8601String(),
         'cancellation_reason': reasonText.isEmpty ? null : reasonText,
       }).eq('id', widget.gigId);
       _load();
@@ -930,6 +931,7 @@ class _MgmtGigDetailPageState extends State<MgmtGigDetailPage>
     try {
       await _sb.from('gigs').update({
         'status': 'inquiry',
+        'cancelled_at': null,
         'cancellation_reason': null,
       }).eq('id', widget.gigId);
       _load();

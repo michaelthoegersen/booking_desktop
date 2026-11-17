@@ -173,6 +173,7 @@ class _MgmtGigsPageState extends State<MgmtGigsPage> {
       final views = await viewsFuture;
 
       _gigs = List<Map<String, dynamic>>.from(gigs);
+      await _archiveStaleCancelled();
       _meetings = List<Map<String, dynamic>>.from(meetings);
       _rebuildOptionLabels();
 
@@ -215,6 +216,33 @@ class _MgmtGigsPageState extends State<MgmtGigsPage> {
       debugPrint('Gigs load error: $e');
     }
     if (mounted) setState(() => _loading = false);
+  }
+
+  /// En avlyst aktivitet blir stående synlig i to uker, så alle rekker å se
+  /// at den er avlyst, og arkiveres så av seg selv. Sveipen kjøres ved
+  /// innlasting — appen har ingen bakgrunnsjobb, og dette er billig nok:
+  /// radene er allerede hentet, så det koster bare en update når noe
+  /// faktisk har gått ut på dato.
+  static const _cancelledGracePeriod = Duration(days: 14);
+
+  Future<void> _archiveStaleCancelled() async {
+    final cutoff = DateTime.now().toUtc().subtract(_cancelledGracePeriod);
+    final stale = <String>[];
+    for (final g in _gigs) {
+      if ((g['status'] as String?) != 'cancelled') continue;
+      final at = DateTime.tryParse(g['cancelled_at']?.toString() ?? '');
+      // Uten tidspunkt vet vi ikke når den ble avlyst, og da lar vi den
+      // ligge framfor å arkivere noe for tidlig.
+      if (at == null) continue;
+      if (at.toUtc().isBefore(cutoff)) stale.add(g['id'] as String);
+    }
+    if (stale.isEmpty) return;
+    try {
+      await _sb.from('gigs').update({'archived': true}).inFilter('id', stale);
+      _gigs = _gigs.where((g) => !stale.contains(g['id'])).toList();
+    } catch (e) {
+      debugPrint('Auto-arkivering av avlyste feilet: $e');
+    }
   }
 
   /// Nummererer datoalternativene innenfor hver gruppe, slik at lista kan si
@@ -441,10 +469,10 @@ class _MgmtGigsPageState extends State<MgmtGigsPage> {
     if (confirmed != true || !mounted) return;
 
     try {
-      await _sb
-          .from('gigs')
-          .update({'status': 'cancelled'})
-          .eq('id', gig['id'] as String);
+      await _sb.from('gigs').update({
+        'status': 'cancelled',
+        'cancelled_at': DateTime.now().toUtc().toIso8601String(),
+      }).eq('id', gig['id'] as String);
       await _load();
     } catch (e) {
       if (mounted) {
