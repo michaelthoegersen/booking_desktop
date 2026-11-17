@@ -2071,9 +2071,9 @@ class _MgmtGigDetailPageState extends State<MgmtGigDetailPage>
     final placeLine = [venue, city].where((s) => s.isNotEmpty).join(' · ');
     // An "Annet" activity is headed by its own name; the place goes on its own
     // line below, like the date.
-    final title = (gigType == 'other' && activityTitle.isNotEmpty)
-        ? activityTitle
-        : placeLine;
+    final title =
+        activityTitle.isNotEmpty ? activityTitle : placeLine;
+    final endCustomer = (_gig?['end_customer'] as String? ?? '').trim();
     final customerLine = [firma, custName].where((s) => s.isNotEmpty).join(' — ');
     final isRehearsalInOffer = gigType == 'rehearsal' && _isMultiDate;
     final treatAsGig = gigType == 'gig' || isRehearsalInOffer;
@@ -2138,7 +2138,20 @@ class _MgmtGigDetailPageState extends State<MgmtGigDetailPage>
                           fontSize: 13,
                         ),
                       ),
-                    if (gigType == 'other' && placeLine.isNotEmpty)
+                    if (endCustomer.isNotEmpty)
+                      Text(
+                        'Sluttkunde: $endCustomer',
+                        style: TextStyle(
+                          color: cs.onSurfaceVariant,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    // Stedet mistet plassen sin i overskrifta da gigen fikk
+                    // sin egen tittel, så det får en linje for seg selv.
+                    if (activityTitle.isNotEmpty &&
+                        placeLine.isNotEmpty &&
+                        placeLine != title)
                       Text(
                         placeLine,
                         style: TextStyle(

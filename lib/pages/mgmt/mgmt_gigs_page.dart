@@ -2556,6 +2556,7 @@ class _GigRow extends StatelessWidget {
     // An "Annet" activity is headed by its own name, with just the place
     // underneath. The type stays readable from the badge on the right.
     final title = (gig['title'] as String? ?? '').trim();
+    final endCustomer = (gig['end_customer'] as String? ?? '').trim();
     final locationLine =
         [venue, city].where((s) => s.isNotEmpty).join(' · ');
     final customerLine =
@@ -2675,11 +2676,31 @@ class _GigRow extends StatelessWidget {
                         ),
                     ],
                   ] else ...[
+                    // Har gigen fått en egen overskrift («Reitan
+                    // Lillehammer»), er det den man kjenner den igjen på —
+                    // stedet flytter ned en linje.
+                    if (title.isNotEmpty)
+                      Text(
+                        title,
+                        style: const TextStyle(
+                            fontWeight: FontWeight.w900, fontSize: 15),
+                      ),
                     if (locationLine.isNotEmpty)
                       Text(
                         locationLine,
-                        style: const TextStyle(
-                            fontWeight: FontWeight.w900, fontSize: 15),
+                        style: title.isNotEmpty
+                            ? TextStyle(
+                                color: cs.onSurfaceVariant, fontSize: 13)
+                            : const TextStyle(
+                                fontWeight: FontWeight.w900, fontSize: 15),
+                      ),
+                    if (endCustomer.isNotEmpty)
+                      Text(
+                        'Sluttkunde: $endCustomer',
+                        style: TextStyle(
+                            color: cs.onSurfaceVariant,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600),
                       ),
                     if (customerLine.isNotEmpty)
                       Text(

@@ -64,6 +64,10 @@ class _GigOfferPageState extends State<GigOfferPage> {
   bool _loadingCompanies = true;
 
   // ── Customer ──────────────────────────────────────────────────────────────
+  /// Overskrift på gigen («Reitan Lillehammer»), og sluttkunden showet er
+  /// for når det er en annen enn den vi fakturerer («Nammo»).
+  final _gigTitleCtrl = TextEditingController();
+  final _endCustomerCtrl = TextEditingController();
   final _firmaCtrl = TextEditingController();
   final _nameCtrl = TextEditingController();
   final _emailCtrl = TextEditingController();
@@ -228,6 +232,8 @@ class _GigOfferPageState extends State<GigOfferPage> {
 
   @override
   void dispose() {
+    _gigTitleCtrl.dispose();
+    _endCustomerCtrl.dispose();
     _firmaCtrl.dispose();
     _nameCtrl.dispose();
     _emailCtrl.dispose();
@@ -820,6 +826,8 @@ class _GigOfferPageState extends State<GigOfferPage> {
   }
 
   void _applyGigFields(Map<String, dynamic> gig) {
+    _gigTitleCtrl.text = gig['title'] ?? '';
+    _endCustomerCtrl.text = gig['end_customer'] ?? '';
     _firmaCtrl.text = gig['customer_firma'] ?? '';
     _nameCtrl.text = gig['customer_name'] ?? '';
     _emailCtrl.text = gig['customer_email'] ?? '';
@@ -1747,6 +1755,8 @@ class _GigOfferPageState extends State<GigOfferPage> {
           'venue_name': n(entry.venueCtrl.text),
           'city': n(entry.cityCtrl.text),
           'country': n(entry.countryCtrl.text),
+          'title': n(_gigTitleCtrl.text),
+          'end_customer': n(_endCustomerCtrl.text),
           'customer_firma': n(_firmaCtrl.text),
           'customer_name': n(_nameCtrl.text),
           'customer_email': n(_emailCtrl.text),
@@ -1944,6 +1954,8 @@ class _GigOfferPageState extends State<GigOfferPage> {
       final offerData = {
         'company_id': _companyId,
         'gig_id': _gigId,
+        'title': n(_gigTitleCtrl.text),
+        'end_customer': n(_endCustomerCtrl.text),
         'customer_firma': n(_firmaCtrl.text),
         'customer_name': n(_nameCtrl.text),
         'customer_email': n(_emailCtrl.text),
@@ -2650,6 +2662,12 @@ class _GigOfferPageState extends State<GigOfferPage> {
       title: 'Datoer & steder',
       child: Column(
         children: [
+          // Øverst på gigen: hva den heter i dagligtale, og hvem den er for.
+          _row2(
+            _tf(_gigTitleCtrl, 'Overskrift'),
+            _tf(_endCustomerCtrl, 'Sluttkunde'),
+          ),
+          const SizedBox(height: 12),
           ...List.generate(_dateEntries.length, (i) {
             final entry = _dateEntries[i];
             return Padding(
