@@ -24,6 +24,16 @@ class MgmtGigsPage extends StatefulWidget {
   State<MgmtGigsPage> createState() => _MgmtGigsPageState();
 }
 
+/// Hvor man sto i aktivitetslista sist. Siden går ut av treet når man åpner
+/// en aktivitet, så uten dette er man tilbake på «Kommende» øverst hver gang
+/// man trykker seg tilbake — og må finne fram på nytt.
+class _ListMemory {
+  static String search = '';
+  static String statusFilter = 'upcoming';
+  static String typeFilter = 'all';
+  static double? offset;
+}
+
 class _MgmtGigsPageState extends State<MgmtGigsPage> {
   final _sb = Supabase.instance.client;
   final _searchCtrl = TextEditingController();
@@ -38,9 +48,9 @@ class _MgmtGigsPageState extends State<MgmtGigsPage> {
   List<Map<String, dynamic>> _gigs = [];
   List<Map<String, dynamic>> _meetings = [];
   Map<String, DateTime> _gigViews = {};
-  String _search = '';
-  String _statusFilter = 'upcoming';
-  String _typeFilter = 'all'; // 'all', 'gig', 'rehearsal', 'meeting'
+  String _search = _ListMemory.search;
+  String _statusFilter = _ListMemory.statusFilter;
+  String _typeFilter = _ListMemory.typeFilter; // 'all', 'gig', 'rehearsal', 'meeting'
 
   /// gigId → «2 av 3» for aktiviteter som er ett av flere datoalternativer.
   /// Regnes ut fra gigene som allerede er lastet, så det koster ingen spørring.
@@ -56,12 +66,37 @@ class _MgmtGigsPageState extends State<MgmtGigsPage> {
   void initState() {
     super.initState();
     activeCompanyNotifier.addListener(_onCompanyChanged);
+    _searchCtrl.text = _ListMemory.search;
     _load();
+  }
+
+  /// Hopper tilbake til der man sto. Kjøres etter at lista har fått høyde —
+  /// før det har ScrollController ingen posisjon å sette.
+  bool _offsetRestored = false;
+
+  void _restoreOffset() {
+    final target = _ListMemory.offset;
+    // Én gang per besøk: ellers river den brukeren tilbake hit for hver
+    // eneste rebuild, og da kan man ikke scrolle i det hele tatt.
+    if (target == null || _offsetRestored) return;
+    _offsetRestored = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_scrollController.hasClients) return;
+      final pos = _scrollController.position;
+      _scrollController.jumpTo(
+          target.clamp(pos.minScrollExtent, pos.maxScrollExtent));
+    });
   }
 
   @override
   void dispose() {
     activeCompanyNotifier.removeListener(_onCompanyChanged);
+    _ListMemory.search = _search;
+    _ListMemory.statusFilter = _statusFilter;
+    _ListMemory.typeFilter = _typeFilter;
+    if (_scrollController.hasClients) {
+      _ListMemory.offset = _scrollController.offset;
+    }
     _searchCtrl.dispose();
     _scrollController.dispose();
     super.dispose();
@@ -970,6 +1005,7 @@ class _MgmtGigsPageState extends State<MgmtGigsPage> {
   /// long list, so picking «Alle» leaves the view on today and you scroll
   /// upward to walk backwards in time — same as the mobile app.
   Widget _buildActivityList() {
+    _restoreOffset();
     final entries = _filtered;
     final now = DateTime.now();
     final todayNorm = DateTime(now.year, now.month, now.day);
