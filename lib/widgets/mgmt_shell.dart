@@ -1,4 +1,5 @@
 import 'dart:async';
+import '../platform/tab_title.dart';
 
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
@@ -569,6 +570,7 @@ class _MgmtSideNavState extends State<_MgmtSideNav> {
     debugPrint('Mgmt chat badge = $total '
         '(gig=$gigCount dm=$dmCount gruppe=$groupCount)');
 
+    setUnreadBadge(total);
     if (mounted) setState(() => _unreadMessages = total);
   }
 
