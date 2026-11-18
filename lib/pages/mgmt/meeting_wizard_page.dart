@@ -94,6 +94,10 @@ class _MeetingWizardPageState extends State<MeetingWizardPage> {
         draft.type = item['item_type'] ?? 'none';
         draft.assignedTo = item['assigned_to'] as String?;
         draft.existingId = item['id'] as String?;
+        draft.sakNumber = item['sak_number'] as String?;
+        // Saved items come in folded, so a long agenda opens as a list of
+        // titles rather than a wall of open boxes.
+        draft.isCollapsed = true;
         _agendaItems.add(draft);
       }
 
@@ -249,40 +253,71 @@ class _MeetingWizardPageState extends State<MeetingWizardPage> {
         meetingId = meeting['id'] as String;
       }
 
-      // 2. Set participants (replace all)
-      if (_selectedUserIds.isNotEmpty) {
-        await MeetingService.setParticipants(meetingId, _selectedUserIds.toList());
-      }
+      // 2. Set participants. Unconditionally: guarding on isNotEmpty meant
+      // that removing the last participant silently kept the old list.
+      await MeetingService.setParticipants(meetingId, _selectedUserIds.toList());
 
-      // 3. Agenda items — delete old and re-add for simplicity
-      if (isEdit) {
-        await MeetingService.client
-            .from('meeting_agenda_items')
-            .delete()
-            .eq('meeting_id', meetingId);
-      }
-
+      // 3. Agenda items — updated in place.
+      //
+      // This used to delete every item and insert them again, which looked
+      // simpler and cost three things each time the meeting was edited:
+      // the files attached to an item (they hang off the item's id), the
+      // item's sak-nummer (a fresh one was handed out, so the numbering
+      // climbed on every edit), and anything else keyed to the item.
+      final keptIds = <String>{};
       for (int i = 0; i < _agendaItems.length; i++) {
         final draft = _agendaItems[i];
         if (draft.titleCtrl.text.trim().isEmpty) continue;
 
-        final agendaItem = await MeetingService.addAgendaItem(
-          meetingId: meetingId,
-          title: draft.titleCtrl.text.trim(),
-          itemType: draft.type,
-          description: draft.descCtrl.text.trim().isNotEmpty ? draft.descCtrl.text.trim() : null,
-          assignedTo: draft.assignedTo,
-          sortOrder: i,
-        );
+        final desc = draft.descCtrl.text.trim();
+        String itemId;
+        if (draft.existingId != null) {
+          itemId = draft.existingId!;
+          await MeetingService.updateAgendaItem(itemId, {
+            'title': draft.titleCtrl.text.trim(),
+            'item_type': draft.type,
+            'description': desc.isNotEmpty ? desc : null,
+            'assigned_to': draft.assignedTo,
+            'sort_order': i,
+          });
+        } else {
+          final agendaItem = await MeetingService.addAgendaItem(
+            meetingId: meetingId,
+            title: draft.titleCtrl.text.trim(),
+            itemType: draft.type,
+            description: desc.isNotEmpty ? desc : null,
+            assignedTo: draft.assignedTo,
+            sortOrder: i,
+          );
+          itemId = agendaItem['id'] as String;
+          draft.existingId = itemId;
+        }
+        keptIds.add(itemId);
 
-        // Upload new files
+        // Only files picked in this session: the ones already uploaded
+        // stay where they are, on an item that is no longer thrown away.
         for (final file in draft.files) {
           await MeetingService.uploadAgendaFile(
-            agendaItemId: agendaItem['id'] as String,
+            agendaItemId: itemId,
             bytes: file.bytes,
             fileName: file.name,
             contentType: file.contentType,
           );
+        }
+        draft.files.clear();
+      }
+
+      // Items the user actually removed — and only those.
+      if (isEdit) {
+        final existing = await MeetingService.client
+            .from('meeting_agenda_items')
+            .select('id')
+            .eq('meeting_id', meetingId);
+        for (final row in (existing as List)) {
+          final id = row['id'] as String;
+          if (!keptIds.contains(id)) {
+            await MeetingService.deleteAgendaItem(id);
+          }
         }
       }
 
@@ -676,9 +711,12 @@ class _MeetingWizardPageState extends State<MeetingWizardPage> {
                         const SizedBox(width: 4),
                         Expanded(
                           child: Text(
+                            // The saksnummer once the item has one; until
+                            // it is saved, its position in the list.
                             item.titleCtrl.text.isNotEmpty
-                                ? 'Sak ${i + 1}: ${item.titleCtrl.text}'
-                                : 'Sak ${i + 1}',
+                                ? '${item.sakNumber ?? 'Sak ${i + 1}'}: '
+                                    '${item.titleCtrl.text}'
+                                : (item.sakNumber ?? 'Sak ${i + 1}'),
                             style: const TextStyle(fontWeight: FontWeight.w700),
                             overflow: TextOverflow.ellipsis,
                           ),
@@ -809,6 +847,9 @@ class _AgendaItemDraft {
   String type = 'none';
   String? assignedTo;
   String? existingId;
+  /// The saksnummer the item was given when it was created (2026-1). Only
+  /// an item that already exists has one.
+  String? sakNumber;
   bool isCollapsed = false;
   final List<({String name, Uint8List bytes, String contentType})> files = [];
 }

@@ -96,17 +96,42 @@ class MeetingService {
         .eq('user_id', userId);
   }
 
+  /// Sets the participant list to exactly [userIds], as a diff.
+  ///
+  /// This used to delete every row and insert the list again, which threw
+  /// away each participant's rsvp_status: every edit of the meeting — even
+  /// a changed address — set everyone back to «ikke svart» after they had
+  /// already answered. Only the people actually added or removed are
+  /// touched now.
   static Future<void> setParticipants(String meetingId, List<String> userIds) async {
-    // Delete existing
-    await _sb.from('meeting_participants').delete().eq('meeting_id', meetingId);
-    // Insert new
-    if (userIds.isNotEmpty) {
+    final wanted = userIds.toSet();
+    final rows = await _sb
+        .from('meeting_participants')
+        .select('user_id')
+        .eq('meeting_id', meetingId);
+    final current = {
+      for (final r in (rows as List)) r['user_id'] as String,
+    };
+
+    final toAdd = wanted.difference(current);
+    final toRemove = current.difference(wanted);
+
+    if (toRemove.isNotEmpty) {
+      await _sb
+          .from('meeting_participants')
+          .delete()
+          .eq('meeting_id', meetingId)
+          .inFilter('user_id', toRemove.toList());
+    }
+    if (toAdd.isNotEmpty) {
       await _sb.from('meeting_participants').insert(
-        userIds.map((uid) => <String, dynamic>{
-            'meeting_id': meetingId,
-            'user_id': uid,
-            'rsvp_status': 'pending',
-        }).toList(),
+        toAdd
+            .map((uid) => <String, dynamic>{
+                  'meeting_id': meetingId,
+                  'user_id': uid,
+                  'rsvp_status': 'pending',
+                })
+            .toList(),
       );
     }
   }
@@ -132,12 +157,16 @@ class MeetingService {
           : DateTime.now().year.toString();
       final companyId = meeting['company_id'] as String;
 
+      // Scoped to this company. Without the join the highest number across
+      // every company on the platform was used, so two companies shared one
+      // series and each one's numbering jumped.
       final existing = await _sb
           .from('meeting_agenda_items')
-          .select('sak_number')
+          .select('sak_number, meetings!inner(company_id)')
+          .eq('meetings.company_id', companyId)
           .not('sak_number', 'is', null)
           .order('sak_number', ascending: false)
-          .limit(100);
+          .limit(200);
 
       int maxNum = 0;
       for (final row in (existing as List)) {
