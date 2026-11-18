@@ -1378,9 +1378,17 @@ class _MgmtGigDetailPageState extends State<MgmtGigDetailPage>
         .toList();
   }
 
+  /// Who the agreement goes to by default: the contract person when the
+  /// gig has one, otherwise the contact person. The field is editable, so
+  /// this only decides what is filled in for you.
+  String get _contractEmail {
+    final contract = (_gig?['contract_email'] as String? ?? '').trim();
+    if (contract.isNotEmpty) return contract;
+    return _gig?['customer_email'] as String? ?? '';
+  }
+
   Future<void> _sendIntensjon() async {
-    final emailCtrl =
-        TextEditingController(text: _gig?['customer_email'] ?? '');
+    final emailCtrl = TextEditingController(text: _contractEmail);
 
     await showDialog(
       context: context,
@@ -1829,8 +1837,7 @@ class _MgmtGigDetailPageState extends State<MgmtGigDetailPage>
   /// agreement_tokens row, uploads the contract to storage and mails an
   /// accept button, none of which apply here.
   Future<void> _sendRidersOnly() async {
-    final emailCtrl =
-        TextEditingController(text: _gig?['customer_email'] ?? '');
+    final emailCtrl = TextEditingController(text: _contractEmail);
 
     // Riders come out of the same generator as the contract; the main PDF is
     // simply not used.

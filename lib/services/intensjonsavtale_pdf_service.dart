@@ -278,9 +278,26 @@ class IntensjonsavtalePdfService {
     final city = gig['city'] as String? ?? '';
     final country = gig['country'] as String? ?? '';
     final firma = gig['customer_firma'] as String? ?? '';
-    final custName = gig['customer_name'] as String? ?? '';
-    final custPhone = gig['customer_phone'] as String? ?? '';
-    final custEmail = gig['customer_email'] as String? ?? '';
+    // Who the contract names. A gig can carry three people — contact,
+    // contract and invoice — and the one the agreement is between is the
+    // contract person. Most gigs have only a contact person, and then that
+    // is who it is. All three fields move together: a half-filled contract
+    // person must not borrow the contact person's phone number and end up
+    // naming one person with another's details.
+    final hasContractPerson =
+        (gig['contract_name'] as String? ?? '').trim().isNotEmpty;
+    final custName = (hasContractPerson
+            ? gig['contract_name'] as String?
+            : gig['customer_name'] as String?) ??
+        '';
+    final custPhone = (hasContractPerson
+            ? gig['contract_phone'] as String?
+            : gig['customer_phone'] as String?) ??
+        '';
+    final custEmail = (hasContractPerson
+            ? gig['contract_email'] as String?
+            : gig['customer_email'] as String?) ??
+        '';
     final performanceTime = gig['performance_time'] as String? ?? '';
     final getInTime = gig['get_in_time'] as String? ?? '';
     final rehearsalTime = gig['rehearsal_time'] as String? ?? '';
