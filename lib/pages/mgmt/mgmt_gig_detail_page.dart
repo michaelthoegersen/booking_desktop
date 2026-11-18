@@ -3072,7 +3072,6 @@ class _InfoTabState extends State<_InfoTab> {
                 _EditField('Prøver', 'rehearsal_time'),
                 _EditField('Opptreden', 'performance_time'),
                 _EditField('Get-out', 'get_out_time'),
-                _EditField('Notat', 'meeting_notes', multiline: true),
               ]),
             ],
           ),
@@ -3092,10 +3091,16 @@ class _InfoTabState extends State<_InfoTab> {
                   MapEntry('In-ear pris', 'kr ${NumberFormat('#,##0', 'nb_NO').format((gig['inear_price'] as num?)?.toDouble() ?? 0)}'),
                 MapEntry('Playback fra oss', gig['playback_from_us'] != false ? 'Ja' : 'Nei'),
               ]),
+              // One place for notes. «Merknader til kontrakten» is what the
+              // customer reads; the other two are ours. Showbeskrivelsen is
+              // gone from here — it belongs to each show now.
               _editCard(cs, 'Notater', [
-                _EditField('For kontrakt', 'notes_for_contract', multiline: true),
-                _EditField('Fra arrangør', 'info_from_organizer', multiline: true),
-                _EditField('Showbeskrivelse', 'show_desc', multiline: true),
+                _EditField('Merknader til kontrakten', 'notes_for_contract',
+                    multiline: true),
+                _EditField('Info fra arrangør', 'info_from_organizer',
+                    multiline: true),
+                _EditField('Info fra Complete', 'meeting_notes',
+                    multiline: true),
               ]),
             ],
           ),

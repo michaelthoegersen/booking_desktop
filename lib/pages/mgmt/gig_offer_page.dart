@@ -1957,6 +1957,8 @@ class _GigOfferPageState extends State<GigOfferPage> {
             'sort_order': e.key,
             'ekstrainnslag':
                 s.ekstrainnslag.isNotEmpty ? s.ekstrainnslag : null,
+            'description':
+                s.description.trim().isNotEmpty ? s.description.trim() : null,
           };
         }).toList();
       }
@@ -2189,6 +2191,8 @@ class _GigOfferPageState extends State<GigOfferPage> {
             'sort_order': e.key,
             'ekstrainnslag':
                 s.ekstrainnslag.isNotEmpty ? s.ekstrainnslag : null,
+            'description':
+                s.description.trim().isNotEmpty ? s.description.trim() : null,
           };
         }).toList();
         await _sb.from('gig_offer_shows').insert(showRows);
@@ -3253,7 +3257,10 @@ class _GigOfferPageState extends State<GigOfferPage> {
           _showPickerField(),
           if (selected.isNotEmpty) ...[
             const SizedBox(height: 16),
-            _tf(_showDescCtrl, 'Showbeskrivelse', maxLines: 2),
+            // Fallback for shows without their own description. Each
+            // show's own text is edited on the show's row below.
+            _tf(_showDescCtrl, 'Felles showbeskrivelse (brukes der showet '
+                'ikke har sin egen)', maxLines: 2),
             const SizedBox(height: 16),
             Padding(
               padding: const EdgeInsets.only(bottom: 6),
@@ -3822,6 +3829,27 @@ class _GigOfferPageState extends State<GigOfferPage> {
                       EdgeInsets.symmetric(horizontal: 10, vertical: 8),
                 ),
                 onChanged: (v) => _shows[index].ekstrainnslag = v,
+              ),
+            ),
+          // What this show is. Goes under the show in the contract, in
+          // place of the offer's shared Showbeskrivelse.
+          if (s.selected)
+            Padding(
+              padding: const EdgeInsets.only(left: 36, bottom: 8),
+              child: TextField(
+                key: ValueKey('show_${index}_desc'),
+                controller: TextEditingController(text: s.description),
+                style: const TextStyle(fontSize: 12),
+                maxLines: 2,
+                minLines: 1,
+                decoration: const InputDecoration(
+                  labelText: 'Showbeskrivelse',
+                  hintText: 'Hva dette showet går ut på',
+                  isDense: true,
+                  contentPadding:
+                      EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                ),
+                onChanged: (v) => _shows[index].description = v,
               ),
             ),
         ],
@@ -6644,6 +6672,10 @@ class _OfferShow {
   int sortOrder;
   String ekstrainnslag;
 
+  /// What this particular show is. Printed under the show in the contract.
+  /// Empty means the offer's shared Showbeskrivelse is used instead.
+  String description;
+
   /// Custom price override. Only honoured when [priceIsCustom] is true.
   /// When false, calculations fall back to CREO × performers.
   double price;
@@ -6659,6 +6691,7 @@ class _OfferShow {
     this.selected = true,
     this.sortOrder = 0,
     this.ekstrainnslag = '',
+    this.description = '',
     this.price = 0,
     this.priceIsCustom = false,
   });
@@ -6674,6 +6707,7 @@ class _OfferShow {
       selected: m['selected'] == true,
       sortOrder: (m['sort_order'] as num?)?.toInt() ?? 0,
       ekstrainnslag: m['ekstrainnslag'] as String? ?? '',
+      description: m['description'] as String? ?? '',
       price: (m['price'] as num?)?.toDouble() ?? 0,
       priceIsCustom: m['price_is_custom'] == true,
     );

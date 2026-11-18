@@ -898,8 +898,17 @@ class IntensjonsavtalePdfService {
                   crossAxisAlignment: pw.CrossAxisAlignment.start,
                   children: [
                     pw.Text(nameWithEkstra, style: boldCell),
-                    if (showDesc.isNotEmpty)
-                      pw.Text(showDesc,
+                    // Per-show description when the show has one; the
+                    // offer's shared Showbeskrivelse is the fallback, so
+                    // older gigs read exactly as they did before.
+                    if (((show['description'] as String?)?.trim().isNotEmpty ??
+                            false) ||
+                        showDesc.isNotEmpty)
+                      pw.Text(
+                          (show['description'] as String?)?.trim().isNotEmpty ==
+                                  true
+                              ? (show['description'] as String).trim()
+                              : showDesc,
                           style: pw.TextStyle(
                             font: regular,
                             fontSize: 9,
@@ -947,13 +956,31 @@ class IntensjonsavtalePdfService {
     String showDesc = '',
   }) {
     final isEn = lang == 'en';
-    if (showDesc.trim().isEmpty) return pw.SizedBox();
+    // One paragraph per show that has its own description, with the
+    // offer's shared Showbeskrivelse as the fallback for shows that have
+    // none. Nothing to say about any show means no section at all.
+    final described = <({String name, String desc})>[];
+    for (final show in shows) {
+      final own = (show['description'] as String?)?.trim() ?? '';
+      final text = own.isNotEmpty ? own : showDesc.trim();
+      if (text.isEmpty) continue;
+      described.add((
+        name: (show['show_name'] as String? ?? '').trim(),
+        desc: text,
+      ));
+    }
+    if (described.isEmpty) return pw.SizedBox();
     return _buildSection(
         bold, regular, isEn ? 'SHOW OVERVIEW' : 'SHOW-OVERSIKT', [
-      pw.Text(
-        showDesc,
-        style: pw.TextStyle(font: regular, fontSize: 10),
-      ),
+      for (final d in described) ...[
+        if (d.name.isNotEmpty)
+          pw.Text(d.name, style: pw.TextStyle(font: bold, fontSize: 10)),
+        pw.Text(
+          d.desc,
+          style: pw.TextStyle(font: regular, fontSize: 10),
+        ),
+        pw.SizedBox(height: 6),
+      ],
     ]);
   }
 
