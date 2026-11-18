@@ -802,6 +802,32 @@ class _CrewGigDetailPageState extends State<CrewGigDetailPage> {
                 ),
             ],
           ),
+          // Per show: have we got enough people on this one? The show
+          // carries the number it needs, so compare against that rather
+          // than leaving the reader to add the two sections up.
+          Builder(builder: (_) {
+            final need = (show['drummers'] as num?)?.toInt() ?? 0;
+            if (need <= 0) return const SizedBox.shrink();
+            final picked = <String>{...skarpSelected, ...bassSelected}.length;
+            final enough = picked >= need;
+            final tone =
+                enough ? Colors.green.shade700 : Colors.orange.shade800;
+            return Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Row(
+                children: [
+                  Icon(enough ? Icons.check_circle : Icons.error_outline,
+                      size: 15, color: tone),
+                  const SizedBox(width: 5),
+                  Text('$picked av $need valgt',
+                      style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                          color: tone)),
+                ],
+              ),
+            );
+          }),
           const SizedBox(height: 10),
           _sectionLabel('Skarp', Colors.purple, skarpSelected.length),
           const SizedBox(height: 6),

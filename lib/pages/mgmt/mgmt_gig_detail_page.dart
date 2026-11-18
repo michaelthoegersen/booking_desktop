@@ -3746,6 +3746,35 @@ class _CrewLineupTab extends StatelessWidget {
                 ),
             ],
           ),
+          // Per show: have we got enough people on this one? The show
+          // itself carries the number it needs, so compare against that
+          // instead of leaving the reader to add the sections up.
+          Builder(builder: (_) {
+            final need = (show['drummers'] as num?)?.toInt() ?? 0;
+            if (need <= 0) return const SizedBox.shrink();
+            final picked = <String>{
+              ...?selectedSkarpByShow[showId],
+              ...?selectedBassByShow[showId],
+            }.length;
+            final enough = picked >= need;
+            final tone =
+                enough ? Colors.green.shade700 : Colors.orange.shade800;
+            return Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Row(
+                children: [
+                  Icon(enough ? Icons.check_circle : Icons.error_outline,
+                      size: 15, color: tone),
+                  const SizedBox(width: 5),
+                  Text('$picked av $need valgt',
+                      style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                          color: tone)),
+                ],
+              ),
+            );
+          }),
           const SizedBox(height: 12),
           _buildSectionBlock(
             context,
@@ -3799,11 +3828,13 @@ class _CrewLineupTab extends StatelessWidget {
     bool readOnly = false,
   }) {
     final cs = Theme.of(context).colorScheme;
-    // Count members who are either admin-selected OR self-checked as available
-    final effectiveCount = members.where((m) {
-      final uid = m['user_id'] as String;
-      return selected.contains(uid) || m['status'] == 'available';
-    }).length;
+    // Two numbers, each labelled, because one bare number was unreadable:
+    // it used to be "selected OR available", a union that matched neither
+    // the ticked boxes nor the people who said yes.
+    final pickedCount =
+        members.where((m) => selected.contains(m['user_id'] as String)).length;
+    final canCount =
+        members.where((m) => m['status'] == 'available').length;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -3816,7 +3847,7 @@ class _CrewLineupTab extends StatelessWidget {
                 borderRadius: BorderRadius.circular(99),
               ),
               child: Text(
-                '$title ($effectiveCount)',
+                '$title · $pickedCount valgt · $canCount kan',
                 style: TextStyle(
                   fontSize: 13,
                   fontWeight: FontWeight.w800,
