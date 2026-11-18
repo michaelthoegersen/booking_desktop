@@ -143,10 +143,16 @@ Deno.serve(async (req) => {
     // filter on `archived` here — the multi-condition OR filter has bitten
     // us before (rows with `archived` literally NULL were getting dropped),
     // and archived gigs are extremely rare in practice. Filter manually.
+    //
+    // is_test IS filtered in the query. Test gigs are hidden from everyone
+    // but their creator by a row-level policy, and this function runs on
+    // the service role, which goes straight past RLS — so a test offer
+    // turned up in every subscriber's calendar.
     const { data: gigsRaw, error: gigsErr } = await supabase
       .from('gigs')
       .select('*')
       .eq('company_id', companyId)
+      .eq('is_test', false)
       .neq('status', 'cancelled')
       .order('date_from', { ascending: true });
 
