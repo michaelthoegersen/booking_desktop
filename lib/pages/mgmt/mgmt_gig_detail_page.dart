@@ -9,6 +9,7 @@ import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:printing/printing.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../state/active_company.dart';
 import '../../state/role_labels.dart';
@@ -2346,6 +2347,12 @@ class _MgmtGigDetailPageState extends State<MgmtGigDetailPage>
                               const SizedBox(height: 12),
                             ],
                             _InfoTab(gig: _gig!, onUpdated: _load),
+                            const SizedBox(height: 12),
+                            Padding(
+                              padding:
+                                  const EdgeInsets.symmetric(horizontal: 18),
+                              child: _FilesCard(gigId: widget.gigId),
+                            ),
                             // Rehearsals/møter/annet get the same Kan/Kan
                             // ikke (Skal/Skal ikke for rehearsals) self-
                             // availability card + counts as the mobile app.
@@ -2389,6 +2396,11 @@ class _MgmtGigDetailPageState extends State<MgmtGigDetailPage>
                               treatAsGig: treatAsGig,
                             ),
                             const SizedBox(height: 12),
+                            Padding(
+                              padding:
+                                  const EdgeInsets.symmetric(horizontal: 18),
+                              child: _FilesCard(gigId: widget.gigId),
+                            ),
                             _ShowsPrisTab(
                               gig: _gig!,
                               shows: _shows,
@@ -2473,6 +2485,276 @@ Widget _tf(
 // ===========================================================================
 // TAB 1 — INFO
 // ===========================================================================
+
+/// Files on an activity — pictures, PDFs, anything the gig needs carried
+/// along. Same table and bucket as the mobile app (`gig_files` +
+/// `gig-files`), so a file added on the phone shows up here and the other
+/// way round.
+class _FilesCard extends StatefulWidget {
+  final String gigId;
+  final bool canEdit;
+
+  const _FilesCard({required this.gigId, this.canEdit = true});
+
+  @override
+  State<_FilesCard> createState() => _FilesCardState();
+}
+
+class _FilesCardState extends State<_FilesCard> {
+  final _sb = Supabase.instance.client;
+
+  List<Map<String, dynamic>> _files = [];
+  bool _loading = true;
+  bool _uploading = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    try {
+      final rows = await _sb
+          .from('gig_files')
+          .select()
+          .eq('gig_id', widget.gigId)
+          .order('created_at', ascending: false);
+      if (!mounted) return;
+      setState(() {
+        _files = List<Map<String, dynamic>>.from(rows);
+        _loading = false;
+      });
+    } catch (e) {
+      debugPrint('Load gig files error: $e');
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  static String _kindOf(String name) {
+    final ext = name.contains('.') ? name.split('.').last.toLowerCase() : '';
+    if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'heic'].contains(ext)) {
+      return 'image';
+    }
+    if (ext == 'pdf') return 'pdf';
+    if (['mp3', 'wav', 'aac', 'm4a', 'ogg'].contains(ext)) return 'audio';
+    if (['mp4', 'mov', 'm4v', 'avi', 'mkv'].contains(ext)) return 'video';
+    return 'file';
+  }
+
+  static IconData _iconFor(String type) {
+    switch (type) {
+      case 'image':
+        return Icons.image_outlined;
+      case 'pdf':
+        return Icons.picture_as_pdf_outlined;
+      case 'audio':
+        return Icons.audiotrack_outlined;
+      case 'video':
+        return Icons.movie_outlined;
+      default:
+        return Icons.insert_drive_file_outlined;
+    }
+  }
+
+  static String _sizeText(num? bytes) {
+    if (bytes == null || bytes <= 0) return '';
+    final kb = bytes / 1024;
+    if (kb < 1024) return '${kb.toStringAsFixed(0)} kB';
+    return '${(kb / 1024).toStringAsFixed(1)} MB';
+  }
+
+  Future<void> _upload() async {
+    final result = await FilePicker.platform.pickFiles(withData: true);
+    if (result == null || result.files.isEmpty) return;
+    final file = result.files.first;
+    final bytes = file.bytes;
+    if (bytes == null) return;
+
+    setState(() => _uploading = true);
+    try {
+      // Same path shape as the mobile app, so both write into one folder per
+      // gig; the timestamp keeps two files of the same name apart.
+      final ts = DateTime.now().millisecondsSinceEpoch;
+      final path = '${widget.gigId}/${ts}_${file.name}';
+      await _sb.storage.from('gig-files').uploadBinary(path, bytes);
+      final url = _sb.storage.from('gig-files').getPublicUrl(path);
+
+      await _sb.from('gig_files').insert({
+        'gig_id': widget.gigId,
+        'file_url': url,
+        'file_name': file.name,
+        'file_type': _kindOf(file.name),
+        'file_size': bytes.length,
+        'uploaded_by': _sb.auth.currentUser?.id,
+      });
+      await _load();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Opplasting feilet: $e')),
+        );
+      }
+    } finally {
+      // In finally: a cancelled or failed upload must not leave the button
+      // spinning for the rest of the session.
+      if (mounted) setState(() => _uploading = false);
+    }
+  }
+
+  Future<void> _delete(Map<String, dynamic> f) async {
+    final name = f['file_name'] as String? ?? 'filen';
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Slett fil'),
+        content: Text('Slette «$name»? Dette kan ikke angres.'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Avbryt')),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            child: const Text('Slett'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    try {
+      await _sb.from('gig_files').delete().eq('id', f['id']);
+      // The row is what both apps list, so it goes first; a leftover object
+      // in storage is harmless, an orphan row is not.
+      final url = f['file_url'] as String? ?? '';
+      const marker = '/gig-files/';
+      final i = url.indexOf(marker);
+      if (i >= 0) {
+        final path = Uri.decodeComponent(url.substring(i + marker.length));
+        try {
+          await _sb.storage.from('gig-files').remove([path]);
+        } catch (e) {
+          debugPrint('Storage delete failed (row is already gone): $e');
+        }
+      }
+      await _load();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Sletting feilet: $e')),
+        );
+      }
+    }
+  }
+
+  Future<void> _open(Map<String, dynamic> f) async {
+    final url = f['file_url'] as String? ?? '';
+    if (url.isEmpty) return;
+    await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final df = DateFormat('dd.MM.yyyy');
+
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: cs.surfaceContainerLowest,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: cs.outlineVariant),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Text('Filer', style: Theme.of(context).textTheme.titleMedium),
+              const SizedBox(width: 8),
+              if (_files.isNotEmpty)
+                Text('${_files.length}',
+                    style: TextStyle(fontSize: 13, color: cs.onSurfaceVariant)),
+              const Spacer(),
+              if (widget.canEdit)
+                FilledButton.icon(
+                  onPressed: _uploading ? null : _upload,
+                  icon: _uploading
+                      ? const SizedBox(
+                          width: 14,
+                          height: 14,
+                          child: CircularProgressIndicator(strokeWidth: 2))
+                      : const Icon(Icons.upload_file, size: 16),
+                  label: Text(_uploading ? 'Laster opp…' : 'Last opp'),
+                  style: FilledButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(horizontal: 12)),
+                ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          if (_loading)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 8),
+              child: SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2)),
+            )
+          else if (_files.isEmpty)
+            Text('Ingen filer lagt til ennå.',
+                style: TextStyle(fontSize: 13, color: cs.onSurfaceVariant))
+          else
+            ..._files.map((f) {
+              final name = f['file_name'] as String? ?? '';
+              final type = f['file_type'] as String? ?? _kindOf(name);
+              final size = _sizeText(f['file_size'] as num?);
+              final created = DateTime.tryParse(f['created_at']?.toString() ?? '');
+              final when = created != null ? df.format(created.toLocal()) : '';
+              final sub = [size, when].where((t) => t.isNotEmpty).join(' · ');
+              return InkWell(
+                onTap: () => _open(f),
+                borderRadius: BorderRadius.circular(8),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 6),
+                  child: Row(
+                    children: [
+                      Icon(_iconFor(type), size: 20, color: cs.primary),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(name,
+                                style: const TextStyle(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w600)),
+                            if (sub.isNotEmpty)
+                              Text(sub,
+                                  style: TextStyle(
+                                      fontSize: 11,
+                                      color: cs.onSurfaceVariant)),
+                          ],
+                        ),
+                      ),
+                      if (widget.canEdit)
+                        IconButton(
+                          icon: const Icon(Icons.delete_outline, size: 18),
+                          visualDensity: VisualDensity.compact,
+                          tooltip: 'Slett',
+                          onPressed: () => _delete(f),
+                        ),
+                    ],
+                  ),
+                ),
+              );
+            }),
+        ],
+      ),
+    );
+  }
+}
 
 class _InfoTab extends StatefulWidget {
   final Map<String, dynamic> gig;
