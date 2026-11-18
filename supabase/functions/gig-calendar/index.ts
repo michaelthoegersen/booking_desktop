@@ -42,6 +42,15 @@ function hasParseableTime(time?: string | null): boolean {
   return /\b\d{1,2}:?\d{2}\b/.test(time);
 }
 
+// Every HH:MM in a free-text time field, in order. "13:00-18:00 (pause)"
+// yields ["13:00", "18:00"], which lets a single field carry both the start
+// and the end of an event.
+function allTimes(time?: string | null): string[] {
+  if (!time) return [];
+  return [...time.matchAll(/\b(\d{1,2}):?(\d{2})\b/g)]
+    .map((m) => `${m[1].padStart(2, '0')}:${m[2]}`);
+}
+
 // Format ISO timestamp to iCal UTC format: 20260315T190000Z
 function icsTimestamp(iso: string): string {
   return new Date(iso).toISOString().replace(/[-:]/g, '').replace(/\.\d+/, '');
@@ -250,17 +259,16 @@ Deno.serve(async (req) => {
       const description = descParts.join('\\n');
 
       // DTSTART / DTEND
-      // For gigs we anchor on performance_time. For rehearsals/other we
-      // prefer rehearsal_time, then meeting_time, then performance_time —
-      // anything that gives a real time so the event isn't shown as
-      // all-day in the calendar.
-      const startTimeStr = type === 'gig'
-          ? performanceTime
-          : (hasParseableTime(rehearsalTime)
-              ? rehearsalTime
-              : (hasParseableTime(meetingTime)
-                  ? meetingTime
-                  : performanceTime));
+      // Anchor on the most meaningful time the activity actually has, and
+      // only fall back to an all-day event when it has none. A gig prefers
+      // its performance time, but a gig with only an Oppmøte or Get-in time
+      // used to land in the calendar as all-day, which is what it looked
+      // like in the user's calendar: "heldags, ikke på tidspunktene".
+      const timeCandidates = type === 'gig'
+          ? [performanceTime, getInTime, meetingTime, rehearsalTime]
+          : [rehearsalTime, meetingTime, performanceTime, getInTime];
+      const startTimeStr =
+          timeCandidates.find((t) => hasParseableTime(t)) ?? null;
       const hasTime = hasParseableTime(startTimeStr);
       const dtStart = hasTime
         ? `DTSTART:${icsDate(dateFrom, startTimeStr)}`
@@ -268,13 +276,35 @@ Deno.serve(async (req) => {
 
       let dtEnd: string;
       if (hasTime) {
-        const m = startTimeStr!.match(/\b(\d{1,2}):?(\d{2})\b/)!;
-        const startH = parseInt(m[1], 10);
-        const startM = parseInt(m[2], 10);
-        const endH = (startH + 2) % 24;
-        const endTime =
-            `${String(endH).padStart(2, '0')}:${String(startM).padStart(2, '0')}`;
-        dtEnd = `DTEND:${icsDate(dateTo, endTime)}`;
+        // An end time we actually know beats a guessed duration: the second
+        // time in the same field ("13:00-18:00"), then Get-out, then
+        // start + 2h as before.
+        const sameField = allTimes(startTimeStr)[1];
+        const getOut = allTimes(getOutTime)[0];
+        let endTime = sameField ?? getOut;
+        if (!endTime) {
+          const m = allTimes(startTimeStr)[0]!.split(':');
+          const endH = (parseInt(m[0], 10) + 2) % 24;
+          endTime = `${String(endH).padStart(2, '0')}:${m[1]}`;
+        }
+        // A gig that runs past midnight (performance 23:00, get-out 01:00)
+        // would otherwise end before it starts, and calendar apps drop or
+        // mangle such an event.
+        let endDateStr = dateTo;
+        const startMin = (() => {
+          const [h, m] = allTimes(startTimeStr)[0]!.split(':');
+          return parseInt(h, 10) * 60 + parseInt(m, 10);
+        })();
+        const [eh, em] = endTime.split(':');
+        const endMin = parseInt(eh, 10) * 60 + parseInt(em, 10);
+        if (endDateStr === dateFrom && endMin <= startMin) {
+          const next = new Date(dateFrom + 'T00:00:00');
+          next.setDate(next.getDate() + 1);
+          endDateStr = `${next.getFullYear()}-` +
+              `${String(next.getMonth() + 1).padStart(2, '0')}-` +
+              `${String(next.getDate()).padStart(2, '0')}`;
+        }
+        dtEnd = `DTEND:${icsDate(endDateStr, endTime)}`;
       } else {
         // All-day: DTEND is exclusive
         const endDate = new Date(dateTo + 'T00:00:00');
@@ -350,11 +380,9 @@ Deno.serve(async (req) => {
         dtEnd = `DTEND:${icsDate(dateStr, endTime)}`;
       } else if (hasTime) {
         // Default duration 1h if no end time
-        const m = startTime!.match(/\b(\d{1,2}):?(\d{2})\b/)!;
-        const startH = parseInt(m[1], 10);
-        const startM = parseInt(m[2], 10);
-        const endH = (startH + 1) % 24;
-        const t = `${String(endH).padStart(2, '0')}:${String(startM).padStart(2, '0')}`;
+        const m = allTimes(startTime)[0]!.split(':');
+        const endH = (parseInt(m[0], 10) + 1) % 24;
+        const t = `${String(endH).padStart(2, '0')}:${m[1]}`;
         dtEnd = `DTEND:${icsDate(dateStr, t)}`;
       } else {
         const endDate = new Date(dateStr + 'T00:00:00');

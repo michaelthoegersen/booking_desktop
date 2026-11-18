@@ -2642,6 +2642,7 @@ class _InfoTabState extends State<_InfoTab> {
                 MapEntry('Org.nr', gig['customer_org_nr']),
                 MapEntry('Adresse', gig['customer_address']),
                 MapEntry('EHF', gig['invoice_on_ehf'] == true ? 'Ja' : null),
+                MapEntry('Fakturareferanse', gig['invoice_reference']),
               ]),
               // Fakturamottaker — vis alternativ-feltene kun når "annen
               // fakturamottaker" er huket av i tilbudet; ellers bare "Samme
@@ -2656,6 +2657,7 @@ class _InfoTabState extends State<_InfoTab> {
                   _EditField('E-post', 'alt_invoice_email'),
                   _EditField('Org.nr', 'alt_invoice_org_nr'),
                   _EditField('Adresse', 'alt_invoice_address'),
+                  _EditField('Referanse', 'alt_invoice_reference'),
                   _EditField('Faktura på EHF', 'alt_invoice_on_ehf',
                       isBool: true),
                 ])

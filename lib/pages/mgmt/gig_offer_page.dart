@@ -74,6 +74,8 @@ class _GigOfferPageState extends State<GigOfferPage> {
   final _phoneCtrl = TextEditingController();
   final _orgNrCtrl = TextEditingController();
   final _addressCtrl = TextEditingController();
+  // What the customer wants printed as their reference on the invoice.
+  final _invoiceRefCtrl = TextEditingController();
   bool _invoiceOnEhf = false;
 
   // Alternative invoice recipient (overrides customer fields when enabled)
@@ -84,6 +86,7 @@ class _GigOfferPageState extends State<GigOfferPage> {
   final _altInvPhoneCtrl = TextEditingController();
   final _altInvOrgNrCtrl = TextEditingController();
   final _altInvAddressCtrl = TextEditingController();
+  final _altInvRefCtrl = TextEditingController();
   bool _altInvoiceOnEhf = false;
 
   // ── Multi-date entries ───────────────────────────────────────────────────
@@ -245,12 +248,14 @@ class _GigOfferPageState extends State<GigOfferPage> {
     _phoneCtrl.dispose();
     _orgNrCtrl.dispose();
     _addressCtrl.dispose();
+    _invoiceRefCtrl.dispose();
     _altInvFirmaCtrl.dispose();
     _altInvNameCtrl.dispose();
     _altInvEmailCtrl.dispose();
     _altInvPhoneCtrl.dispose();
     _altInvOrgNrCtrl.dispose();
     _altInvAddressCtrl.dispose();
+    _altInvRefCtrl.dispose();
     for (final e in _dateEntries) {
       e.dispose();
     }
@@ -840,6 +845,7 @@ class _GigOfferPageState extends State<GigOfferPage> {
     _phoneCtrl.text = gig['customer_phone'] ?? '';
     _orgNrCtrl.text = gig['customer_org_nr'] ?? '';
     _addressCtrl.text = gig['customer_address'] ?? '';
+    _invoiceRefCtrl.text = gig['invoice_reference'] ?? '';
     _invoiceOnEhf = gig['invoice_on_ehf'] == true;
     _isTest = gig['is_test'] == true;
     _altInvoiceEnabled = gig['alt_invoice_enabled'] == true;
@@ -849,6 +855,7 @@ class _GigOfferPageState extends State<GigOfferPage> {
     _altInvPhoneCtrl.text = gig['alt_invoice_phone'] ?? '';
     _altInvOrgNrCtrl.text = gig['alt_invoice_org_nr'] ?? '';
     _altInvAddressCtrl.text = gig['alt_invoice_address'] ?? '';
+    _altInvRefCtrl.text = gig['alt_invoice_reference'] ?? '';
     _altInvoiceOnEhf = gig['alt_invoice_on_ehf'] == true;
     // venue/city/country/dateFrom/dateTo are now per _DateEntry
     _gigStatus = gig['status'] as String? ?? 'inquiry';
@@ -1318,7 +1325,7 @@ class _GigOfferPageState extends State<GigOfferPage> {
       final res = await _sb
           .from('companies')
           .select(
-              'id, name, org_nr, address, city, country, contacts!contacts_company_id_fkey(id, name, phone, email)')
+              'id, name, org_nr, address, city, country, invoice_reference, contacts!contacts_company_id_fkey(id, name, phone, email)')
           .eq('owner_company_id', _companyId!)
           .order('name');
       final list = List<Map<String, dynamic>>.from(res);
@@ -1349,6 +1356,10 @@ class _GigOfferPageState extends State<GigOfferPage> {
       _firmaCtrl.text = company['name'] as String? ?? '';
       _orgNrCtrl.text = company['org_nr'] as String? ?? '';
       _addressCtrl.text = company['address'] as String? ?? '';
+      // The registry's reference is a starting point; a reference already
+      // typed on this gig wins, since it may be specific to this job.
+      final ref = company['invoice_reference'] as String? ?? '';
+      if (_invoiceRefCtrl.text.trim().isEmpty) _invoiceRefCtrl.text = ref;
       if (contacts.isNotEmpty) {
         _selectedContact = contacts.first;
         _nameCtrl.text = contacts.first['name'] as String? ?? '';
@@ -1377,6 +1388,7 @@ class _GigOfferPageState extends State<GigOfferPage> {
       _firmaCtrl.clear();
       _orgNrCtrl.clear();
       _addressCtrl.clear();
+      _invoiceRefCtrl.clear();
       _nameCtrl.clear();
       _phoneCtrl.clear();
       _emailCtrl.clear();
@@ -1769,6 +1781,7 @@ class _GigOfferPageState extends State<GigOfferPage> {
           'customer_phone': n(_phoneCtrl.text),
           'customer_org_nr': n(_orgNrCtrl.text),
           'customer_address': n(_addressCtrl.text),
+          'invoice_reference': n(_invoiceRefCtrl.text),
           'invoice_on_ehf': _invoiceOnEhf,
           'alt_invoice_enabled': _altInvoiceEnabled,
           'alt_invoice_firma': n(_altInvFirmaCtrl.text),
@@ -1777,6 +1790,7 @@ class _GigOfferPageState extends State<GigOfferPage> {
           'alt_invoice_phone': n(_altInvPhoneCtrl.text),
           'alt_invoice_org_nr': n(_altInvOrgNrCtrl.text),
           'alt_invoice_address': n(_altInvAddressCtrl.text),
+          'alt_invoice_reference': n(_altInvRefCtrl.text),
           'alt_invoice_on_ehf': _altInvoiceOnEhf,
           'responsible': n(_responsibleCtrl.text),
           'show_desc': n(_showDescCtrl.text),
@@ -1968,6 +1982,7 @@ class _GigOfferPageState extends State<GigOfferPage> {
         'customer_phone': n(_phoneCtrl.text),
         'customer_org_nr': n(_orgNrCtrl.text),
         'customer_address': n(_addressCtrl.text),
+        'invoice_reference': n(_invoiceRefCtrl.text),
         'alt_invoice_enabled': _altInvoiceEnabled,
         'alt_invoice_firma': n(_altInvFirmaCtrl.text),
         'alt_invoice_name': n(_altInvNameCtrl.text),
@@ -1975,6 +1990,7 @@ class _GigOfferPageState extends State<GigOfferPage> {
         'alt_invoice_phone': n(_altInvPhoneCtrl.text),
         'alt_invoice_org_nr': n(_altInvOrgNrCtrl.text),
         'alt_invoice_address': n(_altInvAddressCtrl.text),
+        'alt_invoice_reference': n(_altInvRefCtrl.text),
         'alt_invoice_on_ehf': _altInvoiceOnEhf,
         'creo_fee_minimum': _creoFeeMinimum,
         'extra_show_fee': _extraShowFee,
@@ -2909,6 +2925,8 @@ class _GigOfferPageState extends State<GigOfferPage> {
           _row2(_tf(_nameCtrl, 'Kontaktperson'), _tf(_phoneCtrl, 'Telefon')),
           const SizedBox(height: 12),
           _row2(_tf(_emailCtrl, 'E-post'), _tf(_addressCtrl, 'Adresse')),
+          const SizedBox(height: 12),
+          _tf(_invoiceRefCtrl, 'Fakturareferanse (kundens referanse)'),
           const SizedBox(height: 8),
           SwitchListTile(
             title: const Text('Faktura på EHF', style: TextStyle(fontSize: 13)),
@@ -2947,6 +2965,8 @@ class _GigOfferPageState extends State<GigOfferPage> {
                         const SizedBox(height: 12),
                         _row2(_tf(_altInvEmailCtrl, 'Faktura: E-post'),
                             _tf(_altInvAddressCtrl, 'Faktura: Adresse')),
+                        const SizedBox(height: 12),
+                        _tf(_altInvRefCtrl, 'Faktura: Referanse'),
                         const SizedBox(height: 4),
                         SwitchListTile(
                           title: const Text('Faktura på EHF',
@@ -3720,7 +3740,11 @@ class _GigOfferPageState extends State<GigOfferPage> {
                 contentPadding:
                     EdgeInsets.symmetric(horizontal: 6, vertical: 4)),
             onChanged: (v) {
-              final p = double.tryParse(v.replaceAll(',', '.'));
+              // Clearing the field means 0. Keeping the old value would leave
+              // the model holding a number the field no longer shows.
+              final p = v.trim().isEmpty
+                  ? 0.0
+                  : double.tryParse(v.replaceAll(',', '.'));
               if (p != null) setState(() => onChanged(p));
             },
           ),
@@ -3912,8 +3936,9 @@ class _GigOfferPageState extends State<GigOfferPage> {
                     keyboardType: TextInputType.number,
                     textAlign: TextAlign.center,
                     onChanged: (v) {
-                      final p = int.tryParse(v);
-                      if (p != null && p > 0) _routePersons = p;
+                      // Empty field → 0 cars (and so 0 km), not the old count.
+                      final p = v.trim().isEmpty ? 0 : int.tryParse(v);
+                      if (p != null && p >= 0) _routePersons = p;
                     },
                   ),
                 ),
@@ -4157,8 +4182,9 @@ class _GigOfferPageState extends State<GigOfferPage> {
                                   contentPadding: EdgeInsets.symmetric(
                                       horizontal: 8, vertical: 6)),
                               onChanged: (v) {
-                                final d = int.tryParse(v);
-                                if (d != null && d > 0) {
+                                // Empty field → 0 days, not the old day count.
+                                final d = v.trim().isEmpty ? 0 : int.tryParse(v);
+                                if (d != null && d >= 0) {
                                   _hyreDays = d;
                                   _recalcTransportPrice();
                                 }
@@ -5031,7 +5057,10 @@ class _GigOfferPageState extends State<GigOfferPage> {
   }
 
   void _applyOverride(String key, String rawText) {
-    final parsed = double.tryParse(rawText.replaceAll(RegExp(r'[^0-9.]'), ''));
+    // An emptied field is 0, not "leave the previous override standing".
+    final parsed = rawText.trim().isEmpty
+        ? 0.0
+        : double.tryParse(rawText.replaceAll(RegExp(r'[^0-9.]'), ''));
     if (parsed == null) return;
 
     setState(() {
@@ -5171,10 +5200,26 @@ class _GigOfferPageState extends State<GigOfferPage> {
 
       // Send signed PDF to customer
       final customerEmail = _agreement!['customer_email'] as String? ?? '';
-      final venue = _dateEntries.first.venueCtrl.text;
-      final dateFrom = _dateEntries.first.dateFrom != null
-          ? df.format(_dateEntries.first.dateFrom!)
-          : '';
+      // Name the agreement after the customer and the gig date, not the
+      // venue: the venue says nothing to the customer filing the PDF, and
+      // the same venue can host several of their jobs. Matches the unsigned
+      // send in mgmt_gig_detail_page.
+      final customerFirma = _firmaCtrl.text.trim();
+      final signedTitle = signedResult.title.isNotEmpty
+          ? signedResult.title
+          : 'Intensjonsavtale';
+      final signedDates = _dateEntries
+          .where((e) => !e.isRehearsal && e.dateFrom != null)
+          .map((e) => df.format(e.dateFrom!))
+          .join(' ');
+      final dateFrom = signedDates.isNotEmpty
+          ? signedDates
+          : (_dateEntries.first.dateFrom != null
+              ? df.format(_dateEntries.first.dateFrom!)
+              : '');
+      final subjectLabel = [customerFirma, dateFrom]
+          .where((t) => t.isNotEmpty)
+          .join(' ');
       if (customerEmail.isEmpty) {
         throw Exception(
             'Avtalen har ingen e-postadresse å sende den signerte kopien '
@@ -5185,12 +5230,12 @@ class _GigOfferPageState extends State<GigOfferPage> {
 <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 600px; margin: 0 auto;">
   <div style="background: #1a1a1a; padding: 24px 32px; border-radius: 8px 8px 0 0;">
     <h1 style="color: white; font-size: 20px; margin: 0;">Signert intensjonsavtale</h1>
-    <p style="color: #aaa; font-size: 14px; margin: 4px 0 0;">$venue $dateFrom</p>
+    <p style="color: #aaa; font-size: 14px; margin: 4px 0 0;">$subjectLabel</p>
   </div>
   <div style="background: #ffffff; padding: 28px 32px; border: 1px solid #eee; border-top: none; border-radius: 0 0 8px 8px;">
     <p style="font-size: 15px; line-height: 1.6; color: #333;">Hei $acceptedName,</p>
     <p style="font-size: 15px; line-height: 1.6; color: #333;">
-      Intensjonsavtalen for $venue er nå godkjent av begge parter. Vedlagt finner du den signerte versjonen.
+      Intensjonsavtalen er nå godkjent av begge parter. Vedlagt finner du den signerte versjonen.
     </p>
     <p style="font-size: 13px; color: #888; margin-top: 20px;">Med vennlig hilsen,<br><strong>Complete Drums / Stian Skog</strong></p>
   </div>
@@ -5198,12 +5243,12 @@ class _GigOfferPageState extends State<GigOfferPage> {
 ''';
         await EmailService.sendEmailWithAttachments(
           to: customerEmail,
-          subject: 'Signert intensjonsavtale — $venue $dateFrom',
+          subject: 'Signert $signedTitle — $subjectLabel',
           body: htmlBody,
           attachments: [
             (
               filename:
-                  'Signert_Intensjonsavtale_${venue.replaceAll(' ', '_')}.pdf',
+                  '${['Signert', signedTitle, customerFirma, dateFrom].where((t) => t.isNotEmpty).join(' ')}.pdf',
               bytes: signedResult.mainPdf
             ),
           ],
@@ -6518,8 +6563,11 @@ class _MarkupSplitDialogState extends State<_MarkupSplitDialog> {
     super.dispose();
   }
 
-  double? _parse(String raw) =>
-      double.tryParse(raw.replaceAll(RegExp(r'[^0-9.]'), ''));
+  // An emptied field is 0, so clearing CompleteKonto moves the whole markup
+  // over to BookingHonorar instead of freezing the old split.
+  double? _parse(String raw) => raw.trim().isEmpty
+      ? 0.0
+      : double.tryParse(raw.replaceAll(RegExp(r'[^0-9.]'), ''));
 
   /// Setter CompleteKonto og speiler resten over i Booking.
   void _setComplete(double v, {required bool fromCompleteField}) {

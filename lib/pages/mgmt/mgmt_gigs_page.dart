@@ -1212,6 +1212,8 @@ class _NewGigDialogState extends State<_NewGigDialog> {
   final _emailCtrl = TextEditingController();
   final _orgNrCtrl = TextEditingController();
   final _addressCtrl = TextEditingController();
+  // What the customer wants printed as their reference on the invoice.
+  final _invoiceRefCtrl = TextEditingController();
   final _responsibleCtrl = TextEditingController();
   final _showDescCtrl = TextEditingController();
   final _meetingTimeCtrl = TextEditingController();
@@ -1266,7 +1268,8 @@ class _NewGigDialogState extends State<_NewGigDialog> {
   void dispose() {
     for (final c in [
       _venueCtrl, _cityCtrl, _countryCtrl, _firmaCtrl, _custNameCtrl,
-      _phoneCtrl, _emailCtrl, _orgNrCtrl, _addressCtrl, _responsibleCtrl,
+      _phoneCtrl, _emailCtrl, _orgNrCtrl, _addressCtrl, _invoiceRefCtrl,
+      _responsibleCtrl,
       _showDescCtrl, _meetingTimeCtrl, _getInTimeCtrl, _rehearsalTimeCtrl,
       _performanceTimeCtrl, _getOutTimeCtrl, _meetingNotesCtrl,
       _stageShapeCtrl, _stageSizeCtrl, _stageNotesCtrl, _inearPriceCtrl,
@@ -1285,7 +1288,7 @@ class _NewGigDialogState extends State<_NewGigDialog> {
     try {
       final res = await _sb
           .from('companies')
-          .select('id, name, org_nr, address, city, country, contacts!contacts_company_id_fkey(id, name, phone, email)')
+          .select('id, name, org_nr, address, city, country, invoice_reference, contacts!contacts_company_id_fkey(id, name, phone, email)')
           .eq('owner_company_id', widget.managementCompanyId)
           .order('name');
       final list = List<Map<String, dynamic>>.from(res);
@@ -1334,6 +1337,9 @@ class _NewGigDialogState extends State<_NewGigDialog> {
       _firmaCtrl.text = company['name'] as String? ?? '';
       _orgNrCtrl.text = company['org_nr'] as String? ?? '';
       _addressCtrl.text = company['address'] as String? ?? '';
+      // A reference already typed for this activity wins over the registry's.
+      final ref = company['invoice_reference'] as String? ?? '';
+      if (_invoiceRefCtrl.text.trim().isEmpty) _invoiceRefCtrl.text = ref;
       if (contacts.isNotEmpty) {
         _selectedContact = contacts.first;
         _custNameCtrl.text = contacts.first['name'] as String? ?? '';
@@ -1362,6 +1368,7 @@ class _NewGigDialogState extends State<_NewGigDialog> {
       _firmaCtrl.clear();
       _orgNrCtrl.clear();
       _addressCtrl.clear();
+      _invoiceRefCtrl.clear();
       _custNameCtrl.clear();
       _phoneCtrl.clear();
       _emailCtrl.clear();
@@ -1428,6 +1435,7 @@ class _NewGigDialogState extends State<_NewGigDialog> {
       'customer_email': n(_emailCtrl.text),
       'customer_org_nr': n(_orgNrCtrl.text),
       'customer_address': n(_addressCtrl.text),
+      'invoice_reference': n(_invoiceRefCtrl.text),
       'invoice_on_ehf': _invoiceOnEhf,
       'responsible': n(_responsibleCtrl.text),
       'show_desc': n(_showDescCtrl.text),
@@ -1841,6 +1849,11 @@ class _NewGigDialogState extends State<_NewGigDialog> {
                         _tf(_emailCtrl, 'E-post'),
                         _tf(_addressCtrl, 'Adresse'),
                       ]),
+                      const SizedBox(height: 8),
+                      // _tfFull, not _tf: _tf returns an Expanded, which
+                      // cannot sit directly in this scrolling Column.
+                      _tfFull(_invoiceRefCtrl,
+                          'Fakturareferanse (kundens referanse)'),
                       const SizedBox(height: 4),
                       SwitchListTile(
                         title: const Text('Faktura på EHF'),

@@ -36,6 +36,8 @@ class _NewCompanyDialogState extends State<NewCompanyDialog> {
   final _invoiceCityCtrl = TextEditingController();
   final _invoiceCountryCtrl = TextEditingController();
   final _invoiceEmailCtrl = TextEditingController();
+  // The customer's own reference, to be printed on their invoice.
+  final _invoiceReferenceCtrl = TextEditingController();
 
   final _contactNameCtrl = TextEditingController();
   final _contactEmailCtrl = TextEditingController();
@@ -115,6 +117,7 @@ class _NewCompanyDialogState extends State<NewCompanyDialog> {
     _invoiceCityCtrl.dispose();
     _invoiceCountryCtrl.dispose();
     _invoiceEmailCtrl.dispose();
+    _invoiceReferenceCtrl.dispose();
     _contactNameCtrl.dispose();
     _contactEmailCtrl.dispose();
     _contactPhoneCtrl.dispose();
@@ -139,6 +142,7 @@ class _NewCompanyDialogState extends State<NewCompanyDialog> {
     final invoiceCity = _invoiceCityCtrl.text.trim();
     final invoiceCountry = _invoiceCountryCtrl.text.trim();
     final invoiceEmail = _invoiceEmailCtrl.text.trim();
+    final invoiceReference = _invoiceReferenceCtrl.text.trim();
     final contactName = _contactNameCtrl.text.trim();
     final email = _contactEmailCtrl.text.trim();
     final phone = _contactPhoneCtrl.text.trim();
@@ -165,6 +169,10 @@ class _NewCompanyDialogState extends State<NewCompanyDialog> {
             'city': city.isEmpty ? null : city,
             'country': country.isEmpty ? null : country,
             'separate_invoice_recipient': _separateInvoice,
+            // The reference belongs to the customer, not to the separate
+            // invoice recipient, so it is saved either way.
+            'invoice_reference':
+                invoiceReference.isEmpty ? null : invoiceReference,
             if (widget.ownerCompanyId != null)
               'owner_company_id': widget.ownerCompanyId,
             if (_separateInvoice) ...{
@@ -369,6 +377,19 @@ class _NewCompanyDialogState extends State<NewCompanyDialog> {
                         decoration: const InputDecoration(
                           labelText: "Country",
                           prefixIcon: Icon(Icons.flag),
+                        ),
+                      ),
+
+                      const SizedBox(height: 8),
+
+                      // ---------------- INVOICE REFERENCE
+                      TextField(
+                        controller: _invoiceReferenceCtrl,
+                        decoration: const InputDecoration(
+                          labelText: "Fakturareferanse",
+                          helperText:
+                              "Det kunden vil ha oppgitt som referanse på fakturaen",
+                          prefixIcon: Icon(Icons.tag),
                         ),
                       ),
 
@@ -600,6 +621,7 @@ class _EditCompanyDialogState extends State<EditCompanyDialog> {
   late final TextEditingController _invoiceCityCtrl;
   late final TextEditingController _invoiceCountryCtrl;
   late final TextEditingController _invoiceEmailCtrl;
+  late final TextEditingController _invoiceReferenceCtrl;
 
   bool _saving = false;
 
@@ -621,6 +643,8 @@ class _EditCompanyDialogState extends State<EditCompanyDialog> {
     _invoiceCityCtrl = TextEditingController(text: c['invoice_city'] ?? '');
     _invoiceCountryCtrl = TextEditingController(text: c['invoice_country'] ?? '');
     _invoiceEmailCtrl = TextEditingController(text: c['invoice_email'] ?? '');
+    _invoiceReferenceCtrl =
+        TextEditingController(text: c['invoice_reference'] ?? '');
   }
 
   @override
@@ -638,6 +662,7 @@ class _EditCompanyDialogState extends State<EditCompanyDialog> {
     _invoiceCityCtrl.dispose();
     _invoiceCountryCtrl.dispose();
     _invoiceEmailCtrl.dispose();
+    _invoiceReferenceCtrl.dispose();
     super.dispose();
   }
 
@@ -665,6 +690,7 @@ class _EditCompanyDialogState extends State<EditCompanyDialog> {
       final invoiceCity = _invoiceCityCtrl.text.trim();
       final invoiceCountry = _invoiceCountryCtrl.text.trim();
       final invoiceEmail = _invoiceEmailCtrl.text.trim();
+      final invoiceReference = _invoiceReferenceCtrl.text.trim();
 
       await _client.from('companies').update({
         'name': company,
@@ -681,6 +707,8 @@ class _EditCompanyDialogState extends State<EditCompanyDialog> {
         'invoice_city': _separateInvoice && invoiceCity.isNotEmpty ? invoiceCity : null,
         'invoice_country': _separateInvoice && invoiceCountry.isNotEmpty ? invoiceCountry : null,
         'invoice_email': _separateInvoice && invoiceEmail.isNotEmpty ? invoiceEmail : null,
+        'invoice_reference':
+            invoiceReference.isEmpty ? null : invoiceReference,
       }).eq('id', widget.company['id']);
 
       if (!mounted) return;
@@ -794,6 +822,19 @@ class _EditCompanyDialogState extends State<EditCompanyDialog> {
                         decoration: const InputDecoration(
                           labelText: "Country",
                           prefixIcon: Icon(Icons.flag),
+                        ),
+                      ),
+
+                      const SizedBox(height: 8),
+
+                      // ---------------- INVOICE REFERENCE
+                      TextField(
+                        controller: _invoiceReferenceCtrl,
+                        decoration: const InputDecoration(
+                          labelText: "Fakturareferanse",
+                          helperText:
+                              "Det kunden vil ha oppgitt som referanse på fakturaen",
+                          prefixIcon: Icon(Icons.tag),
                         ),
                       ),
 

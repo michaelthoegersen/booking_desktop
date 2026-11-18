@@ -7462,7 +7462,10 @@ class _PricingOverrideCardState extends State<_PricingOverrideCard> {
           const TextInputType.numberWithOptions(decimal: true),
       decoration: InputDecoration(labelText: label),
       onChanged: (v) {
-        final d = double.tryParse(v.replaceAll(',', '.'));
+        // Clearing the field means 0, not "keep the old value" — otherwise the
+        // override silently holds a number the field no longer shows.
+        final d =
+            v.trim().isEmpty ? 0.0 : double.tryParse(v.replaceAll(',', '.'));
         if (d != null) onChanged(d);
       },
     );

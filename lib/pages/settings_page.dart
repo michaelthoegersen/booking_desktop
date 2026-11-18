@@ -960,6 +960,10 @@ class _SettingsPageState extends State<SettingsPage> {
 
   double _parseDouble(String s, double fallback) {
     final clean = s.replaceAll(" ", "").replaceAll(",", ".");
+    // An emptied field means 0, not "keep the old rate" — otherwise a rate
+    // can never be cleared, it just springs back on save. The fallback is
+    // only for text that is there but unparseable.
+    if (clean.isEmpty) return 0;
     return double.tryParse(clean) ?? fallback;
   }
 

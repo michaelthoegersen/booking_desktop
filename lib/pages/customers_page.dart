@@ -773,6 +773,67 @@ Future<Map<String, dynamic>> _loadAllForPdf() async {
             ],
           ),
 
+          // Invoice reference (always shown, editable inline)
+          const SizedBox(height: 4),
+          Row(
+            children: [
+              Icon(Icons.tag, size: 16, color: cs.onSurfaceVariant),
+              const SizedBox(width: 6),
+              Text(
+                'Fakturareferanse: ',
+                style: TextStyle(fontSize: 13, color: cs.onSurfaceVariant),
+              ),
+              if ((c['invoice_reference'] ?? '').isNotEmpty)
+                Text(
+                  c['invoice_reference'],
+                  style: const TextStyle(
+                      fontSize: 13, fontWeight: FontWeight.w600),
+                )
+              else
+                Text(
+                  S.t('notSet'),
+                  style: TextStyle(
+                      fontSize: 13,
+                      fontStyle: FontStyle.italic,
+                      color: cs.onSurfaceVariant),
+                ),
+              const SizedBox(width: 6),
+              IconButton(
+                icon: Icon(Icons.edit, size: 14, color: cs.onSurfaceVariant),
+                visualDensity: VisualDensity.compact,
+                tooltip: 'Rediger fakturareferanse',
+                onPressed: () async {
+                  final result = await showTextInputDialog(
+                    context,
+                    title: 'Fakturareferanse',
+                    initial: c['invoice_reference'] ?? '',
+                    label: 'Kundens referanse',
+                    description:
+                        'Dette oppgis som kundens referanse på fakturaen.',
+                    hint: 'F.eks. innkjøpsordre, prosjektnr. eller navn',
+                    confirmLabel: S.t('save'),
+                    cancelLabel: S.t('cancel'),
+                  );
+                  if (!mounted) return;
+                  if (result != null) {
+                    await _client
+                        .from('companies')
+                        .update({'invoice_reference':
+                            result.isEmpty ? null : result})
+                        .eq('id', c['id']);
+                    final updated = await _client
+                        .from('companies')
+                        .select()
+                        .eq('id', c['id'])
+                        .single();
+                    if (!mounted) return;
+                    setState(() => _selectedCompany = updated);
+                  }
+                },
+              ),
+            ],
+          ),
+
           // Separate invoice recipient block
           if (hasSeparateInvoice) ...[
             const SizedBox(height: 12),
