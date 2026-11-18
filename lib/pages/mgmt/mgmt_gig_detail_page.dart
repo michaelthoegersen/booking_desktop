@@ -1212,12 +1212,16 @@ class _MgmtGigDetailPageState extends State<MgmtGigDetailPage>
     final rehearsalTotal = (rehearsalPerformers * rehearsalCount * rehearsalPPP).toDouble();
 
     final markupPct = (o['markup_pct'] as num?)?.toDouble() ?? 0;
-    final markupOnAll = o['markup_on_all'] == true;
+    // Same three terms as gig_offer_page._recalc: performer fees always,
+    // transport and ekstrakostnad only when their own box is ticked.
+    final markupOnTransport = o['markup_on_transport'] == true;
+    final markupOnExtras = o['markup_on_extras'] == true;
     final completePct = markupPct / 2;
     final bookingPct = markupPct / 2;
 
-    final subtotal = performerFees + inearTotal + totalTransport + rehearsalTotal;
-    final markupBase = markupOnAll ? subtotal : performerFees;
+    final markupBase = performerFees +
+        (markupOnTransport ? totalTransport : 0) +
+        (markupOnExtras ? _offerExtrasTotal(o) : 0);
     final completeKonto = markupBase * completePct;
     final bookingHonorar = markupBase * bookingPct;
 
@@ -1472,7 +1476,9 @@ class _MgmtGigDetailPageState extends State<MgmtGigDetailPage>
                   calcLines: calc?.lines,
                   calcTotal: calc?.total,
                   dateEntries: entries,
-                  markupOnAll: _offerData?['markup_on_all'] == true,
+                  markupOnTransport:
+                      _offerData?['markup_on_transport'] == true,
+                  markupOnExtras: _offerData?['markup_on_extras'] == true,
                   datesAreAlternatives: _datesAreAlternatives,
                   lang: _intensjonLang,
                   extras: _offerExtras,
@@ -1856,7 +1862,8 @@ class _MgmtGigDetailPageState extends State<MgmtGigDetailPage>
         calcLines: calc?.lines,
         calcTotal: calc?.total,
         dateEntries: entries,
-        markupOnAll: _offerData?['markup_on_all'] == true,
+        markupOnTransport: _offerData?['markup_on_transport'] == true,
+        markupOnExtras: _offerData?['markup_on_extras'] == true,
         datesAreAlternatives: _datesAreAlternatives,
         lang: _intensjonLang,
         extras: _offerExtras,
@@ -3221,6 +3228,19 @@ class _InfoTabState extends State<_InfoTab> {
   }
 }
 
+/// Sum of an offer's ekstrakostnader. Top-level because the three places
+/// that rebuild the calculation — the page, the Shows/Pris tab and the
+/// Kontrakt tab — live in three different classes and have to agree.
+double _offerExtrasTotal(Map<String, dynamic> o) {
+  final raw = o['extras'];
+  if (raw is! List) return 0;
+  var sum = 0.0;
+  for (final e in raw) {
+    if (e is Map) sum += (e['amount'] as num?)?.toDouble() ?? 0;
+  }
+  return sum;
+}
+
 class _EditField {
   final String label;
   final String dbField;
@@ -3483,12 +3503,16 @@ class _ShowsPrisTabState extends State<_ShowsPrisTab> {
     final rehearsalTotal = (rehearsalPerformers * rehearsalCount * rehearsalPPP).toDouble();
 
     final markupPct = (o['markup_pct'] as num?)?.toDouble() ?? 0;
-    final markupOnAll = o['markup_on_all'] == true;
+    // Same three terms as gig_offer_page._recalc: performer fees always,
+    // transport and ekstrakostnad only when their own box is ticked.
+    final markupOnTransport = o['markup_on_transport'] == true;
+    final markupOnExtras = o['markup_on_extras'] == true;
     final completePct = markupPct / 2;
     final bookingPct = markupPct / 2;
 
-    final subtotal = performerFees + inearTotal + totalTransport + rehearsalTotal;
-    final markupBase = markupOnAll ? subtotal : performerFees;
+    final markupBase = performerFees +
+        (markupOnTransport ? totalTransport : 0) +
+        (markupOnExtras ? _offerExtrasTotal(o) : 0);
 
     final ovJson = o['calc_overrides'];
     final ov = <String, double>{};
@@ -4528,12 +4552,16 @@ class _KontraktTabState extends State<_KontraktTab> {
     final rehearsalTotal = (rehearsalPerformers * rehearsalCount * rehearsalPPP).toDouble();
 
     final markupPct = (o['markup_pct'] as num?)?.toDouble() ?? 0;
-    final markupOnAll = o['markup_on_all'] == true;
+    // Same three terms as gig_offer_page._recalc: performer fees always,
+    // transport and ekstrakostnad only when their own box is ticked.
+    final markupOnTransport = o['markup_on_transport'] == true;
+    final markupOnExtras = o['markup_on_extras'] == true;
     final completePct = markupPct / 2;
     final bookingPct = markupPct / 2;
 
-    final subtotal = performerFees + inearTotal + totalTransport + rehearsalTotal;
-    final markupBase = markupOnAll ? subtotal : performerFees;
+    final markupBase = performerFees +
+        (markupOnTransport ? totalTransport : 0) +
+        (markupOnExtras ? _offerExtrasTotal(o) : 0);
     final completeKonto = markupBase * completePct;
     final bookingHonorar = markupBase * bookingPct;
 
@@ -4704,7 +4732,9 @@ class _KontraktTabState extends State<_KontraktTab> {
         calcLines: calc?.lines,
         calcTotal: calc?.total,
         dateEntries: entries,
-        markupOnAll: widget.offerData?['markup_on_all'] == true,
+        markupOnTransport:
+            widget.offerData?['markup_on_transport'] == true,
+        markupOnExtras: widget.offerData?['markup_on_extras'] == true,
         datesAreAlternatives:
             widget.gig[DateOptionService.kGroup] != null,
         extras: widget.offerExtras,
@@ -4814,7 +4844,9 @@ class _KontraktTabState extends State<_KontraktTab> {
         calcLines: calc?.lines,
         calcTotal: calc?.total,
         dateEntries: entries,
-        markupOnAll: widget.offerData?['markup_on_all'] == true,
+        markupOnTransport:
+            widget.offerData?['markup_on_transport'] == true,
+        markupOnExtras: widget.offerData?['markup_on_extras'] == true,
         datesAreAlternatives:
             widget.gig[DateOptionService.kGroup] != null,
         extras: widget.offerExtras,

@@ -218,8 +218,16 @@ class _GigOfferPageState extends State<GigOfferPage> {
   double _lastMarkupPct = SettingsStore.current.markupPct;
 
   // ── Markup scope ────────────────────────────────────────────────────────
-  bool _markupOnAll =
-      false; // false = only performer fees, true = entire subtotal
+  //
+  // Påslag always sits on the performer fees. Transport and ekstrakostnad
+  // each have their own box, off by default. This replaced a single
+  // «påslag på alt» flag that the two apps and the contract PDF read three
+  // different ways: the web app took it as «on everything», the mobile app
+  // labelled the same column «påslag kun på hyrer», and the PDF's own
+  // branch was inverted again. The same offer therefore priced differently
+  // depending on which surface you opened it in.
+  bool _markupOnTransport = false;
+  bool _markupOnExtras = false;
 
   // ── Calculated ────────────────────────────────────────────────────────────
   double _performerFees = 0;
@@ -452,7 +460,8 @@ class _GigOfferPageState extends State<GigOfferPage> {
           _hyreDays = (setup['hyre_days'] as num?)?.toInt() ?? _hyreDays;
           _hyreDaysCtrl.text = '$_hyreDays';
         }
-        _markupOnAll = offer['markup_on_all'] == true;
+        _markupOnTransport = offer['markup_on_transport'] == true;
+        _markupOnExtras = offer['markup_on_extras'] == true;
         // Load manual overrides
         final ovJson = offer['calc_overrides'];
         if (ovJson is Map) {
@@ -1061,7 +1070,8 @@ class _GigOfferPageState extends State<GigOfferPage> {
         calcLines: _pdfCalcLines,
         calcTotal: _pdfTotal,
         dateEntries: entries,
-        markupOnAll: _markupOnAll,
+        markupOnTransport: _markupOnTransport,
+        markupOnExtras: _markupOnExtras,
         datesAreAlternatives: _datesAreOptions,
       );
 
@@ -1715,20 +1725,16 @@ class _GigOfferPageState extends State<GigOfferPage> {
         _datesAreOptions ? (showDates > 0 ? 1 : 0) : showDates;
     final totalTransport =
         (_transportPrice * numPerformanceDates) + _rehearsalTransport;
-    final subtotalBeforeMarkup =
-        _performerFees + _inearTotal + totalTransport + _rehearsalTotal;
-
-    // Markup
-    // Påslag ligger KUN på utøverhyrer med mindre noe annet er spesifisert;
-    // markup_on_all slår det på for hele summen.
-    //
-    // Denne siden regnet motsatt vei: standard var hyrer + transport + prøver,
-    // og flagget skrudde transport AV. mgmt_gig_detail_page — som bygger
-    // kalkylen og PDF-en — har hele tiden brukt regelen under, så samme tilbud
-    // fikk ulikt påslag avhengig av hvilken flate du så på. De to er nå like.
+    // Markup base: performer fees always, transport and ekstrakostnad only
+    // when their own box is ticked. In-ear and prøvehonorar never carry
+    // påslag. Every surface that re-derives this — the activity page, the
+    // gigghyre admin and both apps' contract PDFs — uses the same three
+    // terms, so an offer prices the same wherever it is opened.
     _completePct = _markupPct / 2;
     _bookingPct = _markupPct / 2;
-    _markupBase = _markupOnAll ? subtotalBeforeMarkup : _performerFees;
+    _markupBase = _performerFees +
+        (_markupOnTransport ? totalTransport : 0) +
+        (_markupOnExtras ? _extrasTotal : 0);
     _completeKonto = _markupBase * _completePct;
     _bookingHonorar = _markupBase * _bookingPct;
   }
@@ -2114,7 +2120,8 @@ class _GigOfferPageState extends State<GigOfferPage> {
             _rehearsalPricePerPerson > 0 ? _rehearsalPricePerPerson : null,
         'rehearsal_transport':
             _rehearsalTransport > 0 ? _rehearsalTransport : null,
-        'markup_on_all': _markupOnAll,
+        'markup_on_transport': _markupOnTransport,
+        'markup_on_extras': _markupOnExtras,
         'extras': _extras
             .where((e) => e.name.trim().isNotEmpty)
             .map((e) => e.toMap())
@@ -4251,9 +4258,16 @@ class _GigOfferPageState extends State<GigOfferPage> {
                 setState(() => _recalc());
               }),
             if (_markupPct > 0)
-              _paramToggle('Påslag på alt', _markupOnAll, (v) {
+              _paramToggle('Påslag transport', _markupOnTransport, (v) {
                 setState(() {
-                  _markupOnAll = v;
+                  _markupOnTransport = v;
+                  _recalc();
+                });
+              }),
+            if (_markupPct > 0)
+              _paramToggle('Påslag ekstrakostnad', _markupOnExtras, (v) {
+                setState(() {
+                  _markupOnExtras = v;
                   _recalc();
                 });
               }),
@@ -5648,7 +5662,8 @@ class _GigOfferPageState extends State<GigOfferPage> {
         calcLines: _pdfCalcLines,
         calcTotal: _pdfTotal,
         dateEntries: entries,
-        markupOnAll: _markupOnAll,
+        markupOnTransport: _markupOnTransport,
+        markupOnExtras: _markupOnExtras,
         datesAreAlternatives: _datesAreOptions,
       );
 

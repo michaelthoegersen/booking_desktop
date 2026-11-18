@@ -137,7 +137,8 @@ class IntensjonsavtalePdfService {
               String getOut,
             })>?
         dateEntries,
-    bool markupOnAll = false,
+    bool markupOnTransport = false,
+    bool markupOnExtras = false,
     /// Datoene i tilbudet er alternativer kunden velger ÉN av. Da er det ett
     /// show til full pris, ikke ett per dato.
     bool datesAreAlternatives = false,
@@ -486,7 +487,8 @@ class IntensjonsavtalePdfService {
               _buildCalcPriceSummary(boldFont, regularFont, nok,
                   lines: calcLines, total: calcTotal, lang: lang,
                   dateEntries: dateEntries,
-                  markupOnAll: markupOnAll,
+                  markupOnTransport: markupOnTransport,
+                  markupOnExtras: markupOnExtras,
                   datesAreAlternatives: datesAreAlternatives,
                   showLabel: config.showLabel.isNotEmpty
                       ? config.showLabel
@@ -1107,7 +1109,8 @@ class IntensjonsavtalePdfService {
               String getOut,
             })>?
         dateEntries,
-    bool markupOnAll = false,
+    bool markupOnTransport = false,
+    bool markupOnExtras = false,
     /// Datoene er alternativer kunden velger ÉN av. Da er det ett show til
     /// full pris — ikke ett show per dato — så prisen skal ikke fordeles.
     bool datesAreAlternatives = false,
@@ -1137,19 +1140,24 @@ class IntensjonsavtalePdfService {
       }
     }
 
-    // Distribute markup. markupOnAll = true means markup applies ONLY to
-    // performer/rehearsal fees; markupOnAll = false (default) means markup
-    // applies to performer fees + transport + rehearsal (everything except
-    // in-ear). See gig_offer_page.dart _recalc().
-    final markupBase = markupOnAll
-        ? (performerFeesRaw + rehearsalAmount)
-        : (performerFeesRaw + transportAmount + rehearsalAmount);
+    // Distribute the markup over exactly the terms it was charged on, so
+    // each line carries its own share and the lines still add up to the
+    // total. Identical to _recalc() in gig_offer_page: performer fees
+    // always, transport and ekstrakostnad only when their box is ticked.
+    //
+    // This used to read one «markupOnAll» flag whose two branches were the
+    // reverse of what the app meant by it, which put the transport markup
+    // on the show prices and vice versa.
+    final extrasRaw = customExtras.fold<double>(0, (s, e) => s + e.amount);
+    final markupBase = performerFeesRaw +
+        (markupOnTransport ? transportAmount : 0) +
+        (markupOnExtras ? extrasRaw : 0);
     final markupPct = markupBase > 0 ? markupAmount / markupBase : 0.0;
 
     final performerFeesWithMarkup = performerFeesRaw * (1 + markupPct);
-    final transportWithMarkup = markupOnAll
-        ? transportAmount
-        : transportAmount * (1 + markupPct);
+    final transportWithMarkup = markupOnTransport
+        ? transportAmount * (1 + markupPct)
+        : transportAmount;
     // rehearsalAmount with markup is shown as kr 0 per rehearsal date in the
     // per-date breakdown (consistent with current UX), so it's not a separate
     // visible line here.
@@ -1189,8 +1197,12 @@ class IntensjonsavtalePdfService {
         (label: isEn ? 'In-ear monitor' : 'In-ear monitoring', amount: inearAmount),
       if (transportWithMarkup > 0)
         (label: 'Transport', amount: transportWithMarkup),
-      // Ekstrakostnader — face value, no markup.
-      ...customExtras,
+      // Ekstrakostnader — each on its own named line, carrying its own
+      // share of the markup when «påslag ekstrakostnad» is on. The customer
+      // sees one amount per line either way.
+      ...customExtras.map((e) => markupOnExtras
+          ? (label: e.label, amount: e.amount * (1 + markupPct))
+          : e),
     ];
 
     return pw.Container(

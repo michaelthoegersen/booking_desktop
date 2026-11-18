@@ -132,7 +132,7 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
             .select('id, gig_id, creo_fee_minimum, extra_show_fee, final_calc, '
                 'markup_pct, inear_included, inear_price, transport_price, '
                 'rehearsal_performers, rehearsal_count, rehearsal_price_per_person, '
-                'rehearsal_transport, markup_on_all, extras')
+                'rehearsal_transport, markup_on_transport, markup_on_extras, extras')
             .eq('company_id', _companyId!)
             .inFilter('gig_id', gigIds),
       );
@@ -168,7 +168,7 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
                     'id, gig_id, creo_fee_minimum, extra_show_fee, final_calc, '
                     'markup_pct, inear_included, inear_price, transport_price, '
                     'rehearsal_performers, rehearsal_count, rehearsal_price_per_person, '
-                    'rehearsal_transport, markup_on_all, extras')
+                    'rehearsal_transport, markup_on_transport, markup_on_extras, extras')
                 .eq('company_id', _companyId!)
                 .inFilter('id', junctionOfferIds),
           );
@@ -1139,7 +1139,8 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
             final gigHire = members.fold<double>(
                 0, (s, e) => s + ((e['hire_fee'] as num?)?.toDouble() ?? 0));
             final markupPct = (offer['markup_pct'] as num?)?.toDouble() ?? 0;
-            final markupOnAll = offer['markup_on_all'] == true;
+            final markupOnTransport = offer['markup_on_transport'] == true;
+            final markupOnExtras = offer['markup_on_extras'] == true;
             final inear = offer['inear_included'] == true
                 ? ((offer['inear_price'] as num?)?.toDouble() ?? 0)
                 : 0.0;
@@ -1154,8 +1155,21 @@ class _MgmtGigHireAdminPageState extends State<MgmtGigHireAdminPage> {
                 (offer['rehearsal_transport'] as num?)?.toDouble() ?? 0;
             final rehearsalTotal =
                 (rehPerf * rehCount * rehPrice) + rehTransport;
+            var extrasTotal = 0.0;
+            final rawExtras = offer['extras'];
+            if (rawExtras is List) {
+              for (final e in rawExtras) {
+                if (e is Map) {
+                  extrasTotal += (e['amount'] as num?)?.toDouble() ?? 0;
+                }
+              }
+            }
             final subtotal = gigHire + inear + transport + rehearsalTotal;
-            final markupBase = markupOnAll ? subtotal : gigHire;
+            // Same three terms as the offer page: hyrer always, transport
+            // and ekstrakostnad only when their own box is ticked.
+            final markupBase = gigHire +
+                (markupOnTransport ? transport : 0) +
+                (markupOnExtras ? extrasTotal : 0);
             offerTotal = subtotal + (markupBase * markupPct);
           }
         }
