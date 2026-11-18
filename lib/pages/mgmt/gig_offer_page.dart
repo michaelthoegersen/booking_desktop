@@ -158,7 +158,29 @@ class _GigOfferPageState extends State<GigOfferPage> {
   final _transportToCtrl = TextEditingController();
   final _transportViaCtrl = TextEditingController();
   bool _routeLoading = false;
-  int _routePersons = 1;
+  /// One entry per private car. The count drives the km (and the tolls);
+  /// the per-car flags add a per-km supplement on top of the state's rate.
+  List<_OfferCar> _cars = [_OfferCar()];
+  int get _routePersons => _cars.length;
+
+  // Supplements, per km, per car. State rates at the time of writing are
+  // 1 kr/km for each; editable, and stored on the company like the hyre
+  // rates so they only have to be set once.
+  double _carPassengerRate = 1.00;
+  double _carTrailerRate = 1.00;
+  double _carHeavyRate = 1.00;
+
+  void _setCarCount(int n) {
+    // 99 is not a real limit for a drum corps, but it does stop a stray
+    // keystroke from building a hundred thousand rows.
+    final count = n.clamp(0, 99);
+    while (_cars.length > count) {
+      _cars.removeLast();
+    }
+    while (_cars.length < count) {
+      _cars.add(_OfferCar());
+    }
+  }
   bool _routeReturn = true;
   double _tollCost = 0;
   List<TollStation> _tollStations = [];
@@ -256,6 +278,9 @@ class _GigOfferPageState extends State<GigOfferPage> {
     _altInvOrgNrCtrl.dispose();
     _altInvAddressCtrl.dispose();
     _altInvRefCtrl.dispose();
+    _carPassengerCtrl.dispose();
+    _carTrailerCtrl.dispose();
+    _carHeavyCtrl.dispose();
     for (final e in _dateEntries) {
       e.dispose();
     }
@@ -328,6 +353,12 @@ class _GigOfferPageState extends State<GigOfferPage> {
         _transportPricePerKm =
             (pd['transport_price_per_km'] as num?)?.toDouble() ??
                 _transportPricePerKm;
+        _carPassengerRate =
+            (pd['car_passenger_rate'] as num?)?.toDouble() ?? _carPassengerRate;
+        _carTrailerRate =
+            (pd['car_trailer_rate'] as num?)?.toDouble() ?? _carTrailerRate;
+        _carHeavyRate =
+            (pd['car_heavy_rate'] as num?)?.toDouble() ?? _carHeavyRate;
         _hyreDayRate =
             (pd['hyre_day_rate'] as num?)?.toDouble() ?? _hyreDayRate;
         _hyreIncludedKmPerDay = (pd['hyre_included_km'] as num?)?.toDouble() ??
@@ -338,6 +369,9 @@ class _GigOfferPageState extends State<GigOfferPage> {
             (pd['hyre_fuel_per_mil'] as num?)?.toDouble() ?? _hyreFuelPerMil;
         _hyreDieselPrice =
             (pd['hyre_diesel_price'] as num?)?.toDouble() ?? _hyreDieselPrice;
+        _carPassengerCtrl.text = _rateText(_carPassengerRate);
+        _carTrailerCtrl.text = _rateText(_carTrailerRate);
+        _carHeavyCtrl.text = _rateText(_carHeavyRate);
         _hyreDayRateCtrl.text = _hyreDayRate.round().toString();
         _hyreInclKmCtrl.text = _hyreIncludedKmPerDay.round().toString();
         _hyreExtraKmCtrl.text = _hyreExtraKmRate % 1 == 0
@@ -380,6 +414,24 @@ class _GigOfferPageState extends State<GigOfferPage> {
         _rehearsalCount = (offer['rehearsal_count'] as num?)?.toInt() ?? 0;
         _rehearsalPricePerPerson = _dbl(offer['rehearsal_price_per_person'], 0);
         _rehearsalTransport = _dbl(offer['rehearsal_transport'], 0);
+        final setup = offer['transport_setup'];
+        if (setup is Map) {
+          final modes = setup['modes'];
+          if (modes is List) {
+            _transportModes
+              ..clear()
+              ..addAll(modes.map((m) => m.toString()));
+          }
+          _routeReturn = setup['return_trip'] != false;
+          final cars = setup['cars'];
+          if (cars is List && cars.isNotEmpty) {
+            _cars = cars
+                .map((c) => _OfferCar.fromMap(Map<String, dynamic>.from(c)))
+                .toList();
+          }
+          _hyreDays = (setup['hyre_days'] as num?)?.toInt() ?? _hyreDays;
+          _hyreDaysCtrl.text = '$_hyreDays';
+        }
         _markupOnAll = offer['markup_on_all'] == true;
         // Load manual overrides
         final ovJson = offer['calc_overrides'];
@@ -2000,6 +2052,15 @@ class _GigOfferPageState extends State<GigOfferPage> {
         'transport_km': _transportKm,
         'transport_price_per_km': _transportPricePerKm,
         'transport_price': _transportPrice > 0 ? _transportPrice : null,
+        // The transport setup itself was never stored: reopening an offer
+        // showed the price but had forgotten which modes were chosen, how
+        // many cars drove, and what each car carried.
+        'transport_setup': {
+          'modes': _transportModes.toList(),
+          'return_trip': _routeReturn,
+          'cars': _cars.map((c) => c.toMap()).toList(),
+          'hyre_days': _hyreDays,
+        },
         'rehearsal_performers':
             _rehearsalPerformers > 0 ? _rehearsalPerformers : null,
         'rehearsal_count': _rehearsalCount > 0 ? _rehearsalCount : null,
@@ -3085,11 +3146,15 @@ class _GigOfferPageState extends State<GigOfferPage> {
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setLocal) {
           final cs = Theme.of(ctx).colorScheme;
-          final existingTypeIds =
-              _shows.map((s) => s.showTypeId).whereType<String>().toSet();
-          final available = _showTypes
-              .where((t) => !existingTypeIds.contains(t['id']))
-              .toList();
+          // Every show type stays on the list, including ones already on
+          // the offer: the same show can be played twice on a gig, and
+          // hiding it after the first pick made that impossible.
+          final available = _showTypes;
+          final usedCount = <String, int>{};
+          for (final sh in _shows) {
+            final id = sh.showTypeId;
+            if (id != null) usedCount[id] = (usedCount[id] ?? 0) + 1;
+          }
           return AlertDialog(
             title: const Text('Velg show'),
             content: SizedBox(
@@ -3119,28 +3184,47 @@ class _GigOfferPageState extends State<GigOfferPage> {
                         },
                       );
                     }),
-                    ...available.map((t) => CheckboxListTile(
-                          dense: true,
-                          contentPadding: EdgeInsets.zero,
-                          controlAffinity: ListTileControlAffinity.leading,
-                          value: false,
-                          title: Text(t['name'] as String? ?? ''),
-                          onChanged: (v) {
-                            setState(() {
-                              _shows.add(_OfferShow(
-                                showTypeId: t['id'] as String?,
-                                showName: t['name'] as String? ?? '',
-                                drummers: (t['drummers'] as num?)?.toInt() ?? 0,
-                                dancers: (t['dancers'] as num?)?.toInt() ?? 0,
-                                others: (t['others'] as num?)?.toInt() ?? 0,
-                                selected: true,
-                                sortOrder: _shows.length,
-                              ));
-                              _recalc();
-                            });
-                            setLocal(() {});
-                          },
-                        )),
+                    if (available.isNotEmpty) ...[
+                      const Divider(height: 20),
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: Text('Legg til show',
+                            style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w700,
+                                color: cs.onSurfaceVariant)),
+                      ),
+                    ],
+                    ...available.map((t) {
+                      final id = t['id'] as String?;
+                      final times = id == null ? 0 : (usedCount[id] ?? 0);
+                      return ListTile(
+                        dense: true,
+                        contentPadding: EdgeInsets.zero,
+                        leading: const Icon(Icons.add, size: 20),
+                        title: Text(t['name'] as String? ?? ''),
+                        subtitle: times > 0
+                            ? Text('Ligger inne ${times}x',
+                                style: TextStyle(
+                                    fontSize: 11, color: cs.onSurfaceVariant))
+                            : null,
+                        onTap: () {
+                          setState(() {
+                            _shows.add(_OfferShow(
+                              showTypeId: id,
+                              showName: t['name'] as String? ?? '',
+                              drummers: (t['drummers'] as num?)?.toInt() ?? 0,
+                              dancers: (t['dancers'] as num?)?.toInt() ?? 0,
+                              others: (t['others'] as num?)?.toInt() ?? 0,
+                              selected: true,
+                              sortOrder: _shows.length,
+                            ));
+                            _recalc();
+                          });
+                          setLocal(() {});
+                        },
+                      );
+                    }),
                     if (_shows.isEmpty && available.isEmpty)
                       Padding(
                         padding: const EdgeInsets.symmetric(vertical: 16),
@@ -3719,6 +3803,111 @@ class _GigOfferPageState extends State<GigOfferPage> {
   final _hyreFuelCtrl = TextEditingController(text: '0.70');
   final _hyreDieselCtrl = TextEditingController(text: '25');
 
+  bool _carRatesExpanded = false;
+  final _carPassengerCtrl = TextEditingController(text: '1');
+  final _carTrailerCtrl = TextEditingController(text: '1');
+  final _carHeavyCtrl = TextEditingController(text: '1');
+
+  /// One row per private car: passengers, trailer, heavy load.
+  List<Widget> _carRows(ColorScheme cs) {
+    return [
+      for (var i = 0; i < _cars.length; i++)
+        Padding(
+          padding: const EdgeInsets.only(bottom: 6),
+          child: Row(
+            children: [
+              SizedBox(
+                width: 54,
+                child: Text('Bil ${i + 1}',
+                    style: TextStyle(fontSize: 12, color: cs.onSurfaceVariant)),
+              ),
+              Text('Passasjerer',
+                  style: TextStyle(fontSize: 12, color: cs.onSurfaceVariant)),
+              const SizedBox(width: 4),
+              _stepButton(Icons.remove, () {
+                if (_cars[i].passengers > 0) {
+                  setState(() => _cars[i].passengers--);
+                  _recalcTransportPrice();
+                }
+              }),
+              SizedBox(
+                width: 24,
+                child: Text('${_cars[i].passengers}',
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                        fontSize: 13, fontWeight: FontWeight.w700)),
+              ),
+              _stepButton(Icons.add, () {
+                setState(() => _cars[i].passengers++);
+                _recalcTransportPrice();
+              }),
+              const SizedBox(width: 10),
+              _carFlag('Tilhenger', _cars[i].trailer, () {
+                setState(() => _cars[i].trailer = !_cars[i].trailer);
+                _recalcTransportPrice();
+              }),
+              const SizedBox(width: 8),
+              _carFlag('Tung last', _cars[i].heavyLoad, () {
+                setState(() => _cars[i].heavyLoad = !_cars[i].heavyLoad);
+                _recalcTransportPrice();
+              }),
+              const Spacer(),
+              if (_cars.length > 1)
+                IconButton(
+                  icon: const Icon(Icons.close, size: 15),
+                  visualDensity: VisualDensity.compact,
+                  tooltip: 'Fjern bilen',
+                  onPressed: () {
+                    setState(() => _cars.removeAt(i));
+                    _recalcTransportPrice();
+                  },
+                ),
+            ],
+          ),
+        ),
+    ];
+  }
+
+  /// Rate as the field shows it: "1" rather than "1.00", "5.30" when it has
+  /// decimals.
+  static String _rateText(double v) =>
+      v % 1 == 0 ? '${v.toInt()}' : v.toStringAsFixed(2);
+
+  Widget _stepButton(IconData icon, VoidCallback onTap) {
+    final cs = Theme.of(context).colorScheme;
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(6),
+      child: Container(
+        padding: const EdgeInsets.all(2),
+        decoration: BoxDecoration(
+          border: Border.all(color: cs.outlineVariant),
+          borderRadius: BorderRadius.circular(6),
+        ),
+        child: Icon(icon, size: 14),
+      ),
+    );
+  }
+
+  Widget _carFlag(String label, bool on, VoidCallback onTap) {
+    final cs = Theme.of(context).colorScheme;
+    return GestureDetector(
+      onTap: onTap,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(on ? Icons.check_box : Icons.check_box_outline_blank,
+              size: 17, color: on ? Colors.black : cs.outline),
+          const SizedBox(width: 3),
+          Text(label,
+              style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: on ? FontWeight.w700 : FontWeight.w400)),
+        ],
+      ),
+    );
+  }
+
   Widget _hyreRateRow(String label, TextEditingController ctrl,
       ValueChanged<double> onChanged) {
     final cs = Theme.of(context).colorScheme;
@@ -3786,14 +3975,37 @@ class _GigOfferPageState extends State<GigOfferPage> {
 
   double get _hyreTotal => _hyreRentalCost + _hyreFuelCost + _tollCost;
 
-  double get _privatbilTotal => _transportTotal + _tollCost;
+  /// What one car drives, return trip included: _transportKm is already
+  /// multiplied by the number of cars and by the return leg.
+  double get _kmPerCar =>
+      _cars.isEmpty ? 0 : _transportKm / _cars.length;
+
+  /// Passengers, trailer and heavy load, summed over every car.
+  double get _carSupplementTotal {
+    var perKm = 0.0;
+    for (final c in _cars) {
+      perKm += c.passengers * _carPassengerRate;
+      if (c.trailer) perKm += _carTrailerRate;
+      if (c.heavyLoad) perKm += _carHeavyRate;
+    }
+    return perKm * _kmPerCar;
+  }
+
+  double get _privatbilTotal =>
+      _transportTotal + _carSupplementTotal + _tollCost;
 
   void _recalcTransportPrice() {
-    _recalc(); // recompute _transportTotal, _tollCost etc.
+    // Two passes, and both are needed. The first refreshes _transportTotal
+    // and _tollCost from the km and the toll stations, which the mode
+    // totals below are built from. The second lets the subtotal and the
+    // markup see the new _transportPrice — without it every transport edit
+    // landed in the total one interaction late.
+    _recalc();
     double total = 0;
     if (_transportModes.contains('privatbil')) total += _privatbilTotal;
     if (_transportModes.contains('hyrebil')) total += _hyreTotal;
     _transportPrice = total;
+    _recalc();
     setState(() {});
   }
 
@@ -3938,7 +4150,7 @@ class _GigOfferPageState extends State<GigOfferPage> {
                     onChanged: (v) {
                       // Empty field → 0 cars (and so 0 km), not the old count.
                       final p = v.trim().isEmpty ? 0 : int.tryParse(v);
-                      if (p != null && p >= 0) _routePersons = p;
+                      if (p != null && p >= 0) setState(() => _setCarCount(p));
                     },
                   ),
                 ),
@@ -4124,17 +4336,92 @@ class _GigOfferPageState extends State<GigOfferPage> {
                         ],
                       ),
                     ),
+                    // One row per car. The state rate covers the driver;
+                    // passengers, a trailer and heavy load are each paid per
+                    // km on top, and they differ from car to car — which is
+                    // why a single "number of cars" box could not express it.
+                    ..._carRows(cs),
+                    const SizedBox(height: 4),
                     Row(
                       children: [
-                        Text(
-                            '${_nf.format(_transportKm)} km × ${_transportPricePerKm.toStringAsFixed(2)} kr',
-                            style: TextStyle(
-                                fontSize: 12, color: cs.onSurfaceVariant)),
-                        if (_tollCost > 0)
-                          Text(' + ${_nf.format(_tollCost)} bom',
-                              style: TextStyle(
-                                  fontSize: 12, color: cs.onSurfaceVariant)),
+                        TextButton.icon(
+                          onPressed: () =>
+                              setState(() => _setCarCount(_cars.length + 1)),
+                          icon: const Icon(Icons.add, size: 16),
+                          label: const Text('Legg til bil',
+                              style: TextStyle(fontSize: 12)),
+                          style: TextButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(horizontal: 8),
+                            minimumSize: Size.zero,
+                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          ),
+                        ),
                         const Spacer(),
+                        TextButton.icon(
+                          onPressed: () => setState(
+                              () => _carRatesExpanded = !_carRatesExpanded),
+                          icon: Icon(
+                              _carRatesExpanded
+                                  ? Icons.expand_less
+                                  : Icons.tune,
+                              size: 16),
+                          label: const Text('Satser',
+                              style: TextStyle(fontSize: 12)),
+                          style: TextButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(horizontal: 8),
+                            minimumSize: Size.zero,
+                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          ),
+                        ),
+                      ],
+                    ),
+                    if (_carRatesExpanded) ...[
+                      const SizedBox(height: 4),
+                      _hyreRateRow('Passasjer kr/km', _carPassengerCtrl, (v) {
+                        _carPassengerRate = v;
+                        _saveHyreRate('car_passenger_rate', v);
+                        _recalcTransportPrice();
+                      }),
+                      const SizedBox(height: 4),
+                      _hyreRateRow('Tilhenger kr/km', _carTrailerCtrl, (v) {
+                        _carTrailerRate = v;
+                        _saveHyreRate('car_trailer_rate', v);
+                        _recalcTransportPrice();
+                      }),
+                      const SizedBox(height: 4),
+                      _hyreRateRow('Tung last kr/km', _carHeavyCtrl, (v) {
+                        _carHeavyRate = v;
+                        _saveHyreRate('car_heavy_rate', v);
+                        _recalcTransportPrice();
+                      }),
+                    ],
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Wrap(
+                            spacing: 4,
+                            children: [
+                              Text(
+                                  '${_nf.format(_transportKm)} km × '
+                                  '${_transportPricePerKm.toStringAsFixed(2)} kr',
+                                  style: TextStyle(
+                                      fontSize: 12,
+                                      color: cs.onSurfaceVariant)),
+                              if (_carSupplementTotal > 0)
+                                Text(
+                                    '+ ${_nf.format(_carSupplementTotal)} tillegg',
+                                    style: TextStyle(
+                                        fontSize: 12,
+                                        color: cs.onSurfaceVariant)),
+                              if (_tollCost > 0)
+                                Text('+ ${_nf.format(_tollCost)} bom',
+                                    style: TextStyle(
+                                        fontSize: 12,
+                                        color: cs.onSurfaceVariant)),
+                            ],
+                          ),
+                        ),
                         Text('${_nf.format(_privatbilTotal)} kr',
                             style: const TextStyle(
                                 fontSize: 13, fontWeight: FontWeight.w700)),
@@ -6214,6 +6501,32 @@ class _OfferShow {
 ///                     out to the lineup.
 ///   'split_company' — [memberAmount] goes to [memberId], the remainder stays
 ///                     with Complete and is never paid out to the lineup.
+/// One private car on a gig. The state's km rate pays the driver; each of
+/// these adds its own per-km supplement, and they differ from car to car.
+class _OfferCar {
+  int passengers;
+  bool trailer;
+  bool heavyLoad;
+
+  _OfferCar({
+    this.passengers = 0,
+    this.trailer = false,
+    this.heavyLoad = false,
+  });
+
+  factory _OfferCar.fromMap(Map<String, dynamic> m) => _OfferCar(
+        passengers: (m['passengers'] as num?)?.toInt() ?? 0,
+        trailer: m['trailer'] == true,
+        heavyLoad: m['heavy_load'] == true,
+      );
+
+  Map<String, dynamic> toMap() => {
+        'passengers': passengers,
+        'trailer': trailer,
+        'heavy_load': heavyLoad,
+      };
+}
+
 class _OfferExtra {
   String name;
   double amount;

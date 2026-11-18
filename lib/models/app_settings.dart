@@ -71,7 +71,9 @@ class AppSettings {
     this.extraShowFee = 1500,
     this.markupPct = 0.25,
     this.inearPrice = 7000,
-    this.transportPricePerKm = 3.50,
+    // Statens sats for egen bil. 3,50 was the old skattefri rate; the one
+    // actually invoiced is 5,30, so a fresh install starts there.
+    this.transportPricePerKm = 5.30,
 
     this.currency = 'NOK',
 
