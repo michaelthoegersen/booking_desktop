@@ -85,6 +85,11 @@ class _GigOfferPageState extends State<GigOfferPage> {
   final _invContactNameCtrl = TextEditingController();
   final _invContactPhoneCtrl = TextEditingController();
   final _invContactEmailCtrl = TextEditingController();
+
+  /// Only the contact person is always there. The other two are added with
+  /// the plus when a gig actually has them — most gigs have one person for
+  /// everything, and three empty blocks on every gig is just noise.
+  final Set<_ContactRole> _shownContacts = {_ContactRole.contact};
   bool _invoiceOnEhf = false;
 
   // Alternative invoice recipient (overrides customer fields when enabled)
@@ -919,6 +924,14 @@ class _GigOfferPageState extends State<GigOfferPage> {
     _invContactNameCtrl.text = gig['invoice_contact_name'] ?? '';
     _invContactPhoneCtrl.text = gig['invoice_contact_phone'] ?? '';
     _invContactEmailCtrl.text = gig['invoice_contact_email'] ?? '';
+    for (final r in [_ContactRole.contract, _ContactRole.invoice]) {
+      final c = _contactCtrls(r);
+      if (c.$1.text.trim().isNotEmpty ||
+          c.$2.text.trim().isNotEmpty ||
+          c.$3.text.trim().isNotEmpty) {
+        _shownContacts.add(r);
+      }
+    }
     _invoiceOnEhf = gig['invoice_on_ehf'] == true;
     _isTest = gig['is_test'] == true;
     _altInvoiceEnabled = gig['alt_invoice_enabled'] == true;
@@ -3019,47 +3032,86 @@ class _GigOfferPageState extends State<GigOfferPage> {
     }
   }
 
-  Widget _contactBlock({
-    required String title,
-    required String subtitle,
-    required TextEditingController name,
-    required TextEditingController phone,
-    required TextEditingController email,
-    required _ContactRole self,
-  }) {
+  /// The plus that brings in the contract or invoice contact. It is gone
+  /// once both are on screen.
+  Widget _addContactButton() {
+    final missing = _ContactRole.values
+        .where((r) => !_shownContacts.contains(r))
+        .toList();
+    if (missing.isEmpty) return const SizedBox.shrink();
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: PopupMenuButton<_ContactRole>(
+        tooltip: 'Legg til kontakt',
+        onSelected: (r) => setState(() => _shownContacts.add(r)),
+        itemBuilder: (_) => [
+          for (final r in missing)
+            PopupMenuItem(value: r, child: Text(_roleLabel(r))),
+        ],
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.add,
+                size: 18, color: Theme.of(context).colorScheme.primary),
+            const SizedBox(width: 4),
+            Text('Legg til kontakt',
+                style: TextStyle(
+                    fontSize: 12,
+                    color: Theme.of(context).colorScheme.primary)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _contactBlock(_ContactRole self) {
     final cs = Theme.of(context).colorScheme;
-    final others =
-        _ContactRole.values.where((r) => r != self).toList();
+    final (name, phone, email) = _contactCtrls(self);
+    // Only offer to copy from a contact that is actually on screen —
+    // copying from a hidden, empty block would just blank this one.
+    final others = _ContactRole.values
+        .where((r) => r != self && _shownContacts.contains(r))
+        .toList();
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Row(
           children: [
-            Text(title,
-                style: const TextStyle(
-                    fontSize: 13, fontWeight: FontWeight.w700)),
-            const SizedBox(width: 8),
             Expanded(
-              child: Text(subtitle,
-                  style: TextStyle(fontSize: 11, color: cs.onSurfaceVariant)),
+              child: Text(_roleLabel(self),
+                  style: const TextStyle(
+                      fontSize: 13, fontWeight: FontWeight.w700)),
             ),
-            PopupMenuButton<_ContactRole>(
-              tooltip: 'Kopier fra en annen kontakt',
-              onSelected: (r) => _copyContact(r, self),
-              itemBuilder: (_) => [
-                for (final r in others)
-                  PopupMenuItem(
-                      value: r, child: Text('Samme som ${_roleLabel(r)}')),
-              ],
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text('Samme som',
-                      style: TextStyle(fontSize: 12, color: cs.primary)),
-                  Icon(Icons.arrow_drop_down, size: 18, color: cs.primary),
-                ],
+            if (self != _ContactRole.contact)
+              IconButton(
+                icon: const Icon(Icons.close, size: 16),
+                visualDensity: VisualDensity.compact,
+                tooltip: 'Fjern ${_roleLabel(self).toLowerCase()}',
+                onPressed: () => setState(() {
+                  _shownContacts.remove(self);
+                  name.clear();
+                  phone.clear();
+                  email.clear();
+                }),
               ),
-            ),
+            if (others.isNotEmpty)
+              PopupMenuButton<_ContactRole>(
+                tooltip: 'Kopier fra en annen kontakt',
+                onSelected: (r) => _copyContact(r, self),
+                itemBuilder: (_) => [
+                  for (final r in others)
+                    PopupMenuItem(
+                        value: r, child: Text('Samme som ${_roleLabel(r)}')),
+                ],
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text('Samme som',
+                        style: TextStyle(fontSize: 12, color: cs.primary)),
+                    Icon(Icons.arrow_drop_down, size: 18, color: cs.primary),
+                  ],
+                ),
+              ),
           ],
         ),
         const SizedBox(height: 6),
@@ -3109,32 +3161,12 @@ class _GigOfferPageState extends State<GigOfferPage> {
           // Three contacts, because they are rarely the same person. Each
           // one can be copied from another with «Samme som», which is a
           // one-off copy — edit one afterwards and the others stay put.
-          _contactBlock(
-            title: 'Kontaktperson',
-            subtitle: 'Den vi snakker med om gigen',
-            name: _nameCtrl,
-            phone: _phoneCtrl,
-            email: _emailCtrl,
-            self: _ContactRole.contact,
-          ),
-          const SizedBox(height: 14),
-          _contactBlock(
-            title: 'Kontraktperson',
-            subtitle: 'Den som signerer avtalen',
-            name: _contractNameCtrl,
-            phone: _contractPhoneCtrl,
-            email: _contractEmailCtrl,
-            self: _ContactRole.contract,
-          ),
-          const SizedBox(height: 14),
-          _contactBlock(
-            title: 'Fakturaperson',
-            subtitle: 'Den som håndterer fakturaen',
-            name: _invContactNameCtrl,
-            phone: _invContactPhoneCtrl,
-            email: _invContactEmailCtrl,
-            self: _ContactRole.invoice,
-          ),
+          for (final r in _ContactRole.values)
+            if (_shownContacts.contains(r)) ...[
+              _contactBlock(r),
+              const SizedBox(height: 14),
+            ],
+          _addContactButton(),
           const SizedBox(height: 12),
           _tf(_invoiceRefCtrl, 'Fakturareferanse (kundens referanse)'),
           const SizedBox(height: 8),
