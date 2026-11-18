@@ -18,6 +18,7 @@ import '../../services/intensjonsavtale_pdf_service.dart';
 import '../../services/email_service.dart';
 import '../../widgets/contact_profile_dialog.dart';
 import '../../widgets/mention_helpers.dart';
+import '../../widgets/multi_date_picker_dialog.dart';
 import '../../widgets/rich_text_field.dart';
 import '../inventory/show_equipment_dialog.dart';
 
@@ -895,6 +896,81 @@ class _MgmtGigDetailPageState extends State<MgmtGigDetailPage>
   // -------------------------------------------------------------------------
   // CANCEL / REOPEN
   // -------------------------------------------------------------------------
+
+  /// Copy this activity onto any number of other dates — the weekly-rehearsal
+  /// case. Only the activity row itself is copied: shows, lineup and the
+  /// offer link stay with the original, which is why this is offered for
+  /// rehearsals and «annet» and not for gigs.
+  Future<void> _duplicateToDates() async {
+    final gig = _gig;
+    if (gig == null) return;
+
+    final from = DateTime.tryParse(gig['date_from']?.toString() ?? '');
+    if (from == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Aktiviteten mangler dato.')),
+      );
+      return;
+    }
+    final to = DateTime.tryParse(gig['date_to']?.toString() ?? '');
+    final spanDays = to != null ? to.difference(from).inDays : 0;
+
+    final picked = await showDialog<Set<DateTime>>(
+      context: context,
+      builder: (_) => MultiDatePickerDialog(
+        initial: const {},
+        excludeDates: {DateTime(from.year, from.month, from.day)},
+      ),
+    );
+    if (!mounted || picked == null || picked.isEmpty) return;
+
+    // Everything that belongs to THIS occurrence rather than to the
+    // activity: its identity, its history, and state a copy must not
+    // inherit (a cancellation, a locked lineup, an invoice lock).
+    const skip = {
+      'id',
+      'created_at',
+      'updated_at',
+      'cancelled_at',
+      'archived',
+      'invoice_locked',
+      'invoiced_at',
+      'lineup_locked_skarp',
+      'lineup_locked_bass',
+    };
+
+    final df = DateFormat('yyyy-MM-dd');
+    final rows = <Map<String, dynamic>>[];
+    for (final d in (picked.toList()..sort())) {
+      final row = <String, dynamic>{};
+      for (final e in gig.entries) {
+        if (!skip.contains(e.key)) row[e.key] = e.value;
+      }
+      row['date_from'] = df.format(d);
+      row['date_to'] = spanDays > 0
+          ? df.format(DateTime(d.year, d.month, d.day + spanDays))
+          : null;
+      // A copy of something cancelled is a new, live activity.
+      if (row['status'] == 'cancelled') row['status'] = 'confirmed';
+      rows.add(row);
+    }
+
+    try {
+      await _sb.from('gigs').insert(rows);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Kopiert til ${rows.length} '
+              '${rows.length == 1 ? "dato" : "datoer"}.'),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Kopiering feilet: $e')),
+      );
+    }
+  }
 
   Future<void> _cancelRehearsal() async {
     // Null = avbrutt. Tom streng = bekreftet uten grunn.
@@ -2243,6 +2319,7 @@ class _MgmtGigDetailPageState extends State<MgmtGigDetailPage>
                       context.go('/m/offers/new?gigId=${widget.gigId}');
                     }
                   }
+                  if (v == 'duplicate') _duplicateToDates();
                   if (v == 'cancel') _cancelRehearsal();
                   if (v == 'reopen') _reopenRehearsal();
                   if (v == 'delete') _confirmDeleteGig();
@@ -2264,6 +2341,19 @@ class _MgmtGigDetailPageState extends State<MgmtGigDetailPage>
                       ],
                     ),
                   ),
+                  // Weekly rehearsals: copy this one onto a handful of
+                  // dates instead of filling the form out again.
+                  if (gigType == 'rehearsal' || gigType == 'other')
+                    const PopupMenuItem(
+                      value: 'duplicate',
+                      child: Row(
+                        children: [
+                          Icon(Icons.repeat, size: 18),
+                          SizedBox(width: 8),
+                          Text('Dupliser til datoer…'),
+                        ],
+                      ),
+                    ),
                   if (status != 'cancelled')
                     const PopupMenuItem(
                       value: 'cancel',
