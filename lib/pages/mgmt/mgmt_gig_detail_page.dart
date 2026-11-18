@@ -3008,13 +3008,28 @@ class _InfoTabState extends State<_InfoTab> {
               ]),
               _readOnlyCard(cs, 'Kunde', [
                 MapEntry('Firma', gig['customer_firma']),
-                MapEntry('Kontakt', gig['customer_name']),
-                MapEntry('Telefon', gig['customer_phone']),
-                MapEntry('E-post', gig['customer_email']),
                 MapEntry('Org.nr', gig['customer_org_nr']),
                 MapEntry('Adresse', gig['customer_address']),
                 MapEntry('EHF', gig['invoice_on_ehf'] == true ? 'Ja' : null),
                 MapEntry('Fakturareferanse', gig['invoice_reference']),
+              ]),
+              // The three contacts. Each one is left out entirely when it
+              // has nothing in it, so a gig with only one contact person
+              // still reads as one contact.
+              _readOnlyCard(cs, 'Kontaktperson', [
+                MapEntry('Navn', gig['customer_name']),
+                MapEntry('Telefon', gig['customer_phone']),
+                MapEntry('E-post', gig['customer_email']),
+              ]),
+              _readOnlyCard(cs, 'Kontraktperson', [
+                MapEntry('Navn', gig['contract_name']),
+                MapEntry('Telefon', gig['contract_phone']),
+                MapEntry('E-post', gig['contract_email']),
+              ]),
+              _readOnlyCard(cs, 'Fakturaperson', [
+                MapEntry('Navn', gig['invoice_contact_name']),
+                MapEntry('Telefon', gig['invoice_contact_phone']),
+                MapEntry('E-post', gig['invoice_contact_email']),
               ]),
               // Fakturamottaker — vis alternativ-feltene kun når "annen
               // fakturamottaker" er huket av i tilbudet; ellers bare "Samme

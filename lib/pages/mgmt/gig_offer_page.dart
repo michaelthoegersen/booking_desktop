@@ -76,6 +76,15 @@ class _GigOfferPageState extends State<GigOfferPage> {
   final _addressCtrl = TextEditingController();
   // What the customer wants printed as their reference on the invoice.
   final _invoiceRefCtrl = TextEditingController();
+
+  // Three people, because they are rarely the same one: who we talk to
+  // about the gig, who signs the contract, and who handles the invoice.
+  final _contractNameCtrl = TextEditingController();
+  final _contractPhoneCtrl = TextEditingController();
+  final _contractEmailCtrl = TextEditingController();
+  final _invContactNameCtrl = TextEditingController();
+  final _invContactPhoneCtrl = TextEditingController();
+  final _invContactEmailCtrl = TextEditingController();
   bool _invoiceOnEhf = false;
 
   // Alternative invoice recipient (overrides customer fields when enabled)
@@ -271,6 +280,12 @@ class _GigOfferPageState extends State<GigOfferPage> {
     _orgNrCtrl.dispose();
     _addressCtrl.dispose();
     _invoiceRefCtrl.dispose();
+    _contractNameCtrl.dispose();
+    _contractPhoneCtrl.dispose();
+    _contractEmailCtrl.dispose();
+    _invContactNameCtrl.dispose();
+    _invContactPhoneCtrl.dispose();
+    _invContactEmailCtrl.dispose();
     _altInvFirmaCtrl.dispose();
     _altInvNameCtrl.dispose();
     _altInvEmailCtrl.dispose();
@@ -898,6 +913,12 @@ class _GigOfferPageState extends State<GigOfferPage> {
     _orgNrCtrl.text = gig['customer_org_nr'] ?? '';
     _addressCtrl.text = gig['customer_address'] ?? '';
     _invoiceRefCtrl.text = gig['invoice_reference'] ?? '';
+    _contractNameCtrl.text = gig['contract_name'] ?? '';
+    _contractPhoneCtrl.text = gig['contract_phone'] ?? '';
+    _contractEmailCtrl.text = gig['contract_email'] ?? '';
+    _invContactNameCtrl.text = gig['invoice_contact_name'] ?? '';
+    _invContactPhoneCtrl.text = gig['invoice_contact_phone'] ?? '';
+    _invContactEmailCtrl.text = gig['invoice_contact_email'] ?? '';
     _invoiceOnEhf = gig['invoice_on_ehf'] == true;
     _isTest = gig['is_test'] == true;
     _altInvoiceEnabled = gig['alt_invoice_enabled'] == true;
@@ -1834,6 +1855,12 @@ class _GigOfferPageState extends State<GigOfferPage> {
           'customer_org_nr': n(_orgNrCtrl.text),
           'customer_address': n(_addressCtrl.text),
           'invoice_reference': n(_invoiceRefCtrl.text),
+          'contract_name': n(_contractNameCtrl.text),
+          'contract_phone': n(_contractPhoneCtrl.text),
+          'contract_email': n(_contractEmailCtrl.text),
+          'invoice_contact_name': n(_invContactNameCtrl.text),
+          'invoice_contact_phone': n(_invContactPhoneCtrl.text),
+          'invoice_contact_email': n(_invContactEmailCtrl.text),
           'invoice_on_ehf': _invoiceOnEhf,
           'alt_invoice_enabled': _altInvoiceEnabled,
           'alt_invoice_firma': n(_altInvFirmaCtrl.text),
@@ -2035,6 +2062,12 @@ class _GigOfferPageState extends State<GigOfferPage> {
         'customer_org_nr': n(_orgNrCtrl.text),
         'customer_address': n(_addressCtrl.text),
         'invoice_reference': n(_invoiceRefCtrl.text),
+        'contract_name': n(_contractNameCtrl.text),
+        'contract_phone': n(_contractPhoneCtrl.text),
+        'contract_email': n(_contractEmailCtrl.text),
+        'invoice_contact_name': n(_invContactNameCtrl.text),
+        'invoice_contact_phone': n(_invContactPhoneCtrl.text),
+        'invoice_contact_email': n(_invContactEmailCtrl.text),
         'alt_invoice_enabled': _altInvoiceEnabled,
         'alt_invoice_firma': n(_altInvFirmaCtrl.text),
         'alt_invoice_name': n(_altInvNameCtrl.text),
@@ -2949,6 +2982,94 @@ class _GigOfferPageState extends State<GigOfferPage> {
   // KUNDE
   // ────────────────────────────────────────────────────────────────────────────
 
+  /// Copies a contact onto another role. A one-off copy, not a link: the
+  /// note asked to "kopiere info fra en kategori til en annen", and a live
+  /// link would fight you the moment one of them differs.
+  void _copyContact(_ContactRole from, _ContactRole to) {
+    final src = _contactCtrls(from);
+    final dst = _contactCtrls(to);
+    setState(() {
+      dst.$1.text = src.$1.text;
+      dst.$2.text = src.$2.text;
+      dst.$3.text = src.$3.text;
+    });
+  }
+
+  (TextEditingController, TextEditingController, TextEditingController)
+      _contactCtrls(_ContactRole role) {
+    switch (role) {
+      case _ContactRole.contact:
+        return (_nameCtrl, _phoneCtrl, _emailCtrl);
+      case _ContactRole.contract:
+        return (_contractNameCtrl, _contractPhoneCtrl, _contractEmailCtrl);
+      case _ContactRole.invoice:
+        return (_invContactNameCtrl, _invContactPhoneCtrl,
+            _invContactEmailCtrl);
+    }
+  }
+
+  static String _roleLabel(_ContactRole role) {
+    switch (role) {
+      case _ContactRole.contact:
+        return 'Kontaktperson';
+      case _ContactRole.contract:
+        return 'Kontraktperson';
+      case _ContactRole.invoice:
+        return 'Fakturaperson';
+    }
+  }
+
+  Widget _contactBlock({
+    required String title,
+    required String subtitle,
+    required TextEditingController name,
+    required TextEditingController phone,
+    required TextEditingController email,
+    required _ContactRole self,
+  }) {
+    final cs = Theme.of(context).colorScheme;
+    final others =
+        _ContactRole.values.where((r) => r != self).toList();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Text(title,
+                style: const TextStyle(
+                    fontSize: 13, fontWeight: FontWeight.w700)),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(subtitle,
+                  style: TextStyle(fontSize: 11, color: cs.onSurfaceVariant)),
+            ),
+            PopupMenuButton<_ContactRole>(
+              tooltip: 'Kopier fra en annen kontakt',
+              onSelected: (r) => _copyContact(r, self),
+              itemBuilder: (_) => [
+                for (final r in others)
+                  PopupMenuItem(
+                      value: r, child: Text('Samme som ${_roleLabel(r)}')),
+              ],
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text('Samme som',
+                      style: TextStyle(fontSize: 12, color: cs.primary)),
+                  Icon(Icons.arrow_drop_down, size: 18, color: cs.primary),
+                ],
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 6),
+        _row2(_tf(name, 'Navn'), _tf(phone, 'Telefon')),
+        const SizedBox(height: 8),
+        _tf(email, 'E-post'),
+      ],
+    );
+  }
+
   Widget _buildCustomerCard() {
     return _card(
       title: 'Kunde',
@@ -2983,9 +3104,37 @@ class _GigOfferPageState extends State<GigOfferPage> {
           const SizedBox(height: 14),
           _row2(_tf(_firmaCtrl, 'Firma'), _tf(_orgNrCtrl, 'Org.nr')),
           const SizedBox(height: 12),
-          _row2(_tf(_nameCtrl, 'Kontaktperson'), _tf(_phoneCtrl, 'Telefon')),
-          const SizedBox(height: 12),
-          _row2(_tf(_emailCtrl, 'E-post'), _tf(_addressCtrl, 'Adresse')),
+          _tf(_addressCtrl, 'Adresse'),
+          const SizedBox(height: 14),
+          // Three contacts, because they are rarely the same person. Each
+          // one can be copied from another with «Samme som», which is a
+          // one-off copy — edit one afterwards and the others stay put.
+          _contactBlock(
+            title: 'Kontaktperson',
+            subtitle: 'Den vi snakker med om gigen',
+            name: _nameCtrl,
+            phone: _phoneCtrl,
+            email: _emailCtrl,
+            self: _ContactRole.contact,
+          ),
+          const SizedBox(height: 14),
+          _contactBlock(
+            title: 'Kontraktperson',
+            subtitle: 'Den som signerer avtalen',
+            name: _contractNameCtrl,
+            phone: _contractPhoneCtrl,
+            email: _contractEmailCtrl,
+            self: _ContactRole.contract,
+          ),
+          const SizedBox(height: 14),
+          _contactBlock(
+            title: 'Fakturaperson',
+            subtitle: 'Den som håndterer fakturaen',
+            name: _invContactNameCtrl,
+            phone: _invContactPhoneCtrl,
+            email: _invContactEmailCtrl,
+            self: _ContactRole.invoice,
+          ),
           const SizedBox(height: 12),
           _tf(_invoiceRefCtrl, 'Fakturareferanse (kundens referanse)'),
           const SizedBox(height: 8),
@@ -6503,6 +6652,9 @@ class _OfferShow {
 ///                     with Complete and is never paid out to the lineup.
 /// One private car on a gig. The state's km rate pays the driver; each of
 /// these adds its own per-km supplement, and they differ from car to car.
+/// The three people a gig can have: who we talk to, who signs, who pays.
+enum _ContactRole { contact, contract, invoice }
+
 class _OfferCar {
   int passengers;
   bool trailer;
