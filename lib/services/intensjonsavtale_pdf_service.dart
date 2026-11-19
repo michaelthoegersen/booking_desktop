@@ -613,6 +613,10 @@ class IntensjonsavtalePdfService {
         // Return ALL active riders so the send dialog can offer them as
         // selectable attachments. Riders matching always_attach or show_match
         // get autoInclude=true so they are pre-checked.
+        // Names and allergies for the riders — empty until the lineup is
+        // locked. Loaded once for the whole batch, not per rider.
+        final crew = await _lockedCrew(gig);
+
         for (final r in (riderRows as List)) {
           final m = r as Map<String, dynamic>;
           final showMatch = m['show_match'] as String? ?? '';
@@ -651,6 +655,8 @@ class IntensjonsavtalePdfService {
                 bodyText: bodyText,
                 quantity: count,
                 logoBytes: riderLogoBytes,
+                crewNames: crew.names,
+                crewAllergies: crew.allergies,
               );
               riderAttachments.add((
                 filename: '$substitutedName.pdf',
@@ -1009,6 +1015,138 @@ class IntensjonsavtalePdfService {
   /// Substitute `{antall}` / `{count}` placeholders in rider body text.
   /// Supports basic arithmetic so `{antall*2}`, `{antall+1}`, `{antall-1}`,
   /// `{antall/2}` work too.
+  /// Who is doing the gig, for the riders — but only once the lineup is
+  /// locked.
+  ///
+  /// A hospitality rider usually goes out long before the team is set, and a
+  /// list of names sent then would be wrong. So before the lock the riders
+  /// carry the count alone, exactly as they did; after it, names and
+  /// allergies can come along too. A section that is still open contributes
+  /// nobody, so locking Skarp alone sends Skarp's names and no one else's.
+  ///
+  /// Allergies are not a column — they are one of the configurable profile
+  /// fields the company sets up itself and members keep current in the
+  /// mobile app, so the field is found by its title.
+  static Future<({List<String> names, List<String> allergies})>
+      _lockedCrew(Map<String, dynamic> gig) async {
+    const empty = (names: <String>[], allergies: <String>[]);
+    final gigId = gig['id'] as String?;
+    if (gigId == null) return empty;
+
+    final lockedSections = <String>{
+      if (gig['lineup_locked_skarp'] == true) 'skarp',
+      if (gig['lineup_locked_bass'] == true) 'bass',
+    };
+    if (lockedSections.isEmpty) return empty;
+
+    try {
+      final sb = Supabase.instance.client;
+      final lineup = await sb
+          .from('gig_lineup')
+          .select('user_id, section')
+          .eq('gig_id', gigId);
+
+      // The same person can be on several shows of one gig; the rider wants
+      // them once.
+      final userIds = <String>{};
+      for (final r in (lineup as List)) {
+        final section = r['section'] as String? ?? '';
+        if (!lockedSections.contains(section)) continue;
+        final uid = r['user_id'] as String?;
+        if (uid != null) userIds.add(uid);
+      }
+      if (userIds.isEmpty) return empty;
+
+      final profiles = await sb
+          .from('profiles')
+          .select('id, name')
+          .inFilter('id', userIds.toList());
+      final nameById = <String, String>{};
+      for (final r in (profiles as List)) {
+        nameById[r['id'] as String] = (r['name'] as String? ?? '').trim();
+      }
+
+      // Allergy values, if this company has such a field at all.
+      final allergyById = <String, String>{};
+      final companyId = gig['company_id'] as String?;
+      if (companyId != null) {
+        try {
+          final fields = await sb
+              .from('profile_field_config')
+              .select('id, title, parent_id')
+              .eq('company_id', companyId);
+          String? allergyFieldId;
+          for (final f in (fields as List)) {
+            if (f['parent_id'] == null) continue;
+            final title = (f['title'] as String? ?? '').toLowerCase();
+            if (title.contains('allerg')) {
+              allergyFieldId = f['id'] as String;
+              break;
+            }
+          }
+          if (allergyFieldId != null) {
+            final values = await sb
+                .from('profile_field_values')
+                .select('profile_id, value')
+                .eq('field_id', allergyFieldId)
+                .inFilter('profile_id', userIds.toList());
+            for (final v in (values as List)) {
+              final text = (v['value'] as String? ?? '').trim();
+              if (text.isEmpty) continue;
+              allergyById[v['profile_id'] as String] = text;
+            }
+          }
+        } catch (e) {
+          debugPrint('Rider allergy lookup failed: $e');
+        }
+      }
+
+      final sorted = userIds.toList()
+        ..sort((a, b) => (nameById[a] ?? '').compareTo(nameById[b] ?? ''));
+
+      final names = <String>[];
+      final allergies = <String>[];
+      for (final uid in sorted) {
+        final name = nameById[uid] ?? '';
+        if (name.isEmpty) continue;
+        names.add(name);
+        final a = allergyById[uid];
+        if (a != null) allergies.add('$name: $a');
+      }
+      return (names: names, allergies: allergies);
+    } catch (e) {
+      debugPrint('Rider crew lookup failed: $e');
+      return empty;
+    }
+  }
+
+  /// Fills `{navneliste}` and `{allergier}` in a rider's title or body.
+  ///
+  /// Both resolve to nothing while the lineup is open, which is the point:
+  /// the rider can carry the placeholders permanently and only starts naming
+  /// people once the team is actually set. A line that holds nothing but an
+  /// empty placeholder is dropped, so the rider does not end up with a blank
+  /// gap where the list would have been.
+  static String _substituteCrew(
+    String text, {
+    required List<String> names,
+    required List<String> allergies,
+  }) {
+    if (!text.contains('{')) return text;
+    final out = <String>[];
+    for (final line in text.split('\n')) {
+      final filled = line
+          .replaceAll(RegExp(r'\{\s*(navneliste|navn|names)\s*\}',
+              caseSensitive: false), names.join('\n'))
+          .replaceAll(RegExp(r'\{\s*(allergier|allergies)\s*\}',
+              caseSensitive: false), allergies.join('\n'));
+      final hadPlaceholder = filled != line;
+      if (hadPlaceholder && filled.trim().isEmpty) continue;
+      out.add(filled);
+    }
+    return out.join('\n');
+  }
+
   static String _substituteRiderCount(String body, int quantity) {
     final re = RegExp(
       r'\{(?:antall|count)(?:\s*([*+\-/x×])\s*(\d+(?:[\.,]\d+)?))?\s*\}',
@@ -1056,9 +1194,19 @@ class IntensjonsavtalePdfService {
     required String bodyText,
     required int quantity,
     Uint8List? logoBytes,
+    List<String> crewNames = const [],
+    List<String> crewAllergies = const [],
   }) async {
-    final substitutedTitle = _substituteRiderCount(title, quantity);
-    final substitutedBody = _substituteRiderCount(bodyText, quantity);
+    final substitutedTitle = _substituteCrew(
+      _substituteRiderCount(title, quantity),
+      names: crewNames,
+      allergies: crewAllergies,
+    );
+    final substitutedBody = _substituteCrew(
+      _substituteRiderCount(bodyText, quantity),
+      names: crewNames,
+      allergies: crewAllergies,
+    );
     final pdf = pw.Document();
     pw.MemoryImage? logo;
     if (logoBytes != null && logoBytes.isNotEmpty) {

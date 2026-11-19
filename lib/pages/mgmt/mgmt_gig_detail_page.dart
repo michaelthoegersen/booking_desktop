@@ -16,6 +16,7 @@ import '../../state/role_labels.dart';
 import '../../services/date_option_service.dart';
 import '../../services/intensjonsavtale_pdf_service.dart';
 import '../../services/email_service.dart';
+import '../../services/profile_field_service.dart';
 import '../../widgets/contact_profile_dialog.dart';
 import '../../widgets/mention_helpers.dart';
 import '../../widgets/multi_date_picker_dialog.dart';
@@ -47,6 +48,9 @@ class _MgmtGigDetailPageState extends State<MgmtGigDetailPage>
   List<Map<String, dynamic>> _shows = [];
   List<Map<String, dynamic>> _showTypes = [];
   List<Map<String, dynamic>> _companyMembers = []; // {user_id, name, status, section}
+  /// user_id -> allergies, from the company's own «Allergier» profile field.
+  /// Empty when the company has not configured one.
+  Map<String, String> _allergies = {};
   String? _linkedOfferId; // gig_offer linked to this gig
   List<Map<String, dynamic>> _siblingGigs = []; // all gigs in multi-date offer
   // gig_id → list of show maps for each sibling gig (for PDF rendering)
@@ -139,7 +143,7 @@ class _MgmtGigDetailPageState extends State<MgmtGigDetailPage>
       if (companyId != null) {
         final members = await _sb
             .from('profiles')
-            .select('id, name, role, section')
+            .select('id, name, role, section, phone, email')
             .eq('company_id', companyId);
 
         // Auto-set all members to "available" for standalone rehearsals only.
@@ -244,10 +248,33 @@ class _MgmtGigDetailPageState extends State<MgmtGigDetailPage>
             'section': m['section'] as String?,
             'status': availMap[uid] ?? 'pending',
             'plus_one': plusOneIds.contains(uid),
+            // Carried for the roster shown once the lineup is locked.
+            'phone': m['phone'] as String? ?? '',
+            'email': m['email'] as String? ?? '',
           };
         }).toList();
         _companyMembers.sort((a, b) =>
             (a['name'] as String).compareTo(b['name'] as String));
+
+        // Allergies live in the company's configurable profile fields, which
+        // members fill in from the mobile app. Only fetched when such a field
+        // exists, so companies without one pay nothing for it.
+        try {
+          final fields = await ProfileFieldService.loadAll(companyId);
+          final allergyField = ProfileFieldService.allergyField(fields);
+          if (allergyField != null) {
+            _allergies = await ProfileFieldService.loadFieldForProfiles(
+              fieldId: allergyField.id,
+              profileIds:
+                  _companyMembers.map((m) => m['user_id'] as String).toList(),
+            );
+          } else {
+            _allergies = {};
+          }
+        } catch (e) {
+          debugPrint('Load allergies error: $e');
+          _allergies = {};
+        }
 
         // Load lineup (including show_id for per-show assignment)
         final lineupData = await _sb
@@ -2525,6 +2552,7 @@ class _MgmtGigDetailPageState extends State<MgmtGigDetailPage>
                             const SizedBox(height: 12),
                             _CrewLineupTab(
                               companyMembers: _companyMembers,
+                              allergies: _allergies,
                               gig: _gig!,
                               shows: _shows,
                               selectedSkarpByShow: _selectedSkarpByShow,
@@ -3935,9 +3963,12 @@ class _CrewLineupTab extends StatelessWidget {
   final Future<void> Function(String section) onSaveAndLock;
   final void Function(String fromShowId) onCopyToAllShows;
   final Future<void> Function(String status) onSetMyAvailability;
+  /// user_id -> allergies. Shown on the locked roster only.
+  final Map<String, String> allergies;
 
   const _CrewLineupTab({
     required this.companyMembers,
+    required this.allergies,
     required this.gig,
     required this.shows,
     required this.selectedSkarpByShow,
@@ -4239,6 +4270,113 @@ class _CrewLineupTab extends StatelessWidget {
     );
   }
 
+  /// The people doing the gig, once the section is locked: full name, how to
+  /// reach them, and allergies. Allergies come from the company's own
+  /// profile field, which members keep up to date in the mobile app — a
+  /// company without that field simply shows no allergy line.
+  Widget _lockedRoster(
+    BuildContext context, {
+    required List<Map<String, dynamic>> members,
+    required Set<String> selected,
+    required Color color,
+  }) {
+    final cs = Theme.of(context).colorScheme;
+    final picked = members
+        .where((m) => selected.contains(m['user_id'] as String))
+        .toList();
+
+    if (picked.isEmpty) {
+      return Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(
+          border: Border.all(color: cs.outlineVariant),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Text('Låst uten at noen er valgt i denne seksjonen.',
+            style: TextStyle(color: cs.onSurfaceVariant, fontSize: 13)),
+      );
+    }
+
+    return Container(
+      decoration: BoxDecoration(
+        border: Border.all(color: cs.outlineVariant),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        children: picked.asMap().entries.map((entry) {
+          final i = entry.key;
+          final m = entry.value;
+          final isLast = i == picked.length - 1;
+          final uid = m['user_id'] as String;
+          final name = (m['name'] as String? ?? '').trim();
+          final phone = (m['phone'] as String? ?? '').trim();
+          final email = (m['email'] as String? ?? '').trim();
+          final allergy = (allergies[uid] ?? '').trim();
+
+          return Container(
+            width: double.infinity,
+            padding:
+                const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            decoration: BoxDecoration(
+              border: isLast
+                  ? null
+                  : Border(bottom: BorderSide(color: cs.outlineVariant)),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Icon(Icons.person, size: 16, color: color),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        name.isEmpty ? 'Uten navn' : name,
+                        style: const TextStyle(
+                            fontSize: 14, fontWeight: FontWeight.w700),
+                      ),
+                    ),
+                  ],
+                ),
+                if (phone.isNotEmpty || email.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(left: 24, top: 2),
+                    child: Text(
+                      [phone, email].where((t) => t.isNotEmpty).join('  ·  '),
+                      style: TextStyle(
+                          fontSize: 12, color: cs.onSurfaceVariant),
+                    ),
+                  ),
+                if (allergy.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(left: 24, top: 4),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Icon(Icons.warning_amber_rounded,
+                            size: 14, color: Colors.orange),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: Text(
+                            allergy,
+                            style: const TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                                color: Colors.orange),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+              ],
+            ),
+          );
+        }).toList(),
+      ),
+    );
+  }
+
   Widget _buildSectionBlock(
     BuildContext context, {
     required String title,
@@ -4296,6 +4434,12 @@ class _CrewLineupTab extends StatelessWidget {
         if (members.isEmpty)
           Text('Ingen medlemmer i denne seksjonen.',
               style: TextStyle(color: cs.onSurfaceVariant, fontSize: 13))
+        // Once the section is locked the question is no longer who CAN do
+        // the gig — it is settled. The list of everyone with a tickbox gives
+        // way to the people actually doing it, with what you need to reach
+        // them and what they cannot eat.
+        else if (locked && !readOnly)
+          _lockedRoster(context, members: members, selected: selected, color: color)
         else
           Container(
             decoration: BoxDecoration(
