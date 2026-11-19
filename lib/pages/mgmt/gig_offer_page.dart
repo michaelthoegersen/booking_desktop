@@ -1970,6 +1970,14 @@ class _GigOfferPageState extends State<GigOfferPage> {
         final gigData = sharedGigData(i);
 
         if (entry.gigId != null) {
+          // A test row is only ever visible to its owner, and the policy
+          // that enforces that asks the same question on write: is this
+          // yours? A gig created before created_by was stamped — or by
+          // someone else — would be refused, so turning the switch on
+          // also claims the row. Turning it off leaves ownership alone.
+          if (_isTest) {
+            gigData['created_by'] = _sb.auth.currentUser?.id;
+          }
           await _sb.from('gigs').update(gigData).eq('id', entry.gigId!);
         } else {
           gigData['created_by'] = _sb.auth.currentUser?.id;
@@ -2163,6 +2171,11 @@ class _GigOfferPageState extends State<GigOfferPage> {
       offerData['is_test'] = _isTest;
 
       if (_offerId != null) {
+        // Same reason as the gigs above: the test policy checks ownership
+        // on write, so switching it on claims the offer row too.
+        if (_isTest) {
+          offerData['created_by'] = _sb.auth.currentUser?.id;
+        }
         await _sb.from('gig_offers').update(offerData).eq('id', _offerId!);
       } else {
         offerData['created_by'] = _sb.auth.currentUser?.id;
