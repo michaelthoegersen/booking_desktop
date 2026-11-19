@@ -176,6 +176,15 @@ class EmailService {
     if (useSmtp) {
       final account = await getDefaultSmtpAccount(companyId: companyId);
       if (account != null) {
+        // Resend first — it is the one route that does not depend on which
+        // IP the edge runtime happened to get, or on a Microsoft connection
+        // staying alive. Falls straight through when it is not configured.
+        if (await _trySendViaResend(
+          from: account.email, fromName: account.displayName,
+          to: to, subject: subject, body: body, isHtml: isHtml,
+        )) {
+          return;
+        }
         try {
           if (kIsWeb) {
             await _sendViaSmtpEdgeFunction(account: account, to: to, subject: subject, body: body, isHtml: isHtml);
@@ -217,11 +226,16 @@ class EmailService {
     // the fallback failed too, and that is the half that decides whether the
     // mail had any way out at all.
     if (lastSmtpSendError != null && lastSmtpSendError!.isNotEmpty) {
-      final graph = lastGraphSendError;
-      if (kIsWeb && graph != null && graph.isNotEmpty) {
-        throw Exception('E-postsending feilet.\n'
-            'SMTP (Domeneshop): $lastSmtpSendError\n'
-            'Microsoft Graph: $graph');
+      final parts = <String>[
+        if (lastResendError != null && lastResendError!.isNotEmpty)
+          'Resend: $lastResendError',
+        'SMTP (Domeneshop): $lastSmtpSendError',
+        if (kIsWeb && lastGraphSendError != null &&
+            lastGraphSendError!.isNotEmpty)
+          'Microsoft Graph: $lastGraphSendError',
+      ];
+      if (parts.length > 1) {
+        throw Exception('E-postsending feilet.\n${parts.join('\n')}');
       }
       throw Exception('E-postsending feilet: $lastSmtpSendError');
     }
@@ -296,6 +310,14 @@ class EmailService {
     if (useSmtp) {
       final account = await getDefaultSmtpAccount(companyId: companyId);
       if (account != null) {
+        // Same order as above: Resend, then the two older routes.
+        if (await _trySendViaResend(
+          from: account.email, fromName: account.displayName,
+          to: to, subject: subject, body: body,
+          attachments: attachments, isHtml: isHtml,
+        )) {
+          return;
+        }
         try {
           if (kIsWeb) {
             await _sendViaSmtpEdgeFunction(
@@ -356,11 +378,16 @@ class EmailService {
     // the fallback failed too, and that is the half that decides whether the
     // mail had any way out at all.
     if (lastSmtpSendError != null && lastSmtpSendError!.isNotEmpty) {
-      final graph = lastGraphSendError;
-      if (kIsWeb && graph != null && graph.isNotEmpty) {
-        throw Exception('E-postsending feilet.\n'
-            'SMTP (Domeneshop): $lastSmtpSendError\n'
-            'Microsoft Graph: $graph');
+      final parts = <String>[
+        if (lastResendError != null && lastResendError!.isNotEmpty)
+          'Resend: $lastResendError',
+        'SMTP (Domeneshop): $lastSmtpSendError',
+        if (kIsWeb && lastGraphSendError != null &&
+            lastGraphSendError!.isNotEmpty)
+          'Microsoft Graph: $lastGraphSendError',
+      ];
+      if (parts.length > 1) {
+        throw Exception('E-postsending feilet.\n${parts.join('\n')}');
       }
       throw Exception('E-postsending feilet: $lastSmtpSendError');
     }
@@ -368,6 +395,65 @@ class EmailService {
       throw Exception('Microsoft Graph-sending feilet: $lastGraphSendError');
     }
     throw Exception(_emailNotConfiguredMessage(companyId: companyId));
+  }
+
+  /// Last concrete error from the send-resend-email edge function.
+  static String? lastResendError;
+
+  /// Send through Resend's HTTPS API.
+  ///
+  /// This is the path meant to just work. The SMTP route is at the mercy of
+  /// Domeneshop refusing AWS IPs, and Microsoft Graph needs a per-company
+  /// OAuth connection that can only be made from the desktop app and
+  /// quietly expires. Resend needs neither: HTTPS, one verified sending
+  /// domain, nothing to stay logged in to.
+  ///
+  /// Returns false — leaving the older paths to try — when it is not
+  /// configured, so deploying this changes nothing until the key is set.
+  static Future<bool> _trySendViaResend({
+    required String from,
+    required String fromName,
+    required String to,
+    required String subject,
+    required String body,
+    List<({String filename, Uint8List bytes})>? attachments,
+    bool isHtml = false,
+  }) async {
+    lastResendError = null;
+    try {
+      final payload = <String, dynamic>{
+        'to': to,
+        'from': from,
+        'fromName': fromName,
+        'subject': subject,
+        'body': body,
+        'isHtml': isHtml,
+      };
+      if (attachments != null && attachments.isNotEmpty) {
+        payload['attachments'] = attachments
+            .map((a) => {
+                  'filename': a.filename,
+                  'content': base64Encode(a.bytes),
+                })
+            .toList();
+      }
+      final res = await Supabase.instance.client.functions
+          .invoke('send-resend-email', body: payload);
+      final data = res.data;
+      final sent = data is Map && data['sent'] == true;
+      if (!sent) {
+        final err = (data is Map ? data['error'] : data)?.toString();
+        // Not set up yet is not a failure worth reporting to the user — the
+        // older paths are still there and will say what went wrong.
+        if (err != 'resend_not_configured') lastResendError = err;
+        debugPrint('send-resend-email not sent: $err');
+      }
+      return sent;
+    } catch (e) {
+      lastResendError = e.toString();
+      debugPrint('send-resend-email failed: $e');
+      return false;
+    }
   }
 
   /// Web delegated send: calls the ms-graph-send edge function, which uses the
