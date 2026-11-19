@@ -212,7 +212,17 @@ class EmailService {
     // Prefer the real SMTP (Domeneshop) error — that is the actual delivery
     // path for this company. The Microsoft Graph path only applies to companies
     // that connected Microsoft, so its "no_oauth_connection" is noise here.
+    //
+    // Both are reported when both ran. Showing only the SMTP error hid why
+    // the fallback failed too, and that is the half that decides whether the
+    // mail had any way out at all.
     if (lastSmtpSendError != null && lastSmtpSendError!.isNotEmpty) {
+      final graph = lastGraphSendError;
+      if (kIsWeb && graph != null && graph.isNotEmpty) {
+        throw Exception('E-postsending feilet.\n'
+            'SMTP (Domeneshop): $lastSmtpSendError\n'
+            'Microsoft Graph: $graph');
+      }
       throw Exception('E-postsending feilet: $lastSmtpSendError');
     }
     if (kIsWeb && lastGraphSendError != null && lastGraphSendError!.isNotEmpty) {
@@ -341,7 +351,17 @@ class EmailService {
     // Prefer the real SMTP (Domeneshop) error — that is the actual delivery
     // path for this company. The Microsoft Graph path only applies to companies
     // that connected Microsoft, so its "no_oauth_connection" is noise here.
+    //
+    // Both are reported when both ran. Showing only the SMTP error hid why
+    // the fallback failed too, and that is the half that decides whether the
+    // mail had any way out at all.
     if (lastSmtpSendError != null && lastSmtpSendError!.isNotEmpty) {
+      final graph = lastGraphSendError;
+      if (kIsWeb && graph != null && graph.isNotEmpty) {
+        throw Exception('E-postsending feilet.\n'
+            'SMTP (Domeneshop): $lastSmtpSendError\n'
+            'Microsoft Graph: $graph');
+      }
       throw Exception('E-postsending feilet: $lastSmtpSendError');
     }
     if (kIsWeb && lastGraphSendError != null && lastGraphSendError!.isNotEmpty) {
