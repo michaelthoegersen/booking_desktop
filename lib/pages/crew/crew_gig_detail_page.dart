@@ -144,6 +144,20 @@ class _CrewGigDetailPageState extends State<CrewGigDetailPage> {
             _selectedBassByShow[showId]!.add(l['user_id'] as String);
           }
         }
+
+        // Same as the management page: a row without a show_id was picked
+        // for the gig, not for one show, so it belongs to every show here.
+        if (_shows.isNotEmpty) {
+          final showIds = _shows.map((sh) => sh['id'] as String).toList();
+          for (final map in [_selectedSkarpByShow, _selectedBassByShow]) {
+            final gigWide = map.remove('');
+            if (gigWide == null || gigWide.isEmpty) continue;
+            for (final sid in showIds) {
+              map.putIfAbsent(sid, () => {});
+              map[sid]!.addAll(gigWide);
+            }
+          }
+        }
       } else {
         _shows = [];
         _companyMembers = [];

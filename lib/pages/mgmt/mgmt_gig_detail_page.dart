@@ -294,6 +294,26 @@ class _MgmtGigDetailPageState extends State<MgmtGigDetailPage>
             _selectedBassByShow[showId]!.add(l['user_id'] as String);
           }
         }
+
+        // A lineup row without a show_id was picked for the GIG, not for one
+        // show — that is how the mobile app and older web versions saved it.
+        // The per-show UI only ever looked up a show's own id, so those
+        // people showed as nobody at all here while the phone listed them
+        // correctly. A gig-wide pick belongs to every show on the gig, so
+        // fold the bucket into each one. The save path already drops the
+        // empty bucket once a gig has real shows, so the next save writes
+        // them out properly attached.
+        if (_shows.isNotEmpty) {
+          final showIds = _shows.map((sh) => sh['id'] as String).toList();
+          for (final map in [_selectedSkarpByShow, _selectedBassByShow]) {
+            final gigWide = map.remove('');
+            if (gigWide == null || gigWide.isEmpty) continue;
+            for (final sid in showIds) {
+              map.putIfAbsent(sid, () => {});
+              map[sid]!.addAll(gigWide);
+            }
+          }
+        }
       }
 
       // Check for linked gig offer
