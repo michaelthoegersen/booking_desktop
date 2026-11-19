@@ -507,6 +507,7 @@ class IntensjonsavtalePdfService {
                 total: total,
                 lang: lang,
                 extras: extras,
+                markupFactor: markupFactor,
                 showLabel: config.showLabel.isNotEmpty
                     ? config.showLabel
                     : (tenantName.isNotEmpty ? tenantName : 'Show'),
@@ -1561,15 +1562,25 @@ class IntensjonsavtalePdfService {
     required double transportPrice,
     required double total,
     required String showLabel,
+    required double markupFactor,
     String lang = 'no',
     List<({String label, double amount})>? extras,
   }) {
     final isEn = lang == 'en';
-    final effectiveShowLabel = shows.length == 1
-        ? (shows.first['show_name'] as String? ?? showLabel)
-        : showLabel;
+    // One line per show, named, at the same price the table above shows —
+    // markup already baked in, because markupFactor is what spread it over
+    // the shows in the first place. Several shows used to collapse into a
+    // single line carrying the company's own name, which told the customer
+    // nothing and matched neither the table nor what was agreed.
+    final showRows = <_PriceLine>[];
+    for (final sh in shows) {
+      final name = (sh['show_name'] as String? ?? '').trim();
+      final price = ((sh['price'] as num?)?.toDouble() ?? 0) * markupFactor;
+      showRows.add(_PriceLine(name.isEmpty ? showLabel : name, price));
+    }
     final rows = <_PriceLine>[
-      _PriceLine(effectiveShowLabel, showsTotal),
+      // Nothing to itemise (a gig with no shows on it) keeps the one line.
+      if (showRows.isEmpty) _PriceLine(showLabel, showsTotal) else ...showRows,
       if (inearFromUs && inearPrice > 0)
         _PriceLine(isEn ? 'In-ear monitor' : 'In-ear monitoring', inearPrice),
       if (transportPrice > 0) _PriceLine('Transport', transportPrice),
