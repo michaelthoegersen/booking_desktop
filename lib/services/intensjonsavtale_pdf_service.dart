@@ -872,10 +872,12 @@ class IntensjonsavtalePdfService {
           ),
         ),
         pw.SizedBox(height: 6),
+        // No price column: every show is priced on its own line in the
+        // summary below, and the same figure printed twice on one page is
+        // just something else that can disagree with itself.
         pw.Table(
           columnWidths: {
             0: const pw.FlexColumnWidth(4),
-            1: const pw.FixedColumnWidth(90),
           },
           children: [
             // Header row
@@ -883,7 +885,6 @@ class IntensjonsavtalePdfService {
               decoration: pw.BoxDecoration(color: headerBg),
               children: [
                 _cell('Show', headerStyle, pw.Alignment.centerLeft),
-                _cell(isEn ? 'Price' : 'Pris', headerStyle, pw.Alignment.centerRight),
               ],
             ),
             // Data rows
@@ -892,7 +893,6 @@ class IntensjonsavtalePdfService {
               final show = entry.value;
               final isEven = i % 2 == 0;
               final bg = isEven ? rowBg : PdfColors.white;
-              final price = ((show['price'] as num?)?.toDouble() ?? 0) * markupFactor;
               final ekstra = show['ekstrainnslag'] as String? ?? '';
               final name = show['show_name'] as String? ?? '';
               final nameWithEkstra = ekstra.isNotEmpty
@@ -929,8 +929,6 @@ class IntensjonsavtalePdfService {
                 decoration: pw.BoxDecoration(color: bg),
                 children: [
                   showNameWidget,
-                  _cell(_money(nok, price, isEn),
-                      boldCell, pw.Alignment.centerRight),
                 ],
               );
             }),
