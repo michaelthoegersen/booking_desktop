@@ -4434,13 +4434,17 @@ class _CrewLineupTab extends StatelessWidget {
         if (members.isEmpty)
           Text('Ingen medlemmer i denne seksjonen.',
               style: TextStyle(color: cs.onSurfaceVariant, fontSize: 13))
-        // Once the section is locked the question is no longer who CAN do
-        // the gig — it is settled. The list of everyone with a tickbox gives
-        // way to the people actually doing it, with what you need to reach
-        // them and what they cannot eat.
-        else if (locked && !readOnly)
-          _lockedRoster(context, members: members, selected: selected, color: color)
-        else
+        else ...[
+          // Once the section is locked, who is actually doing the gig is
+          // settled, so the roster leads: full name, how to reach them, and
+          // allergies. The tick list stays underneath it, unchanged and
+          // still showing every tick — it is the record of what was chosen,
+          // and hiding it made a locked lineup look wiped.
+          if (locked && !readOnly) ...[
+            _lockedRoster(
+                context, members: members, selected: selected, color: color),
+            const SizedBox(height: 10),
+          ],
           Container(
             decoration: BoxDecoration(
               border: Border.all(color: cs.outlineVariant),
@@ -4520,6 +4524,7 @@ class _CrewLineupTab extends StatelessWidget {
               }).toList(),
             ),
           ),
+        ],
       ],
     );
   }
