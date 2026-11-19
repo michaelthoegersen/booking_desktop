@@ -4124,42 +4124,84 @@ class _CrewLineupTab extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 16),
-          // ── Per-show crew assignment ──
-          for (final show in shows) ...[
-            _buildShowBlock(
+          // A locked section is settled, so it stops being a picker: one
+          // list of the people doing the gig, the way the phone shows it.
+          // The per-show tick lists stay for whatever is still open.
+          if (lockedSkarp) ...[
+            _lockedRoster(
               context,
-              show: show,
-              skarpMembers: skarpMembers,
-              bassMembers: bassMembers,
-              noSectionMembers: noSectionMembers,
-              lockedSkarp: lockedSkarp,
-              lockedBass: lockedBass,
+              title: 'Skarp',
+              color: Colors.purple,
+              members: skarpMembers,
+              selected: _pickedAcrossShows(selectedSkarpByShow),
             ),
-            const SizedBox(height: 20),
+            const SizedBox(height: 16),
           ],
+          if (lockedBass) ...[
+            _lockedRoster(
+              context,
+              title: 'Bass',
+              color: Colors.teal,
+              members: bassMembers,
+              selected: _pickedAcrossShows(selectedBassByShow),
+            ),
+            const SizedBox(height: 16),
+          ],
+          // ── Per-show crew assignment ──
+          if (!lockedSkarp || !lockedBass)
+            for (final show in shows) ...[
+              _buildShowBlock(
+                context,
+                show: show,
+                skarpMembers: skarpMembers,
+                bassMembers: bassMembers,
+                noSectionMembers: noSectionMembers,
+                lockedSkarp: lockedSkarp,
+                lockedBass: lockedBass,
+              ),
+              const SizedBox(height: 20),
+            ],
         ] else ...[
           // Fallback: no shows → assign per gig (showId = '')
-          _buildSectionBlock(
-            context,
-            title: 'Skarp',
-            color: Colors.purple,
-            members: skarpMembers,
-            selected: selectedSkarpByShow[''] ?? {},
-            section: 'skarp',
-            showId: '',
-            locked: lockedSkarp,
-          ),
+          if (lockedSkarp)
+            _lockedRoster(
+              context,
+              title: 'Skarp',
+              color: Colors.purple,
+              members: skarpMembers,
+              selected: _pickedAcrossShows(selectedSkarpByShow),
+            )
+          else
+            _buildSectionBlock(
+              context,
+              title: 'Skarp',
+              color: Colors.purple,
+              members: skarpMembers,
+              selected: selectedSkarpByShow[''] ?? {},
+              section: 'skarp',
+              showId: '',
+              locked: lockedSkarp,
+            ),
           const SizedBox(height: 16),
-          _buildSectionBlock(
-            context,
-            title: 'Bass',
-            color: Colors.teal,
-            members: bassMembers,
-            selected: selectedBassByShow[''] ?? {},
-            section: 'bass',
-            showId: '',
-            locked: lockedBass,
-          ),
+          if (lockedBass)
+            _lockedRoster(
+              context,
+              title: 'Bass',
+              color: Colors.teal,
+              members: bassMembers,
+              selected: _pickedAcrossShows(selectedBassByShow),
+            )
+          else
+            _buildSectionBlock(
+              context,
+              title: 'Bass',
+              color: Colors.teal,
+              members: bassMembers,
+              selected: selectedBassByShow[''] ?? {},
+              section: 'bass',
+              showId: '',
+              locked: lockedBass,
+            ),
           if (noSectionMembers.isNotEmpty) ...[
             const SizedBox(height: 16),
             _buildSectionBlock(
@@ -4250,27 +4292,32 @@ class _CrewLineupTab extends StatelessWidget {
             );
           }),
           const SizedBox(height: 12),
-          _buildSectionBlock(
-            context,
-            title: 'Skarp',
-            color: Colors.purple,
-            members: skarpMembers,
-            selected: selectedSkarpByShow[showId] ?? {},
-            section: 'skarp',
-            showId: showId,
-            locked: lockedSkarp,
-          ),
-          const SizedBox(height: 12),
-          _buildSectionBlock(
-            context,
-            title: 'Bass',
-            color: Colors.teal,
-            members: bassMembers,
-            selected: selectedBassByShow[showId] ?? {},
-            section: 'bass',
-            showId: showId,
-            locked: lockedBass,
-          ),
+          // A locked section already appears once as a roster above, so it
+          // is not repeated as a picker here.
+          if (!lockedSkarp) ...[
+            _buildSectionBlock(
+              context,
+              title: 'Skarp',
+              color: Colors.purple,
+              members: skarpMembers,
+              selected: selectedSkarpByShow[showId] ?? {},
+              section: 'skarp',
+              showId: showId,
+              locked: lockedSkarp,
+            ),
+            const SizedBox(height: 12),
+          ],
+          if (!lockedBass)
+            _buildSectionBlock(
+              context,
+              title: 'Bass',
+              color: Colors.teal,
+              members: bassMembers,
+              selected: selectedBassByShow[showId] ?? {},
+              section: 'bass',
+              showId: showId,
+              locked: lockedBass,
+            ),
           if (noSectionMembers.isNotEmpty) ...[
             const SizedBox(height: 12),
             _buildSectionBlock(
@@ -4290,12 +4337,24 @@ class _CrewLineupTab extends StatelessWidget {
     );
   }
 
+  /// Everyone picked for this section, across every show on the gig. A
+  /// locked section is shown as one list, not per show, so somebody on two
+  /// shows is still one person on the list.
+  Set<String> _pickedAcrossShows(Map<String, Set<String>> byShow) {
+    final out = <String>{};
+    for (final picks in byShow.values) {
+      out.addAll(picks);
+    }
+    return out;
+  }
+
   /// The people doing the gig, once the section is locked: full name, how to
   /// reach them, and allergies. Allergies come from the company's own
   /// profile field, which members keep up to date in the mobile app — a
   /// company without that field simply shows no allergy line.
   Widget _lockedRoster(
     BuildContext context, {
+    required String title,
     required List<Map<String, dynamic>> members,
     required Set<String> selected,
     required Color color,
@@ -4305,20 +4364,46 @@ class _CrewLineupTab extends StatelessWidget {
         .where((m) => selected.contains(m['user_id'] as String))
         .toList();
 
+    final header = Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.15),
+        borderRadius: BorderRadius.circular(99),
+      ),
+      child: Text(
+        '$title · ${picked.length} skal gjøre gigen',
+        style: TextStyle(
+            fontSize: 13, fontWeight: FontWeight.w800, color: color),
+      ),
+    );
+
     if (picked.isEmpty) {
-      return Container(
-        width: double.infinity,
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-        decoration: BoxDecoration(
-          border: Border.all(color: cs.outlineVariant),
-          borderRadius: BorderRadius.circular(12),
-        ),
-        child: Text('Låst uten at noen er valgt i denne seksjonen.',
-            style: TextStyle(color: cs.onSurfaceVariant, fontSize: 13)),
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          header,
+          const SizedBox(height: 8),
+          Container(
+            width: double.infinity,
+            padding:
+                const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            decoration: BoxDecoration(
+              border: Border.all(color: cs.outlineVariant),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Text('Låst uten at noen er valgt i denne seksjonen.',
+                style: TextStyle(color: cs.onSurfaceVariant, fontSize: 13)),
+          ),
+        ],
       );
     }
 
-    return Container(
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        header,
+        const SizedBox(height: 8),
+        Container(
       decoration: BoxDecoration(
         border: Border.all(color: cs.outlineVariant),
         borderRadius: BorderRadius.circular(12),
@@ -4392,8 +4477,10 @@ class _CrewLineupTab extends StatelessWidget {
               ],
             ),
           );
-        }).toList(),
-      ),
+          }).toList(),
+          ),
+        ),
+      ],
     );
   }
 
@@ -4454,17 +4541,7 @@ class _CrewLineupTab extends StatelessWidget {
         if (members.isEmpty)
           Text('Ingen medlemmer i denne seksjonen.',
               style: TextStyle(color: cs.onSurfaceVariant, fontSize: 13))
-        else ...[
-          // Once the section is locked, who is actually doing the gig is
-          // settled, so the roster leads: full name, how to reach them, and
-          // allergies. The tick list stays underneath it, unchanged and
-          // still showing every tick — it is the record of what was chosen,
-          // and hiding it made a locked lineup look wiped.
-          if (locked && !readOnly) ...[
-            _lockedRoster(
-                context, members: members, selected: selected, color: color),
-            const SizedBox(height: 10),
-          ],
+        else
           Container(
             decoration: BoxDecoration(
               border: Border.all(color: cs.outlineVariant),
@@ -4544,7 +4621,6 @@ class _CrewLineupTab extends StatelessWidget {
               }).toList(),
             ),
           ),
-        ],
       ],
     );
   }
